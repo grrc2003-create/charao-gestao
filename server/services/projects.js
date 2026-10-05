@@ -5,6 +5,7 @@ import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } f
 import { summarize } from './metrics.js';
 import { listVisible } from './tasks.js';
 import { audit } from './audit.js';
+import { listStages, syncStages, defaultStageId } from './stages.js';
 
 export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'];
 
@@ -36,8 +37,11 @@ export function getProject(ctx, id) {
   }
   const people = [...byUser.values()].map(u => ({ id: u.id, name: u.name, summary: summarize(u.tasks) }))
     .sort((a, b) => b.summary.total - a.summary.total);
+  // Andamento por classificação (Grupo/Local/Etapa)
+  const stages = listStages(id).map(s => ({ ...s, summary: summarize(tasks.filter(t => t.stage_id === s.id)) }));
   return {
     ...p,
+    stages,
     members: members(id),
     summary: summarize(tasks),
     tasks,
@@ -82,11 +86,13 @@ export function createProject(ctx, body, ip) {
       code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
     for (const m of memberIds) run('INSERT INTO project_members (project_id, user_id) VALUES (?,?)', id, m);
+    defaultStageId(id);
+    const stagesLog = syncStages(id, body.stages);
     // Quem cria um projeto (sem acesso total) recebe acesso a ele
     if (!isAdmin(ctx.user) && ctx.user.access_scope !== 'total') {
       run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', ctx.user.id, id);
     }
-    audit(ctx.user.id, 'project', id, 'Projeto criado', { code, name: d.name }, ip);
+    audit(ctx.user.id, 'project', id, 'Projeto criado', { code, name: d.name, classificacoes: stagesLog?.criadas || [] }, ip);
     return id;
   });
 }
@@ -103,7 +109,8 @@ export function updateProject(ctx, id, body, ip) {
     run('DELETE FROM project_members WHERE project_id = ?', id);
     for (const m of memberIds) run('INSERT INTO project_members (project_id, user_id) VALUES (?,?)', id, m);
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));
-    audit(ctx.user.id, 'project', id, 'Projeto atualizado', { campos: changed }, ip);
+    const stagesLog = syncStages(id, body.stages);
+    audit(ctx.user.id, 'project', id, 'Projeto atualizado', { campos: changed, ...(stagesLog ? { classificacoes: stagesLog } : {}) }, ip);
   });
 }
 

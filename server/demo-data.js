@@ -4,6 +4,7 @@ import { run, one, tx } from './db.js';
 import { hashPassword } from './lib/auth.js';
 import { saveDemoSvg } from './services/files.js';
 import { today, addDays } from './services/metrics.js';
+import { defaultStageId } from './services/stages.js';
 
 export const DEMO_PASSWORD = 'charao2026';
 
@@ -217,6 +218,27 @@ export function seedDemo() {
       }
     });
     run('UPDATE tasks SET sub_seq = ? WHERE id = ?', subs.length, mother.id);
+
+    // Classificações (Grupo/Local/Etapa) por projeto e associação das tarefas
+    const STAGES = {
+      1: { Fundação: [], Estrutura: ['vigas', 'laje', 'Concretagem', 'fôrmas', 'caminhões', 'corpos de prova', 'Cura'], Alvenaria: ['alvenaria', 'blocos', 'Chapisco'],
+        Instalações: ['quadros', 'eletrodutos', 'prumadas', 'impermeabilização'], 'Canteiro e gestão': ['canteiro', 'diário'] },
+      2: { Recepção: ['recepção', 'balcão', 'sala de espera'], Consultórios: ['consultórios', 'Pontos elétricos'], Sanitários: ['sanitários'],
+        'Acabamentos e legalização': ['Pintura', 'vigilância'] },
+      3: { 'Estrutura pré-moldada': ['pilares', 'vigas de cobertura'], 'Pavimentação e drenagem': ['piso industrial', 'Drenagem', 'docas'],
+        Elétrica: ['subestação', 'Iluminação'] },
+      4: { Diagnóstico: ['patologias', 'percussão'], 'Fachada e acabamento': ['paleta', 'andaimes'] },
+    };
+    for (const p of [1, 2, 3, 4, 5]) defaultStageId(p);
+    for (const [pid, stages] of Object.entries(STAGES)) {
+      Object.entries(stages).forEach(([name, keys], i) => {
+        const sid = Number(run('INSERT INTO project_stages (project_id, name, sort_order) VALUES (?,?,?)', Number(pid), name, i + 1).lastInsertRowid);
+        for (const k of keys) run(`UPDATE tasks SET stage_id = ? WHERE project_id = ? AND stage_id IS NULL AND title LIKE ?`, sid, Number(pid), `%${k}%`);
+      });
+    }
+    run(`UPDATE tasks SET stage_id = (SELECT id FROM project_stages s WHERE s.project_id = tasks.project_id AND s.is_default = 1) WHERE stage_id IS NULL`);
+    // Início previsto: alguns dias antes do prazo (alimenta o Gantt)
+    run(`UPDATE tasks SET start_date = date(due_date, '-' || (4 + (id % 7)) || ' days') WHERE due_date IS NOT NULL`);
 
     run(`INSERT INTO audit_log (actor_id, entity, entity_id, action, details) VALUES (1, 'system', NULL, 'Base de demonstração criada', NULL)`);
   });

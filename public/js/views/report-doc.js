@@ -2,6 +2,7 @@
 import { html, raw, api, esc, icon, STATUS, STATUS_ORDER, PROOF, PRIORITY, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { STATUS_COLOR } from './shared.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
+import { ganttChart } from './gantt.js';
 
 const TYPE_TITLE = { projeto: 'Relatório de Projeto', usuario: 'Relatório Individual', equipe: 'Relatório de Gestor e Equipe', geral: 'Relatório Geral da Operação' };
 const LEVEL_TITLE = { resumo: 'Resumo', detalhado: 'Detalhado', completo: 'Completo com fotos' };
@@ -41,10 +42,23 @@ const groupTable = (title, rows, labelHead) => rows.length ? html`<section class
 
 const stBadge = s => html`<span class="r-st" style="--c:${STATUS_COLOR[s]}">${STATUS[s].label}</span>`;
 
-function taskTable(tasks, showProject) {
+const stageLabel = (t, multi) => (multi ? `${t.project_code} · ${t.stage_name || 'Geral'}` : (t.stage_name || 'Geral'));
+
+function taskTable(tasks, showProject, grouped) {
+  const cols = showProject ? 7 : 6;
+  let last = null;
+  const groupRow = t => {
+    const label = stageLabel(t, showProject);
+    if (!grouped || label === last) return '';
+    last = label;
+    const items = tasks.filter(x => stageLabel(x, showProject) === label);
+    const done = items.filter(x => x.eff_status === 'concluida').length;
+    return html`<tr class="r-grouprow"><td colspan="${cols}"><span class="r-stage">${label}</span>
+      <span class="muted small">${items.length} tarefa(s) · ${done} concluída(s) · ${Math.round((done / items.length) * 100)}%</span></td></tr>`;
+  };
   return html`<table class="r-table r-tasks"><thead><tr><th>Código</th><th>Tarefa</th>${showProject ? html`<th>Projeto</th>` : ''}<th>Responsável</th><th>Prazo</th><th>Prior.</th><th>Status</th></tr></thead>
-    <tbody>${tasks.map(t => html`<tr><td class="mono nowrap">${t.code}</td>
-      <td>${t.parent_code ? html`<div class="muted small">↳ Subtarefa de ${t.parent_code}</div>` : ''}<b>${t.title}</b>${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
+    <tbody>${tasks.map(t => html`${groupRow(t)}<tr><td class="mono nowrap">${t.code}</td>
+      <td>${t.parent_code ? html`<div class="muted small">↳ Subtarefa de ${t.parent_code}</div>` : ''}<b>${t.title}</b>${!grouped && t.stage_name && !t.stage_default ? html` <span class="r-stage r-stage-sm">${t.stage_name}</span>` : ''}${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
       ${showProject ? html`<td class="small">${t.project_code}</td>` : ''}
       <td class="small">${t.assignee_name || '—'}</td>
       <td class="nowrap small ${t.eff_status === 'atrasada' ? 'late' : ''}">${fmtDate(t.due_date)}${t.days_late ? html`<div class="small">${t.days_late}d atraso</div>` : ''}</td>
@@ -97,6 +111,8 @@ export async function view({ query }) {
           <dt>Emitido por</dt><dd>${r.issued_by}</dd>
           <dt>Data de referência</dt><dd>${fmtDate(r.reference_date)}</dd>
           <dt>Período (prazo)</dt><dd>${r.from || r.to ? `${fmtDate(r.from)} a ${fmtDate(r.to)}` : 'Todos'}</dd>
+          <dt>Organização</dt><dd>${r.group === 'classificacao' ? 'Por classificação' : 'Por status e prazo'}</dd>
+          ${r.stage_filter.length ? html`<dt>Classificações</dt><dd>${r.stage_filter.join(', ')}</dd>` : ''}
           ${!r.include_done ? html`<dt>Filtro</dt><dd>Sem concluídas</dd>` : ''}
         </dl>
       </section>
@@ -139,6 +155,7 @@ export async function view({ query }) {
         ${statusBars(s.by_status, s.total)}
       </section>
 
+      ${r.group === 'classificacao' || r.by_stage.length > 1 ? groupTable('Andamento por classificação (Grupo/Local/Etapa)', r.by_stage, 'Classificação') : ''}
       ${multiProject ? groupTable('Andamento por projeto', r.by_project, 'Projeto') : ''}
       ${r.type !== 'usuario' ? groupTable('Desempenho por responsável', r.by_person, 'Responsável') : ''}
 
@@ -146,9 +163,14 @@ export async function view({ query }) {
         <table class="r-table"><thead><tr><th>Código</th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th class="num">Atraso</th></tr></thead>
         <tbody>${r.critical.map(t => html`<tr><td class="mono nowrap">${t.code}</td><td>${t.title}</td><td class="small">${t.assignee_name || '—'}</td><td class="nowrap small">${fmtDate(t.due_date)}</td><td class="num late">${t.days_late} d</td></tr>`)}</tbody></table></section>` : ''}
 
-      ${r.level !== 'resumo' ? html`<section class="r-section">
-        <h3 class="r-h">Detalhamento das tarefas <span class="muted small">(${r.tasks.length})</span></h3>
-        ${r.tasks.length ? taskTable(r.tasks, multiProject) : html`<p class="muted">Sem tarefas no escopo.</p>`}
+      ${r.gantt && r.gantt_tasks.length ? html`<section class="r-section r-gantt">
+        <h3 class="r-h">Cronograma das tarefas (Gantt) <span class="muted small">(${r.gantt_tasks.length})</span></h3>
+        ${ganttChart(r.gantt_tasks, { ref: r.reference_date, groupLabel: t => stageLabel(t, multiProject), showProject: multiProject })}
+      </section>` : ''}
+
+      ${r.level !== 'resumo' ? html`<section class="r-section ${r.gantt ? 'r-after-gantt' : ''}">
+        <h3 class="r-h">Detalhamento das tarefas <span class="muted small">(${r.tasks.length})</span>${r.group === 'classificacao' ? html` <span class="muted small">· agrupadas por classificação</span>` : ''}</h3>
+        ${r.tasks.length ? taskTable(r.tasks, multiProject, r.group === 'classificacao') : html`<p class="muted">Sem tarefas no escopo.</p>`}
       </section>` : ''}
 
       ${r.level === 'completo' ? html`<section class="r-section r-break">
@@ -173,7 +195,9 @@ export async function view({ query }) {
     html: html`${printToolbar({
       back, title: `${title} — ${r.scope.label}`,
       extra: html`<label class="pt-opt">Nível <select id="lvl">${Object.entries(LEVEL_TITLE).map(([k, l]) => html`<option value="${k}" ${r.level === k ? 'selected' : ''}>${l}</option>`)}</select></label>
-        <a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}">${icon('edit')}Configurar</a>`,
+        <label class="pt-opt">Organizar <select id="grp"><option value="classificacao" ${r.group === 'classificacao' ? 'selected' : ''}>Por classificação</option><option value="nenhum" ${r.group !== 'classificacao' ? 'selected' : ''}>Por status e prazo</option></select></label>
+        <label class="pt-opt"><input type="checkbox" id="gnt" ${r.gantt ? 'checked' : ''}>Gantt</label>
+        <a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}">${icon('edit')}Configurar</a>`,
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
       setPageFooter(`Charão · ${title} · ${r.scope.label}`);
@@ -182,6 +206,8 @@ export async function view({ query }) {
         ctx.setQuery({ ...q, level: e.target.value });
         ctx.render();
       });
+      root.querySelector('#grp').addEventListener('change', e => { ctx.setQuery({ ...q, group: e.target.value }); ctx.render(); });
+      root.querySelector('#gnt').addEventListener('change', e => { ctx.setQuery({ ...q, gantt: e.target.checked ? '' : '0' }); ctx.render(); });
     },
   };
 }

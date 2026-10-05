@@ -121,6 +121,50 @@
 .fl-lines span { border-bottom: 1px dotted #9AA5B0; }
 .fl-legend { margin-top: 10px; font-size: 7.8pt; color: #6E7A86; }
 
+/* Classificação (Grupo/Local/Etapa) nos documentos */
+.r-stage { display: inline-block; font-weight: 700; color: #6B5A3E; background: #F3EEE5; border: 1px solid #E9E1D3; border-radius: 3px; padding: 0 6px; margin-right: 6px; }
+.r-stage-sm { font-size: 7.5pt; font-weight: 600; margin-left: 4px; }
+.r-grouprow td { background: #FAF8F4; border-top: 1.5px solid #CFC3AE; padding-top: 6px; }
+.fl-group { margin: 10px 0 2px; padding: 3px 8px; background: #F3EEE5; border-left: 3px solid #F26B21; font-weight: 700; font-size: 9pt; color: #2A3D50; break-after: avoid; }
+.fl-group span { font-weight: 400; color: #6E7A86; font-size: 8pt; margin-left: 6px; }
+
+/* Cronograma (Gantt) */
+.gantt { overflow-x: auto; }
+.g-table { width: 100%; min-width: 600px; border-collapse: collapse; table-layout: fixed; font-size: 8pt; }
+.g-table th { font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; color: #46535F; text-align: left; background: #F3EEE5; border-bottom: 1px solid #CFC3AE; }
+.g-label { width: 34%; padding: 3px 8px 3px 4px; vertical-align: middle; overflow: hidden; }
+.g-track { position: relative; height: 24px; padding: 0; }
+.g-axis { height: 30px; }
+.g-axis span { position: absolute; bottom: 4px; transform: translateX(-50%); font-size: 7pt; font-weight: 600; color: #6E7A86; white-space: nowrap; letter-spacing: 0; text-transform: none; }
+.g-axis .g-today-label { top: 2px; bottom: auto; color: #fff; background: #F26B21; border-radius: 3px; padding: 0 4px; font-weight: 700; font-size: 6.5pt; }
+.g-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dotted #DCD7CE; }
+.g-today { position: absolute; top: 0; bottom: 0; border-left: 1.5px solid #F26B21; z-index: 1; }
+.g-bar { position: absolute; top: 50%; height: 10px; transform: translateY(-50%); border-radius: 2px; z-index: 2;
+  background: color-mix(in srgb, var(--c) 30%, #fff); border: 1px solid var(--c); }
+.g-bar.is-done { background: var(--c); }
+.g-late { position: absolute; top: 50%; height: 10px; transform: translateY(-50%); z-index: 2; border: 1px solid #C0392B; border-left: 0;
+  background: repeating-linear-gradient(45deg, #C0392B 0 2px, #fff 2px 5px); }
+.g-due { position: absolute; top: 50%; width: 7px; height: 7px; background: #1C2A38; transform: translate(-50%, -50%) rotate(45deg); z-index: 3; }
+.g-span { position: absolute; top: 50%; height: 5px; transform: translateY(-50%); background: #2A3D50; border-radius: 3px; z-index: 2; }
+.g-row td { border-bottom: 1px solid #F1EFEA; }
+.g-row { break-inside: avoid; }
+.g-group td { background: #F7F3EC; border-top: 1px solid #CFC3AE; border-bottom: 1px solid #E9E1D3; }
+.g-group b { color: #2A3D50; }
+.g-code { font-family: var(--mono); font-weight: 700; color: #2A3D50; font-size: 7.3pt; margin-right: 5px; }
+.g-proj { font-size: 7pt; color: #6E7A86; margin-right: 5px; }
+.g-title { font-weight: 600; }
+.g-label .g-title, .g-label .g-code { white-space: nowrap; }
+.g-meta { display: block; color: #6E7A86; font-size: 7pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-row .g-label { white-space: nowrap; text-overflow: ellipsis; }
+.g-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 7.5pt; color: #46535F; margin-top: 8px; align-items: center; }
+.g-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.g-sw { display: inline-block; width: 18px; height: 9px; border-radius: 2px; border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 30%, #fff); }
+.g-sw.is-done { background: var(--c); }
+.g-sw-late { border: 1px solid #C0392B; background: repeating-linear-gradient(45deg, #C0392B 0 2px, #fff 2px 5px); }
+.g-due-legend { position: static; display: inline-block; transform: rotate(45deg); }
+.g-today-legend { display: inline-block; width: 0; height: 12px; border-left: 1.5px solid #F26B21; }
+.g-note { font-size: 7.3pt; color: #6E7A86; margin: 4px 0 0; }
+
 /* ---------- Impressão ---------- */
 @page {
   size: A4;
@@ -128,7 +172,12 @@
   @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 7.5pt; color: #6E7A86; font-family: "Segoe UI", Arial, sans-serif; }
   @bottom-left { font-size: 7.5pt; color: #6E7A86; font-family: "Segoe UI", Arial, sans-serif; }
 }
+/* Página em paisagem para o cronograma */
+@page paisagem { size: A4 landscape; margin: 10mm 10mm 13mm; }
 @media print {
+  .r-gantt { page: paisagem; }
+  .r-gantt .g-table { min-width: 0; }
+  .gantt { overflow: visible; }
   html, body { background: #fff !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .no-print, .print-toolbar, #toasts { display: none !important; }

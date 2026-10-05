@@ -4,7 +4,12 @@ import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATU
 export async function view({ params, query, setQuery, render }) {
   const p = await api(`/projects/${params.id}`);
   const active = query.get('status') || '';
-  const tasks = active ? p.tasks.filter(t => t.eff_status === active) : p.tasks;
+  const stage = Number(query.get('stage')) || 0;
+  const stageObj = p.stages.find(s => s.id === stage);
+  const inStage = stage ? p.tasks.filter(t => t.stage_id === stage) : p.tasks;
+  const tasks = active ? inStage.filter(t => t.eff_status === active) : inStage;
+  const stageCounts = Object.fromEntries(STATUS_ORDER.map(s => [s, inStage.filter(t => t.eff_status === s).length]));
+  const usedStages = p.stages.filter(s => s.summary.total || !s.is_default);
   const daysLeft = p.end_date ? Math.round((Date.parse(p.end_date) - Date.now()) / 86400e3) : null;
   const elapsed = p.start_date && p.end_date
     ? Math.max(0, Math.min(100, Math.round(((Date.now() - Date.parse(p.start_date)) / (Date.parse(p.end_date) - Date.parse(p.start_date))) * 100)))
@@ -52,25 +57,41 @@ export async function view({ params, query, setQuery, render }) {
         </section>
       </div>
 
-      <section class="section">
+      ${usedStages.length > 1 || (usedStages.length === 1 && !usedStages[0].is_default) ? html`<section class="card section">
+        <div class="card-head"><h2>Andamento por classificação</h2><span class="sub">Grupo / Local / Etapa · toque para filtrar</span></div>
+        <ul class="rows">${usedStages.map(s => html`<li><button type="button" class="row-link proj-row stage-row ${stage === s.id ? 'is-active' : ''}" data-stage="${stage === s.id ? '' : s.id}">
+          <div class="grow"><div class="row-title"><span class="stage-tag">${s.name}</span>${s.is_default ? html`<span class="muted" style="font-size:12px">sem classificação específica</span>` : ''}</div>
+            ${progress(s.summary.completion_pct ?? 0, `Conclusão de ${s.name}`)}
+            <div class="proj-stats"><span><b>${s.summary.total}</b> tarefas</span><span><b>${s.summary.in_progress}</b> em andamento</span>
+              <span style="color:${s.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.summary.late}</b> atrasadas</span><span><b>${s.summary.done}</b> concluídas</span></div></div>
+          <div class="proj-pct">${fmtPct(s.summary.completion_pct ?? 0)}</div></button></li>`)}</ul>
+      </section>` : ''}
+
+      <section class="section" id="proj-tasks">
         <div class="page-head" style="margin-bottom:10px">
-          <div><h2>Tarefas do projeto</h2><p>${tasks.length} de ${p.tasks.length} tarefas${active ? ` · filtro: ${STATUS[active].label}` : ''}</p></div>
-          <div class="page-actions">${fieldListButton(`project=${p.id}`)}</div>
+          <div><h2>Tarefas do projeto</h2><p>${tasks.length} de ${p.tasks.length} tarefas${stageObj ? ` · classificação: ${stageObj.name}` : ''}${active ? ` · filtro: ${STATUS[active].label}` : ''}</p></div>
+          <div class="page-actions">${fieldListButton(`project=${p.id}${stage ? `&stage=${stage}` : ''}`)}</div>
         </div>
+        ${p.stages.length > 1 ? html`<div class="filters-adv" style="display:grid;grid-template-columns:minmax(0,320px);margin-bottom:10px">
+          <select id="stage-filter" aria-label="Filtrar por classificação"><option value="">Todas as classificações</option>
+            ${p.stages.map(s => html`<option value="${s.id}" ${stage === s.id ? 'selected' : ''}>${s.name} (${s.summary.total})</option>`)}</select></div>` : ''}
         <div class="chips" role="group" aria-label="Filtrar por status" style="margin-bottom:12px">
-          <button class="chip" data-st="" aria-pressed="${!active}">Todas<span class="n">${p.tasks.length}</span></button>
-          ${STATUS_ORDER.map(s => html`<button class="chip" data-st="${s}" aria-pressed="${active === s}" style="--c:${STATUS_COLOR[s]}"><span class="dot"></span>${STATUS[s].label}<span class="n">${p.summary.by_status[s]}</span></button>`)}
+          <button class="chip" data-st="" aria-pressed="${!active}">Todas<span class="n">${inStage.length}</span></button>
+          ${STATUS_ORDER.map(s => html`<button class="chip" data-st="${s}" aria-pressed="${active === s}" style="--c:${STATUS_COLOR[s]}"><span class="dot"></span>${STATUS[s].label}<span class="n">${stageCounts[s]}</span></button>`)}
         </div>
         ${taskList(tasks, { showProject: false })}
       </section>
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
-      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st }); render(); }));
+      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '' }); render(); }));
+      const goStage = v => { setQuery({ status: active, stage: v }); render().then(() => document.getElementById('proj-tasks')?.scrollIntoView({ block: 'start' })); };
+      root.querySelector('#stage-filter')?.addEventListener('change', e => goStage(e.target.value));
+      root.querySelectorAll('[data-stage]').forEach(b => b.addEventListener('click', () => goStage(b.dataset.stage)));
       // Links da rosca/legenda filtram a lista dentro do próprio projeto
       root.querySelectorAll(`a[href^="#/projetos/${p.id}?status="]`).forEach(a => a.addEventListener('click', e => {
         e.preventDefault();
-        setQuery({ status: new URLSearchParams(a.getAttribute('href').split('?')[1]).get('status') });
+        setQuery({ status: new URLSearchParams(a.getAttribute('href').split('?')[1]).get('status'), stage: stage || '' });
         render();
       }));
     },

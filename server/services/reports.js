@@ -7,6 +7,30 @@ import { listVisible } from './tasks.js';
 
 export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral'];
 export const LEVELS = ['resumo', 'detalhado', 'completo'];
+export const GROUPINGS = ['nenhum', 'classificacao'];
+
+// Ordenação por classificação: projeto → ordem da classificação ("Geral" primeiro) → prazo
+const byStage = (a, b) => a.project_code.localeCompare(b.project_code)
+  || (b.stage_default || 0) - (a.stage_default || 0) || (a.stage_order || 0) - (b.stage_order || 0)
+  || (a.stage_name || '').localeCompare(b.stage_name || '') || (a.due_date || '9999').localeCompare(b.due_date || '9999');
+
+function groupByStage(tasks, multiProject) {
+  const m = new Map();
+  for (const t of [...tasks].sort(byStage)) {
+    const k = t.stage_id || 0;
+    if (!m.has(k)) m.set(k, { key: k, label: multiProject ? `${t.project_code} · ${t.stage_name || 'Geral'}` : (t.stage_name || 'Geral'), tasks: [] });
+    m.get(k).tasks.push(t);
+  }
+  return [...m.values()].map(g => ({ key: g.key, label: g.label, summary: summarize(g.tasks) }));
+}
+
+// Dados mínimos para o cronograma (Gantt)
+const ganttRow = t => ({
+  id: t.id, code: t.code, title: t.title, parent_code: t.parent_code, assignee_name: t.assignee_name,
+  project_code: t.project_code, stage_id: t.stage_id, stage_name: t.stage_name,
+  start_date: t.start_date, started_at: t.started_at, created_at: t.created_at, due_date: t.due_date,
+  completed_at: t.completed_at, delivered_date: t.delivered_date, eff_status: t.eff_status, days_late: t.days_late,
+});
 
 function usersMap() {
   return new Map(all('SELECT id, name, role, manager_id, job_title FROM users').map(u => [u.id, u]));
@@ -48,6 +72,9 @@ export function buildReport(ctx, q) {
   const from = date(q.from, 'Data inicial');
   const to = date(q.to, 'Data final');
   const includeDone = q.include_done !== '0';
+  const group = oneOf(q.group, GROUPINGS, 'Agrupamento', 'nenhum');
+  const withGantt = q.gantt !== '0';
+  const stageFilter = String(q.stage || '').split(',').map(intOrNull).filter(Boolean);
   const id = intOrNull(q.id);
   const all_ = listVisible(ctx);
   const map = usersMap();
@@ -81,6 +108,13 @@ export function buildReport(ctx, q) {
 
   tasks = filterPeriod(tasks, from, to);
   if (!includeDone) tasks = tasks.filter(t => t.status !== 'concluida');
+  let stageNames = [];
+  if (stageFilter.length) {
+    tasks = tasks.filter(t => stageFilter.includes(t.stage_id));
+    stageNames = [...new Set(tasks.map(t => t.stage_name))];
+    if (!stageNames.length) stageNames = all(`SELECT name FROM project_stages WHERE id IN (${stageFilter.map(() => '?').join(',')})`, ...stageFilter).map(r => r.name);
+  }
+  if (group === 'classificacao') tasks = [...tasks].sort(byStage);
 
   const summary = summarize(tasks);
   const byProject = groupBy(tasks, t => t.project_id, t => `${t.project_code} · ${t.project_name}`);
@@ -91,7 +125,9 @@ export function buildReport(ctx, q) {
   const critical = tasks.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 10);
 
   return {
-    type, level, from, to, include_done: includeDone,
+    type, level, from, to, include_done: includeDone, group, gantt: withGantt, stage_filter: stageNames,
+    by_stage: groupByStage(tasks, type !== 'projeto'),
+    gantt_tasks: withGantt ? (group === 'classificacao' ? tasks : [...tasks].sort(byStage)).map(ganttRow) : [],
     issued_at: new Date().toISOString(),
     issued_by: ctx.user.name,
     reference_date: today(),
@@ -126,6 +162,12 @@ export function fieldList(ctx, q) {
   } else {
     throw badRequest('Informe o projeto ou o usuário.');
   }
+  const stageId = intOrNull(q.stage);
+  if (stageId) {
+    tasks = tasks.filter(t => t.stage_id === stageId);
+    const s = one('SELECT name FROM project_stages WHERE id = ?', stageId);
+    if (s) context.stage = s.name;
+  }
   if (!includeDone) tasks = tasks.filter(t => t.status !== 'concluida');
   if (!includeReview) tasks = tasks.filter(t => t.status !== 'aguardando_conferencia');
   const order = { atrasada: 0, em_andamento: 1, aberta: 2, aguardando_conferencia: 3, concluida: 4 };
@@ -139,6 +181,7 @@ export function fieldList(ctx, q) {
     summary: summarize(tasks),
     tasks: tasks.map(t => ({
       id: t.id, code: t.code, title: t.title, parent_code: t.parent_code,
+      stage_id: t.stage_id, stage_name: t.stage_name, stage_order: t.stage_order, stage_default: t.stage_default,
       short: t.field_summary || shorten(t.description),
       project_code: t.project_code, project_name: t.project_name,
       assignee_name: t.assignee_name, due_date: t.due_date, eff_status: t.eff_status, priority: t.priority,

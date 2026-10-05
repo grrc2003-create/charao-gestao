@@ -130,7 +130,8 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
 
 api.get('/api/meta', (req, res, { ctx }) => {
   const projects = all('SELECT id, code, name, status FROM projects ORDER BY code')
-    .filter(p => ctx.projects === null || ctx.projects.has(p.id));
+    .filter(p => ctx.projects === null || ctx.projects.has(p.id))
+    .map(p => ({ ...p, stages: all('SELECT id, name, is_default FROM project_stages WHERE project_id = ? ORDER BY is_default DESC, sort_order, id', p.id) }));
   const users = all(`SELECT id, name, role, job_title, active, manager_id FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
   // Para filtros de tarefas também listamos responsáveis visíveis nas tarefas (sem dados pessoais)
   const assignees = new Map();
@@ -174,6 +175,8 @@ api.get('/api/tasks', (req, res, { ctx, query }) => {
   else if (assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id);
   else if (assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(assignee));
   if (priority.length) tasks = tasks.filter(t => priority.includes(t.priority));
+  const stages = query.getAll('stage').map(intOrNull).filter(Boolean);
+  if (stages.length) tasks = tasks.filter(t => stages.includes(t.stage_id));
   const nivel = query.get('nivel');
   if (nivel === 'principais') tasks = tasks.filter(t => !t.parent_id);
   else if (nivel === 'subtarefas') tasks = tasks.filter(t => t.parent_id);

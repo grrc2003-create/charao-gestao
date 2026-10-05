@@ -7,6 +7,7 @@ import {
 import { decorate, today } from './metrics.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored } from './files.js';
+import { resolveStage } from './stages.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
 export const PROOF_TYPES = ['nenhuma', 'foto', 'descricao', 'foto_descricao'];
@@ -18,12 +19,13 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     a.name AS assignee_name, c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count,
-    pt.code AS parent_code, pt.title AS parent_title,
+    pt.code AS parent_code, pt.title AS parent_title, st.name AS stage_name, st.sort_order AS stage_order, st.is_default AS stage_default,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id) AS sub_total,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'concluida') AS sub_done
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id
+  LEFT JOIN project_stages st ON st.id = t.stage_id
   LEFT JOIN users a ON a.id = t.assignee_id
   LEFT JOIN users c ON c.id = t.creator_id
   LEFT JOIN users ab ON ab.id = t.assigned_by_id
@@ -140,10 +142,12 @@ export function createTask(ctx, body) {
     field_summary: str(body.field_summary, { max: 180, label: 'Resumo para campo' }),
     notes: str(body.notes, { max: 2000, label: 'Observações' }),
     due_date: date(body.due_date, 'Prazo'),
+    start_date: date(body.start_date, 'Início previsto'),
     priority: oneOf(body.priority, PRIORITIES, 'Prioridade', 'media'),
     proof_type: oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação', 'nenhuma'),
     assignee_id: validateAssignee(intOrNull(body.assignee_id), projectId),
   };
+  assertDateOrder(data.start_date, data.due_date);
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
 
   return tx(() => {
@@ -159,15 +163,18 @@ export function createTask(ctx, body) {
       code = `${project.code}-${String(seq).padStart(5, '0')}`;
     }
     const now = nowIso();
-    const r = run(`INSERT INTO tasks (code, project_id, parent_id, seq, title, description, field_summary, notes, assignee_id, assigned_by_id,
-        creator_id, due_date, priority, proof_type, status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?)`,
-      code, projectId, parent?.id ?? null, seq, data.title, data.description, data.field_summary, data.notes, data.assignee_id,
-      data.assignee_id ? ctx.user.id : null, ctx.user.id, data.due_date, data.priority, data.proof_type, now, now);
+    // Sem classificação escolhida, a tarefa assume "Geral"
+    const stageId = resolveStage(projectId, body.stage_id);
+    const r = run(`INSERT INTO tasks (code, project_id, parent_id, seq, stage_id, title, description, field_summary, notes, assignee_id, assigned_by_id,
+        creator_id, start_date, due_date, priority, proof_type, status, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?)`,
+      code, projectId, parent?.id ?? null, seq, stageId, data.title, data.description, data.field_summary, data.notes, data.assignee_id,
+      data.assignee_id ? ctx.user.id : null, ctx.user.id, data.start_date, data.due_date, data.priority, data.proof_type, now, now);
     const id = Number(r.lastInsertRowid);
     const assignee = data.assignee_id ? one('SELECT name FROM users WHERE id = ?', data.assignee_id).name : 'sem responsável';
+    const stageName = one('SELECT name FROM project_stages WHERE id = ?', stageId).name;
     taskHistory(id, ctx.user.id, parent ? `Subtarefa criada em ${parent.code}` : 'Tarefa criada',
-      `Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
+      `Classificação: ${stageName} · Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
     if (parent) taskHistory(parent.id, ctx.user.id, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption);
     if (images.length) taskHistory(id, ctx.user.id, 'Imagens de referência anexadas', `${images.length} imagem(ns)`);
@@ -176,6 +183,10 @@ export function createTask(ctx, body) {
 }
 
 const fmtDate = d => (d ? d.split('-').reverse().join('/') : 'sem prazo');
+
+function assertDateOrder(start, due) {
+  if (start && due && start > due) throw badRequest('O início previsto deve ser anterior ou igual ao prazo.');
+}
 
 export function updateTask(ctx, id, body) {
   const t = loadVisible(ctx, id);
@@ -194,6 +205,16 @@ export function updateTask(ctx, id, body) {
   if ('field_summary' in body) set('field_summary', str(body.field_summary, { max: 180, label: 'Resumo para campo' }), 'Resumo para campo alterado', () => '');
   if ('notes' in body) set('notes', str(body.notes, { max: 2000, label: 'Observações' }), 'Observações alteradas', () => '');
   if ('due_date' in body) set('due_date', date(body.due_date, 'Prazo'), 'Prazo alterado', fmtDate);
+  if ('start_date' in body) set('start_date', date(body.start_date, 'Início previsto'), 'Início previsto alterado', d => (d ? fmtDate(d) : '—'));
+  assertDateOrder(next.start_date !== undefined ? next.start_date : t.start_date, next.due_date !== undefined ? next.due_date : t.due_date);
+  if ('stage_id' in body) {
+    const sid = resolveStage(t.project_id, body.stage_id);
+    if (sid !== t.stage_id) {
+      next.stage_id = sid;
+      const name = s => (s ? one('SELECT name FROM project_stages WHERE id = ?', s)?.name : '—');
+      changes.push(['Classificação alterada', name(t.stage_id), name(sid)]);
+    }
+  }
   if ('priority' in body) set('priority', oneOf(body.priority, PRIORITIES, 'Prioridade'), 'Prioridade alterada', v => PRIORITY_LABEL[v]);
   if ('proof_type' in body) set('proof_type', oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação'), 'Comprovação exigida alterada', v => PROOF_LABEL[v]);
   if ('assignee_id' in body) {

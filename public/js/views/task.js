@@ -95,7 +95,7 @@ function build(t, ctx) {
     html: html`
       ${pageHead({ back: { href: back, label: backLabel }, title: '' })}
       <article class="card task-hero st-${t.eff_status}">
-        <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}</div>
+        <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}${t.stage_name ? html`<a class="stage-tag" href="#/tarefas?project=${t.project_id}&stage=${t.stage_id}" title="Classificação (Grupo/Local/Etapa)">${t.stage_name}</a>` : ''}</div>
         ${t.parent_id ? html`<div class="parent-link">↳ Subtarefa de ${t.parent_visible ? html`<a href="#/tarefas/${t.parent_id}"><b>${t.parent_code}</b> · ${t.parent_title}</a>` : html`<b>${t.parent_code}</b>`}</div>` : ''}
         <h1>${t.title}</h1>
         <div class="facts">
@@ -128,6 +128,8 @@ function build(t, ctx) {
             <dt>Criada por</dt><dd>${t.creator_name} · ${fmtDateTime(t.created_at)}</dd>
             ${t.assigned_by_name && t.assigned_by_id !== t.assignee_id ? html`<dt>Atribuída por</dt><dd>${t.assigned_by_name}</dd>` : ''}
             <dt>Prioridade</dt><dd>${PRIORITY[t.priority]}</dd>
+            <dt>Classificação</dt><dd>${t.stage_name || 'Geral'}</dd>
+            ${t.start_date ? html`<dt>Início previsto</dt><dd>${fmtDate(t.start_date)}</dd>` : ''}
           </dl>
         </div>
       </section>

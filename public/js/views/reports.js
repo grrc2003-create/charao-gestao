@@ -18,7 +18,10 @@ export async function view({ state, query }) {
   const users = await api('/users');
   const meta = state.meta;
   const managers = users.filter(u => u.team_size > 0);
-  const init = { type: query.get('type') || 'projeto', id: query.get('id') || '', level: query.get('level') || 'detalhado' };
+  const init = { type: query.get('type') || 'projeto', id: query.get('id') || '', level: query.get('level') || 'detalhado',
+    group: query.get('group') || 'classificacao', gantt: query.get('gantt') !== '0' };
+  const GROUPS = [['classificacao', 'Agrupar por classificação', 'Tarefas organizadas por Grupo/Local/Etapa, com andamento de cada uma'],
+    ['nenhum', 'Por status e prazo', 'Lista única: atrasadas e pendentes primeiro']];
   const opt = (v, l) => html`<option value="${v}" ${String(init.id) === String(v) ? 'selected' : ''}>${l}</option>`;
   const scopes = {
     projeto: meta.projects.map(p => opt(p.id, `${p.code} · ${p.name}`)),
@@ -47,7 +50,14 @@ export async function view({ state, query }) {
           <div class="field"><span class="label">3. Nível de detalhe</span>
             <div class="segmented seg-3">${LEVELS.map(([k, l, d]) => html`<label><input type="radio" name="level" value="${k}" ${init.level === k ? 'checked' : ''}>${l}<small>${d}</small></label>`)}</div></div>
 
+          <div class="field"><span class="label">4. Organização das tarefas</span>
+            <div class="segmented">${GROUPS.map(([k, l, d]) => html`<label><input type="radio" name="group" value="${k}" ${init.group === k ? 'checked' : ''}>${l}<small>${d}</small></label>`)}</div>
+            <label class="switch" style="margin-top:6px"><input type="checkbox" name="gantt" ${init.gantt ? 'checked' : ''}>Incluir cronograma das tarefas (gráfico de Gantt)</label></div>
+
           <fieldset class="fieldset form"><legend>Filtros opcionais</legend>
+            <div class="field" id="stage-field" hidden><span class="label">Classificações</span>
+              <div class="checks" id="stage-checks"></div>
+              <span class="hint">Nenhuma marcada = todas as classificações do projeto.</span></div>
             <div class="form-row">
               <div class="field"><label for="from">Prazo a partir de</label><input id="from" name="from" type="date"></div>
               <div class="field"><label for="to">Prazo até</label><input id="to" name="to" type="date"></div>
@@ -72,6 +82,8 @@ export async function view({ state, query }) {
               <li>Cabeçalho institucional, escopo e data de emissão</li>
               <li>Resumo executivo e indicadores principais</li>
               <li>Distribuição por status e por projeto/responsável</li>
+              <li>Andamento por classificação (Grupo/Local/Etapa)</li>
+              <li id="li-gantt">Cronograma das tarefas (Gantt) em página paisagem</li>
               <li id="li-det">Detalhamento das tarefas</li>
               <li id="li-ph">Comprovações com fotos e histórico</li>
               <li>Rodapé com emissor e paginação</li>
@@ -100,6 +112,14 @@ export async function view({ state, query }) {
             sel.innerHTML = list.length ? html`${list}`.toString() : '<option value="">Nenhuma opção disponível</option>';
             sel.dataset.type = type;
           }
+          // Classificações do projeto escolhido (filtro opcional)
+          const stageField = root.querySelector('#stage-field');
+          const proj = type === 'projeto' ? meta.projects.find(p => String(p.id) === sel.value) : null;
+          stageField.hidden = !proj || proj.stages.length < 2;
+          if (proj && stageField.dataset.project !== String(proj.id)) {
+            root.querySelector('#stage-checks').innerHTML = html`${proj.stages.map(s => html`<label><input type="checkbox" name="stage" value="${s.id}">${s.name}</label>`)}`.toString();
+            stageField.dataset.project = String(proj.id);
+          }
           root.querySelector('#scope-label').textContent = labels[type][0];
           root.querySelector('#scope-hint').textContent = labels[type][1];
         }
@@ -107,6 +127,7 @@ export async function view({ state, query }) {
         root.querySelector('#mini .ph-row').style.display = level === 'completo' ? '' : 'none';
         root.querySelector('#li-det').style.opacity = level === 'resumo' ? '.35' : '1';
         root.querySelector('#li-ph').style.opacity = level === 'completo' ? '1' : '.35';
+        root.querySelector('#li-gantt').style.opacity = f.gantt.checked ? '1' : '.35';
       };
       f.addEventListener('change', sync);
       sync();
@@ -121,6 +142,10 @@ export async function view({ state, query }) {
         if (fd.get('from')) qs.set('from', fd.get('from'));
         if (fd.get('to')) qs.set('to', fd.get('to'));
         if (!fd.get('include_done')) qs.set('include_done', '0');
+        qs.set('group', fd.get('group'));
+        if (!fd.get('gantt')) qs.set('gantt', '0');
+        const stages = type === 'projeto' ? fd.getAll('stage') : [];
+        if (stages.length) qs.set('stage', stages.join(','));
         ctx.navigate(`/imprimir/relatorio?${qs}`);
       });
     },

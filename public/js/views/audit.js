@@ -8,7 +8,10 @@ export async function view({ state }) {
     if (!d) return '';
     try {
       const o = JSON.parse(d);
-      return Object.entries(o).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') || '—' : v ?? '—'}`).join(' · ');
+      const val = v => Array.isArray(v) ? v.join(', ') || '—'
+        : v && typeof v === 'object' ? Object.entries(v).filter(([, x]) => [].concat(x).length).map(([a, b]) => `${a}: ${[].concat(b).join(', ')}`).join('; ') || '—'
+        : v ?? '—';
+      return Object.entries(o).map(([k, v]) => `${k}: ${val(v)}`).join(' · ');
     } catch { return d; }
   };
   return {

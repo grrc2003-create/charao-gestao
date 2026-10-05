@@ -50,6 +50,13 @@ export async function list({ state, query, setQuery }) {
   };
 }
 
+const stageItem = s => html`<li class="stage-item" data-id="${s.id || ''}">
+  <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
+  <input type="text" maxlength="60" value="${s.name}" aria-label="Nome da classificação" required>
+  <span class="stage-count">${s.task_count ? `${s.task_count} tarefa(s)` : 'sem tarefas'}</span>
+  <button type="button" class="icon-btn" data-rm ${s.task_count ? 'disabled' : ''} aria-label="Remover classificação"
+    title="${s.task_count ? 'Possui tarefas: reclassifique-as antes de remover' : 'Remover'}">✕</button></li>`;
+
 export async function form({ params, state, navigate, reloadMeta }) {
   const editing = !!params.id;
   if (!state.meta.can.manage_projects) throw new Error('Seu perfil não pode cadastrar ou editar projetos.');
@@ -91,6 +98,18 @@ export async function form({ params, state, navigate, reloadMeta }) {
             <div class="field"><label for="actual_end_date">Término real</label><input id="actual_end_date" name="actual_end_date" type="date" value="${v.actual_end_date || ''}"></div>
           </div>
         </fieldset>
+        <fieldset class="fieldset form"><legend>Classificação das tarefas (Grupo/Local/Etapa)</legend>
+          <span class="hint">Cadastre as opções que aparecerão na lista suspensa ao criar tarefas deste projeto (ex.: Fundação, Bloco A, 2º pavimento, Instalações). Tarefas sem classificação ficam em <b>Geral</b>.</span>
+          <ul class="stage-list" id="stage-list">
+            <li class="stage-item stage-default"><span class="stage-handle" aria-hidden="true">•</span><input type="text" value="Geral" disabled aria-label="Classificação padrão">
+              <span class="stage-count">${(p?.stages || []).find(s => s.is_default)?.task_count ?? 0} tarefa(s) · padrão</span></li>
+            ${(p?.stages || []).filter(s => !s.is_default).map(s => stageItem(s))}
+          </ul>
+          <div class="stage-add">
+            <input type="text" id="stage-new" maxlength="60" placeholder="Nova classificação (ex.: Fundação)" aria-label="Nova classificação">
+            <button type="button" class="btn btn-ghost" id="stage-add-btn">${icon('plus')}Adicionar</button>
+          </div>
+        </fieldset>
         <fieldset class="fieldset form"><legend>Equipe / responsáveis</legend>
           <span class="hint">Integrantes da equipe do projeto. O acesso ao sistema é controlado separadamente em <b>Usuários → Permissões</b>.</span>
           <div class="checks">${active.map(u => html`<label><input type="checkbox" name="member" value="${u.id}" ${memberIds.has(u.id) ? 'checked' : ''}>${u.name}<span class="muted" style="font-size:12px">${u.job_title || ''}</span></label>`)}</div>
@@ -103,11 +122,36 @@ export async function form({ params, state, navigate, reloadMeta }) {
       </form>`,
     mount(root) {
       const f = root.querySelector('#proj-form');
+      const list = root.querySelector('#stage-list');
+      const newInput = root.querySelector('#stage-new');
+      const addStage = () => {
+        const name = newInput.value.replace(/\s+/g, ' ').trim();
+        if (!name) return newInput.focus();
+        const exists = [...list.querySelectorAll('input')].some(i => i.value.trim().toLowerCase() === name.toLowerCase());
+        if (exists) { toast('Essa classificação já existe.', 'warn'); return newInput.select(); }
+        list.insertAdjacentHTML('beforeend', stageItem({ name, task_count: 0 }).toString());
+        newInput.value = '';
+        newInput.focus();
+      };
+      root.querySelector('#stage-add-btn').addEventListener('click', addStage);
+      newInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addStage(); } });
+      list.addEventListener('click', e => {
+        const li = e.target.closest('.stage-item');
+        if (!li) return;
+        if (e.target.closest('[data-rm]')) li.remove();
+        const mv = e.target.closest('[data-move]');
+        if (mv) {
+          const dir = Number(mv.dataset.move);
+          const sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
+          if (sib && !sib.classList.contains('stage-default')) dir < 0 ? sib.before(li) : sib.after(li);
+        }
+      });
       const err = f.querySelector('.form-error');
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
         data.member_ids = [...f.querySelectorAll('[name=member]:checked')].map(c => Number(c.value));
+        data.stages = [...f.querySelectorAll('.stage-item:not(.stage-default)')].map(li => ({ id: li.dataset.id ? Number(li.dataset.id) : null, name: li.querySelector('input').value }));
         delete data.member;
         err.hidden = true;
         try {

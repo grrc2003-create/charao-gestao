@@ -60,6 +60,8 @@ Interface, regras de negócio e dados estão separados: as telas só conversam c
 - **Conferência**: o responsável não confere a própria entrega. Devolução e reabertura exigem motivo.
 - **Pontualidade**: entrega (envio para conferência) até o prazo. Média de atraso considera entregas tardias e atrasos ativos.
 - **Gestor**: acompanha a equipe (direta e indireta) sem se tornar responsável pelas tarefas dos subordinados; desempenho próprio e consolidado da equipe aparecem separados.
+- **Classificação (Grupo/Local/Etapa)**: cadastrada por projeto (formulário do projeto). Toda tarefa pertence a uma classificação; sem escolha, assume **Geral**. Classificações com tarefas não podem ser removidas (apenas renomeadas). Filtro em Tarefas, andamento por classificação no painel do projeto, agrupamento nos relatórios e na lista de campo.
+- **Cronograma (Gantt)**: nos relatórios (página A4 paisagem). Início = início previsto da tarefa (campo opcional) ou, na falta dele, início da execução/data de criação; fim = prazo (ou conclusão).
 - **Histórico**: criação, mudança de responsável, prazo, prioridade, status, comprovação, envio, devolução, conclusão e reabertura — com usuário, data e hora.
 - **Auditoria administrativa**: logins, falhas de login, criação/alteração de usuários e permissões, projetos.
 

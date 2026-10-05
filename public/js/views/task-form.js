@@ -19,7 +19,7 @@ export async function view({ params, query, state, navigate }) {
   const projects = state.meta.projects.filter(p => !['concluido', 'cancelado'].includes(p.status) || (t && p.id === t.project_id));
   const projectId = String(t?.project_id || parent?.project_id || query.get('projeto') || (projects.length === 1 ? projects[0].id : ''));
   const v = t || (parent
-    ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: parent.due_date }
+    ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: parent.due_date, stage_id: parent.stage_id }
     : { priority: 'media', proof_type: 'foto', assignee_id: null });
   const pending = []; // imagens de referência escolhidas antes de salvar
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
@@ -38,6 +38,9 @@ export async function view({ params, query, state, navigate }) {
           <div class="field"><label class="req" for="project_id">Projeto</label>
             <select id="project_id" name="project_id" required ${editing || parent ? 'disabled' : ''}>${opt('', 'Selecione o projeto', projectId)}${projects.map(p => opt(p.id, `${p.code} · ${p.name}`, projectId))}</select>
             ${editing ? html`<span class="hint">O projeto não pode ser alterado após a criação (o código da tarefa depende dele).</span>` : ''}</div>
+          <div class="field"><label for="stage_id">Classificação (Grupo/Local/Etapa)</label>
+            <select id="stage_id" name="stage_id"><option value="">Geral</option></select>
+            <span class="hint">Opcional. Sem classificação, a tarefa fica em <b>Geral</b>. As opções são cadastradas no projeto.</span></div>
           <div class="field"><label class="req" for="title">Título</label><input id="title" name="title" type="text" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: Conferir armação das vigas do 4º pavimento"></div>
           <div class="field"><label class="req" for="description">Descrição detalhada</label>
             <textarea id="description" name="description" rows="5" maxlength="5000" required placeholder="O que deve ser feito, onde, critérios de aceite e referências de projeto.">${v.description || ''}</textarea></div>
@@ -53,6 +56,10 @@ export async function view({ params, query, state, navigate }) {
               <select id="assignee_id" name="assignee_id"><option value="">Selecione o projeto primeiro</option></select>
               <span class="hint">Somente usuários com acesso ao projeto.</span></div>
             <div class="field"><label for="due_date">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}"></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
+              <span class="hint">Opcional. Usado no cronograma (Gantt) dos relatórios.</span></div>
           </div>
           <div class="field"><span class="label">Prioridade</span>
             <div class="segmented seg-4">${Object.entries(PRIORITY).map(([k, l]) => html`<label><input type="radio" name="priority" value="${k}" ${v.priority === k ? 'checked' : ''}><span class="prio prio-${k}">${l}</span></label>`)}</div></div>
@@ -88,7 +95,19 @@ export async function view({ params, query, state, navigate }) {
         } catch (e) { toast(e.message, 'err'); }
       };
       loadAssignees(projectId);
-      f.project_id.addEventListener('change', () => loadAssignees(f.project_id.value));
+      // Classificações do projeto selecionado (cadastradas no projeto; "Geral" é a padrão)
+      const stageSel = f.querySelector('#stage_id');
+      const loadStages = (pid, cur) => {
+        const proj = state.meta.projects.find(p => String(p.id) === String(pid));
+        const stages = proj?.stages || [];
+        const def = stages.find(s => s.is_default);
+        const others = stages.filter(s => !s.is_default);
+        stageSel.innerHTML = html`<option value="${def?.id || ''}">Geral</option>${others.map(s => opt(s.id, s.name, cur))}`.toString();
+        stageSel.disabled = !pid;
+        if (cur && others.some(s => String(s.id) === String(cur))) stageSel.value = String(cur);
+      };
+      loadStages(projectId, v.stage_id);
+      f.project_id.addEventListener('change', () => { loadAssignees(f.project_id.value); loadStages(f.project_id.value, null); });
 
       const thumbsEl = root.querySelector('#ref-thumbs');
       const drawThumbs = () => {

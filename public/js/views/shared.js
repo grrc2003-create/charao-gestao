@@ -106,6 +106,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
       <div class="tc-title">${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>
       <div class="tc-meta">
         ${showProject ? html`<span>${icon('projects')}<em>${t.project_name}</em></span>` : ''}
+        ${t.stage_name && !t.stage_default ? html`<span style="grid-column:1/-1"><em class="stage-tag">${t.stage_name}</em></span>` : ''}
         ${showAssignee ? html`<span>${icon('user')}<em>${t.assignee_name || 'Sem responsável'}</em></span>` : ''}
         <span class="${due.cls}">${icon('calendar')}<em>${due.text}</em></span>
         <span>${priorityTag(t.priority)}</span>
@@ -117,7 +118,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
       const due = dueInfo(t);
       return html`<tr class="row-st st-${t.eff_status}" data-href="#/tarefas/${t.id}" tabindex="0">
         <td class="mono nowrap">${t.code}</td>
-        <td>${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}<div class="t-title">${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>${t.exec_count || t.ref_count ? html`<div class="t-sub">${t.ref_count ? `${t.ref_count} ref.` : ''} ${t.exec_count ? `· ${t.exec_count} foto(s) execução` : ''}</div>` : ''}</td>
+        <td>${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}<div class="t-title">${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>${t.stage_name && !t.stage_default ? html`<div style="margin-top:3px"><span class="stage-tag">${t.stage_name}</span></div>` : ''}${t.exec_count || t.ref_count ? html`<div class="t-sub">${t.ref_count ? `${t.ref_count} ref.` : ''} ${t.exec_count ? `· ${t.exec_count} foto(s) execução` : ''}</div>` : ''}</td>
         ${showProject ? html`<td><div>${t.project_name}</div><div class="t-sub mono">${t.project_code}</div></td>` : ''}
         ${showAssignee ? html`<td class="nowrap">${t.assignee_name || html`<span class="muted">—</span>`}</td>` : ''}
         <td class="nowrap ${due.cls}">${due.text}</td>

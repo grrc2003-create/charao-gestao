@@ -95,13 +95,17 @@ export const userRankRow = (u, i) => html`<li><a class="row-link rank" href="#/u
     <div><b>${u.stats.assigned}</b>atribuídas</div>
   </div><span class="chev">${icon('chevron')}</span></a></li>`;
 
+// Concluída após o prazo vigente: selo com os dias de atraso da entrega
+export const lateDoneTag = t => (t.status === 'concluida' && t.on_time === false
+  ? html`<span class="done-late" title="Entregue ${t.days_late} dia(s) após o prazo de ${fmtDate(t.due_date)}">com ${t.days_late}d de atraso</span>` : '');
+
 // Lista de tarefas: tabela no desktop + cards no celular
 export function taskList(tasks, { showProject = true, showAssignee = true, empty = 'Nenhuma tarefa encontrada.' } = {}) {
   if (!tasks.length) return html`<div class="card empty-state"><p>${empty}</p></div>`;
   const cards = html`<div class="task-cards only-mobile">${tasks.map(t => {
     const due = dueInfo(t);
     return html`<a class="task-card st-${t.eff_status}" href="#/tarefas/${t.id}">
-      <div class="tc-top"><span class="tc-code">${t.code}</span>${statusBadge(t.eff_status, { short: true })}</div>
+      <div class="tc-top"><span class="tc-code">${t.code}</span><span class="tc-status">${statusBadge(t.eff_status, { short: true })}${lateDoneTag(t)}</span></div>
       ${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}
       <div class="tc-title">${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>
       <div class="tc-meta">
@@ -123,7 +127,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
         ${showAssignee ? html`<td class="nowrap">${t.assignee_name || html`<span class="muted">—</span>`}</td>` : ''}
         <td class="nowrap ${due.cls}">${due.text}${t.reschedule_count ? html` <i class="resched-badge ${t.chronic ? 'is-chronic' : ''}" title="Reagendada ${t.reschedule_count}x · prazo original ${fmtDate(t.original_due)}${t.chronic ? ' · crônica' : ''}">↻${t.reschedule_count}</i>` : ''}${t.late_episodes > 1 ? html` <i class="late-badge" title="Ficou atrasada ${t.late_episodes} vezes">${t.late_episodes}x</i>` : ''}</td>
         <td>${priorityTag(t.priority)}</td>
-        <td>${statusBadge(t.eff_status)}</td></tr>`;
+        <td>${statusBadge(t.eff_status)}${lateDoneTag(t) ? html`<div style="margin-top:3px">${lateDoneTag(t)}</div>` : ''}</td></tr>`;
     })}</tbody></table></div></div>`;
   return html`${cards}${table}`;
 }

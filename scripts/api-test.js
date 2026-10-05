@@ -280,6 +280,12 @@ async function main() {
   ok((await ricardo('GET', '/tasks?due=ja_atrasadas')).data.some(t => t.id === tCorr) && !(await ricardo('GET', '/tasks?due=ja_atrasadas')).data.some(t => t.id === tPrev), 'filtro "ficaram atrasadas"');
   ok((await ricardo('GET', '/tasks?due=corretivas')).data.every(t => t.reschedules_corrective > 0), 'filtro "repactuadas após atraso"');
   ok((await ricardo('GET', '/tasks?due=cronicas')).data.some(t => t.id === tChr), 'filtro "crônicas"');
+  // Concluída com atraso: entrega após o prazo vigente
+  const tLateDone = await mk('Concluída com atraso', '2020-05-01');
+  await ricardo('POST', `/tasks/${tLateDone}/actions/conclude`, {});
+  const lateDone = (await ricardo('GET', '/tasks?due=concluidas_atraso')).data;
+  ok(lateDone.some(t => t.id === tLateDone && t.days_late > 0) && lateDone.every(t => t.status === 'concluida' && t.on_time === false), 'filtro "concluídas com atraso"');
+  ok(!lateDone.some(t => t.id === tOk), 'tarefas no prazo não entram no filtro de concluídas com atraso');
   const dash = (await ricardo('GET', '/dashboard')).data;
   ok(dash.trend.length === 6 && dash.summary.late_rate !== undefined && dash.deadline_watch.length > 0, 'dashboard com indicadores, evolução mensal e tarefas em atenção');
   const urep = (await ricardo('GET', `/reports?type=projeto&id=${np2}&level=detalhado`)).data;

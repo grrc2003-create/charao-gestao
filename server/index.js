@@ -219,6 +219,7 @@ api.get('/api/tasks', (req, res, { ctx, query }) => {
       ja_atrasadas: t => t.ever_late,
       corretivas: t => t.reschedules_corrective > 0,
       cronicas: t => t.chronic,
+      concluidas_atraso: t => t.status === 'concluida' && t.on_time === false,
     }[due];
     if (f) tasks = tasks.filter(f);
   }

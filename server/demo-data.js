@@ -5,6 +5,7 @@ import { hashPassword } from './lib/auth.js';
 import { saveDemoSvg } from './services/files.js';
 import { today, addDays } from './services/metrics.js';
 import { defaultStageId } from './services/stages.js';
+import { generateFor } from './services/recurrences.js';
 
 export const DEMO_PASSWORD = 'charao2026';
 
@@ -269,6 +270,23 @@ export function seedDemo() {
     run(`INSERT INTO audit_log (actor_id, entity, entity_id, action, details) VALUES (1, 'system', NULL, 'Base de demonstração criada', NULL)`);
   });
 
+
+  // Tarefas recorrentes de exemplo
+  let monday = addDays(T, 1);
+  while (new Date(Date.parse(monday + 'T00:00:00Z')).getUTCDay() !== 1) monday = addDays(monday, 1);
+  const canteiro = one(`SELECT id FROM project_stages WHERE project_id = 1 AND name = 'Canteiro e gestão'`).id;
+  const recs = [
+    [1, 'Inspeção semanal de segurança (DDS)', 'Realizar o Diálogo Diário de Segurança e inspecionar EPIs, guarda-corpos e andaimes. Registrar fotos das não conformidades.',
+      'DDS + inspeção de EPIs, guarda-corpos e andaimes.', 4, canteiro, 'alta', 'foto_descricao', 'semanal', '1', null, monday, 'data', addDays(T, 90), null, 14],
+    [2, 'Boletim de medição mensal', 'Consolidar as quantidades executadas no mês e enviar o boletim de medição ao cliente.',
+      'Consolidar e enviar boletim de medição.', 3, null, 'media', 'descricao', 'mensal', null, 28, addDays(T, 20).slice(0, 8) + '28', 'ocorrencias', null, 6, 30],
+  ];
+  for (const [p, title, desc, summary, assignee, stage, prio, proof, freq, wds, mday, start, endType, endDate, endCount, lead] of recs) {
+    const id = Number(run(`INSERT INTO recurrences (project_id, title, description, field_summary, assignee_id, stage_id, priority, proof_type, freq, interval_n,
+        weekdays, month_day, start_date, end_type, end_date, end_count, lead_days, created_by) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,2)`,
+      p, title, desc, summary, assignee, stage, prio, proof, freq, wds, mday, start < addDays(T, 1) ? addDays(start, 28) : start, endType, endDate, endCount, lead).lastInsertRowid);
+    generateFor(id);
+  }
 
   return { users: users.length, projects: projects.length, tasks: tasks.length };
 }

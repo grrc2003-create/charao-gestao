@@ -2,6 +2,7 @@ import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct,
 import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
+import { recurrenceRows } from './recurrences.js';
 
 export async function view({ params, query, setQuery, render }) {
   const p = await api(`/projects/${params.id}`);
@@ -76,6 +77,13 @@ export async function view({ params, query, setQuery, render }) {
         extra: usedStages.length > 1 ? html`<div><div class="sub-label">Por classificação (Grupo/Local/Etapa)</div>
           ${deadlineTable(usedStages.filter(s => s.summary.with_due).map(s => ({ label: s.name, s: s.summary })), 'Classificação')}</div>` : '',
       })}
+
+      <section class="card section">
+        <div class="card-head"><h2>${icon('history')}Tarefas recorrentes</h2>
+          <a class="sub" href="#/recorrencias?project=${p.id}">${p.recurrences.filter(r => r.active).length} ativa(s) · ver todas</a></div>
+        ${p.recurrences.filter(r => r.active).length ? recurrenceRows(p.recurrences.filter(r => r.active).slice(0, 5))
+          : html`<div class="card-body muted" style="font-size:13.5px">Nenhuma tarefa recorrente ativa. Para criar, use <b>Nova tarefa</b> e ative <b>Repetir esta tarefa</b>.</div>`}
+      </section>
 
       <section class="section" id="proj-tasks">
         <div class="page-head" style="margin-bottom:10px">

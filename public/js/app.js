@@ -16,6 +16,7 @@ import * as FieldList from './views/field-list.js';
 import * as Account from './views/account.js';
 import * as Audit from './views/audit.js';
 import * as Settings from './views/settings.js';
+import * as Recurrences from './views/recurrences.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
 
@@ -55,6 +56,9 @@ const routes = [
   ['/conta', Account.view],
   ['/auditoria', Audit.view],
   ['/configuracoes', Settings.view],
+  ['/recorrencias', Recurrences.list],
+  ['/recorrencias/:id', Recurrences.view],
+  ['/recorrencias/:id/editar', Recurrences.edit],
 ].map(([pattern, view, opts = {}]) => {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');

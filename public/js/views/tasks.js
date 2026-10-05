@@ -42,6 +42,7 @@ export async function view({ state, query, setQuery }) {
         actions: html`
           ${f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?project=${f.project}${f.stage ? `&stage=${f.stage}` : ''}">${icon('checklist')}Lista de campo</a>` : ''}
           ${f.assignee && f.assignee !== 'none' && !f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?user=${f.assignee === 'me' ? state.user.id : f.assignee}">${icon('checklist')}Lista de campo</a>` : ''}
+          <a class="btn btn-ghost" href="#/recorrencias${f.project ? `?project=${f.project}` : ''}">${icon('history')}Recorrentes</a>
           <a class="btn btn-accent" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}">${icon('plus')}Nova tarefa</a>`,
       })}
       <form class="toolbar" id="filters" role="search">

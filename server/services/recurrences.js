@@ -192,7 +192,7 @@ export function listRecurrences(ctx, { project } = {}) {
 function decorate(ctx, r) {
   const rule = ruleOf(r);
   const next = r.active ? [...occurrenceDates(rule, { limit: r.generated_count + 3 })].slice(r.generated_count) : [];
-  return { ...r, rule, description: describeRule(rule), next_dates: next, can_manage: canManage(ctx, r) };
+  return { ...r, rule, rule_text: describeRule(rule), next_dates: next, can_manage: canManage(ctx, r) };
 }
 
 export function getRecurrence(ctx, id) {

@@ -99,7 +99,8 @@ function build(t, ctx) {
         por ${t.cancelled_by_name || '—'} em ${fmtDateTime(t.cancelled_at)} — ${t.cancel_reason}
         <div class="muted" style="font-size:12.5px;margin-top:2px">Não aparece nas listas, indicadores, relatórios nem na lista de campo. ${can.reactivate_blocked || ''}</div></div></div>` : ''}
       <article class="card task-hero st-${t.eff_status}">
-        <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}${t.stage_name ? html`<a class="stage-tag" href="#/tarefas?project=${t.project_id}&stage=${t.stage_id}" title="Classificação (Grupo/Local/Etapa)">${t.stage_name}</a>` : ''}</div>
+        <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}${t.stage_name ? html`<a class="stage-tag" href="#/tarefas?project=${t.project_id}&stage=${t.stage_id}" title="Classificação (Grupo/Local/Etapa)">${t.stage_name}</a>` : ''}
+          ${t.recurrence_id ? html`<a class="rec-tag" href="#/recorrencias/${t.recurrence_id}" title="Tarefa recorrente: ${t.recurrence_title}">Recorrente · ${t.recurrence_seq}ª</a>` : ''}</div>
         ${t.parent_id ? html`<div class="parent-link">↳ Subtarefa de ${t.parent_visible ? html`<a href="#/tarefas/${t.parent_id}"><b>${t.parent_code}</b> · ${t.parent_title}</a>` : html`<b>${t.parent_code}</b>`}</div>` : ''}
         <h1>${t.title}</h1>
         <div class="facts">

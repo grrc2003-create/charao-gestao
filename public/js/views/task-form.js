@@ -1,6 +1,7 @@
 import { html, api, icon, PRIORITY, PROOF } from '../core.js';
 import { toast, readImages, pickImages } from '../ui.js';
 import { pageHead } from './shared.js';
+import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -55,9 +56,9 @@ export async function view({ params, query, state, navigate }) {
             <div class="field"><label for="assignee_id">Responsável</label>
               <select id="assignee_id" name="assignee_id"><option value="">Selecione o projeto primeiro</option></select>
               <span class="hint">Somente usuários com acesso ao projeto.</span></div>
-            <div class="field"><label for="due_date">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}"></div>
+            <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}"></div>
           </div>
-          <div class="form-row">
+          <div class="form-row" id="start-row">
             <div class="field"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
               <span class="hint">Opcional. Usado no cronograma (Gantt) dos relatórios.</span></div>
           </div>
@@ -78,6 +79,8 @@ export async function view({ params, query, state, navigate }) {
             <span class="seg-ic" aria-hidden="true">${p.icon}</span>${k === 'nenhuma' ? 'Nenhuma' : p.label}<small>${PROOF_HELP[k]}</small></label>`)}</div>
         </fieldset>
 
+        ${!editing && !parent ? recurrenceFieldset() : ''}
+
         ${!editing ? html`<fieldset class="fieldset form"><legend>Imagens de referência</legend>
           <div class="thumbs" id="ref-thumbs"><button type="button" class="add-thumb" id="add-ref">${icon('image')}Adicionar imagem</button></div>
           <span class="hint">Fotos do local, croquis ou trechos de projeto. Reduzidas automaticamente para envio.</span>
@@ -92,6 +95,15 @@ export async function view({ params, query, state, navigate }) {
     mount(root) {
       const f = root.querySelector('#task-form');
       const err = f.querySelector('.form-error');
+      // Tarefa recorrente: o prazo passa a ser o da 1ª ocorrência; início previsto vem da duração
+      const rec = root.querySelector('#rec-fs') ? bindRecurrence(root, f, {
+        onToggle: on => {
+          root.querySelector('#due-label').textContent = on ? 'Prazo da 1ª ocorrência' : 'Prazo';
+          root.querySelector('#due-label').classList.toggle('req', on);
+          root.querySelector('#start-row').hidden = on;
+          f.querySelector('[type=submit]').lastChild.textContent = on ? 'Criar tarefa recorrente' : 'Criar tarefa';
+        },
+      }) : null;
       // Reagendamento: alterar um prazo já definido exige justificativa
       const reschedBox = root.querySelector('#resched-fields');
       if (reschedBox) {
@@ -162,6 +174,12 @@ export async function view({ params, query, state, navigate }) {
           } else {
             data.images = pending.map(p => ({ data: p.data }));
             if (parent) { data.parent_id = parent.id; data.project_id = parent.project_id; }
+            if (rec?.enabled()) {
+              const r = await api('/recurrences', { method: 'POST', body: { ...data, ...rec.read() } });
+              toast(r.generated ? `Recorrência criada: ${r.generated} ocorrência(s) já gerada(s).` : 'Recorrência criada. As ocorrências serão geradas conforme a antecedência.');
+              navigate(`/recorrencias/${r.id}`);
+              return;
+            }
             const r = await api('/tasks', { method: 'POST', body: data });
             toast('Tarefa criada.');
             navigate(`/tarefas/${r.id}`);

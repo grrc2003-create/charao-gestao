@@ -7,6 +7,7 @@ import { listVisible, listCancelled } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
 import { getSetting } from './settings.js';
+import { listRecurrences } from './recurrences.js';
 
 export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'];
 
@@ -45,6 +46,7 @@ export function getProject(ctx, id) {
     stages,
     trend: monthlyTrend(tasks),
     cancelled_count: listCancelled(ctx, 'WHERE t.project_id = ?', id).length,
+    recurrences: listRecurrences(ctx, { project: id }),
     chronic_min: getSetting('chronic_reschedule_threshold'),
     members: members(id),
     summary: summarize(tasks),

@@ -384,6 +384,7 @@ async function main() {
   const expectedW = [...Array(15).keys()].map(plus).filter(d => d >= nextMon && [1, 3].includes(wd(d))).slice(0, 6);
   ok(rw2.tasks.length === expectedW.length && rw2.tasks.map(t => t.due_date).join() === expectedW.join(), `ocorrências criadas até hoje + 14 dias (${rw2.tasks.length})`);
   ok(rw2.tasks.every(t => t.recurrence_id === recW.data.id && /^PRJ-\d{3}-\d{5}$/.test(t.code) && t.stage_name === 'Segurança' && t.priority === 'alta' && t.ref_count === 1), 'ocorrências são tarefas normais com molde, classificação e imagem');
+  ok(rw2.description === 'Inspeção semanal de EPIs e andaimes' && rw2.rule_text.startsWith('Toda semana: segunda e quarta'), 'molde e regra preservados separadamente');
   ok(rw2.generated_count === rw2.tasks.length && rw2.next_dates.length > 0 && rw2.active, 'série acompanha quantas foram criadas e as próximas datas');
   const occ = (await ricardo('GET', `/tasks/${rw2.tasks[0].id}`)).data;
   ok(occ.recurrence_title === 'Inspeção de segurança (DDS)' && occ.recurrence_seq === 1 && occ.history.some(h => h.action.includes('automaticamente pela recorrência')), 'tarefa mostra a série de origem e o histórico');

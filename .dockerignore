@@ -1,0 +1,6 @@
+data
+docs
+scripts
+node_modules
+.git
+*.md

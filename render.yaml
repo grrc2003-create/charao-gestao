@@ -1,0 +1,26 @@
+# Blueprint do Render: serviço web + disco persistente para banco e fotos.
+services:
+  - type: web
+    name: charao-gestao
+    runtime: docker
+    plan: starter            # plano pago necessário para disco persistente
+    region: virginia
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: charao-data
+      mountPath: /var/data   # banco SQLite + fotos ficam aqui e sobrevivem a novas publicações
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: SESSION_HOURS
+        value: "12"
+      - key: ADMIN_NAME
+        sync: false          # informado no painel do Render
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false          # usado só no primeiro início, com banco vazio

@@ -1,0 +1,88 @@
+# Charão · Gestão de Obras
+
+Aplicativo web responsivo (mobile-first) para gestão de projetos, tarefas, pendências e acompanhamento operacional da **Charão Engenharia e Construção**.
+
+## Como rodar
+
+Requisito: **Node.js 22.5+** (testado no 24). Não há dependências para instalar.
+
+```bash
+npm run seed    # cria/RECRIA o banco com dados de demonstração (apaga o existente)
+npm start       # http://localhost:3000
+npm test        # 55 testes de API ponta a ponta (usa banco temporário, não toca nos dados)
+```
+
+### Contas de demonstração
+
+Senha de todas: `charao2026`
+
+| Usuário | E-mail | Perfil | Acesso |
+|---|---|---|---|
+| Ana Charão | ana@charao.eng.br | Administrador | Total |
+| Ricardo Menezes | ricardo@charao.eng.br | Gestor (equipe: Marcos, Felipe, Bruno) | Total |
+| Juliana Prates | juliana@charao.eng.br | Gestor (equipe: Camila, Patrícia) | Só PRJ-002 e PRJ-004 |
+| Marcos Silva | marcos@charao.eng.br | Colaborador | PRJ-001, 002, 003 |
+| Felipe Andrade | felipe@charao.eng.br | Colaborador | PRJ-001, 003, 005 |
+| Camila Rocha | camila@charao.eng.br | Colaborador | PRJ-002, 004 |
+| Bruno Costa | bruno@charao.eng.br | Colaborador | **Somente tarefas próprias** em PRJ-001, 002, 003 |
+| Patrícia Lima | patricia@charao.eng.br | Colaborador | PRJ-002, 004 |
+
+Para desligar o modo demonstração (atalhos na tela de login e selo "Ambiente de demonstração"): `DEMO=0 npm start`.
+
+## Estrutura
+
+```
+server/
+  index.js            Rotas HTTP (API REST) + arquivos estáticos + cabeçalhos de segurança
+  db.js               SQLite (node:sqlite) + executor de migrações versionadas
+  migrations/         001_init.sql … (novas funcionalidades = novo arquivo NNN_*.sql)
+  lib/auth.js         Senhas (scrypt), sessões, limite de tentativas
+  lib/permissions.js  TODAS as regras de autorização (perfil, escopo, projeto, equipe)
+  lib/http.js         Roteador, validação de entrada, erros
+  services/           Regras de negócio: tasks, projects, users, reports, metrics, files, audit
+  seed.js             Dados de demonstração
+public/
+  index.html, css/app.css (sistema visual), css/print.css (documentos A4)
+  js/core.js          Templates com escape automático (anti-XSS), API, formatação, domínio
+  js/app.js           Sessão, layout e roteamento
+  js/views/*.js       Uma tela por arquivo
+data/                 charao.db + uploads/ (fora do repositório de código)
+scripts/api-test.js   Testes ponta a ponta
+```
+
+Interface, regras de negócio e dados estão separados: as telas só conversam com a API; a API só chama serviços; os serviços concentram as regras e o acesso ao banco.
+
+## Regras principais
+
+- **Códigos**: projetos `PRJ-001`; tarefas `PRJ-001-00001` (sequência por projeto, gerada no servidor dentro de transação).
+- **Status**: Aberta, Em andamento, Aguardando conferência, Concluída. **Atrasada** é calculada (prazo vencido sem entrega), nunca gravada — assim não fica desatualizada.
+- **Comprovação**: nenhuma, só foto, só descrição ou foto + descrição. O servidor bloqueia o envio para conferência se faltar o exigido.
+- **Conferência**: o responsável não confere a própria entrega. Devolução e reabertura exigem motivo.
+- **Pontualidade**: entrega (envio para conferência) até o prazo. Média de atraso considera entregas tardias e atrasos ativos.
+- **Gestor**: acompanha a equipe (direta e indireta) sem se tornar responsável pelas tarefas dos subordinados; desempenho próprio e consolidado da equipe aparecem separados.
+- **Histórico**: criação, mudança de responsável, prazo, prioridade, status, comprovação, envio, devolução, conclusão e reabertura — com usuário, data e hora.
+- **Auditoria administrativa**: logins, falhas de login, criação/alteração de usuários e permissões, projetos.
+
+## Segurança
+
+- Sessão em cookie `HttpOnly` + `SameSite=Strict` (token aleatório; no banco só o hash), expiração deslizante de 12 h.
+- Proteção CSRF (cabeçalho obrigatório em mutações), CSP restritiva, `X-Frame-Options`, `nosniff`.
+- Senhas com scrypt; bloqueio de 10 min após 5 tentativas; troca obrigatória de senha provisória.
+- Autorização sempre validada no backend (perfil, escopo de acesso, projeto, equipe). Dados pessoais (e-mail/telefone) só para o próprio, o gestor e administradores.
+- Alterar permissões ou desativar um usuário encerra as sessões dele.
+- Uploads validados pela assinatura binária (JPG/PNG/WEBP), servidos apenas a quem pode ver a tarefa. Fotos são reduzidas no aparelho antes do envio.
+
+## O que ainda é protótipo
+
+- **Dados de demonstração**: usuários, projetos, tarefas e imagens são fictícios (as imagens do seed são croquis ilustrativos).
+- **Hospedagem**: roda localmente. Para uso real em campo é preciso publicar em um servidor com **HTTPS** (o cookie passa a ser `Secure` automaticamente atrás de proxy HTTPS) e **mover a pasta `data/` para fora do OneDrive/SharePoint** — sincronização de nuvem pode corromper um banco SQLite aberto.
+- **Recuperação de senha por e-mail**: não implementada (o administrador redefine a senha).
+- **Modo offline**: não há sincronização offline; a lista de campo impressa cobre o uso sem sinal.
+- **Escala**: filtros e indicadores são calculados em memória — adequado para milhares de tarefas. Acima disso, mover filtros para SQL (as regras já estão isoladas em `services/`).
+- **Backup**: copiar `data/charao.db` e `data/uploads/` periodicamente (ainda não automatizado).
+
+## Evolução sem perda de dados
+
+1. Crie `server/migrations/002_sua_mudanca.sql` com `ALTER TABLE`/`CREATE TABLE`.
+2. Ao iniciar, o servidor aplica só as migrações novas, em transação, e registra em `schema_migrations`.
+3. Nunca edite uma migração já aplicada; nunca rode `npm run seed` na base real (ele recria o banco).

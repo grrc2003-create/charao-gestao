@@ -1,0 +1,9 @@
+{
+  "name": "Charão · Gestão de Obras",
+  "short_name": "Charão",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F6F3",
+  "theme_color": "#2A3D50",
+  "icons": [{ "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

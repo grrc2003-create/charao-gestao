@@ -86,3 +86,12 @@ Interface, regras de negócio e dados estão separados: as telas só conversam c
 1. Crie `server/migrations/002_sua_mudanca.sql` com `ALTER TABLE`/`CREATE TABLE`.
 2. Ao iniciar, o servidor aplica só as migrações novas, em transação, e registra em `schema_migrations`.
 3. Nunca edite uma migração já aplicada; nunca rode `npm run seed` na base real (ele recria o banco).
+
+## Publicação (Render)
+
+1. Envie este repositório para o GitHub (privado).
+2. No Render: **New → Blueprint**, escolha o repositório. O `render.yaml` cria o serviço web (Docker) com disco persistente em `/var/data`.
+3. Preencha `ADMIN_NAME`, `ADMIN_EMAIL` e `ADMIN_PASSWORD` (mín. 8 caracteres, letras e números). Esse administrador é criado apenas no primeiro início, com banco vazio.
+4. Após o deploy, entre com esse administrador e cadastre projetos e usuários. Cada `git push` na branch `main` publica de novo automaticamente, preservando o banco e as fotos do disco.
+
+Variáveis opcionais: `SEED_DEMO=1` (carrega dados fictícios no primeiro início — não use com dados reais), `DEMO=1` (exibe atalhos de demonstração no login), `SESSION_HOURS`.

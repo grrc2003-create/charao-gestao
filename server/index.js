@@ -24,6 +24,7 @@ import { all } from './db.js';
 
 migrate();
 bootstrap();
+if (one('SELECT COUNT(*) AS n FROM users').n) Projects.ensureInternalArea();
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -143,7 +144,8 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     // Tarefas com mais atrasos/repactuações (atenção)
     deadline_watch: tasks.filter(t => t.late_episodes > 1 || t.chronic)
       .sort((a, b) => b.late_episodes - a.late_episodes || b.reschedule_count - a.reschedule_count).slice(0, 6),
-    projects: projects.filter(p => p.status !== 'cancelado'),
+    projects: projects.filter(p => p.status !== 'cancelado' && p.kind !== 'interno'),
+    internal_areas: projects.filter(p => p.kind === 'interno' && p.status !== 'cancelado'),
     users,
     upcoming,
     late,
@@ -155,7 +157,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
 });
 
 api.get('/api/meta', (req, res, { ctx }) => {
-  const projects = all('SELECT id, code, name, status FROM projects ORDER BY code')
+  const projects = all(`SELECT id, code, name, status, kind FROM projects ORDER BY kind = 'interno', code`)
     .filter(p => ctx.projects === null || ctx.projects.has(p.id))
     .map(p => ({ ...p, stages: all('SELECT id, name, is_default FROM project_stages WHERE project_id = ? ORDER BY is_default DESC, sort_order, id', p.id) }));
   const users = all(`SELECT id, name, role, job_title, active, manager_id FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
@@ -205,6 +207,8 @@ api.get('/api/tasks', (req, res, { ctx, query }) => {
   else if (assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id);
   else if (assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(assignee));
   if (priority.length) tasks = tasks.filter(t => priority.includes(t.priority));
+  const kind = query.get('kind');
+  if (kind === 'obra' || kind === 'interno') tasks = tasks.filter(t => t.project_kind === kind);
   const stages = query.getAll('stage').map(intOrNull).filter(Boolean);
   if (stages.length) tasks = tasks.filter(t => stages.includes(t.stage_id));
   const nivel = query.get('nivel');

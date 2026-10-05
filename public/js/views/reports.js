@@ -1,6 +1,6 @@
 // Configuração de relatórios: tipo → escopo → nível de detalhe → gerar documento A4.
 import { html, api, icon } from '../core.js';
-import { pageHead } from './shared.js';
+import { pageHead, projectOptions } from './shared.js';
 
 const TYPES = [
   ['projeto', 'Projeto', 'Andamento consolidado de uma obra', 'projects'],
@@ -27,7 +27,7 @@ export async function view({ state, query }) {
     ['mes', 'Por mês', 'Tarefas agrupadas pelo mês do prazo']];
   const opt = (v, l) => html`<option value="${v}" ${String(init.id) === String(v) ? 'selected' : ''}>${l}</option>`;
   const scopes = {
-    projeto: meta.projects.map(p => opt(p.id, `${p.code} · ${p.name}`)),
+    projeto: [projectOptions(meta.projects, init.id, (v, l) => opt(v, l))],
     usuario: users.filter(u => u.active).map(u => opt(u.id, `${u.name}${u.job_title ? ` · ${u.job_title}` : ''}`)),
     equipe: managers.map(u => opt(u.id, `${u.name} · ${u.team_size} integrante(s)`)),
   };
@@ -65,6 +65,8 @@ export async function view({ state, query }) {
               <div class="field"><label for="from">Prazo a partir de</label><input id="from" name="from" type="date"></div>
               <div class="field"><label for="to">Prazo até</label><input id="to" name="to" type="date"></div>
             </div>
+            ${meta.projects.some(p => p.kind === 'interno') ? html`<div class="field" id="kind-field"><label for="kind">Obras ou interno</label>
+              <select id="kind" name="kind"><option value="">Obras e áreas internas</option><option value="obra">Somente obras</option><option value="interno">Somente áreas internas (empresa)</option></select></div>` : ''}
             <label class="switch"><input type="checkbox" name="include_done" checked>Incluir tarefas concluídas</label>
           </fieldset>
           <div class="form-error" hidden></div>
@@ -130,6 +132,8 @@ export async function view({ state, query }) {
         root.querySelector('#mini .ph-row').style.display = level === 'completo' ? '' : 'none';
         root.querySelector('#li-det').style.opacity = level === 'resumo' ? '.35' : '1';
         root.querySelector('#li-ph').style.opacity = level === 'completo' ? '1' : '.35';
+        const kf = root.querySelector('#kind-field');
+        if (kf) kf.style.display = type === 'projeto' ? 'none' : '';
         root.querySelector('#li-gantt').style.opacity = f.gantt.checked ? '1' : '.35';
       };
       f.addEventListener('change', sync);
@@ -145,6 +149,7 @@ export async function view({ state, query }) {
         if (fd.get('from')) qs.set('from', fd.get('from'));
         if (fd.get('to')) qs.set('to', fd.get('to'));
         if (!fd.get('include_done')) qs.set('include_done', '0');
+        if (fd.get('kind') && type !== 'projeto') qs.set('kind', fd.get('kind'));
         qs.set('group', fd.get('group'));
         if (!fd.get('gantt')) qs.set('gantt', '0');
         const stages = type === 'projeto' ? fd.getAll('stage') : [];

@@ -26,7 +26,7 @@ export async function view({ state }) {
       ${pageHead({
         eyebrow: 'Visão geral da operação',
         title: `Olá, ${firstName}`,
-        sub: `${plural(d.projects.filter(p => p.status === 'em_andamento').length, 'projeto ativo', 'projetos ativos')} · ${plural(s.total, 'tarefa visível', 'tarefas visíveis')} para o seu perfil`,
+        sub: `${plural(d.projects.filter(p => p.status === 'em_andamento').length, 'obra ativa', 'obras ativas')} · ${plural(s.total, 'tarefa visível', 'tarefas visíveis')} para o seu perfil`,
         actions: html`<a class="btn btn-ghost" href="#/relatorios">${icon('reports')}Relatórios</a><a class="btn btn-accent" href="#/tarefas/nova">${icon('plus')}Nova tarefa</a>`,
       })}
       ${kpiBlock(s, { linkBase: '#/tarefas' })}
@@ -39,6 +39,8 @@ export async function view({ state }) {
         <section class="card">
           <div class="card-head"><h2>Conclusão por projeto</h2><a class="sub" href="#/projetos">Todos os projetos</a></div>
           <ul class="rows">${projects.map(projectRow)}</ul>
+          ${d.internal_areas.length ? html`<div class="card-head" style="border-top:1px solid var(--line)"><h2>Interno (empresa)</h2><span class="sub">tarefas da própria Charão</span></div>
+            <ul class="rows">${d.internal_areas.map(projectRow)}</ul>` : ''}
         </section>
       </div>
 

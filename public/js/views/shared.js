@@ -171,3 +171,13 @@ export const fieldListButton = (query, label = 'Gerar lista de campo') =>
   html`<a class="btn btn-accent" href="#/imprimir/campo?${query}">${icon('checklist')}${label}</a>`;
 
 export { fmtDate };
+
+// <option>s de projetos agrupadas: obras e áreas internas da empresa
+export const projectOptions = (projects, current, opt) => {
+  const obras = projects.filter(p => p.kind !== 'interno');
+  const internas = projects.filter(p => p.kind === 'interno');
+  const o = p => opt(p.id, `${p.code} · ${p.name}`, current);
+  return internas.length
+    ? html`<optgroup label="Obras">${obras.map(o)}</optgroup><optgroup label="Interno (empresa)">${internas.map(o)}</optgroup>`
+    : html`${obras.map(o)}`;
+};

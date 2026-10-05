@@ -16,7 +16,7 @@ const PRIORITY_LABEL = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente:
 const PROOF_LABEL = { nenhuma: 'Nenhuma', foto: 'Somente foto', descricao: 'Somente descrição', foto_descricao: 'Foto + descrição' };
 const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', concluida: 'Concluída' };
 
-const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client,
+const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
     a.name AS assignee_name, c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count,

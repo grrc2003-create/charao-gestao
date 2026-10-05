@@ -6,6 +6,8 @@ import { saveDemoSvg } from './services/files.js';
 import { today, addDays } from './services/metrics.js';
 import { defaultStageId } from './services/stages.js';
 import { generateFor } from './services/recurrences.js';
+import { ensureInternalArea } from './services/projects.js';
+import { insertTask } from './services/tasks.js';
 
 export const DEMO_PASSWORD = 'charao2026';
 
@@ -270,6 +272,23 @@ export function seedDemo() {
     run(`INSERT INTO audit_log (actor_id, entity, entity_id, action, details) VALUES (1, 'system', NULL, 'Base de demonstração criada', NULL)`);
   });
 
+
+  // Área interna da empresa com algumas tarefas de exemplo
+  const intId = ensureInternalArea();
+  if (intId) {
+    const dep = n => one('SELECT id FROM project_stages WHERE project_id = ? AND name = ?', intId, n).id;
+    const intTasks = [
+      ['Renovar seguro dos equipamentos', 'Cotar e renovar a apólice de seguro de betoneiras, andaimes e ferramentas elétricas.', 'Financeiro', 3, 6, 'alta'],
+      ['Revisão preventiva da betoneira 400 L', 'Trocar correia, lubrificar e testar motor da betoneira de 400 L.', 'Equipamentos e manutenção', 5, 2, 'media'],
+      ['Atualizar PGR e treinamentos NR-35', 'Atualizar o programa de gerenciamento de riscos e agendar reciclagem de trabalho em altura.', 'Segurança do trabalho', 2, -3, 'urgente'],
+      ['Proposta comercial — Condomínio Jardins', 'Elaborar orçamento e proposta para reforma de fachada do Condomínio Jardins.', 'Comercial', 3, 9, 'alta'],
+    ];
+    const proj = one('SELECT * FROM projects WHERE id = ?', intId);
+    for (const [title, desc, d, assignee, off, prio] of intTasks) {
+      insertTask({ project: proj, data: { title, description: desc, field_summary: null, notes: null, priority: prio, proof_type: 'descricao',
+        assignee_id: assignee, due_date: addDays(T, off), start_date: null }, stageInput: dep(d), creatorId: 1 });
+    }
+  }
 
   // Tarefas recorrentes de exemplo
   let monday = addDays(T, 1);

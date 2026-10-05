@@ -1,6 +1,6 @@
 import { html, api, icon, PRIORITY, PROOF } from '../core.js';
 import { toast, readImages, pickImages } from '../ui.js';
-import { pageHead } from './shared.js';
+import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
 
 const PROOF_HELP = {
@@ -37,7 +37,7 @@ export async function view({ params, query, state, navigate }) {
       <form class="card card-pad form" id="task-form" novalidate style="max-width:860px">
         <fieldset class="fieldset form"><legend>Solicitação</legend>
           <div class="field"><label class="req" for="project_id">Projeto</label>
-            <select id="project_id" name="project_id" required ${editing || parent ? 'disabled' : ''}>${opt('', 'Selecione o projeto', projectId)}${projects.map(p => opt(p.id, `${p.code} · ${p.name}`, projectId))}</select>
+            <select id="project_id" name="project_id" required ${editing || parent ? 'disabled' : ''}>${opt('', 'Selecione o projeto ou área interna', projectId)}${projectOptions(projects, projectId, opt)}</select>
             ${editing ? html`<span class="hint">O projeto não pode ser alterado após a criação (o código da tarefa depende dele).</span>` : ''}</div>
           <div class="field"><label for="stage_id">Classificação (Grupo/Local/Etapa)</label>
             <select id="stage_id" name="stage_id"><option value="">Geral</option></select>

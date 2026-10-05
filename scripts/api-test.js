@@ -72,7 +72,7 @@ async function main() {
 
   console.log('Restrição por projeto e perfil');
   const julProjects = (await juliana('GET', '/projects')).data.map(p => p.code);
-  ok(julProjects.join() === 'PRJ-002,PRJ-004', `gestora restrita vê só PRJ-002 e PRJ-004 (${julProjects})`);
+  ok(julProjects.join() === 'PRJ-002,PRJ-004,INT-001', `gestora restrita vê só PRJ-002, PRJ-004 e a área interna (${julProjects})`);
   ok((await juliana('GET', '/projects/1')).status === 404, 'gestora restrita não abre PRJ-001');
   const brunoTasks = (await bruno('GET', '/tasks')).data;
   ok(brunoTasks.every(t => t.assignee_name === 'Bruno Costa' || t.creator_name === 'Bruno Costa'), 'escopo "somente próprias" vê apenas as próprias tarefas');
@@ -418,6 +418,32 @@ async function main() {
   const ended = (await ricardo('POST', `/recurrences/${recE.id}/end`, { reason: 'Vistorias passaram a ser semanais', cancel_future: true })).data;
   ok(!ended.active && ended.cancelled === 4 && ended.tasks.every(t => t.cancelled_at), 'encerrar cancela as ocorrências futuras não iniciadas');
   ok((await ana('GET', '/audit')).data.some(a => a.action === 'Recorrência encerrada'), 'criação e encerramento registrados na auditoria');
+
+  console.log('Áreas internas da empresa');
+  const intArea = (await ana('GET', '/projects')).data.find(p => p.kind === 'interno');
+  ok(intArea && intArea.code === 'INT-001' && intArea.name === 'Charão — Interno', 'área interna padrão criada (INT-001)');
+  const intDet = (await ana('GET', `/projects/${intArea.id}`)).data;
+  ok(['Administrativo', 'Financeiro', 'Equipamentos e manutenção'].every(n => intDet.stages.some(s => s.name === n)), 'departamentos como classificações');
+  ok((await ricardo('GET', '/projects')).data.some(p => p.id === intArea.id), 'gestor tem acesso à área interna');
+  ok(!(await marcos('GET', '/projects')).data.some(p => p.id === intArea.id) && (await marcos('GET', `/projects/${intArea.id}`)).status === 404, 'colaborador sem liberação não vê a área interna');
+  const tInt = (await ricardo('POST', '/tasks', { project_id: intArea.id, title: 'Pagar fornecedores', description: 'Conferir e pagar notas da semana', assignee_id: 2,
+    stage_id: intDet.stages.find(s => s.name === 'Financeiro').id, due_date: '2099-01-05' })).data.id;
+  const tIntD = (await ricardo('GET', `/tasks/${tInt}`)).data;
+  ok(/^INT-001-\d{5}$/.test(tIntD.code) && tIntD.project_kind === 'interno' && tIntD.stage_name === 'Financeiro', `tarefa interna com código próprio (${tIntD.code})`);
+  const nInt = await ricardo('POST', '/projects', { kind: 'interno', name: 'Manutenção de frota' });
+  const nIntD = (await ricardo('GET', `/projects/${nInt.data.id}`)).data;
+  ok(nInt.status === 201 && nIntD.code === 'INT-002' && nIntD.client === 'Charão Engenharia e Construção', 'nova área interna sem cliente (INT-002)');
+  ok((await ricardo('POST', '/projects', { name: 'Obra sem cliente' })).status === 400, 'obra continua exigindo cliente');
+  await ricardo('PUT', `/projects/${nIntD.id}`, { kind: 'obra', name: 'Manutenção de frota' });
+  ok((await ricardo('GET', `/projects/${nIntD.id}`)).data.kind === 'interno', 'tipo do projeto não muda na edição');
+  const nObra = (await ricardo('POST', '/projects', { name: 'Obra nova', client: 'Cliente N' })).data.id;
+  ok(/^PRJ-\d{3}$/.test((await ricardo('GET', `/projects/${nObra}`)).data.code), 'numeração das obras continua PRJ');
+  const dsh = (await ricardo('GET', '/dashboard')).data;
+  ok(dsh.projects.every(p => p.kind === 'obra') && dsh.internal_areas.some(p => p.id === intArea.id), 'dashboard separa obras e áreas internas');
+  ok(dsh.summary.total >= 1 && (await ricardo('GET', '/tasks?kind=interno')).data.every(t => t.project_kind === 'interno'), 'filtro de tarefas por tipo (interno)');
+  ok((await ricardo('GET', '/tasks?kind=obra')).data.every(t => t.project_kind === 'obra'), 'filtro de tarefas por tipo (obras)');
+  const rk = (await ricardo('GET', '/reports?type=geral&level=resumo&kind=interno')).data;
+  ok(rk.kind === 'interno' && rk.by_project.every(g => g.label.startsWith('INT-')), 'relatório geral só das áreas internas');
 
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });

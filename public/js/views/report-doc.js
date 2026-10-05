@@ -181,6 +181,7 @@ export async function view({ query }) {
           <dt>Período (prazo)</dt><dd>${r.from || r.to ? `${fmtDate(r.from)} a ${fmtDate(r.to)}` : 'Todos'}</dd>
           <dt>Organização</dt><dd>${ORG_LABEL[r.group] || 'Por status e prazo'}</dd>
           ${r.stage_filter.length ? html`<dt>Classificações</dt><dd>${r.stage_filter.join(', ')}</dd>` : ''}
+          ${r.kind ? html`<dt>Abrangência</dt><dd>${r.kind === 'interno' ? 'Somente áreas internas' : 'Somente obras'}</dd>` : ''}
           ${!r.include_done ? html`<dt>Filtro</dt><dd>Sem concluídas</dd>` : ''}
         </dl>
       </section>

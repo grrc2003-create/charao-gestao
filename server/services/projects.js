@@ -19,7 +19,7 @@ function members(projectId) {
 }
 
 export function listProjects(ctx, tasks = listVisible(ctx)) {
-  const rows = all(`${BASE} ORDER BY p.code`).filter(p => canAccessProject(ctx.user, p.id, ctx.projects));
+  const rows = all(`${BASE} ORDER BY p.kind = 'interno', p.code`).filter(p => canAccessProject(ctx.user, p.id, ctx.projects));
   return rows.map(p => {
     const pt = tasks.filter(t => t.project_id === p.id);
     return { ...p, members: members(p.id), summary: summarize(pt), can_edit: canManageProject(ctx, p.id) };
@@ -58,9 +58,11 @@ export function getProject(ctx, id) {
 }
 
 function readProjectBody(body) {
+  const kind = body.kind === 'interno' ? 'interno' : 'obra';
   const d = {
-    name: str(body.name, { max: 160, required: true, label: 'Nome do projeto' }),
-    client: str(body.client, { max: 160, required: true, label: 'Cliente' }),
+    name: str(body.name, { max: 160, required: true, label: kind === 'interno' ? 'Nome da área' : 'Nome do projeto' }),
+    // Área interna: cliente é a própria empresa
+    client: kind === 'interno' ? (str(body.client, { max: 160, label: 'Cliente' }) || COMPANY_NAME) : str(body.client, { max: 160, required: true, label: 'Cliente' }),
     location: str(body.location, { max: 200, label: 'Local' }),
     description: str(body.description, { max: 3000, label: 'Descrição' }),
     status: oneOf(body.status, PROJECT_STATUSES, 'Status', 'planejamento'),
@@ -76,20 +78,44 @@ function readProjectBody(body) {
   return { d, memberIds };
 }
 
-function nextCode() {
-  const r = one(`SELECT MAX(CAST(SUBSTR(code, 5) AS INTEGER)) AS n FROM projects WHERE code LIKE 'PRJ-%'`);
-  return `PRJ-${String((r?.n || 0) + 1).padStart(3, '0')}`;
+// Obras: PRJ-001… · Áreas internas da empresa: INT-001…
+export const COMPANY_NAME = 'Charão Engenharia e Construção';
+function nextCode(kind = 'obra') {
+  const prefix = kind === 'interno' ? 'INT' : 'PRJ';
+  const r = one(`SELECT MAX(CAST(SUBSTR(code, 5) AS INTEGER)) AS n FROM projects WHERE code LIKE '${prefix}-%'`);
+  return `${prefix}-${String((r?.n || 0) + 1).padStart(3, '0')}`;
+}
+
+// Cria uma única vez a área interna padrão, com departamentos como classificações e acesso para gestores
+export function ensureInternalArea() {
+  if (one(`SELECT value FROM app_settings WHERE key = 'internal_area_created'`)) return null;
+  return tx(() => {
+    const now = new Date().toISOString();
+    const r = run(`INSERT INTO projects (code, name, client, description, status, kind, created_at, updated_at) VALUES (?,?,?,?, 'em_andamento', 'interno', ?, ?)`,
+      nextCode('interno'), 'Charão — Interno', COMPANY_NAME, 'Tarefas internas da empresa, não vinculadas a obras. Use as classificações como departamentos.', now, now);
+    const id = Number(r.lastInsertRowid);
+    defaultStageId(id);
+    ['Administrativo', 'Comercial', 'Financeiro', 'Equipamentos e manutenção', 'Pessoas (RH)', 'Segurança do trabalho']
+      .forEach((n, i) => run('INSERT INTO project_stages (project_id, name, sort_order) VALUES (?,?,?)', id, n, i + 1));
+    for (const g of all(`SELECT id FROM users WHERE role = 'gestor' AND access_scope <> 'total'`)) {
+      run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', g.id, id);
+    }
+    run(`INSERT INTO app_settings (key, value) VALUES ('internal_area_created', ?)`, String(id));
+    audit(null, 'project', id, 'Área interna padrão criada', { nome: 'Charão — Interno', acesso: 'Administradores e Gestores' });
+    return id;
+  });
 }
 
 export function createProject(ctx, body, ip) {
   if (!canManageProject(ctx, null)) throw forbidden('Apenas administradores e gestores podem cadastrar projetos.');
   const { d, memberIds } = readProjectBody(body);
+  const kind = body.kind === 'interno' ? 'interno' : 'obra';
   return tx(() => {
-    const code = nextCode();
+    const code = nextCode(kind);
     const now = new Date().toISOString();
     const r = run(`INSERT INTO projects (code, name, client, location, description, status, start_date, end_date, actual_end_date,
-      lead_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, ctx.user.id, now, now);
+      lead_id, kind, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, kind, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
     for (const m of memberIds) run('INSERT INTO project_members (project_id, user_id) VALUES (?,?)', id, m);
     defaultStageId(id);
@@ -107,7 +133,7 @@ export function updateProject(ctx, id, body, ip) {
   const p = one('SELECT * FROM projects WHERE id = ?', id);
   if (!p || !canAccessProject(ctx.user, id, ctx.projects)) throw notFound('Projeto não encontrado.');
   if (!canManageProject(ctx, id)) throw forbidden('Você não pode editar este projeto.');
-  const { d, memberIds } = readProjectBody({ ...p, ...body, member_ids: body.member_ids ?? members(id).map(m => m.id) });
+  const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) });
   tx(() => {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
       lead_id=?, updated_at=? WHERE id=?`,

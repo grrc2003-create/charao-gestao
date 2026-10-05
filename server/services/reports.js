@@ -108,6 +108,7 @@ export function buildReport(ctx, q) {
     scope = { label: 'Visão geral da operação', subtitle: 'Todos os projetos acessíveis ao emissor' };
   }
 
+  if (q.kind === 'obra' || q.kind === 'interno') tasks = tasks.filter(t => t.project_kind === q.kind);
   tasks = filterPeriod(tasks, from, to);
   if (!includeDone) tasks = tasks.filter(t => t.status !== 'concluida');
   let stageNames = [];
@@ -148,7 +149,7 @@ export function buildReport(ctx, q) {
   const critical = tasks.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 10);
 
   return {
-    type, level, from, to, include_done: includeDone, group, gantt: withGantt, stage_filter: stageNames,
+    type, level, from, to, include_done: includeDone, kind: q.kind === 'obra' || q.kind === 'interno' ? q.kind : '', group, gantt: withGantt, stage_filter: stageNames,
     by_stage: groupByStage(tasks, type !== 'projeto'),
     by_period: byPeriod ? groupByPeriod(tasks, group) : [],
     reschedules: rescheduleSummary,

@@ -1,5 +1,5 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
-import { pageHead, taskList, bindCommon, STATUS_COLOR } from './shared.js';
+import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions } from './shared.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 
 const DUE = { '': 'Qualquer prazo', vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo', reagendadas: 'Reagendadas', ja_atrasadas: 'Ficaram atrasadas alguma vez', corretivas: 'Repactuadas após vencer', cronicas: 'Crônicas (muitos reagendamentos)', concluidas_atraso: 'Concluídas com atraso' };
@@ -15,6 +15,7 @@ export async function view({ state, query, setQuery }) {
     nivel: query.get('nivel') || '',
     stage: query.get('stage') || '',
     org: readOrg(query),
+    kind: query.get('kind') || '',
   };
   // Contagem por status sem o filtro de status (para os chips)
   const [tasks, base, cancelled] = await Promise.all([
@@ -24,7 +25,7 @@ export async function view({ state, query, setQuery }) {
   ]);
   const counts = Object.fromEntries(STATUS_ORDER.map(s => [s, base.filter(t => t.eff_status === s).length]));
   const meta = state.meta;
-  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel', 'stage'].filter(k => f[k]).length;
+  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind'].filter(k => f[k]).length;
   const opt = (v, l, cur) => html`<option value="${v}" ${cur === String(v) ? 'selected' : ''}>${l}</option>`;
   // Classificações: do projeto escolhido, ou agrupadas por projeto
   const selProject = meta.projects.find(p => String(p.id) === f.project);
@@ -57,11 +58,12 @@ export async function view({ state, query, setQuery }) {
           ${cancelled.length || f.status.includes('cancelada') ? html`<button type="button" class="chip chip-cancel" data-st="cancelada" aria-pressed="${f.status.includes('cancelada')}" style="--c:#5D6670" title="Canceladas não entram em indicadores nem relatórios"><span class="dot"></span>Canceladas<span class="n">${cancelled.length}</span></button>` : ''}
         </div>
         <div class="filters-adv" id="adv" ${advCount ? '' : 'hidden'}>
-          <select name="project" aria-label="Projeto">${opt('', 'Todos os projetos', f.project)}${meta.projects.map(p => opt(p.id, `${p.code} · ${p.name}`, f.project))}</select>
+          <select name="project" aria-label="Projeto">${opt('', 'Todos os projetos', f.project)}${projectOptions(meta.projects, f.project, opt)}</select>
           <select name="assignee" aria-label="Responsável">${opt('', 'Todos os responsáveis', f.assignee)}${opt('me', 'Minhas tarefas', f.assignee)}${opt('none', 'Sem responsável', f.assignee)}${meta.assignees.map(u => opt(u.id, u.name, f.assignee))}</select>
           <select name="due" aria-label="Prazo">${Object.entries(DUE).map(([k, l]) => opt(k, l, f.due))}</select>
           <select name="priority" aria-label="Prioridade">${opt('', 'Todas as prioridades', f.priority)}${Object.entries(PRIORITY).map(([k, l]) => opt(k, l, f.priority))}</select>
           <select name="stage" aria-label="Classificação">${opt('', 'Todas as classificações', f.stage)}${stageOptions}</select>
+          ${meta.projects.some(p => p.kind === 'interno') ? html`<select name="kind" aria-label="Obras ou interno">${opt('', 'Obras e interno', f.kind)}${opt('obra', 'Somente obras', f.kind)}${opt('interno', 'Somente interno (empresa)', f.kind)}</select>` : ''}
           <select name="nivel" aria-label="Tipo">${opt('', 'Tarefas e subtarefas', f.nivel)}${opt('principais', 'Somente tarefas principais', f.nivel)}${opt('subtarefas', 'Somente subtarefas', f.nivel)}</select>
           ${advCount || f.q || f.status.length ? html`<button type="button" class="btn btn-ghost btn-sm" id="clear">${icon('x')}Limpar</button>` : ''}
         </div>
@@ -97,7 +99,7 @@ export async function view({ state, query, setQuery }) {
         adv.hidden = !adv.hidden;
         e.currentTarget.setAttribute('aria-expanded', String(!adv.hidden));
       });
-      root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '', stage: '' }));
+      root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '', stage: '', kind: '' }));
     },
   };
 }

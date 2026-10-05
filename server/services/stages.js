@@ -53,6 +53,8 @@ export function syncStages(projectId, input) {
   const removed = current.filter(s => !s.is_default && !keep.has(s.id));
   for (const s of removed) {
     if (s.task_count) throw badRequest(`A classificação "${s.name}" possui ${s.task_count} tarefa(s). Reclassifique-as antes de removê-la.`);
+    const rec = one('SELECT COUNT(*) AS n FROM recurrences WHERE stage_id = ?', s.id).n;
+    if (rec) throw badRequest(`A classificação "${s.name}" é usada em ${rec} tarefa(s) recorrente(s). Altere-as antes de removê-la.`);
   }
   const log = { criadas: [], renomeadas: [], removidas: removed.map(s => s.name) };
   for (const s of removed) run('DELETE FROM project_stages WHERE id = ?', s.id);

@@ -365,6 +365,59 @@ async function main() {
   ok((await ana('DELETE', `/tasks/${dExec}`, { reason: 'Teste de bloqueio' })).status === 400, 'servidor recusa excluir tarefa com execução');
   ok((await ana('DELETE', `/tasks/${cP2}`, { reason: 'Teste de bloqueio' })).status === 400, 'servidor recusa excluir tarefa com subtarefas');
 
+  console.log('Tarefas recorrentes');
+  const TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  const plus = n => new Date(Date.parse(TODAY + 'T00:00:00Z') + n * 86400e3).toISOString().slice(0, 10);
+  const wd = d => new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay();
+  let nextMon = plus(1); while (wd(nextMon) !== 1) nextMon = plus((Date.parse(nextMon) - Date.parse(TODAY)) / 86400e3 + 1);
+  const npR = (await ricardo('POST', '/projects', { name: 'Obra Recorrências', client: 'Cliente R', stages: [{ name: 'Segurança' }] })).data.id;
+  const segStage = (await ricardo('GET', `/projects/${npR}`)).data.stages.find(s => s.name === 'Segurança').id;
+  const pv = (await ricardo('POST', '/recurrences/preview', { freq: 'semanal', weekdays: [1, 3], start_date: nextMon, end_type: 'ocorrencias', end_count: 6 })).data;
+  ok(pv.description.startsWith('Toda semana: segunda e quarta') && pv.next.length === 6 && pv.total === 6, 'prévia da regra (descrição e próximas datas)');
+  ok((await ricardo('POST', '/recurrences', { project_id: npR, title: 'X', description: 'x', freq: 'diaria', start_date: plus(-1), end_type: 'nunca' })).status === 400, '1ª ocorrência no passado é recusada');
+  ok((await ricardo('POST', '/recurrences', { project_id: npR, title: 'X', description: 'x', freq: 'diaria', start_date: plus(1), end_type: 'data', end_date: TODAY })).status === 400, 'término antes da 1ª ocorrência é recusado');
+  const recW = await ricardo('POST', '/recurrences', { project_id: npR, title: 'Inspeção de segurança (DDS)', description: 'Inspeção semanal de EPIs e andaimes', assignee_id: 2,
+    stage_id: segStage, priority: 'alta', proof_type: 'foto', freq: 'semanal', weekdays: [1, 3], start_date: nextMon, end_type: 'ocorrencias', end_count: 6,
+    lead_days: 14, duration_days: 1, images: [{ data: tinyPng() }] });
+  ok(recW.status === 201, 'recorrência semanal criada');
+  let rw2 = (await ricardo('GET', `/recurrences/${recW.data.id}`)).data;
+  const expectedW = [...Array(15).keys()].map(plus).filter(d => d >= nextMon && [1, 3].includes(wd(d))).slice(0, 6);
+  ok(rw2.tasks.length === expectedW.length && rw2.tasks.map(t => t.due_date).join() === expectedW.join(), `ocorrências criadas até hoje + 14 dias (${rw2.tasks.length})`);
+  ok(rw2.tasks.every(t => t.recurrence_id === recW.data.id && /^PRJ-\d{3}-\d{5}$/.test(t.code) && t.stage_name === 'Segurança' && t.priority === 'alta' && t.ref_count === 1), 'ocorrências são tarefas normais com molde, classificação e imagem');
+  ok(rw2.generated_count === rw2.tasks.length && rw2.next_dates.length > 0 && rw2.active, 'série acompanha quantas foram criadas e as próximas datas');
+  const occ = (await ricardo('GET', `/tasks/${rw2.tasks[0].id}`)).data;
+  ok(occ.recurrence_title === 'Inspeção de segurança (DDS)' && occ.recurrence_seq === 1 && occ.history.some(h => h.action.includes('automaticamente pela recorrência')), 'tarefa mostra a série de origem e o histórico');
+  ok((await ricardo('GET', `/projects/${npR}`)).data.summary.total === rw2.tasks.length, 'ocorrências entram nos indicadores do projeto');
+  ok((await ricardo('PUT', `/projects/${npR}`, { stages: [] })).status === 400, 'classificação usada por recorrência não pode ser removida');
+  // Término por número de ocorrências: série termina sozinha
+  const recD = (await ricardo('POST', '/recurrences', { project_id: npR, title: 'Limpeza diária', description: 'Limpeza do canteiro', freq: 'diaria', start_date: plus(1), end_type: 'ocorrencias', end_count: 3, lead_days: 30 })).data;
+  const rd2 = (await ricardo('GET', `/recurrences/${recD.id}`)).data;
+  ok(rd2.tasks.length === 3 && !rd2.active && rd2.end_reason === 'Término da recorrência atingido', 'após a última ocorrência, a recorrência encerra sozinha');
+  // Mensal ainda fora da antecedência: nada criado agora
+  const recM = (await ricardo('POST', '/recurrences', { project_id: npR, title: 'Medição mensal', description: 'Boletim de medição', freq: 'mensal', start_date: plus(40), month_day: 31, end_type: 'nunca', lead_days: 5 })).data;
+  const rm2 = (await ricardo('GET', `/recurrences/${recM.id}`)).data;
+  ok(recM.generated === 0 && rm2.tasks.length === 0 && rm2.next_dates[0] >= plus(40) && rm2.next_dates[0].slice(0, 7) === plus(40).slice(0, 7) && rm2.active, 'ocorrência só é criada dentro da antecedência configurada');
+  // Permissões
+  ok((await camila('POST', '/recurrences', { project_id: 1, title: 'X', description: 'x', freq: 'diaria', start_date: plus(1), end_type: 'nunca' })).status === 403, 'sem acesso ao projeto não cria recorrência');
+  ok((await camila('GET', `/recurrences/${recW.data.id}`)).status === 404, 'sem acesso ao projeto não vê a recorrência');
+  const recMarcos = (await marcos('POST', '/recurrences', { project_id: 1, title: 'Diário de obra', description: 'Preencher diário', assignee_id: 4, freq: 'diaria', workdays_only: true, start_date: plus(1), end_type: 'nunca', lead_days: 3 })).data;
+  ok(recMarcos.id && (await ricardo('GET', `/recurrences/${recMarcos.id}`)).data.can_manage, 'colaborador cria recorrência no projeto liberado; gestor pode gerenciá-la');
+  ok((await marcos('PUT', `/recurrences/${recW.data.id}`, { title: 'X' })).status === 404 || (await marcos('PUT', `/recurrences/${recW.data.id}`, { title: 'X' })).status === 403, 'colaborador não edita recorrência de outro');
+  const md = (await marcos('GET', `/recurrences/${recMarcos.id}`)).data;
+  ok(md.tasks.every(t => ![0, 6].includes(wd(t.due_date))), 'somente dias úteis respeitado nas ocorrências');
+  // Edição vale para as próximas ocorrências
+  const before = rw2.tasks.length;
+  const updR = (await ricardo('PUT', `/recurrences/${recW.data.id}`, { title: 'Inspeção de segurança e EPIs', lead_days: 30 })).data;
+  ok(updR.tasks.length > before || updR.tasks.length === 6, 'aumentar a antecedência cria as ocorrências que entraram no prazo');
+  ok(updR.tasks.slice(0, before).every(t => t.title === 'Inspeção de segurança (DDS)') && updR.tasks.slice(before).every(t => t.title === 'Inspeção de segurança e EPIs'), 'edição não altera ocorrências já criadas');
+  ok((await ricardo('PUT', `/recurrences/${recW.data.id}`, { end_type: 'ocorrencias', end_count: 1 })).status === 400, 'não é possível reduzir o total abaixo do já criado');
+  // Encerrar com cancelamento das futuras
+  const recE = (await ricardo('POST', '/recurrences', { project_id: npR, title: 'Vistoria', description: 'Vistoria', freq: 'diaria', start_date: plus(1), end_type: 'nunca', lead_days: 4 })).data;
+  ok((await ricardo('POST', `/recurrences/${recE.id}/end`, {})).status === 400, 'encerrar exige motivo');
+  const ended = (await ricardo('POST', `/recurrences/${recE.id}/end`, { reason: 'Vistorias passaram a ser semanais', cancel_future: true })).data;
+  ok(!ended.active && ended.cancelled === 4 && ended.tasks.every(t => t.cancelled_at), 'encerrar cancela as ocorrências futuras não iniciadas');
+  ok((await ana('GET', '/audit')).data.some(a => a.action === 'Recorrência encerrada'), 'criação e encerramento registrados na auditoria');
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

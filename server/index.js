@@ -16,6 +16,7 @@ import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
+import * as Recurrences from './services/recurrences.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
@@ -298,6 +299,26 @@ api.get('/api/audit', (req, res, { user }) => {
   send(res, 200, listAudit());
 });
 
+// ---------- Tarefas recorrentes ----------
+api.get('/api/recurrences', (req, res, { ctx, query }) => send(res, 200, Recurrences.listRecurrences(ctx, { project: query.get('project') })));
+api.post('/api/recurrences/preview', (req, res, { body }) => send(res, 200, Recurrences.previewRule(body)));
+api.post('/api/recurrences', (req, res, { ctx, body }) => send(res, 201, Recurrences.createRecurrence(ctx, body, clientIp(req))));
+api.get('/api/recurrences/:id', (req, res, { ctx, params }) => send(res, 200, Recurrences.getRecurrence(ctx, intOrNull(params.id))));
+api.put('/api/recurrences/:id', (req, res, { ctx, params, body }) => {
+  Recurrences.updateRecurrence(ctx, intOrNull(params.id), body, clientIp(req));
+  send(res, 200, Recurrences.getRecurrence(ctx, intOrNull(params.id)));
+});
+api.post('/api/recurrences/:id/end', (req, res, { ctx, params, body }) => {
+  const r = Recurrences.endRecurrence(ctx, intOrNull(params.id), body, clientIp(req));
+  send(res, 200, { ...Recurrences.getRecurrence(ctx, intOrNull(params.id)), cancelled: r.cancelled });
+});
+api.get('/api/recurrence-files/:id', (req, res, { ctx, params }) => {
+  const f = Recurrences.recurrenceFileForUser(ctx, intOrNull(params.id));
+  const buf = readStored(f.stored_name);
+  if (!buf) throw new HttpError(404, 'Arquivo indisponível.');
+  send(res, 200, buf, { 'Content-Type': f.mime, 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' });
+});
+
 // ---------- Configurações ----------
 // Justificativas de reagendamento: todos os usuários leem as ativas (lista suspensa); gestores e administradores editam
 api.get('/api/settings/reasons', (req, res, { ctx, query }) =>
@@ -364,5 +385,15 @@ const server = http.createServer(async (req, res) => {
     send(res, 500, { error: 'Erro interno. Tente novamente.' });
   }
 });
+
+// Geração das ocorrências recorrentes: ao iniciar e a cada hora
+const runRecurrences = () => {
+  try {
+    const n = Recurrences.generateAll();
+    if (n) console.log(`[recorrência] ${n} ocorrência(s) criada(s)`);
+  } catch (e) { console.error('[recorrência]', e); }
+};
+runRecurrences();
+setInterval(runRecurrences, 60 * 60 * 1000).unref();
 
 server.listen(PORT, () => console.log(`Charão Gestão rodando em http://localhost:${PORT}${DEMO ? ' (modo demonstração)' : ''}`));

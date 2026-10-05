@@ -26,7 +26,8 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL) AS sub_total,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL AND s.status = 'concluida') AS sub_done,
     cb.name AS cancelled_by_name,
-    (SELECT rc.freq FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_freq
+    (SELECT rc.title FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_title,
+    (SELECT rc.active FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_active
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id

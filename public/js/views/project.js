@@ -79,7 +79,7 @@ export async function view({ params, query, setQuery, render }) {
 
       <section class="section" id="proj-tasks">
         <div class="page-head" style="margin-bottom:10px">
-          <div><h2>Tarefas do projeto</h2><p>${tasks.length} de ${p.tasks.length} tarefas${stageObj ? ` · classificação: ${stageObj.name}` : ''}${active ? ` · filtro: ${STATUS[active].label}` : ''}</p></div>
+          <div><h2>Tarefas do projeto</h2><p>${tasks.length} de ${p.tasks.length} tarefas${p.cancelled_count ? html` · <a href="#/tarefas?project=${p.id}&status=cancelada">${p.cancelled_count} cancelada(s)</a>` : ''}${stageObj ? ` · classificação: ${stageObj.name}` : ''}${active ? ` · filtro: ${STATUS[active].label}` : ''}</p></div>
           <div class="page-actions">${fieldListButton(`project=${p.id}${stage ? `&stage=${stage}` : ''}${org ? `&org=${org}` : ''}`)}</div>
         </div>
         ${p.stages.length > 1 ? html`<div class="filters-adv" style="display:grid;grid-template-columns:minmax(0,320px);margin-bottom:10px">

@@ -5,7 +5,7 @@ import {
   canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, userHasProjectAccess, isAdmin,
 } from '../lib/permissions.js';
 import { decorate, today } from './metrics.js';
-import { taskHistory } from './audit.js';
+import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
@@ -23,8 +23,9 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     pt.code AS parent_code, pt.title AS parent_title,
     (SELECT COUNT(*) FROM task_reschedules rs WHERE rs.task_id = t.id) AS reschedule_count,
     (SELECT rs.old_due FROM task_reschedules rs WHERE rs.task_id = t.id ORDER BY rs.id LIMIT 1) AS original_due, st.name AS stage_name, st.sort_order AS stage_order, st.is_default AS stage_default,
-    (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id) AS sub_total,
-    (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'concluida') AS sub_done
+    (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL) AS sub_total,
+    (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL AND s.status = 'concluida') AS sub_done,
+    cb.name AS cancelled_by_name
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id
@@ -32,7 +33,8 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
   LEFT JOIN users a ON a.id = t.assignee_id
   LEFT JOIN users c ON c.id = t.creator_id
   LEFT JOIN users ab ON ab.id = t.assigned_by_id
-  LEFT JOIN users r ON r.id = t.reviewed_by`;
+  LEFT JOIN users r ON r.id = t.reviewed_by
+  LEFT JOIN users cb ON cb.id = t.cancelled_by`;
 
 const nowIso = () => new Date().toISOString();
 
@@ -50,10 +52,21 @@ function reschedulesByTask(taskIds) {
   return m;
 }
 
+// Tarefas visíveis ao usuário. Canceladas ficam de fora (indicadores, listas, relatórios, lista de campo);
+// use listCancelled para consultá-las.
 export function listVisible(ctx, where = '', ...params) {
+  return listTasks(ctx, 't.cancelled_at IS NULL', where, params);
+}
+
+export function listCancelled(ctx, where = '', ...params) {
+  return listTasks(ctx, 't.cancelled_at IS NOT NULL', where, params);
+}
+
+function listTasks(ctx, base, where, params) {
   const ref = today();
   const chronicMin = getSetting('chronic_reschedule_threshold');
-  const rows = all(`${BASE_SQL} ${where} ORDER BY t.due_date IS NULL, t.due_date, t.id`, ...params).filter(t => canSeeTask(ctx, t));
+  const extra = where ? ` AND (${where.replace(/^\s*WHERE\s+/i, '')})` : '';
+  const rows = all(`${BASE_SQL} WHERE ${base}${extra} ORDER BY t.due_date IS NULL, t.due_date, t.id`, ...params).filter(t => canSeeTask(ctx, t));
   const rs = reschedulesByTask(rows.filter(t => t.reschedule_count).map(t => t.id));
   return rows.map(t => decorate(t, ref, rs.get(t.id) || [], chronicMin)).sort(byWorkOrder);
 }
@@ -81,6 +94,10 @@ function loadVisible(ctx, id) {
 
 export function permissionsFor(ctx, t) {
   const manage = canManageTask(ctx, t);
+  if (t.cancelled_at) {
+    const parentCancelled = t.parent_id && one('SELECT cancelled_at FROM tasks WHERE id = ?', t.parent_id)?.cancelled_at;
+    return { reactivate: manage && !parentCancelled, reactivate_blocked: parentCancelled ? 'Reative antes a tarefa principal.' : null };
+  }
   const execute = canExecuteTask(ctx, t);
   const review = canReviewTask(ctx, t);
   const editableExec = execute && (t.status === 'aberta' || t.status === 'em_andamento');
@@ -95,12 +112,26 @@ export function permissionsFor(ctx, t) {
     conclude_directly: manage && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || ctx.user.role === 'gestor'),
     // Subtarefas: um nível. Quem gerencia a tarefa ou é o responsável por ela pode dividi-la.
     add_subtask: !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
+    cancel: manage && t.status !== 'concluida',
+    ...deletePermission(ctx, t),
   };
+}
+
+// Exclusão definitiva: só Administrador e só tarefas sem nenhum registro de execução
+function deletePermission(ctx, t) {
+  if (!isAdmin(ctx.user)) return { delete: false };
+  const blocks = [];
+  if (t.status !== 'aberta') blocks.push('a execução já foi iniciada');
+  if (t.delivered_at || one(`SELECT 1 FROM task_history WHERE task_id = ? AND action = 'Enviada para conferência' LIMIT 1`, t.id)) blocks.push('já foi enviada para conferência');
+  if (t.exec_description || t.exec_notes) blocks.push('há descrição ou observação de execução');
+  if (one(`SELECT 1 FROM task_files WHERE task_id = ? AND kind = 'execucao' LIMIT 1`, t.id)) blocks.push('há fotos de execução');
+  if (one('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1', t.id)) blocks.push('possui subtarefas');
+  return { delete: !blocks.length, delete_blocked: blocks.length ? `Não pode ser excluída: ${blocks.join(', ')}. Use "Cancelar tarefa".` : null };
 }
 
 // Tarefa principal só é entregue/concluída com todas as subtarefas concluídas
 function assertSubtasksDone(t) {
-  const pending = one(`SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND status <> 'concluida'`, t.id).n;
+  const pending = one(`SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND status <> 'concluida' AND cancelled_at IS NULL`, t.id).n;
   if (pending) throw badRequest(`Conclua as subtarefas antes: ${pending} pendente(s).`);
 }
 
@@ -214,8 +245,13 @@ function assertDateOrder(start, due) {
   if (start && due && start > due) throw badRequest('O início previsto deve ser anterior ou igual ao prazo.');
 }
 
+function assertNotCancelled(t) {
+  if (t.cancelled_at) throw badRequest('Tarefa cancelada. Reative-a para fazer alterações.');
+}
+
 export function updateTask(ctx, id, body) {
   const t = loadVisible(ctx, id);
+  assertNotCancelled(t);
   if (!canManageTask(ctx, t)) throw forbidden('Você não pode editar esta tarefa.');
   if (t.status === 'concluida') throw badRequest('Reabra a tarefa antes de editá-la.');
   const changes = [];
@@ -296,6 +332,7 @@ export function rescheduleTask(ctx, id, body) {
 // Retorno do responsável (descrição/observações da execução)
 export function updateExecution(ctx, id, body) {
   const t = loadVisible(ctx, id);
+  assertNotCancelled(t);
   if (!canExecuteTask(ctx, t)) throw forbidden('Apenas o responsável pode registrar a execução.');
   if (!['aberta', 'em_andamento'].includes(t.status)) throw badRequest('A execução não pode ser alterada neste status.');
   const next = {};
@@ -326,6 +363,7 @@ function addFileInternal(ctx, taskId, kind, dataUrl, caption) {
 
 export function addFiles(ctx, id, body) {
   const t = loadVisible(ctx, id);
+  assertNotCancelled(t);
   const kind = oneOf(body.kind, ['referencia', 'execucao'], 'Tipo do arquivo');
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
   if (!images.length) throw badRequest('Nenhuma imagem enviada.');
@@ -344,6 +382,7 @@ export function addFiles(ctx, id, body) {
 
 export function removeFile(ctx, taskId, fileId) {
   const t = loadVisible(ctx, taskId);
+  assertNotCancelled(t);
   const f = one('SELECT * FROM task_files WHERE id = ? AND task_id = ?', fileId, taskId);
   if (!f) throw notFound('Arquivo não encontrado.');
   const allowed = f.kind === 'execucao'
@@ -367,6 +406,7 @@ export function fileForUser(ctx, fileId) {
 // Transições de status
 export function transition(ctx, id, action, body = {}) {
   const t = loadVisible(ctx, id);
+  assertNotCancelled(t);
   const can = permissionsFor(ctx, t);
   const now = nowIso();
   const label = s => STATUS_LABEL[s];
@@ -429,4 +469,58 @@ export function transition(ctx, id, action, body = {}) {
         throw badRequest('Ação desconhecida.');
     }
   });
+}
+
+// ---------- Cancelamento e exclusão ----------
+export function cancelTask(ctx, id, body) {
+  const t = loadVisible(ctx, id);
+  if (!permissionsFor(ctx, t).cancel) throw t.cancelled_at ? badRequest('A tarefa já está cancelada.') : forbidden('Você não pode cancelar esta tarefa.');
+  const reason = str(body.reason, { max: 1000, required: true, label: 'Motivo do cancelamento' });
+  if (reason.length < 5) throw badRequest('Descreva o motivo do cancelamento.');
+  const now = nowIso();
+  tx(() => {
+    const cancel = (taskId, why) => {
+      run('UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ?', now, ctx.user.id, why, now, taskId);
+      taskHistory(taskId, ctx.user.id, 'Tarefa cancelada', why);
+    };
+    cancel(id, reason);
+    // Subtarefas não concluídas são canceladas junto
+    const subs = all(`SELECT id, code FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND status <> 'concluida'`, id);
+    for (const s of subs) cancel(s.id, `Cancelada junto com a tarefa principal ${t.code}: ${reason}`);
+    if (subs.length) taskHistory(id, ctx.user.id, 'Subtarefas canceladas', subs.map(s => s.code).join(', '));
+    if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa cancelada', `${t.code} · ${t.title}`);
+  });
+}
+
+export function reactivateTask(ctx, id, body = {}) {
+  const t = loadVisible(ctx, id);
+  if (!t.cancelled_at) throw badRequest('A tarefa não está cancelada.');
+  const can = permissionsFor(ctx, t);
+  if (!can.reactivate) throw can.reactivate_blocked ? badRequest(can.reactivate_blocked) : forbidden('Você não pode reativar esta tarefa.');
+  const note = str(body.note, { max: 1000, label: 'Observação' });
+  tx(() => {
+    run('UPDATE tasks SET cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, updated_at = ? WHERE id = ?', nowIso(), id);
+    taskHistory(id, ctx.user.id, 'Tarefa reativada', note || `Cancelamento desfeito (motivo anterior: ${t.cancel_reason})`);
+    if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa reativada', `${t.code} · ${t.title}`);
+  });
+}
+
+export function deleteTask(ctx, id, body, ip) {
+  const t = loadVisible(ctx, id);
+  const can = deletePermission(ctx, t);
+  if (!can.delete) throw can.delete_blocked ? badRequest(can.delete_blocked) : forbidden('Apenas administradores excluem tarefas.');
+  const reason = str(body.reason, { max: 1000, required: true, label: 'Motivo da exclusão' });
+  if (reason.length < 5) throw badRequest('Descreva o motivo da exclusão.');
+  const files = all('SELECT stored_name FROM task_files WHERE task_id = ?', id);
+  const resch = one('SELECT COUNT(*) AS n FROM task_reschedules WHERE task_id = ?', id).n;
+  tx(() => {
+    run('DELETE FROM tasks WHERE id = ?', id); // histórico, imagens e reagendamentos saem em cascata
+    if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa excluída', `${t.code} · ${t.title} · Motivo: ${reason}`);
+    audit(ctx.user.id, 'task', id, 'Tarefa excluída definitivamente', {
+      codigo: t.code, titulo: t.title, projeto: `${t.project_code} · ${t.project_name}`, responsavel: t.assignee_name || '—',
+      prazo: t.due_date || '—', motivo: reason, imagens: files.length, reagendamentos: resch,
+    }, ip);
+  });
+  for (const f of files) deleteStored(f.stored_name);
+  return { project_id: t.project_id, parent_id: t.parent_id };
 }

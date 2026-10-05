@@ -315,6 +315,56 @@ async function main() {
   const flw = (await ricardo('GET', `/field-list?project=${npP}&org=semana`)).data;
   ok(flw.context.org === 'semana' && flw.tasks[0].period_label.startsWith('Semana de 01/06') && flw.tasks.at(-1).period_label === 'Sem prazo', 'lista de campo organizada por semana');
 
+  console.log('Cancelamento e exclusão de tarefas');
+  const npC = (await ricardo('POST', '/projects', { name: 'Obra Cancelamentos', client: 'Cliente C' })).data.id;
+  const mkC = async (title, extra = {}) => (await ricardo('POST', '/tasks', { project_id: npC, title, description: title, assignee_id: 2, due_date: '2020-01-01', ...extra })).data.id;
+  const cA = await mkC('Atrasada a cancelar');
+  let sumBefore = (await ricardo('GET', `/projects/${npC}`)).data.summary;
+  ok(sumBefore.total === 1 && sumBefore.late === 1, 'antes: tarefa conta nos indicadores');
+  ok((await marcos('POST', `/tasks/${cA}/cancel`, { reason: 'Duplicada' })).status === 404, 'usuário sem acesso não cancela');
+  ok((await ricardo('POST', `/tasks/${cA}/cancel`, { reason: '' })).status === 400, 'cancelamento exige motivo');
+  let cT = (await ricardo('POST', `/tasks/${cA}/cancel`, { reason: 'Serviço retirado do escopo pelo cliente' })).data;
+  ok(cT.eff_status === 'cancelada' && cT.cancelled_by_name === 'Ricardo Menezes' && cT.cancel_reason.includes('escopo'), 'tarefa cancelada com motivo e responsável');
+  ok(cT.history.some(h => h.action === 'Tarefa cancelada'), 'cancelamento registrado no histórico');
+  ok(cT.can.reactivate && !cT.can.edit && !cT.can.reschedule, 'tarefa cancelada fica bloqueada (só reativar)');
+  ok((await ricardo('PATCH', `/tasks/${cA}`, { title: 'x' })).status === 400, 'não edita tarefa cancelada');
+  const sumAfter = (await ricardo('GET', `/projects/${npC}`)).data.summary;
+  ok(sumAfter.total === 0 && sumAfter.late === 0, 'cancelada sai dos indicadores do projeto');
+  ok(!(await ricardo('GET', '/tasks')).data.some(t => t.id === cA), 'cancelada sai da lista padrão');
+  ok((await ricardo('GET', '/tasks?status=cancelada')).data.some(t => t.id === cA && t.eff_status === 'cancelada'), 'filtro "Canceladas"');
+  ok(!(await ricardo('GET', `/field-list?project=${npC}`)).data.tasks.some(t => t.id === cA), 'cancelada sai da lista de campo');
+  ok((await ricardo('GET', `/reports?type=projeto&id=${npC}&level=detalhado`)).data.summary.total === 0, 'cancelada sai dos relatórios');
+  cT = (await ricardo('POST', `/tasks/${cA}/reactivate`, {})).data;
+  ok(!cT.cancelled_at && cT.eff_status === 'atrasada' && cT.history.some(h => h.action === 'Tarefa reativada'), 'reativação devolve o status anterior');
+  // Principal com subtarefas: cancelamento em cascata
+  const cP = await mkC('Principal', { due_date: '2099-01-01' });
+  const cS1 = (await ricardo('POST', '/tasks', { parent_id: cP, title: 'Sub 1', description: 'Sub 1' })).data.id;
+  const cS2 = (await ricardo('POST', '/tasks', { parent_id: cP, title: 'Sub 2', description: 'Sub 2' })).data.id;
+  await ricardo('POST', `/tasks/${cS2}/actions/conclude`, {});
+  await ricardo('POST', `/tasks/${cP}/cancel`, { reason: 'Etapa eliminada do projeto' });
+  ok((await ricardo('GET', `/tasks/${cS1}`)).data.cancelled_at && !(await ricardo('GET', `/tasks/${cS2}`)).data.cancelled_at, 'cancelar a principal cancela as subtarefas não concluídas');
+  ok((await ricardo('POST', `/tasks/${cS1}/reactivate`, {})).status === 400, 'subtarefa só reativa com a principal ativa');
+  // Subtarefa cancelada não trava a conclusão da principal
+  const cP2 = await mkC('Principal 2', { due_date: '2099-01-01' });
+  const cS3 = (await ricardo('POST', '/tasks', { parent_id: cP2, title: 'Sub 3', description: 'Sub 3' })).data.id;
+  await ricardo('POST', `/tasks/${cS3}/cancel`, { reason: 'Não será mais necessária' });
+  ok((await ricardo('POST', `/tasks/${cP2}/actions/conclude`, {})).data.status === 'concluida', 'subtarefa cancelada não impede concluir a principal');
+  // Exclusão definitiva
+  const dOk = await mkC('Criada por engano', { images: [{ data: tinyPng() }] });
+  ok((await ricardo('GET', `/tasks/${dOk}`)).data.can.delete === false, 'gestor não vê a opção de excluir');
+  ok((await ricardo('DELETE', `/tasks/${dOk}`, { reason: 'Duplicada' })).status === 403, 'gestor não exclui');
+  ok((await ana('GET', `/tasks/${dOk}`)).data.can.delete === true, 'administrador pode excluir tarefa sem execução');
+  ok((await ana('DELETE', `/tasks/${dOk}`, { reason: '' })).status === 400, 'exclusão exige motivo');
+  const del = await ana('DELETE', `/tasks/${dOk}`, { reason: 'Cadastrada em duplicidade' });
+  ok(del.status === 200 && (await ana('GET', `/tasks/${dOk}`)).status === 404, 'tarefa excluída definitivamente');
+  ok((await ana('GET', '/audit')).data.some(a => a.action === 'Tarefa excluída definitivamente' && a.details.includes('Cadastrada em duplicidade') && a.details.includes('"imagens":1')), 'exclusão registrada na auditoria com motivo');
+  const dExec = await mkC('Com execução', { due_date: '2099-01-01' });
+  await ricardo('PATCH', `/tasks/${dExec}/execution`, { exec_description: 'Iniciado o serviço' });
+  const blocked = (await ana('GET', `/tasks/${dExec}`)).data.can;
+  ok(blocked.delete === false && blocked.delete_blocked.includes('Cancelar'), 'tarefa com execução não pode ser excluída (orienta cancelar)');
+  ok((await ana('DELETE', `/tasks/${dExec}`, { reason: 'Teste de bloqueio' })).status === 400, 'servidor recusa excluir tarefa com execução');
+  ok((await ana('DELETE', `/tasks/${cP2}`, { reason: 'Teste de bloqueio' })).status === 400, 'servidor recusa excluir tarefa com subtarefas');
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

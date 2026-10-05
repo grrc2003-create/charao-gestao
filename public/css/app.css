@@ -709,3 +709,16 @@ table.data.dl-table td.num, table.data.dl-table th.num { text-align: right; whit
 .period-current .period-head { border-bottom-color: var(--orange); }
 .period-past .period-head h3 { color: var(--ink-2); }
 @media (max-width: 560px) { .period-bar { width: 100%; } .org-control { width: 100%; justify-content: space-between; } .org-btn { flex: 1; padding: 6px 4px; } }
+
+/* Tarefa cancelada */
+.st-cancelada { --c: #5D6670; --bg-c: #ECEEF0; }
+.badge.st-cancelada { border-style: dashed; }
+.task-card.st-cancelada, table.data tr.st-cancelada td { opacity: .78; }
+.task-card.st-cancelada .tc-title, table.data tr.st-cancelada .t-title { text-decoration: line-through; text-decoration-color: rgba(93, 102, 112, .6); }
+.cancel-banner { display: flex; gap: 10px; align-items: flex-start; border: 1px dashed #9AA3AC; background: #F3F4F5; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.cancel-banner svg { flex: none; width: 20px; height: 20px; color: #5D6670; margin-top: 1px; }
+.cancel-banner b { display: block; color: var(--ink); }
+.btn-danger-ghost { background: var(--surface); color: var(--st-atrasada); border-color: #E7B7B1; }
+.btn-danger-ghost:hover { background: var(--st-atrasada-bg); border-color: var(--st-atrasada); }
+.delete-hint { font-size: 12px; color: var(--muted); flex-basis: 100%; }
+.chip-cancel[aria-pressed="true"] { background: #5D6670; border-color: #5D6670; }

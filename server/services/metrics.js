@@ -15,6 +15,7 @@ export const STATUSES = ['aberta', 'em_andamento', 'aguardando_conferencia', 'at
 
 // 'atrasada' = prazo vencido e ainda não entregue (aberta ou em andamento)
 export function effectiveStatus(t, ref = today()) {
+  if (t.cancelled_at) return 'cancelada';
   if ((t.status === 'aberta' || t.status === 'em_andamento') && t.due_date && t.due_date < ref) return 'atrasada';
   return t.status;
 }
@@ -74,6 +75,7 @@ export function summarize(tasks, ref = today()) {
   let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0, rescheduled = 0, reschedules = 0;
   let withDue = 0, everLate = 0, episodes = 0, preventive = 0, corrective = 0, chronic = 0, daysAdded = 0, onTimeOriginal = 0;
   const dist = { r0: 0, r1: 0, r2: 0, r3: 0 };
+  tasks = tasks.filter(t => !t.cancelled_at);
   for (const t of tasks) {
     if (t.reschedule_count) { rescheduled++; reschedules += t.reschedule_count; }
     if (t.due_date || t.original_due) {

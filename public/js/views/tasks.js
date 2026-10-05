@@ -17,9 +17,10 @@ export async function view({ state, query, setQuery }) {
     org: readOrg(query),
   };
   // Contagem por status sem o filtro de status (para os chips)
-  const [tasks, base] = await Promise.all([
+  const [tasks, base, cancelled] = await Promise.all([
     api('/tasks', { query: f }),
     api('/tasks', { query: { ...f, status: [] } }),
+    api('/tasks', { query: { ...f, status: ['cancelada'] } }),
   ]);
   const counts = Object.fromEntries(STATUS_ORDER.map(s => [s, base.filter(t => t.eff_status === s).length]));
   const meta = state.meta;
@@ -52,6 +53,7 @@ export async function view({ state, query, setQuery }) {
         <div class="chips" role="group" aria-label="Filtrar por status">
           <button type="button" class="chip" data-st="" aria-pressed="${!f.status.length}">Todas<span class="n">${base.length}</span></button>
           ${STATUS_ORDER.map(s => html`<button type="button" class="chip" data-st="${s}" aria-pressed="${f.status.includes(s)}" style="--c:${STATUS_COLOR[s]}"><span class="dot"></span>${STATUS[s].label}<span class="n">${counts[s]}</span></button>`)}
+          ${cancelled.length || f.status.includes('cancelada') ? html`<button type="button" class="chip chip-cancel" data-st="cancelada" aria-pressed="${f.status.includes('cancelada')}" style="--c:#5D6670" title="Canceladas não entram em indicadores nem relatórios"><span class="dot"></span>Canceladas<span class="n">${cancelled.length}</span></button>` : ''}
         </div>
         <div class="filters-adv" id="adv" ${advCount ? '' : 'hidden'}>
           <select name="project" aria-label="Projeto">${opt('', 'Todos os projetos', f.project)}${meta.projects.map(p => opt(p.id, `${p.code} · ${p.name}`, f.project))}</select>

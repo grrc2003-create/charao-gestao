@@ -3,7 +3,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } from '../lib/permissions.js';
 import { summarize, monthlyTrend } from './metrics.js';
-import { listVisible } from './tasks.js';
+import { listVisible, listCancelled } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
 import { getSetting } from './settings.js';
@@ -44,6 +44,7 @@ export function getProject(ctx, id) {
     ...p,
     stages,
     trend: monthlyTrend(tasks),
+    cancelled_count: listCancelled(ctx, 'WHERE t.project_id = ?', id).length,
     chronic_min: getSetting('chronic_reschedule_threshold'),
     members: members(id),
     summary: summarize(tasks),

@@ -54,6 +54,7 @@ export const STATUS = {
   aguardando_conferencia: { label: 'Aguardando conferência', short: 'Em conferência', icon: '◎' },
   atrasada: { label: 'Atrasada', icon: '!' },
   concluida: { label: 'Concluída', icon: '✓' },
+  cancelada: { label: 'Cancelada', icon: '⊘' },
 };
 export const STATUS_ORDER = ['aberta', 'em_andamento', 'aguardando_conferencia', 'atrasada', 'concluida'];
 export const PRIORITY = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };

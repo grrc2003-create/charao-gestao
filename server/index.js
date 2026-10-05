@@ -186,7 +186,10 @@ api.get('/api/projects/:id/assignees', (req, res, { ctx, params }) => send(res, 
 
 // ---------- Tarefas ----------
 api.get('/api/tasks', (req, res, { ctx, query }) => {
-  let tasks = Tasks.listVisible(ctx);
+  // "cancelada" é consultada à parte (não entra nas listas padrão nem nos indicadores)
+  const wantCancelled = query.getAll('status').includes('cancelada');
+  const onlyCancelled = wantCancelled && query.getAll('status').filter(Boolean).length === 1;
+  let tasks = [...(onlyCancelled ? [] : Tasks.listVisible(ctx)), ...(wantCancelled ? Tasks.listCancelled(ctx) : [])];
   const q = (query.get('q') || '').trim().toLowerCase();
   const status = query.getAll('status').filter(Boolean);
   const project = intOrNull(query.get('project'));
@@ -243,6 +246,15 @@ api.delete('/api/tasks/:id/files/:fid', (req, res, { ctx, params }) => {
   Tasks.removeFile(ctx, intOrNull(params.id), intOrNull(params.fid));
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
+api.post('/api/tasks/:id/cancel', (req, res, { ctx, params, body }) => {
+  Tasks.cancelTask(ctx, intOrNull(params.id), body);
+  send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
+});
+api.post('/api/tasks/:id/reactivate', (req, res, { ctx, params, body }) => {
+  Tasks.reactivateTask(ctx, intOrNull(params.id), body);
+  send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
+});
+api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200, Tasks.deleteTask(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/tasks/:id/reschedule', (req, res, { ctx, params, body }) => {
   Tasks.rescheduleTask(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));

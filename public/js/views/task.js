@@ -70,7 +70,8 @@ function build(t, ctx) {
     : ctx.query.get('from') === 'project' ? `#/projetos/${t.project_id}` : '#/tarefas';
   const backLabel = back.startsWith('#/tarefas/') ? t.parent_code : back === '#/tarefas' ? 'Tarefas' : t.project_code;
 
-  const subDone = t.subtasks.filter(s => s.status === 'concluida').length;
+  const activeSubs = t.subtasks.filter(s => !s.cancelled_at);
+  const subDone = activeSubs.filter(s => s.status === 'concluida').length;
   const subtaskRow = s => {
     const d = dueInfo(s);
     return html`<li><a class="row-link subtask-row st-${s.eff_status}" href="#/tarefas/${s.id}">
@@ -83,17 +84,20 @@ function build(t, ctx) {
   const subtasksBlock = !t.parent_id && (t.subtasks.length || can.add_subtask) ? html`
       <section class="card block" aria-labelledby="blk-sub">
         <header class="block-head"><span class="step" style="background:var(--navy-700)">${icon('tasks')}</span><h2 id="blk-sub">Subtarefas</h2>
-          <span class="right muted" style="font-size:12px">${t.subtasks.length ? `${subDone} de ${t.subtasks.length} concluídas` : ''}</span></header>
-        ${t.subtasks.length ? html`<div style="padding:12px 16px 0">${progress(Math.round((subDone / t.subtasks.length) * 100), 'Subtarefas concluídas')}</div>
+          <span class="right muted" style="font-size:12px">${activeSubs.length ? `${subDone} de ${activeSubs.length} concluídas` : ''}${t.subtasks.length > activeSubs.length ? ` · ${t.subtasks.length - activeSubs.length} cancelada(s)` : ''}</span></header>
+        ${t.subtasks.length ? html`<div style="padding:12px 16px 0">${progress(activeSubs.length ? Math.round((subDone / activeSubs.length) * 100) : 0, 'Subtarefas concluídas')}</div>
           <ul class="rows">${t.subtasks.map(subtaskRow)}</ul>` : html`<div class="block-body"><p class="muted" style="margin:0">Divida esta tarefa em etapas com responsável, prazo e comprovação próprios.</p></div>`}
         ${can.add_subtask ? html`<div class="block-body" style="padding-top:8px"><a class="btn btn-ghost" href="#/tarefas/nova?pai=${t.id}">${icon('plus')}Adicionar subtarefa</a></div>` : ''}
-        ${t.subtasks.length && subDone < t.subtasks.length ? html`<div class="block-body" style="padding-top:0"><div class="notice">${icon('info')}<span>A tarefa principal só pode ser enviada para conferência ou concluída depois que todas as subtarefas estiverem concluídas.</span></div></div>` : ''}
+        ${activeSubs.length && subDone < activeSubs.length ? html`<div class="block-body" style="padding-top:0"><div class="notice">${icon('info')}<span>A tarefa principal só pode ser enviada para conferência ou concluída depois que todas as subtarefas estiverem concluídas.</span></div></div>` : ''}
       </section>` : '';
 
   return {
     title: `${t.code} · ${t.title}`,
     html: html`
       ${pageHead({ back: { href: back, label: backLabel }, title: '' })}
+      ${t.cancelled_at ? html`<div class="cancel-banner" role="status">${icon('x')}<div><b>Tarefa cancelada</b>
+        por ${t.cancelled_by_name || '—'} em ${fmtDateTime(t.cancelled_at)} — ${t.cancel_reason}
+        <div class="muted" style="font-size:12.5px;margin-top:2px">Não aparece nas listas, indicadores, relatórios nem na lista de campo. ${can.reactivate_blocked || ''}</div></div></div>` : ''}
       <article class="card task-hero st-${t.eff_status}">
         <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}${t.stage_name ? html`<a class="stage-tag" href="#/tarefas?project=${t.project_id}&stage=${t.stage_id}" title="Classificação (Grupo/Local/Etapa)">${t.stage_name}</a>` : ''}</div>
         ${t.parent_id ? html`<div class="parent-link">↳ Subtarefa de ${t.parent_visible ? html`<a href="#/tarefas/${t.parent_id}"><b>${t.parent_code}</b> · ${t.parent_title}</a>` : html`<b>${t.parent_code}</b>`}</div>` : ''}
@@ -101,18 +105,22 @@ function build(t, ctx) {
         <div class="facts">
           <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
           <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}</div></div>
-          <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
+          <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.cancelled_at ? 'Tarefa cancelada' : t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
             <span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
             ${t.reschedule_count ? html`<button type="button" class="resched-badge ${t.chronic ? 'is-chronic' : ''}" data-act="goresched" style="cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada${t.chronic ? ' · crônica' : ''}</button>` : ''}
             ${t.late_episodes ? html`<i class="late-badge" title="Repactuações após vencer + entrega após o prazo + atraso atual">atrasou ${t.late_episodes}x</i>` : ''}</span></div></div>
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
           <div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>
         </div>
-        ${can.edit || can.reopen || can.conclude_directly ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        ${can.edit || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           ${can.edit ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
           ${can.reschedule ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
           ${can.conclude_directly ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
           ${can.reopen ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
+          ${can.reactivate ? html`<button type="button" class="btn btn-primary btn-sm" data-act="reactivate">${icon('history')}Reativar tarefa</button>` : ''}
+          ${can.cancel ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-act="cancel">${icon('x')}Cancelar tarefa</button>` : ''}
+          ${can.delete ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-act="delete">${icon('trash')}Excluir definitivamente</button>` : ''}
+          ${!can.delete && can.delete_blocked ? html`<span class="delete-hint">${icon('info')} Exclusão definitiva indisponível: ${can.delete_blocked.replace(/^Não pode ser excluída: /, '')}</span>` : ''}
         </div>` : ''}
       </article>
 
@@ -282,6 +290,46 @@ function mount(root, t, ctx) {
         onSubmit: d => api(`/tasks/${t.id}/actions/conclude`, { method: 'POST', body: d }),
       });
       if (r) { toast('Tarefa concluída.'); refresh(r); }
+    },
+    cancel: async () => {
+      const subs = t.subtasks.filter(s => !s.cancelled_at && s.status !== 'concluida').length;
+      const r = await sheet({
+        title: 'Cancelar tarefa',
+        body: html`<p class="muted" style="margin:0">A tarefa sai das listas, indicadores, relatórios e da lista de campo, mas continua consultável pelo filtro <b>Canceladas</b> e pode ser reativada.</p>
+          ${subs ? html`<div class="notice notice-proto">${icon('alert')}<span>${subs} subtarefa(s) não concluída(s) também serão canceladas.</span></div>` : ''}
+          <div class="field"><label class="req" for="cr">Motivo do cancelamento</label><textarea id="cr" name="reason" rows="3" maxlength="1000" required placeholder="Ex.: serviço retirado do escopo pelo cliente"></textarea></div>`,
+        submitLabel: 'Cancelar tarefa', danger: true,
+        onSubmit: d => api(`/tasks/${t.id}/cancel`, { method: 'POST', body: d }),
+      });
+      if (r) { toast('Tarefa cancelada.', 'warn'); refresh(r); }
+    },
+    reactivate: async () => {
+      const r = await sheet({
+        title: 'Reativar tarefa',
+        body: html`<p class="muted" style="margin:0">A tarefa volta ao status anterior ao cancelamento e às listas e indicadores.</p>
+          <div class="field"><label for="rn2">Observação (opcional)</label><textarea id="rn2" name="note" rows="2" maxlength="1000"></textarea></div>`,
+        submitLabel: 'Reativar',
+        onSubmit: d => api(`/tasks/${t.id}/reactivate`, { method: 'POST', body: d }),
+      });
+      if (r) { toast('Tarefa reativada.'); refresh(r); }
+    },
+    delete: async () => {
+      const r = await sheet({
+        title: 'Excluir definitivamente',
+        body: html`<div class="notice notice-proto">${icon('alert')}<span><b>Esta ação não pode ser desfeita.</b> A tarefa ${t.code}, o histórico dela e as imagens de referência serão apagados.
+          A exclusão fica registrada na Auditoria. Para tarefas que só deixaram de ser necessárias, prefira <b>Cancelar</b>.</span></div>
+          <div class="field"><label class="req" for="dr">Motivo da exclusão</label><textarea id="dr" name="reason" rows="3" maxlength="1000" required placeholder="Ex.: cadastrada em duplicidade"></textarea></div>
+          <label class="switch"><input type="checkbox" name="confirm" required>Entendo que a exclusão é definitiva</label>`,
+        submitLabel: 'Excluir definitivamente', danger: true,
+        onSubmit: d => {
+          if (!d.confirm) throw new Error('Marque a confirmação para excluir.');
+          return api(`/tasks/${t.id}`, { method: 'DELETE', body: { reason: d.reason } });
+        },
+      });
+      if (r) {
+        toast(`Tarefa ${t.code} excluída.`, 'warn');
+        ctx.navigate(r.parent_id ? `/tarefas/${r.parent_id}` : `/projetos/${r.project_id}`);
+      }
     },
     reopen: async () => {
       const r = await sheet({

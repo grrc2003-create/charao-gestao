@@ -71,6 +71,7 @@ Interface, regras de negócio e dados estão separados: as telas só conversam c
   - *Pontualidade real × repactuada*: entregas até o prazo original × até o prazo vigente.
   - Evolução mensal (mês do prazo original), comparação por responsável e por classificação, semáforo (atraso ≤15% bom, ≤30% atenção; corretivas ≤30% bom, ≤50% atenção; crônicas: nenhuma bom, até 5% atenção).
   - Filtros em Tarefas: "Ficaram atrasadas alguma vez", "Repactuadas após vencer", "Crônicas".
+- **Organização por dia, semana ou mês**: seletor "Organizar: Lista · Dia · Semana · Mês" em Tarefas e nas listas do projeto e do usuário (a escolha fica lembrada no aparelho); nos relatórios (detalhamento, Gantt e tabela "Andamento por período") e na lista de campo. Usa o prazo vigente; semanas de segunda a domingo; tarefas sem prazo ficam no grupo "Sem prazo".
 - **Configurações** (Gestor e Administrador): limite de tarefa crônica e justificativas de reagendamento — incluir, renomear, ordenar, inativar; as já usadas não podem ser excluídas e o histórico guarda o texto usado na época.
 - **Histórico**: criação, mudança de responsável, prazo, prioridade, status, comprovação, envio, devolução, conclusão e reabertura — com usuário, data e hora.
 - **Auditoria administrativa**: logins, falhas de login, criação/alteração de usuários e permissões, projetos.

@@ -2,11 +2,13 @@
 import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct } from '../core.js';
 import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
+import { readOrg, saveOrg, orgControl } from './periods.js';
 
 export async function view({ params, query, setQuery, render, state }) {
   const d = await api(`/users/${params.id}`);
   const u = d.user;
   const s = d.stats;
+  const org = readOrg(query);
   const tab = query.get('tab') || 'tarefas';
   const st = query.get('status') || '';
   const isMe = u.id === state.user.id;
@@ -22,12 +24,13 @@ export async function view({ params, query, setQuery, render, state }) {
   const tabContent = {
     tarefas: html`
       <div class="page-head" style="margin-bottom:10px"><div><h2>Tarefas de ${u.name.split(' ')[0]}</h2><p>${filtered.length} tarefa(s)${st ? ` · ${STATUS[st].label}` : ''}</p></div>
-        <div class="page-actions">${fieldListButton(`user=${u.id}`)}</div></div>
+        <div class="page-actions">${fieldListButton(`user=${u.id}${org ? `&org=${org}` : ''}`)}</div></div>
       <div class="chips" role="group" aria-label="Filtrar por status" style="margin-bottom:12px">
         <button class="chip" data-st="" aria-pressed="${!st}">Todas<span class="n">${d.tasks.length}</span></button>
         ${STATUS_ORDER.map(k => html`<button class="chip" data-st="${k}" aria-pressed="${st === k}" style="--c:${STATUS_COLOR[k]}"><span class="dot"></span>${STATUS[k].label}<span class="n">${s.by_status[k]}</span></button>`)}
       </div>
-      ${taskList(filtered, { showAssignee: false, empty: 'Nenhuma tarefa atribuída.' })}`,
+      <div class="result-count"><span></span>${orgControl(org)}</div>
+      ${taskList(filtered, { showAssignee: false, empty: 'Nenhuma tarefa atribuída.', groupBy: org })}`,
     equipe: d.team_summary ? html`
       <div class="kpis kpis-5" style="margin-bottom:14px">
         ${kpi({ label: 'Tarefas da equipe', value: d.team_summary.total, color: '#2A3D50' })}
@@ -40,7 +43,8 @@ export async function view({ params, query, setQuery, render, state }) {
         <ul class="rows">${[...d.team].sort((a, b) => (b.stats.on_time_pct ?? -1) - (a.stats.on_time_pct ?? -1)).map((m, i) => userRankRow({ ...m }, i))}</ul></section>
       <div class="page-head section" style="margin-bottom:10px"><div><h2>Tarefas da equipe</h2><p>${d.team_tasks.length} tarefa(s)</p></div>
         <div class="page-actions"><a class="btn btn-ghost" href="#/imprimir/relatorio?type=equipe&id=${u.id}&level=detalhado">${icon('print')}Relatório da equipe</a></div></div>
-      ${taskList(d.team_tasks)}` : '',
+      <div class="result-count"><span></span>${orgControl(org)}</div>
+      ${taskList(d.team_tasks, { groupBy: org })}` : '',
     criadas: taskList(d.created_tasks, { empty: 'Nenhuma tarefa criada para outros responsáveis.' }),
   };
 
@@ -109,7 +113,8 @@ export async function view({ params, query, setQuery, render, state }) {
     mount(root) {
       bindCommon(root);
       root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab }); render(); }));
-      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st }); render(); }));
+      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st, org }); render(); }));
+      root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => { saveOrg(b.dataset.org); setQuery({ tab, status: st, org: b.dataset.org }); render(); }));
       root.querySelectorAll(`a[href^="#/usuarios/${u.id}?status="]`).forEach(a => a.addEventListener('click', e => {
         e.preventDefault();
         setQuery({ tab: 'tarefas', status: new URLSearchParams(a.getAttribute('href').split('?')[1]).get('status') });

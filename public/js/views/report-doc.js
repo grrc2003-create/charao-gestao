@@ -3,6 +3,7 @@ import { html, raw, api, esc, icon, STATUS, STATUS_ORDER, PROOF, PRIORITY, fmtDa
 import { STATUS_COLOR } from './shared.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { ganttChart } from './gantt.js';
+import { periodKey, periodInfo } from './periods.js';
 
 const TYPE_TITLE = { projeto: 'Relatório de Projeto', usuario: 'Relatório Individual', equipe: 'Relatório de Gestor e Equipe', geral: 'Relatório Geral da Operação' };
 const LEVEL_TITLE = { resumo: 'Resumo', detalhado: 'Detalhado', completo: 'Completo com fotos' };
@@ -102,21 +103,30 @@ const stBadge = s => html`<span class="r-st" style="--c:${STATUS_COLOR[s]}">${ST
 
 const stageLabel = (t, multi) => (multi ? `${t.project_code} · ${t.stage_name || 'Geral'}` : (t.stage_name || 'Geral'));
 
-function taskTable(tasks, showProject, grouped) {
+const PERIOD_GROUPS = ['dia', 'semana', 'mes'];
+const ORG_LABEL = { classificacao: 'Por classificação', nenhum: 'Por status e prazo', dia: 'Por dia (prazo)', semana: 'Por semana (prazo)', mes: 'Por mês (prazo)' };
+// Rótulo do grupo conforme a organização escolhida (classificação ou período do prazo)
+const groupLabelFor = (group, multi) => PERIOD_GROUPS.includes(group)
+  ? t => periodInfo(periodKey(t.due_date, group), group).label
+  : group === 'classificacao' ? t => stageLabel(t, multi) : null;
+
+// labelOf: rótulo do grupo (ou null = lista única); hideStage: a classificação já é o próprio grupo
+function taskTable(tasks, showProject, labelOf, hideStage = false) {
   const cols = showProject ? 7 : 6;
+  const grouped = !!labelOf;
   let last = null;
   const groupRow = t => {
-    const label = stageLabel(t, showProject);
+    const label = grouped ? labelOf(t) : null;
     if (!grouped || label === last) return '';
     last = label;
-    const items = tasks.filter(x => stageLabel(x, showProject) === label);
+    const items = tasks.filter(x => labelOf(x) === label);
     const done = items.filter(x => x.eff_status === 'concluida').length;
     return html`<tr class="r-grouprow"><td colspan="${cols}"><span class="r-stage">${label}</span>
       <span class="muted small">${items.length} tarefa(s) · ${done} concluída(s) · ${Math.round((done / items.length) * 100)}%</span></td></tr>`;
   };
   return html`<table class="r-table r-tasks"><thead><tr><th>Código</th><th>Tarefa</th>${showProject ? html`<th>Projeto</th>` : ''}<th>Responsável</th><th>Prazo</th><th>Prior.</th><th>Status</th></tr></thead>
     <tbody>${tasks.map(t => html`${groupRow(t)}<tr><td class="mono nowrap">${t.code}</td>
-      <td>${t.parent_code ? html`<div class="muted small">↳ Subtarefa de ${t.parent_code}</div>` : ''}<b>${t.title}</b>${!grouped && t.stage_name && !t.stage_default ? html` <span class="r-stage r-stage-sm">${t.stage_name}</span>` : ''}${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
+      <td>${t.parent_code ? html`<div class="muted small">↳ Subtarefa de ${t.parent_code}</div>` : ''}<b>${t.title}</b>${!hideStage && t.stage_name && !t.stage_default ? html` <span class="r-stage r-stage-sm">${t.stage_name}</span>` : ''}${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
       ${showProject ? html`<td class="small">${t.project_code}</td>` : ''}
       <td class="small">${t.assignee_name || '—'}</td>
       <td class="nowrap small ${t.eff_status === 'atrasada' ? 'late' : ''}">${fmtDate(t.due_date)}${t.days_late ? html`<div class="small">${t.days_late}d atraso</div>` : ''}${t.reschedule_count ? html`<div class="r-resched">↻ ${t.reschedule_count}x · orig. ${fmtDate(t.original_due)}</div>` : ''}</td>
@@ -169,7 +179,7 @@ export async function view({ query }) {
           <dt>Emitido por</dt><dd>${r.issued_by}</dd>
           <dt>Data de referência</dt><dd>${fmtDate(r.reference_date)}</dd>
           <dt>Período (prazo)</dt><dd>${r.from || r.to ? `${fmtDate(r.from)} a ${fmtDate(r.to)}` : 'Todos'}</dd>
-          <dt>Organização</dt><dd>${r.group === 'classificacao' ? 'Por classificação' : 'Por status e prazo'}</dd>
+          <dt>Organização</dt><dd>${ORG_LABEL[r.group] || 'Por status e prazo'}</dd>
           ${r.stage_filter.length ? html`<dt>Classificações</dt><dd>${r.stage_filter.join(', ')}</dd>` : ''}
           ${!r.include_done ? html`<dt>Filtro</dt><dd>Sem concluídas</dd>` : ''}
         </dl>
@@ -213,6 +223,7 @@ export async function view({ query }) {
         ${statusBars(s.by_status, s.total)}
       </section>
 
+      ${r.by_period.length ? groupTable(`Andamento por ${{ dia: 'dia', semana: 'semana', mes: 'mês' }[r.group]} (pelo prazo)`, r.by_period, { dia: 'Dia', semana: 'Semana', mes: 'Mês' }[r.group]) : ''}
       ${r.group === 'classificacao' || r.by_stage.length > 1 ? groupTable('Andamento por classificação (Grupo/Local/Etapa)', r.by_stage, 'Classificação') : ''}
       ${multiProject ? groupTable('Andamento por projeto', r.by_project, 'Projeto') : ''}
       ${r.type !== 'usuario' ? groupTable('Desempenho por responsável', r.by_person, 'Responsável') : ''}
@@ -225,12 +236,12 @@ export async function view({ query }) {
 
       ${r.gantt && r.gantt_tasks.length ? html`<section class="r-section r-gantt">
         <h3 class="r-h">Cronograma das tarefas (Gantt) <span class="muted small">(${r.gantt_tasks.length})</span></h3>
-        ${ganttChart(r.gantt_tasks, { ref: r.reference_date, groupLabel: t => stageLabel(t, multiProject), showProject: multiProject })}
+        ${ganttChart(r.gantt_tasks, { ref: r.reference_date, groupLabel: groupLabelFor(r.group, multiProject) || (t => stageLabel(t, multiProject)), showProject: multiProject })}
       </section>` : ''}
 
       ${r.level !== 'resumo' ? html`<section class="r-section ${r.gantt ? 'r-after-gantt' : ''}">
-        <h3 class="r-h">Detalhamento das tarefas <span class="muted small">(${r.tasks.length})</span>${r.group === 'classificacao' ? html` <span class="muted small">· agrupadas por classificação</span>` : ''}</h3>
-        ${r.tasks.length ? taskTable(r.tasks, multiProject, r.group === 'classificacao') : html`<p class="muted">Sem tarefas no escopo.</p>`}
+        <h3 class="r-h">Detalhamento das tarefas <span class="muted small">(${r.tasks.length})</span>${groupLabelFor(r.group, multiProject) ? html` <span class="muted small">· ${ORG_LABEL[r.group].toLowerCase()}</span>` : ''}</h3>
+        ${r.tasks.length ? taskTable(r.tasks, multiProject, groupLabelFor(r.group, multiProject), r.group === 'classificacao') : html`<p class="muted">Sem tarefas no escopo.</p>`}
       </section>` : ''}
 
       ${r.level === 'completo' ? html`<section class="r-section r-break">
@@ -255,7 +266,7 @@ export async function view({ query }) {
     html: html`${printToolbar({
       back, title: `${title} — ${r.scope.label}`,
       extra: html`<label class="pt-opt">Nível <select id="lvl">${Object.entries(LEVEL_TITLE).map(([k, l]) => html`<option value="${k}" ${r.level === k ? 'selected' : ''}>${l}</option>`)}</select></label>
-        <label class="pt-opt">Organizar <select id="grp"><option value="classificacao" ${r.group === 'classificacao' ? 'selected' : ''}>Por classificação</option><option value="nenhum" ${r.group !== 'classificacao' ? 'selected' : ''}>Por status e prazo</option></select></label>
+        <label class="pt-opt">Organizar <select id="grp">${Object.entries(ORG_LABEL).map(([k, l]) => html`<option value="${k}" ${r.group === k ? 'selected' : ''}>${l}</option>`)}</select></label>
         <label class="pt-opt"><input type="checkbox" id="gnt" ${r.gantt ? 'checked' : ''}>Gantt</label>
         <a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}">${icon('edit')}Configurar</a>`,
     })}<div class="doc-stage">${doc}</div>`,

@@ -8,7 +8,10 @@ export async function view({ query }) {
   const d = await api('/field-list', { query: q });
   const c = d.context;
   const showNotesLines = q.lines === '1';
-  const grouped = q.group === '1';
+  // Organização: prioridade (padrão), classificação ou período do prazo. "group=1" (links antigos) = classificação.
+  const org = q.org || (q.group === '1' ? 'classificacao' : '');
+  const grouped = org === 'classificacao';
+  const byPeriod = ['dia', 'semana', 'mes'].includes(org);
   const stageKey = t => (c.show_project ? `${t.project_code} · ${t.stage_name || 'Geral'}` : (t.stage_name || 'Geral'));
 
   const item = (t, i) => html`<li class="fl-item">
@@ -40,8 +43,8 @@ export async function view({ query }) {
     const order = (a, b) => a.project_code.localeCompare(b.project_code) || (b.stage_default || 0) - (a.stage_default || 0)
       || (a.stage_order || 0) - (b.stage_order || 0) || (a.stage_name || '').localeCompare(b.stage_name || '');
     const groups = new Map();
-    for (const t of [...d.tasks].sort(order)) {
-      const k = stageKey(t);
+    for (const t of (byPeriod ? d.tasks : [...d.tasks].sort(order))) {
+      const k = byPeriod ? t.period_label : stageKey(t);
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(t);
     }
@@ -57,7 +60,9 @@ export async function view({ query }) {
     title: `Lista de campo · ${c.title}`,
     html: html`${printToolbar({
       back, title: `Lista de campo — ${c.title}`,
-      extra: html`${toggle('include_review', 'Em conferência', q.include_review !== '0')}${toggle('include_done', 'Concluídas', q.include_done === '1')}${toggle('lines', 'Linhas p/ anotação', showNotesLines)}${toggle('group', 'Agrupar por classificação', grouped)}`,
+      extra: html`${toggle('include_review', 'Em conferência', q.include_review !== '0')}${toggle('include_done', 'Concluídas', q.include_done === '1')}${toggle('lines', 'Linhas p/ anotação', showNotesLines)}
+        <label class="pt-opt">Organizar <select id="fl-org">${[['', 'Prioridade'], ['classificacao', 'Classificação'], ['dia', 'Dia (prazo)'], ['semana', 'Semana (prazo)'], ['mes', 'Mês (prazo)']]
+          .map(([k, l]) => html`<option value="${k}" ${org === k ? 'selected' : ''}>${l}</option>`)}</select></label>`,
     })}
     <div class="doc-stage">
       <article class="doc a4 field-doc">
@@ -76,13 +81,19 @@ export async function view({ query }) {
         <div class="fl-fill">
           <span>Data da visita: <i></i></span><span>Conferido por: <i></i></span><span>Assinatura: <i></i></span>
         </div>
-        ${d.tasks.length ? (grouped ? groupedList() : html`<ol class="fl-list">${d.tasks.map(item)}</ol>`) : html`<p class="muted" style="padding:20px 0">Nenhuma tarefa pendente neste contexto.</p>`}
+        ${d.tasks.length ? (grouped || byPeriod ? groupedList() : html`<ol class="fl-list">${d.tasks.map(item)}</ol>`) : html`<p class="muted" style="padding:20px 0">Nenhuma tarefa pendente neste contexto.</p>`}
         <div class="fl-legend">☐ Marque a caixa ao concluir no local. Registre fotos e descrição no aplicativo para enviar à conferência.</div>
       </article>
     </div>`,
     mount(root, ctx) {
       setPageFooter(`Charão · Lista de campo · ${c.title}`);
       bindPrintToolbar(root);
+      root.querySelector('#fl-org').addEventListener('change', e => {
+        const next = { ...q, org: e.target.value };
+        delete next.group;
+        ctx.setQuery(next);
+        ctx.render();
+      });
       root.querySelectorAll('[data-opt]').forEach(cb => cb.addEventListener('change', () => {
         const k = cb.dataset.opt;
         const next = { ...q };

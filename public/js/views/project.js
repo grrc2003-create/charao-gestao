@@ -1,10 +1,12 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
 import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
+import { readOrg, saveOrg, orgControl } from './periods.js';
 
 export async function view({ params, query, setQuery, render }) {
   const p = await api(`/projects/${params.id}`);
   const active = query.get('status') || '';
+  const org = readOrg(query);
   const stage = Number(query.get('stage')) || 0;
   const stageObj = p.stages.find(s => s.id === stage);
   const inStage = stage ? p.tasks.filter(t => t.stage_id === stage) : p.tasks;
@@ -78,7 +80,7 @@ export async function view({ params, query, setQuery, render }) {
       <section class="section" id="proj-tasks">
         <div class="page-head" style="margin-bottom:10px">
           <div><h2>Tarefas do projeto</h2><p>${tasks.length} de ${p.tasks.length} tarefas${stageObj ? ` · classificação: ${stageObj.name}` : ''}${active ? ` · filtro: ${STATUS[active].label}` : ''}</p></div>
-          <div class="page-actions">${fieldListButton(`project=${p.id}${stage ? `&stage=${stage}` : ''}`)}</div>
+          <div class="page-actions">${fieldListButton(`project=${p.id}${stage ? `&stage=${stage}` : ''}${org ? `&org=${org}` : ''}`)}</div>
         </div>
         ${p.stages.length > 1 ? html`<div class="filters-adv" style="display:grid;grid-template-columns:minmax(0,320px);margin-bottom:10px">
           <select id="stage-filter" aria-label="Filtrar por classificação"><option value="">Todas as classificações</option>
@@ -87,12 +89,18 @@ export async function view({ params, query, setQuery, render }) {
           <button class="chip" data-st="" aria-pressed="${!active}">Todas<span class="n">${inStage.length}</span></button>
           ${STATUS_ORDER.map(s => html`<button class="chip" data-st="${s}" aria-pressed="${active === s}" style="--c:${STATUS_COLOR[s]}"><span class="dot"></span>${STATUS[s].label}<span class="n">${stageCounts[s]}</span></button>`)}
         </div>
-        ${taskList(tasks, { showProject: false })}
+        <div class="result-count" style="margin-top:-2px"><span></span>${orgControl(org)}</div>
+        ${taskList(tasks, { showProject: false, groupBy: org })}
       </section>
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
-      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '' }); render(); }));
+      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
+      root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {
+        saveOrg(b.dataset.org);
+        setQuery({ status: active, stage: stage || '', org: b.dataset.org });
+        render().then(() => document.getElementById('proj-tasks')?.scrollIntoView({ block: 'start' }));
+      }));
       const goStage = v => { setQuery({ status: active, stage: v }); render().then(() => document.getElementById('proj-tasks')?.scrollIntoView({ block: 'start' })); };
       root.querySelector('#stage-filter')?.addEventListener('change', e => goStage(e.target.value));
       root.querySelectorAll('[data-stage]').forEach(b => b.addEventListener('click', () => goStage(b.dataset.stage)));

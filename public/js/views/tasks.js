@@ -1,5 +1,6 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
 import { pageHead, taskList, bindCommon, STATUS_COLOR } from './shared.js';
+import { readOrg, saveOrg, orgControl } from './periods.js';
 
 const DUE = { '': 'Qualquer prazo', vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo', reagendadas: 'Reagendadas', ja_atrasadas: 'Ficaram atrasadas alguma vez', corretivas: 'Repactuadas após vencer', cronicas: 'Crônicas (muitos reagendamentos)', concluidas_atraso: 'Concluídas com atraso' };
 
@@ -13,6 +14,7 @@ export async function view({ state, query, setQuery }) {
     due: query.get('due') || '',
     nivel: query.get('nivel') || '',
     stage: query.get('stage') || '',
+    org: readOrg(query),
   };
   // Contagem por status sem o filtro de status (para os chips)
   const [tasks, base] = await Promise.all([
@@ -61,14 +63,15 @@ export async function view({ state, query, setQuery }) {
           ${advCount || f.q || f.status.length ? html`<button type="button" class="btn btn-ghost btn-sm" id="clear">${icon('x')}Limpar</button>` : ''}
         </div>
       </form>
-      <div class="result-count"><span>${tasks.length} ${tasks.length === 1 ? 'tarefa' : 'tarefas'}</span></div>
-      ${taskList(tasks)}
+      <div class="result-count"><span>${tasks.length} ${tasks.length === 1 ? 'tarefa' : 'tarefas'}${f.org ? ' · organizadas pelo prazo' : ''}</span>${orgControl(f.org)}</div>
+      ${taskList(tasks, { groupBy: f.org })}
       <a class="fab" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}" aria-label="Nova tarefa">${icon('plus')}</a>`,
     mount(root, ctx) {
       bindCommon(root);
       const form = root.querySelector('#filters');
       form.addEventListener('submit', e => e.preventDefault());
       const apply = patch => { setQuery({ ...f, ...patch }); ctx.render(); };
+      root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => { saveOrg(b.dataset.org); apply({ org: b.dataset.org }); }));
       let timer;
       const qInput = form.q;
       qInput.addEventListener('input', () => {

@@ -298,6 +298,23 @@ async function main() {
   ok((await ricardo('GET', `/tasks/${tChr}`)).data.chronic === false, 'com limite 4, a tarefa reagendada 3x deixa de ser crônica');
   await ricardo('PUT', '/settings/general', { chronic_reschedule_threshold: 3 });
 
+  console.log('Organização por dia, semana e mês');
+  const npP = (await ricardo('POST', '/projects', { name: 'Obra Períodos', client: 'Cliente Z' })).data.id;
+  for (const [t, d] of [['Seg', '2099-06-01'], ['Dom', '2099-06-07'], ['Seg seguinte', '2099-06-08'], ['Julho', '2099-07-02'], ['Sem prazo', '']]) {
+    await ricardo('POST', '/tasks', { project_id: npP, title: t, description: t, due_date: d || undefined });
+  }
+  const rw = (await ricardo('GET', `/reports?type=projeto&id=${npP}&level=detalhado&group=semana`)).data;
+  ok(rw.by_period.map(g => g.key).join() === '2099-06-01,2099-06-08,2099-06-29,9999', `semanas de segunda a domingo (${rw.by_period.map(g => g.key).join()})`);
+  ok(rw.by_period[0].summary.total === 2 && rw.by_period.at(-1).label === 'Sem prazo', 'agrupamento semanal com "Sem prazo" por último');
+  ok(rw.tasks.map(t => t.due_date || '-').join() === '2099-06-01,2099-06-07,2099-06-08,2099-07-02,-', 'tarefas em ordem cronológica do prazo');
+  const rm = (await ricardo('GET', `/reports?type=projeto&id=${npP}&level=resumo&group=mes`)).data;
+  ok(rm.by_period.map(g => g.label).join('|') === 'Junho de 2099|Julho de 2099|Sem prazo' && rm.by_period[0].summary.total === 3, 'agrupamento mensal');
+  const rd = (await ricardo('GET', `/reports?type=projeto&id=${npP}&level=resumo&group=dia`)).data;
+  ok(rd.by_period.length === 5 && rd.by_period[0].label.startsWith('Seg,'), 'agrupamento diário com dia da semana');
+  ok((await ricardo('GET', `/reports?type=projeto&id=${npP}&level=resumo&group=quinzena`)).status === 400, 'organização inválida é recusada');
+  const flw = (await ricardo('GET', `/field-list?project=${npP}&org=semana`)).data;
+  ok(flw.context.org === 'semana' && flw.tasks[0].period_label.startsWith('Semana de 01/06') && flw.tasks.at(-1).period_label === 'Sem prazo', 'lista de campo organizada por semana');
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

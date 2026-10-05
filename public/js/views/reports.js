@@ -21,7 +21,10 @@ export async function view({ state, query }) {
   const init = { type: query.get('type') || 'projeto', id: query.get('id') || '', level: query.get('level') || 'detalhado',
     group: query.get('group') || 'classificacao', gantt: query.get('gantt') !== '0' };
   const GROUPS = [['classificacao', 'Agrupar por classificação', 'Tarefas organizadas por Grupo/Local/Etapa, com andamento de cada uma'],
-    ['nenhum', 'Por status e prazo', 'Lista única: atrasadas e pendentes primeiro']];
+    ['nenhum', 'Por status e prazo', 'Lista única: atrasadas e pendentes primeiro'],
+    ['dia', 'Por dia', 'Tarefas agrupadas pelo dia do prazo'],
+    ['semana', 'Por semana', 'Semanas de segunda a domingo, pelo prazo'],
+    ['mes', 'Por mês', 'Tarefas agrupadas pelo mês do prazo']];
   const opt = (v, l) => html`<option value="${v}" ${String(init.id) === String(v) ? 'selected' : ''}>${l}</option>`;
   const scopes = {
     projeto: meta.projects.map(p => opt(p.id, `${p.code} · ${p.name}`)),

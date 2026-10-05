@@ -2,13 +2,13 @@
 import { all, one } from '../db.js';
 import { badRequest, notFound, oneOf, intOrNull, date } from '../lib/http.js';
 import { canAccessProject, canSeeUser, teamIds } from '../lib/permissions.js';
-import { summarize, userStats, today, monthlyTrend, localDate } from './metrics.js';
+import { summarize, userStats, today, monthlyTrend, localDate, PERIODS, groupByPeriod, periodKey, periodLabel, byDue } from './metrics.js';
 import { listVisible } from './tasks.js';
 import { getSetting } from './settings.js';
 
 export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral'];
 export const LEVELS = ['resumo', 'detalhado', 'completo'];
-export const GROUPINGS = ['nenhum', 'classificacao'];
+export const GROUPINGS = ['nenhum', 'classificacao', ...PERIODS];
 
 // Ordenação por classificação: projeto → ordem da classificação ("Geral" primeiro) → prazo
 const byStage = (a, b) => a.project_code.localeCompare(b.project_code)
@@ -116,7 +116,9 @@ export function buildReport(ctx, q) {
     stageNames = [...new Set(tasks.map(t => t.stage_name))];
     if (!stageNames.length) stageNames = all(`SELECT name FROM project_stages WHERE id IN (${stageFilter.map(() => '?').join(',')})`, ...stageFilter).map(r => r.name);
   }
+  const byPeriod = PERIODS.includes(group);
   if (group === 'classificacao') tasks = [...tasks].sort(byStage);
+  else if (byPeriod) tasks = [...tasks].sort(byDue);
 
   const summary = summarize(tasks);
   const byProject = groupBy(tasks, t => t.project_id, t => `${t.project_code} · ${t.project_name}`);
@@ -148,10 +150,11 @@ export function buildReport(ctx, q) {
   return {
     type, level, from, to, include_done: includeDone, group, gantt: withGantt, stage_filter: stageNames,
     by_stage: groupByStage(tasks, type !== 'projeto'),
+    by_period: byPeriod ? groupByPeriod(tasks, group) : [],
     reschedules: rescheduleSummary,
     trend: monthlyTrend(tasks, today(), 6),
     chronic_min: getSetting('chronic_reschedule_threshold'),
-    gantt_tasks: withGantt ? (group === 'classificacao' ? tasks : [...tasks].sort(byStage)).map(ganttRow) : [],
+    gantt_tasks: withGantt ? (group === 'classificacao' || byPeriod ? tasks : [...tasks].sort(byStage)).map(ganttRow) : [],
     issued_at: new Date().toISOString(),
     issued_by: ctx.user.name,
     reference_date: today(),
@@ -194,17 +197,20 @@ export function fieldList(ctx, q) {
   }
   if (!includeDone) tasks = tasks.filter(t => t.status !== 'concluida');
   if (!includeReview) tasks = tasks.filter(t => t.status !== 'aguardando_conferencia');
+  const org = PERIODS.includes(q.org) ? q.org : null;
   const order = { atrasada: 0, em_andamento: 1, aberta: 2, aguardando_conferencia: 3, concluida: 4 };
   const prio = { urgente: 0, alta: 1, media: 2, baixa: 3 };
   tasks.sort((a, b) => order[a.eff_status] - order[b.eff_status] || prio[a.priority] - prio[b.priority]
     || (a.due_date || '9999').localeCompare(b.due_date || '9999'));
+  if (org) { tasks.sort(byDue); context.org = org; }
   return {
     context,
     issued_at: new Date().toISOString(),
     issued_by: ctx.user.name,
     summary: summarize(tasks),
     tasks: tasks.map(t => ({
-      id: t.id, code: t.code, title: t.title, parent_code: t.parent_code, reschedule_count: t.reschedule_count, original_due: t.original_due,
+      id: t.id, code: t.code, title: t.title, parent_code: t.parent_code,
+      ...(org ? { period_key: periodKey(t.due_date, org), period_label: periodLabel(periodKey(t.due_date, org), org) } : {}), reschedule_count: t.reschedule_count, original_due: t.original_due,
       stage_id: t.stage_id, stage_name: t.stage_name, stage_order: t.stage_order, stage_default: t.stage_default,
       short: t.field_summary || shorten(t.description),
       project_code: t.project_code, project_name: t.project_name,

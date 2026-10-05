@@ -197,3 +197,44 @@ export function behaviorSummary(s, assigned, selfCreated) {
   if (s.in_progress + s.open > 8) lines.push('Carga elevada de tarefas abertas — avaliar redistribuição.');
   return lines;
 }
+
+// ---------- Organização por período (dia / semana / mês do prazo vigente) ----------
+export const PERIODS = ['dia', 'semana', 'mes'];
+const cap = s => s[0].toUpperCase() + s.slice(1);
+const MONTH_NAMES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const ddmm = d => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+
+// Semana de segunda a domingo: retorna a segunda-feira
+export function weekStart(d) {
+  const dow = new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay();
+  return addDays(d, dow === 0 ? -6 : 1 - dow);
+}
+
+export function periodKey(date, kind) {
+  if (!date) return '9999';
+  if (kind === 'dia') return date;
+  if (kind === 'semana') return weekStart(date);
+  return date.slice(0, 7);
+}
+
+export function periodLabel(key, kind) {
+  if (key === '9999') return 'Sem prazo';
+  if (kind === 'dia') return `${cap(WEEKDAYS[new Date(Date.parse(key + 'T00:00:00Z')).getUTCDay()])}, ${ddmm(key)}/${key.slice(0, 4)}`;
+  if (kind === 'semana') { const end = addDays(key, 6); return `Semana de ${ddmm(key)} a ${ddmm(end)}/${end.slice(0, 4)}`; }
+  return `${cap(MONTH_NAMES[Number(key.slice(5, 7)) - 1])} de ${key.slice(0, 4)}`;
+}
+
+// Ordenação cronológica pelo prazo; sem prazo por último
+export const byDue = (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999') || a.code.localeCompare(b.code);
+
+export function groupByPeriod(tasks, kind, ref = today()) {
+  const m = new Map();
+  for (const t of [...tasks].sort(byDue)) {
+    const k = periodKey(t.due_date, kind);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(t);
+  }
+  const cur = periodKey(ref, kind);
+  return [...m].map(([key, ts]) => ({ key, label: periodLabel(key, kind), current: key === cur, summary: summarize(ts, ref) }));
+}

@@ -693,3 +693,19 @@ table.data.dl-table td.num, table.data.dl-table th.num { text-align: right; whit
 .done-late { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: #9E2B20; background: var(--st-atrasada-bg);
   border: 1px solid #F0C3BD; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .done-late::before { content: "!"; width: 13px; height: 13px; border-radius: 50%; background: var(--st-atrasada); color: #fff; font-size: 9.5px; display: inline-grid; place-items: center; }
+
+/* Organização por período */
+.org-control { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 9px; padding: 3px; }
+.org-label { font-size: 12px; color: var(--muted); font-weight: 600; padding: 0 6px 0 4px; }
+.org-btn { border: 0; background: none; font: 600 13px var(--font); color: var(--ink-2); padding: 6px 11px; border-radius: 6px; cursor: pointer; min-height: 32px; }
+.org-btn[aria-pressed="true"] { background: var(--navy); color: #fff; }
+.period-groups { display: grid; gap: 18px; }
+.period-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 2px 8px; margin-bottom: 8px; border-bottom: 2px solid var(--line-strong); }
+.period-head h3 { font-size: 15px; color: var(--navy-900); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.period-hint { text-transform: none; font-size: 11.5px; font-weight: 700; color: #fff; background: var(--orange-700); border-radius: 99px; padding: 1px 8px; }
+.period-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.period-meta b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.period-bar { width: 180px; max-width: 100%; }
+.period-current .period-head { border-bottom-color: var(--orange); }
+.period-past .period-head h3 { color: var(--ink-2); }
+@media (max-width: 560px) { .period-bar { width: 100%; } .org-control { width: 100%; justify-content: space-between; } .org-btn { flex: 1; padding: 6px 4px; } }

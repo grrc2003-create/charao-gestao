@@ -1,4 +1,5 @@
 // Blocos visuais reutilizados por várias telas (KPIs, gráficos, listas de tarefas, projetos e pessoas).
+import { groupTasks } from './periods.js';
 import {
   html, raw, STATUS, STATUS_ORDER, PROJECT_STATUS, statusBadge, priorityTag, avatar, progress, icon, fmtPct, dueInfo, fmtDate, esc,
 } from '../core.js';
@@ -99,9 +100,24 @@ export const userRankRow = (u, i) => html`<li><a class="row-link rank" href="#/u
 export const lateDoneTag = t => (t.status === 'concluida' && t.on_time === false
   ? html`<span class="done-late" title="Entregue ${t.days_late} dia(s) após o prazo de ${fmtDate(t.due_date)}">com ${t.days_late}d de atraso</span>` : '');
 
-// Lista de tarefas: tabela no desktop + cards no celular
-export function taskList(tasks, { showProject = true, showAssignee = true, empty = 'Nenhuma tarefa encontrada.' } = {}) {
+// Lista de tarefas: tabela no desktop + cards no celular. groupBy = 'dia' | 'semana' | 'mes' organiza por período do prazo.
+export function taskList(tasks, { showProject = true, showAssignee = true, empty = 'Nenhuma tarefa encontrada.', groupBy = '' } = {}) {
   if (!tasks.length) return html`<div class="card empty-state"><p>${empty}</p></div>`;
+  if (groupBy) {
+    return html`<div class="period-groups">${groupTasks(tasks, groupBy).map(g => {
+      const by = Object.fromEntries(STATUS_ORDER.map(s => [s, g.items.filter(t => t.eff_status === s).length]));
+      return html`<section class="period-group period-${g.rel}">
+        <header class="period-head">
+          <div><h3>${g.label}${g.hint ? html` <span class="period-hint">${g.hint}</span>` : ''}</h3>
+            <div class="period-meta"><span><b>${g.items.length}</b> tarefa(s)</span>
+              ${by.atrasada ? html`<span class="due-late"><b>${by.atrasada}</b> atrasada(s)</span>` : ''}
+              ${by.concluida ? html`<span><b>${by.concluida}</b> concluída(s)</span>` : ''}</div></div>
+          <div class="period-bar">${stackBar(by)}</div>
+        </header>
+        ${taskList(g.items, { showProject, showAssignee })}
+      </section>`;
+    })}</div>`;
+  }
   const cards = html`<div class="task-cards only-mobile">${tasks.map(t => {
     const due = dueInfo(t);
     return html`<a class="task-card st-${t.eff_status}" href="#/tarefas/${t.id}">

@@ -97,6 +97,12 @@ export function canSeePersonalData(ctx, userId) {
   return canSeeUser(ctx, userId);
 }
 
+// Configurações gerais (ex.: justificativas de reagendamento): Gestor e Administrador
+export const canManageSettings = user => isAdmin(user) || user.role === 'gestor';
+export function requireSettingsManager(user) {
+  if (!canManageSettings(user)) throw forbidden('Apenas gestores e administradores alteram as configurações.');
+}
+
 export function requireAdmin(user) {
   if (!isAdmin(user)) throw forbidden('Apenas administradores podem realizar esta ação.');
 }

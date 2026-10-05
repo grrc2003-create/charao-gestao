@@ -1,7 +1,7 @@
-// Configurações gerais do sistema. Hoje: justificativas de reagendamento (válidas para todos os projetos).
+// Configurações gerais do sistema (Gestor e Administrador). Hoje: justificativas de reagendamento (válidas para todos os projetos).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, intOrNull } from '../lib/http.js';
-import { requireAdmin } from '../lib/permissions.js';
+import { requireSettingsManager } from '../lib/permissions.js';
 import { audit } from './audit.js';
 
 export function listReasons({ includeInactive = false } = {}) {
@@ -18,7 +18,7 @@ export function activeReason(id) {
 
 // Sincroniza a lista editada em Configurações: cria, renomeia, ordena, ativa/inativa e remove (somente nunca usadas).
 export function saveReasons(ctx, input, ip) {
-  requireAdmin(ctx.user);
+  requireSettingsManager(ctx.user);
   if (!Array.isArray(input)) throw badRequest('Lista de justificativas inválida.');
   const current = listReasons({ includeInactive: true });
   const byId = new Map(current.map(r => [r.id, r]));

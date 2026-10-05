@@ -213,7 +213,12 @@ async function main() {
   console.log('Reagendamento de prazos e Configurações');
   const reasons = (await marcos('GET', '/settings/reasons')).data;
   ok(reasons.length >= 5 && reasons.every(r => r.active), 'justificativas pré-cadastradas disponíveis a todos os usuários');
-  ok((await marcos('PUT', '/settings/reasons', { reasons: [] })).status === 403, 'somente administrador altera as justificativas');
+  ok((await marcos('PUT', '/settings/reasons', { reasons: [] })).status === 403, 'colaborador não altera as justificativas');
+  ok((await marcos('GET', '/meta')).data.can.manage_settings === false && (await ricardo('GET', '/meta')).data.can.manage_settings === true, 'Configurações liberada para gestor e oculta para colaborador');
+  const gAll = (await ricardo('GET', '/settings/reasons?all=1')).data;
+  const gSave = await ricardo('PUT', '/settings/reasons', { reasons: [...gAll, { name: 'Embargo / fiscalização' }] });
+  ok(gSave.status === 200 && gSave.data.some(r => r.name === 'Embargo / fiscalização'), 'gestor altera as justificativas');
+  ok((await ana('GET', '/audit')).data.some(a => a.action === 'Justificativas de reagendamento atualizadas' && a.actor_name === 'Ricardo Menezes'), 'alteração do gestor registrada na auditoria');
   const rTask = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Prazo a reagendar', description: 'Teste de reagendamento', assignee_id: 4, due_date: '2099-03-10' })).data.id;
   ok((await ricardo('PATCH', `/tasks/${rTask}`, { due_date: '2099-03-20' })).status === 400, 'alterar prazo sem justificativa é recusado');
   ok((await ricardo('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-03-20' })).status === 400, 'reagendar exige justificativa');

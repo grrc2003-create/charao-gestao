@@ -30,7 +30,8 @@ export async function list({ state }) {
         title: 'Usuários',
         sub: isAdmin ? 'Gerencie logins individuais, perfis (Administrador, Gestor, Colaborador), hierarquia e restrição por projeto.'
           : 'Você visualiza o próprio perfil e os integrantes da equipe sob sua gestão.',
-        actions: isAdmin ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a><a class="btn btn-ghost" href="#/auditoria">${icon('shield')}Auditoria</a><a class="btn btn-accent" href="#/usuarios/novo">${icon('plus')}Novo usuário</a>` : '',
+        actions: isAdmin ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a><a class="btn btn-ghost" href="#/auditoria">${icon('shield')}Auditoria</a><a class="btn btn-accent" href="#/usuarios/novo">${icon('plus')}Novo usuário</a>`
+          : state.meta.can.manage_settings ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a>` : '',
       })}
       ${['admin', 'gestor', 'colaborador'].filter(r => byRole(r).length).map(r => html`<section class="card section">
         <div class="card-head"><h2>${ROLE[r]}es</h2><span class="sub">${byRole(r).length}</span></div>

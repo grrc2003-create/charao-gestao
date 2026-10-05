@@ -1,4 +1,4 @@
-// Configurações gerais (administrador). Organizada em seções para receber novos cadastros no futuro.
+// Configurações gerais (Gestor e Administrador). Organizada em seções para receber novos cadastros no futuro.
 import { html, api, icon } from '../core.js';
 import { toast } from '../ui.js';
 import { pageHead } from './shared.js';
@@ -12,7 +12,7 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
     title="${r.use_count ? 'Já usada: inative em vez de excluir' : 'Excluir'}">✕</button></li>`;
 
 export async function view({ state }) {
-  if (!state.meta.can.manage_settings) throw new Error('Apenas administradores acessam as configurações.');
+  if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
   const reasons = await api('/settings/reasons', { query: { all: '1' } });
 
   return {

@@ -240,6 +240,27 @@ export function seedDemo() {
     // Início previsto: alguns dias antes do prazo (alimenta o Gantt)
     run(`UPDATE tasks SET start_date = date(due_date, '-' || (4 + (id % 7)) || ' days') WHERE due_date IS NOT NULL`);
 
+    // Reagendamentos de exemplo (cadeia de prazos terminando no prazo atual)
+    const reason = n => one('SELECT id, name FROM reschedule_reasons WHERE name LIKE ?', `${n}%`);
+    const resch = [
+      ['Executar impermeabilização', [[-12, 'Condições climáticas', 'Chuva forte impediu a aplicação da manta.'], [-6, 'Atraso na entrega de material', 'Manta asfáltica entregue com 5 dias de atraso.']]],
+      ['Montagem das vigas de cobertura', [[-9, 'Problema com equipamento', 'Guindaste em manutenção.']]],
+      ['Ajustar layout do balcão', [[-10, 'Aguardando liberação', 'Cliente solicitou nova opção de acabamento.']]],
+      ['Instalação de piso vinílico', [[-2, 'Dependência de outra tarefa', 'Contrapiso ainda em cura.']]],
+    ];
+    for (const [title, steps] of resch) {
+      const tk = one('SELECT id, due_date, assignee_id FROM tasks WHERE title LIKE ?', `${title}%`);
+      const dues = steps.map(([off]) => addDays(tk.due_date, off));
+      steps.forEach(([, rn, note], i) => {
+        const r = reason(rn);
+        const oldDue = dues[i], newDue = dues[i + 1] || tk.due_date;
+        const when = ts(Math.min(-1, (Date.parse(oldDue) - Date.parse(T)) / 86400e3 - 1), 17);
+        run(`INSERT INTO task_reschedules (task_id, old_due, new_due, reason_id, reason_name, note, user_id, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+          tk.id, oldDue, newDue, r.id, r.name, note, 2, when);
+        hist(tk.id, 2, `Prazo reagendado (${i + 1}º reagendamento)`, `${oldDue.split('-').reverse().join('/')} → ${newDue.split('-').reverse().join('/')} · Justificativa: ${r.name} · ${note}`, when);
+      });
+    }
+
     run(`INSERT INTO audit_log (actor_id, entity, entity_id, action, details) VALUES (1, 'system', NULL, 'Base de demonstração criada', NULL)`);
   });
 

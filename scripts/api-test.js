@@ -121,8 +121,9 @@ async function main() {
 
   console.log('Alterações rastreadas');
   const t2 = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Prazo', description: 'Teste de prazo', assignee_id: 5, due_date: '2099-02-01' })).data.id;
-  const upd = (await ricardo('PATCH', `/tasks/${t2}`, { due_date: '2099-03-01', assignee_id: 4 })).data;
-  ok(upd.history.some(h => h.action === 'Prazo alterado' && h.details.includes('01/03/2099')), 'mudança de prazo registrada');
+  const reason1 = (await ricardo('GET', '/settings/reasons')).data[0].id;
+  const upd = (await ricardo('PATCH', `/tasks/${t2}`, { due_date: '2099-03-01', assignee_id: 4, reschedule_reason_id: reason1 })).data;
+  ok(upd.history.some(h => h.action.startsWith('Prazo reagendado') && h.details.includes('01/03/2099')), 'mudança de prazo registrada');
   ok(upd.history.some(h => h.action === 'Responsável alterado'), 'mudança de responsável registrada');
   ok((await ricardo('PATCH', `/tasks/${t2}`, { assignee_id: 6 })).status === 400, 'responsável sem acesso ao projeto é recusado');
 
@@ -208,6 +209,39 @@ async function main() {
   ok((await juliana('GET', `/tasks?stage=${fund}`)).data.length === 0, 'filtro por classificação respeita restrição de projeto');
   const fl = (await ricardo('GET', `/field-list?project=${np.data.id}&stage=${fund}`)).data;
   ok(fl.context.stage === 'Fundações' && fl.tasks.length === 3 && fl.tasks.every(t => t.stage_name === 'Fundações'), 'lista de campo por classificação');
+
+  console.log('Reagendamento de prazos e Configurações');
+  const reasons = (await marcos('GET', '/settings/reasons')).data;
+  ok(reasons.length >= 5 && reasons.every(r => r.active), 'justificativas pré-cadastradas disponíveis a todos os usuários');
+  ok((await marcos('PUT', '/settings/reasons', { reasons: [] })).status === 403, 'somente administrador altera as justificativas');
+  const rTask = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Prazo a reagendar', description: 'Teste de reagendamento', assignee_id: 4, due_date: '2099-03-10' })).data.id;
+  ok((await ricardo('PATCH', `/tasks/${rTask}`, { due_date: '2099-03-20' })).status === 400, 'alterar prazo sem justificativa é recusado');
+  ok((await ricardo('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-03-20' })).status === 400, 'reagendar exige justificativa');
+  ok((await marcos('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-03-20', reason_id: reasons[0].id })).status === 403, 'responsável colaborador não reagenda (regra de edição mantida)');
+  let rt = (await ricardo('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-03-20', reason_id: reasons[1].id, note: 'Fornecedor atrasou' })).data;
+  ok(rt.due_date === '2099-03-20' && rt.reschedule_count === 1 && rt.original_due === '2099-03-10', 'reagendamento registrado (contagem e prazo original)');
+  rt = (await ricardo('PATCH', `/tasks/${rTask}`, { due_date: '2099-04-02', reschedule_reason_id: reasons[0].id })).data;
+  ok(rt.reschedule_count === 2 && rt.reschedules.length === 2 && rt.reschedules[1].old_due === '2099-03-20', 'reagendamento também pela edição da tarefa');
+  ok(rt.history.some(h => h.action === 'Prazo reagendado (2º reagendamento)' && h.details.includes(reasons[0].name)), 'histórico registra o reagendamento com a justificativa');
+  const outro = reasons.find(r => /outro/i.test(r.name));
+  ok((await ricardo('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-04-05', reason_id: outro.id })).status === 400, '"Outro motivo" exige observação');
+  const noDue = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Sem prazo', description: 'x' })).data.id;
+  ok((await ricardo('PATCH', `/tasks/${noDue}`, { due_date: '2099-05-01' })).data.reschedule_count === 0, 'definir o primeiro prazo não é reagendamento');
+  ok((await ricardo('GET', '/tasks?due=reagendadas')).data.some(t => t.id === rTask), 'filtro "reagendadas"');
+  const rr = (await ricardo('GET', '/reports?type=projeto&id=1&level=detalhado')).data;
+  ok(rr.summary.rescheduled >= 1 && rr.reschedules.reasons.length >= 2 && rr.reschedules.tasks.find(t => t.id === rTask).entries.length === 2, 'relatório traz reagendamentos e motivos');
+  ok(rr.gantt_tasks.find(t => t.id === rTask).original_due === '2099-03-10', 'Gantt recebe o prazo original');
+  // Configurações (administrador)
+  const all1 = (await ana('GET', '/settings/reasons?all=1')).data;
+  const used = all1.find(r => r.id === reasons[1].id);
+  ok(used.use_count >= 1 && all1.some(r => r.use_count === 0), 'contagem de uso da justificativa');
+  ok((await ana('PUT', '/settings/reasons', { reasons: all1.filter(r => r.id !== used.id) })).status === 400, 'justificativa já usada não pode ser excluída');
+  const edited = [{ ...all1[0], name: 'Chuva / clima' }, { ...used, active: false }, ...all1.slice(2).filter(r => r.id !== used.id), { name: 'Interdição da via de acesso' }];
+  const saved = await ana('PUT', '/settings/reasons', { reasons: edited });
+  ok(saved.status === 200 && saved.data.some(r => r.name === 'Interdição da via de acesso') && !saved.data.find(r => r.id === used.id).active, 'renomear, inativar e incluir justificativas');
+  ok(!(await marcos('GET', '/settings/reasons')).data.some(r => r.id === used.id), 'justificativa inativa some da lista suspensa');
+  ok((await ricardo('GET', `/tasks/${rTask}`)).data.reschedules[0].reason_name === reasons[1].name, 'histórico preserva o texto original da justificativa');
+  ok((await ricardo('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-04-09', reason_id: used.id })).status === 400, 'justificativa inativa não pode ser usada');
 
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });

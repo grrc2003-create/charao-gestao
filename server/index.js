@@ -15,6 +15,7 @@ import * as Tasks from './services/tasks.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
+import * as Settings from './services/settings.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { summarize, userStats, today, daysBetween } from './services/metrics.js';
@@ -163,6 +164,7 @@ api.get('/api/meta', (req, res, { ctx }) => {
       manage_users: isAdmin(ctx.user),
       manage_projects: isAdmin(ctx.user) || ctx.user.role === 'gestor',
       view_audit: isAdmin(ctx.user),
+      manage_settings: isAdmin(ctx.user),
     },
   });
 });
@@ -208,6 +210,7 @@ api.get('/api/tasks', (req, res, { ctx, query }) => {
       '7d': within(7),
       '30d': within(30),
       sem_prazo: t => !t.due_date,
+      reagendadas: t => t.reschedule_count > 0,
     }[due];
     if (f) tasks = tasks.filter(f);
   }
@@ -229,6 +232,10 @@ api.post('/api/tasks/:id/files', (req, res, { ctx, params, body }) => {
 });
 api.delete('/api/tasks/:id/files/:fid', (req, res, { ctx, params }) => {
   Tasks.removeFile(ctx, intOrNull(params.id), intOrNull(params.fid));
+  send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
+});
+api.post('/api/tasks/:id/reschedule', (req, res, { ctx, params, body }) => {
+  Tasks.rescheduleTask(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
 api.post('/api/tasks/:id/actions/:action', (req, res, { ctx, params, body }) => {
@@ -269,6 +276,12 @@ api.get('/api/audit', (req, res, { user }) => {
   requireAdmin(user);
   send(res, 200, listAudit());
 });
+
+// ---------- Configurações ----------
+// Justificativas de reagendamento: todos os usuários leem as ativas (lista suspensa); só administradores editam
+api.get('/api/settings/reasons', (req, res, { ctx, query }) =>
+  send(res, 200, Settings.listReasons({ includeInactive: query.get('all') === '1' && isAdmin(ctx.user) })));
+api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
 
 // ---------- Relatórios ----------
 api.get('/api/reports', (req, res, { ctx, query }) => send(res, 200, Reports.buildReport(ctx, Object.fromEntries(query))));

@@ -61,6 +61,14 @@ export async function view({ params, query, state, navigate }) {
             <div class="field"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
               <span class="hint">Opcional. Usado no cronograma (Gantt) dos relatórios.</span></div>
           </div>
+          ${editing && t.due_date ? html`<div class="notice notice-proto" id="resched-fields" hidden>
+            <div style="display:grid;gap:10px;width:100%">
+              <span>${icon('reschedule')} <b>Reagendamento</b> — o prazo atual é ${t.due_date.split('-').reverse().join('/')}${t.reschedule_count ? ` (já reagendada ${t.reschedule_count}x)` : ''}. Informe a justificativa.</span>
+              <div class="field"><label class="req" for="reschedule_reason_id">Justificativa</label>
+                <select id="reschedule_reason_id" name="reschedule_reason_id"><option value="">Selecione a justificativa</option></select></div>
+              <div class="field"><label for="reschedule_note">Observação do reagendamento</label>
+                <textarea id="reschedule_note" name="reschedule_note" rows="2" maxlength="1000" placeholder="Obrigatória para “Outro motivo”"></textarea></div>
+            </div></div>` : ''}
           <div class="field"><span class="label">Prioridade</span>
             <div class="segmented seg-4">${Object.entries(PRIORITY).map(([k, l]) => html`<label><input type="radio" name="priority" value="${k}" ${v.priority === k ? 'checked' : ''}><span class="prio prio-${k}">${l}</span></label>`)}</div></div>
         </fieldset>
@@ -84,6 +92,16 @@ export async function view({ params, query, state, navigate }) {
     mount(root) {
       const f = root.querySelector('#task-form');
       const err = f.querySelector('.form-error');
+      // Reagendamento: alterar um prazo já definido exige justificativa
+      const reschedBox = root.querySelector('#resched-fields');
+      if (reschedBox) {
+        api('/settings/reasons').then(list => {
+          f.reschedule_reason_id.insertAdjacentHTML('beforeend', html`${list.map(x => html`<option value="${x.id}">${x.name}</option>`)}`.toString());
+        }).catch(e => toast(e.message, 'err'));
+        const sync = () => { reschedBox.hidden = f.due_date.value === t.due_date; };
+        f.due_date.addEventListener('input', sync);
+        f.due_date.addEventListener('change', sync);
+      }
       const assigneeSel = f.querySelector('#assignee_id');
 
       const loadAssignees = async pid => {
@@ -136,6 +154,8 @@ export async function view({ params, query, state, navigate }) {
         try {
           if (editing) {
             delete data.project_id;
+            if (reschedBox && reschedBox.hidden) { delete data.reschedule_reason_id; delete data.reschedule_note; }
+            if (reschedBox && !reschedBox.hidden && !data.reschedule_reason_id) throw new Error('Selecione a justificativa do reagendamento.');
             await api(`/tasks/${t.id}`, { method: 'PATCH', body: data });
             toast('Tarefa atualizada.');
             navigate(`/tarefas/${t.id}`);

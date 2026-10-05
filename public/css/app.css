@@ -626,3 +626,27 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .stage-tag::before { content: ""; width: 6px; height: 6px; border-radius: 1px; background: var(--orange); flex: none; }
 .stage-row { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; color: inherit; }
 .stage-row.is-active { background: var(--navy-50); box-shadow: inset 3px 0 0 var(--orange); }
+
+/* Configurações: justificativas de reagendamento */
+.reason-item { grid-template-columns: auto 1fr auto auto auto; }
+.reason-item.is-inactive input[type=text] { color: var(--muted); background: var(--navy-50); text-decoration: line-through; }
+.reason-active { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.reason-active input { width: 17px; height: 17px; accent-color: var(--navy); }
+@media (max-width: 560px) {
+  .reason-item { grid-template-columns: auto 1fr auto; grid-template-areas: "mv txt rm" "mv act cnt"; row-gap: 4px; }
+  .reason-item .stage-move { grid-area: mv; }
+  .reason-item input[type=text] { grid-area: txt; }
+  .reason-item [data-rm] { grid-area: rm; }
+  .reason-item .reason-active { grid-area: act; }
+  .reason-item .stage-count { grid-area: cnt; display: inline; }
+}
+
+/* Reagendamentos */
+.resched-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; color: #8C3D0B;
+  background: var(--orange-50); border: 1px solid #F8CDB2; border-radius: 5px; padding: 0 5px; white-space: nowrap; font-style: normal; }
+.resched-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.resched-list li { border: 1px solid var(--line); border-left: 3px solid var(--orange); border-radius: 8px; padding: 9px 12px; background: #FFFCFA; }
+.resched-list .dates { font-weight: 650; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.resched-list .dates s { color: var(--muted); font-weight: 500; }
+.resched-list .why { font-size: 13.5px; margin-top: 2px; }
+.resched-list .who { font-size: 12px; color: var(--muted); margin-top: 2px; }

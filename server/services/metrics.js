@@ -42,8 +42,9 @@ const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
 export function summarize(tasks, ref = today()) {
   const by = Object.fromEntries(STATUSES.map(s => [s, 0]));
-  let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0;
+  let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0, rescheduled = 0, reschedules = 0;
   for (const t of tasks) {
+    if (t.reschedule_count) { rescheduled++; reschedules += t.reschedule_count; }
     by[t.eff_status]++;
     if (t.delivered) {
       delivered++;
@@ -68,6 +69,8 @@ export function summarize(tasks, ref = today()) {
     on_time_pct: pct(onTime, delivered),
     avg_delay_days: lateCount ? Math.round((lateDaysSum / lateCount) * 10) / 10 : 0,
     due_soon: dueSoon,
+    rescheduled,
+    reschedules,
   };
 }
 

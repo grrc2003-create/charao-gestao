@@ -15,6 +15,7 @@ import * as ReportDoc from './views/report-doc.js';
 import * as FieldList from './views/field-list.js';
 import * as Account from './views/account.js';
 import * as Audit from './views/audit.js';
+import * as Settings from './views/settings.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
 
@@ -53,6 +54,7 @@ const routes = [
   ['/imprimir/campo', FieldList.view, { print: true }],
   ['/conta', Account.view],
   ['/auditoria', Audit.view],
+  ['/configuracoes', Settings.view],
 ].map(([pattern, view, opts = {}]) => {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
@@ -104,6 +106,7 @@ function shell() {
       <div class="sidebar-tag">Gestão de Obras</div>
       <nav>${NAV.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
         ${state.meta?.can.view_audit ? html`<a href="#/auditoria" data-nav="/auditoria">${icon('shield')}<span>Auditoria</span></a>` : ''}
+        ${state.meta?.can.manage_settings ? html`<a href="#/configuracoes" data-nav="/configuracoes">${icon('settings')}<span>Configurações</span></a>` : ''}
       </nav>
       <a href="#/conta" class="sidebar-user">${avatar(u.name)}<span><b>${u.name}</b><small>${ROLE[u.role]}</small></span></a>
       ${state.demo ? html`<div class="demo-flag" title="Os dados exibidos são fictícios para testes">Ambiente de demonstração</div>` : ''}

@@ -165,6 +165,10 @@
 .g-today-legend { display: inline-block; width: 0; height: 12px; border-left: 1.5px solid #F26B21; }
 .g-note { font-size: 7.3pt; color: #6E7A86; margin: 4px 0 0; }
 
+.g-orig { background: #fff; border: 1.5px solid #C9520F; width: 8px; height: 8px; }
+.fl-resched { font-size: 7.5pt; font-weight: 700; color: #8C3D0B; background: #FFF1E8; border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+.r-resched { font-size: 7.5pt; font-weight: 700; color: #8C3D0B; white-space: nowrap; }
+
 /* ---------- Impressão ---------- */
 @page {
   size: A4;

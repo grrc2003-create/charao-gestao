@@ -40,6 +40,29 @@ const groupTable = (title, rows, labelHead) => rows.length ? html`<section class
     <td class="num">${g.summary.in_progress}</td><td class="num ${g.summary.late ? 'late' : ''}">${g.summary.late}</td>
     <td class="num"><b>${fmtPct(g.summary.completion_pct ?? 0)}</b></td><td class="num">${fmtPct(g.summary.on_time_pct)}</td></tr>`)}</tbody></table></section>` : '';
 
+// Prazos e reagendamentos: indicadores, motivos e (detalhado/completo) histórico por tarefa
+function reschedSection(r) {
+  const s = r.summary;
+  const rs = r.reschedules;
+  if (!s.rescheduled) return html`<section class="r-section avoid"><h3 class="r-h">Prazos e reagendamentos</h3>
+    <p class="r-p muted">Nenhuma tarefa do escopo foi reagendada.</p></section>`;
+  return html`<section class="r-section">
+    <h3 class="r-h">Prazos e reagendamentos</h3>
+    <div class="r-kpis avoid" style="grid-template-columns:repeat(3,1fr)">
+      ${kpiBox('Tarefas reagendadas', s.rescheduled, `${Math.round((s.rescheduled / s.total) * 100)}% das tarefas`, '#C9520F')}
+      ${kpiBox('Total de reagendamentos', s.reschedules, null, '#C9520F')}
+      ${kpiBox('Média por tarefa reagendada', String(Math.round((s.reschedules / s.rescheduled) * 10) / 10).replace('.', ','), 'reagendamentos', '#707E8B')}
+    </div>
+    <table class="r-table avoid" style="margin-top:8px"><thead><tr><th>Justificativa</th><th class="num">Reagendamentos</th><th class="num">%</th></tr></thead>
+      <tbody>${rs.reasons.map(x => html`<tr><td>${x.name}</td><td class="num">${x.count}</td><td class="num">${Math.round((x.count / s.reschedules) * 100)}%</td></tr>`)}</tbody></table>
+    ${r.level !== 'resumo' ? html`<table class="r-table" style="margin-top:10px"><thead><tr><th>Tarefa</th><th>Prazo original → atual</th><th class="num">Vezes</th><th>Reagendamentos (justificativa · por · em)</th></tr></thead>
+      <tbody>${rs.tasks.map(t => html`<tr><td><span class="mono">${t.code}</span><div><b>${t.title}</b></div><div class="muted small">${t.assignee_name || '—'}</div></td>
+        <td class="nowrap small">${fmtDate(t.original_due)} → <b>${fmtDate(t.due_date)}</b><div>${stBadge(t.eff_status)}</div></td>
+        <td class="num"><b>${t.reschedule_count}</b></td>
+        <td class="small">${t.entries.map((e, i) => html`<div>${i + 1}º ${fmtDate(e.old_due)} → ${fmtDate(e.new_due)} · <b>${e.reason_name}</b>${e.note ? ` — ${e.note}` : ''} <span class="muted">· ${e.user_name || '—'} · ${fmtDateTime(e.created_at)}</span></div>`)}</td></tr>`)}</tbody></table>` : ''}
+  </section>`;
+}
+
 const stBadge = s => html`<span class="r-st" style="--c:${STATUS_COLOR[s]}">${STATUS[s].label}</span>`;
 
 const stageLabel = (t, multi) => (multi ? `${t.project_code} · ${t.stage_name || 'Geral'}` : (t.stage_name || 'Geral'));
@@ -61,7 +84,7 @@ function taskTable(tasks, showProject, grouped) {
       <td>${t.parent_code ? html`<div class="muted small">↳ Subtarefa de ${t.parent_code}</div>` : ''}<b>${t.title}</b>${!grouped && t.stage_name && !t.stage_default ? html` <span class="r-stage r-stage-sm">${t.stage_name}</span>` : ''}${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
       ${showProject ? html`<td class="small">${t.project_code}</td>` : ''}
       <td class="small">${t.assignee_name || '—'}</td>
-      <td class="nowrap small ${t.eff_status === 'atrasada' ? 'late' : ''}">${fmtDate(t.due_date)}${t.days_late ? html`<div class="small">${t.days_late}d atraso</div>` : ''}</td>
+      <td class="nowrap small ${t.eff_status === 'atrasada' ? 'late' : ''}">${fmtDate(t.due_date)}${t.days_late ? html`<div class="small">${t.days_late}d atraso</div>` : ''}${t.reschedule_count ? html`<div class="r-resched">↻ ${t.reschedule_count}x · orig. ${fmtDate(t.original_due)}</div>` : ''}</td>
       <td class="small">${PRIORITY[t.priority]}</td><td>${stBadge(t.eff_status)}</td></tr>`)}</tbody></table>`;
 }
 
@@ -158,6 +181,8 @@ export async function view({ query }) {
       ${r.group === 'classificacao' || r.by_stage.length > 1 ? groupTable('Andamento por classificação (Grupo/Local/Etapa)', r.by_stage, 'Classificação') : ''}
       ${multiProject ? groupTable('Andamento por projeto', r.by_project, 'Projeto') : ''}
       ${r.type !== 'usuario' ? groupTable('Desempenho por responsável', r.by_person, 'Responsável') : ''}
+
+      ${reschedSection(r)}
 
       ${r.critical.length ? html`<section class="r-section avoid"><h3 class="r-h">Pontos de atenção — tarefas atrasadas</h3>
         <table class="r-table"><thead><tr><th>Código</th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th class="num">Atraso</th></tr></thead>

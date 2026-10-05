@@ -17,6 +17,7 @@ export async function view({ state, navigate }) {
           <dl class="kv"><dt>E-mail</dt><dd>${u.email}</dd><dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd></dl>
           <div class="page-actions" style="margin-top:16px">
             <a class="btn btn-ghost" href="#/usuarios/${u.id}">${icon('dashboard')}Meu desempenho</a>
+            ${state.meta?.can.manage_settings ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a>` : ''}
             <button type="button" class="btn btn-warn" id="logout">${icon('logout')}Sair</button>
           </div>
         </section>

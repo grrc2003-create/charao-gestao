@@ -76,11 +76,14 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false } = {}) 
     const late = s.lateTo && s.lateTo > s.due
       ? html`<span class="g-late" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%;width:${(pos(addDays(s.lateTo, 1)) - pos(addDays(s.due, 1))).toFixed(2)}%"></span>` : '';
     const dueMark = s.due ? html`<span class="g-due" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%" title="Prazo ${fmtDate(s.due)}"></span>` : '';
+    // Prazo original (antes dos reagendamentos): losango vazado
+    const origMark = t.original_due && t.original_due !== s.due
+      ? html`<span class="g-due g-orig" style="left:${pos(addDays(t.original_due, 1)).toFixed(2)}%" title="Prazo original ${fmtDate(t.original_due)} · reagendada ${t.reschedule_count}x"></span>` : '';
     return html`<tr class="g-row">
       <td class="g-label"><span class="g-code">${t.code}</span>${showProject ? html`<span class="g-proj">${t.project_code}</span>` : ''}
         <span class="g-title">${t.parent_code ? '↳ ' : ''}${t.title}</span>
-        <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}</span></td>
-      <td class="g-track">${grid}${bar}${late}${dueMark}</td></tr>`;
+        <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}</span></td>
+      <td class="g-track">${grid}${bar}${late}${origMark}${dueMark}</td></tr>`;
   };
 
   // Agrupamento (classificação), com barra-resumo do grupo
@@ -115,6 +118,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false } = {}) 
       <span><i class="g-sw is-done" style="--c:${STATUS_COLOR.concluida}"></i>Concluída (até a conclusão)</span>
       <span><i class="g-sw g-sw-late"></i>Atraso (prazo → hoje)</span>
       <span><i class="g-due g-due-legend"></i>Prazo</span>
+      <span><i class="g-due g-orig g-due-legend"></i>Prazo original (reagendada)</span>
       <span><i class="g-today-legend"></i>Hoje (${fmtDate(ref)})</span>
     </div>
     <p class="g-note">Início = início previsto da tarefa; quando não informado, usa-se o início da execução ou a data de criação.</p>

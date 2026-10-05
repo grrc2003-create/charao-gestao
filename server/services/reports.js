@@ -29,6 +29,7 @@ const ganttRow = t => ({
   id: t.id, code: t.code, title: t.title, parent_code: t.parent_code, assignee_name: t.assignee_name,
   project_code: t.project_code, stage_id: t.stage_id, stage_name: t.stage_name,
   start_date: t.start_date, started_at: t.started_at, created_at: t.created_at, due_date: t.due_date,
+  original_due: t.original_due, reschedule_count: t.reschedule_count,
   completed_at: t.completed_at, delivered_date: t.delivered_date, eff_status: t.eff_status, days_late: t.days_late,
 });
 
@@ -122,11 +123,29 @@ export function buildReport(ctx, q) {
     const u = map.get(g.key);
     return { ...g, job_title: u?.job_title || null };
   });
+  // Reagendamentos do escopo: motivos e tarefas reagendadas (com o histórico de cada uma)
+  const resched = tasks.filter(t => t.reschedule_count > 0);
+  let rescheduleRows = [];
+  if (resched.length) {
+    const ids = resched.map(t => t.id);
+    rescheduleRows = all(`SELECT r.task_id, r.old_due, r.new_due, r.reason_name, r.note, r.created_at, u.name AS user_name
+      FROM task_reschedules r LEFT JOIN users u ON u.id = r.user_id WHERE r.task_id IN (${ids.map(() => '?').join(',')}) ORDER BY r.id`, ...ids);
+  }
+  const reasonCount = new Map();
+  for (const r of rescheduleRows) reasonCount.set(r.reason_name, (reasonCount.get(r.reason_name) || 0) + 1);
+  const rescheduleSummary = {
+    reasons: [...reasonCount].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    tasks: resched.sort((a, b) => b.reschedule_count - a.reschedule_count).map(t => ({
+      id: t.id, code: t.code, title: t.title, assignee_name: t.assignee_name, original_due: t.original_due, due_date: t.due_date,
+      eff_status: t.eff_status, reschedule_count: t.reschedule_count, entries: rescheduleRows.filter(r => r.task_id === t.id),
+    })),
+  };
   const critical = tasks.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 10);
 
   return {
     type, level, from, to, include_done: includeDone, group, gantt: withGantt, stage_filter: stageNames,
     by_stage: groupByStage(tasks, type !== 'projeto'),
+    reschedules: rescheduleSummary,
     gantt_tasks: withGantt ? (group === 'classificacao' ? tasks : [...tasks].sort(byStage)).map(ganttRow) : [],
     issued_at: new Date().toISOString(),
     issued_by: ctx.user.name,
@@ -180,7 +199,7 @@ export function fieldList(ctx, q) {
     issued_by: ctx.user.name,
     summary: summarize(tasks),
     tasks: tasks.map(t => ({
-      id: t.id, code: t.code, title: t.title, parent_code: t.parent_code,
+      id: t.id, code: t.code, title: t.title, parent_code: t.parent_code, reschedule_count: t.reschedule_count, original_due: t.original_due,
       stage_id: t.stage_id, stage_name: t.stage_name, stage_order: t.stage_order, stage_default: t.stage_default,
       short: t.field_summary || shorten(t.description),
       project_code: t.project_code, project_name: t.project_name,

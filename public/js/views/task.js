@@ -101,12 +101,14 @@ function build(t, ctx) {
         <div class="facts">
           <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
           <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}</div></div>
-          <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small></div></div>
+          <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
+            ${t.reschedule_count ? html`<button type="button" class="resched-badge" data-act="goresched" style="margin-top:4px;cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada</button>` : ''}</div></div>
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
           <div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>
         </div>
         ${can.edit || can.reopen || can.conclude_directly ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           ${can.edit ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
+          ${can.reschedule ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
           ${can.conclude_directly ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
           ${can.reopen ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
         </div>` : ''}
@@ -156,6 +158,15 @@ function build(t, ctx) {
 
       ${subtasksBlock}
 
+      ${t.reschedules.length ? html`<section class="card block" id="resched" aria-labelledby="blk-resched">
+        <header class="block-head"><span class="step" style="background:var(--orange-700)">${icon('reschedule')}</span><h2 id="blk-resched">Reagendamentos</h2>
+          <span class="right muted" style="font-size:12px">${t.reschedules.length}x · prazo original ${fmtDate(t.original_due)}</span></header>
+        <div class="block-body"><ol class="resched-list">${t.reschedules.map((r, i) => html`<li>
+          <div class="dates"><span class="resched-badge">${i + 1}º</span><s>${fmtDate(r.old_due)}</s> → <span>${r.new_due ? fmtDate(r.new_due) : 'sem prazo'}</span></div>
+          <div class="why"><b>Justificativa:</b> ${r.reason_name}${r.note ? html` — ${r.note}` : ''}</div>
+          <div class="who">${r.user_name || '—'} · ${fmtDateTime(r.created_at)}</div></li>`)}</ol></div>
+      </section>` : ''}
+
       <section class="card block">
         <header class="block-head"><span class="step" style="background:var(--steel)">${icon('history')}</span><h2>Histórico</h2></header>
         <div class="block-body"><ul class="timeline">${t.history.map(h => html`<li>
@@ -204,6 +215,23 @@ function mount(root, t, ctx) {
   });
 
   const actions = {
+    goresched: () => root.querySelector('#resched')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    reschedule: async () => {
+      let reasons;
+      try { reasons = await api('/settings/reasons'); } catch (e) { return toast(e.message, 'err'); }
+      const r = await sheet({
+        title: 'Reagendar prazo',
+        body: html`<div class="notice">${icon('info')}<span>Prazo atual: <b>${fmtDate(t.due_date)}</b>${t.reschedule_count ? ` · já reagendada ${t.reschedule_count}x (original ${fmtDate(t.original_due)})` : ''}.</span></div>
+          <div class="field"><label class="req" for="nd">Novo prazo</label><input id="nd" name="due_date" type="date" required value="${t.due_date}"></div>
+          <div class="field"><label class="req" for="rs">Justificativa</label>
+            <select id="rs" name="reason_id" required><option value="">Selecione a justificativa</option>${reasons.map(x => html`<option value="${x.id}">${x.name}</option>`)}</select>
+            <span class="hint">Lista cadastrada em Configurações, comum a todos os projetos.</span></div>
+          <div class="field"><label for="rn">Observação</label><textarea id="rn" name="note" rows="3" maxlength="1000" placeholder="Detalhe o motivo (obrigatório para “Outro motivo”)"></textarea></div>`,
+        submitLabel: 'Reagendar',
+        onSubmit: d => api(`/tasks/${t.id}/reschedule`, { method: 'POST', body: d }),
+      });
+      if (r) { toast('Prazo reagendado.'); refresh(r); }
+    },
     desc: async () => {
       const r = await textSheet('exec_description', 'Descrição da execução', 'O que foi executado', t.exec_description, 'Descreva o serviço realizado, materiais e conferências feitas.');
       if (r) { toast('Descrição registrada.'); refresh(r); }

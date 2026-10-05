@@ -8,6 +8,7 @@ import { decorate, today } from './metrics.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored } from './files.js';
 import { resolveStage } from './stages.js';
+import { activeReason } from './settings.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
 export const PROOF_TYPES = ['nenhuma', 'foto', 'descricao', 'foto_descricao'];
@@ -19,7 +20,9 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     a.name AS assignee_name, c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count,
-    pt.code AS parent_code, pt.title AS parent_title, st.name AS stage_name, st.sort_order AS stage_order, st.is_default AS stage_default,
+    pt.code AS parent_code, pt.title AS parent_title,
+    (SELECT COUNT(*) FROM task_reschedules rs WHERE rs.task_id = t.id) AS reschedule_count,
+    (SELECT rs.old_due FROM task_reschedules rs WHERE rs.task_id = t.id ORDER BY rs.id LIMIT 1) AS original_due, st.name AS stage_name, st.sort_order AS stage_order, st.is_default AS stage_default,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id) AS sub_total,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'concluida') AS sub_done
   FROM tasks t
@@ -69,6 +72,7 @@ export function permissionsFor(ctx, t) {
   const editableExec = execute && (t.status === 'aberta' || t.status === 'em_andamento');
   return {
     edit: manage && t.status !== 'concluida',
+    reschedule: manage && t.status !== 'concluida' && !!t.due_date,
     execute: editableExec,
     start: execute && t.status === 'aberta',
     submit: editableExec,
@@ -91,13 +95,15 @@ export function getTask(ctx, id) {
   const files = all(`SELECT f.id, f.kind, f.mime, f.size, f.caption, f.created_at, f.uploaded_by, u.name AS uploaded_by_name
     FROM task_files f LEFT JOIN users u ON u.id = f.uploaded_by WHERE f.task_id = ? ORDER BY f.id`, id);
   const history = all(`SELECT h.id, h.action, h.details, h.created_at, u.name AS user_name
-    FROM task_history h LEFT JOIN users u ON u.id = h.user_id WHERE h.task_id = ? ORDER BY h.id DESC`, id);
+    FROM task_history h LEFT JOIN users u ON u.id = h.user_id WHERE h.task_id = ? ORDER BY h.created_at DESC, h.id DESC`, id);
   const ref = today();
   const subtasks = all(`${BASE_SQL} WHERE t.parent_id = ? ORDER BY t.seq`, id)
     .filter(s => canSeeTask(ctx, s)).map(s => decorate(s, ref));
   const parent = t.parent_id ? one(`${BASE_SQL} WHERE t.id = ?`, t.parent_id) : null;
+  const reschedules = all(`SELECT r.id, r.old_due, r.new_due, r.reason_name, r.note, r.created_at, u.name AS user_name
+    FROM task_reschedules r LEFT JOIN users u ON u.id = r.user_id WHERE r.task_id = ? ORDER BY r.id`, id);
   return {
-    ...decorate(t), files, history, subtasks,
+    ...decorate(t), files, history, subtasks, reschedules,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
   };
@@ -204,7 +210,23 @@ export function updateTask(ctx, id, body) {
   if ('description' in body) set('description', str(body.description, { max: 5000, required: true, label: 'Descrição' }), 'Descrição alterada', () => '');
   if ('field_summary' in body) set('field_summary', str(body.field_summary, { max: 180, label: 'Resumo para campo' }), 'Resumo para campo alterado', () => '');
   if ('notes' in body) set('notes', str(body.notes, { max: 2000, label: 'Observações' }), 'Observações alteradas', () => '');
-  if ('due_date' in body) set('due_date', date(body.due_date, 'Prazo'), 'Prazo alterado', fmtDate);
+  // Prazo: definir um prazo inexistente é livre; alterar um prazo já definido é REAGENDAMENTO,
+  // que exige justificativa pré-cadastrada (Configurações) e fica registrado.
+  let reschedule = null;
+  if ('due_date' in body) {
+    const nd = date(body.due_date, 'Prazo');
+    if ((nd ?? null) !== (t.due_date ?? null)) {
+      next.due_date = nd;
+      if (t.due_date) {
+        const reason = activeReason(body.reschedule_reason_id);
+        const note = str(body.reschedule_note, { max: 1000, label: 'Observação do reagendamento' });
+        if (/outro/i.test(reason.name) && !note) throw badRequest('Detalhe o motivo na observação do reagendamento.');
+        reschedule = { old: t.due_date, new: nd, reason, note };
+      } else {
+        changes.push(['Prazo definido', '—', fmtDate(nd)]);
+      }
+    }
+  }
   if ('start_date' in body) set('start_date', date(body.start_date, 'Início previsto'), 'Início previsto alterado', d => (d ? fmtDate(d) : '—'));
   assertDateOrder(next.start_date !== undefined ? next.start_date : t.start_date, next.due_date !== undefined ? next.due_date : t.due_date);
   if ('stage_id' in body) {
@@ -226,12 +248,29 @@ export function updateTask(ctx, id, body) {
       changes.push(['Responsável alterado', name(t.assignee_id), name(aid)]);
     }
   }
-  if (!changes.length) return;
+  if (!changes.length && !reschedule) return;
   tx(() => {
     const fields = Object.keys(next);
     run(`UPDATE tasks SET ${fields.map(f => `${f} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...fields.map(f => next[f]), nowIso(), id);
+    if (reschedule) {
+      const n = one('SELECT COUNT(*) AS n FROM task_reschedules WHERE task_id = ?', id).n + 1;
+      run(`INSERT INTO task_reschedules (task_id, old_due, new_due, reason_id, reason_name, note, user_id, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+        id, reschedule.old, reschedule.new, reschedule.reason.id, reschedule.reason.name, reschedule.note, ctx.user.id, nowIso());
+      taskHistory(id, ctx.user.id, `Prazo reagendado (${n}º reagendamento)`,
+        `${fmtDate(reschedule.old)} → ${fmtDate(reschedule.new)} · Justificativa: ${reschedule.reason.name}${reschedule.note ? ` · ${reschedule.note}` : ''}`);
+    }
     for (const [label, from, to] of changes) taskHistory(id, ctx.user.id, label, from || to ? `${from} → ${to}` : null);
   });
+}
+
+// Ação dedicada "Reagendar" (mesma regra da edição, exigindo uma nova data)
+export function rescheduleTask(ctx, id, body) {
+  const t = loadVisible(ctx, id);
+  if (!t.due_date) throw badRequest('A tarefa ainda não tem prazo. Defina o prazo editando a tarefa.');
+  const nd = date(body.due_date, 'Novo prazo');
+  if (!nd) throw badRequest('Informe o novo prazo.');
+  if (nd === t.due_date) throw badRequest('O novo prazo deve ser diferente do atual.');
+  updateTask(ctx, id, { due_date: nd, reschedule_reason_id: body.reason_id, reschedule_note: body.note });
 }
 
 // Retorno do responsável (descrição/observações da execução)

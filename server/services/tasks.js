@@ -6,7 +6,7 @@ import {
 } from '../lib/permissions.js';
 import { decorate, today } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
-import { saveImageFromDataUrl, deleteStored } from './files.js';
+import { saveImageFromDataUrl, deleteStored, copyStored } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
 
@@ -25,7 +25,8 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     (SELECT rs.old_due FROM task_reschedules rs WHERE rs.task_id = t.id ORDER BY rs.id LIMIT 1) AS original_due, st.name AS stage_name, st.sort_order AS stage_order, st.is_default AS stage_default,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL) AS sub_total,
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL AND s.status = 'concluida') AS sub_done,
-    cb.name AS cancelled_by_name
+    cb.name AS cancelled_by_name,
+    (SELECT rc.freq FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_freq
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id
@@ -171,7 +172,7 @@ function proofCheck(t, files) {
   return { need_photo: needPhoto, need_desc: needDesc, has_photo: hasPhoto, has_desc: hasDesc, ok: missing.length === 0, missing };
 }
 
-function validateAssignee(assigneeId, projectId) {
+export function validateAssignee(assigneeId, projectId) {
   if (!assigneeId) return null;
   if (!userHasProjectAccess(assigneeId, projectId)) throw badRequest('O responsável escolhido não tem acesso a este projeto.');
   return assigneeId;
@@ -206,8 +207,14 @@ export function createTask(ctx, body) {
   };
   assertDateOrder(data.start_date, data.due_date);
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
+  return tx(() => insertTask({ project, parent, data, stageInput: body.stage_id, creatorId: ctx.user.id, images, ctx }));
+}
 
-  return tx(() => {
+// Gravação da tarefa (código, classificação, histórico, imagens). Usada na criação manual e pelas recorrências.
+// images: [{data, caption}] (upload) | copyFiles: [{stored_name, mime, caption}] (cópia do molde) | recurrence: {id, seq, label}
+export function insertTask({ project, parent = null, data, stageInput, creatorId, images = [], copyFiles = [], recurrence = null, ctx = null }) {
+  const projectId = project.id;
+  {
     let seq, code;
     if (parent) {
       // Código da subtarefa: código da tarefa-mãe + sequência (PRJ-001-00001-01)
@@ -221,25 +228,34 @@ export function createTask(ctx, body) {
     }
     const now = nowIso();
     // Sem classificação escolhida, a tarefa assume "Geral"
-    const stageId = resolveStage(projectId, body.stage_id);
+    const stageId = resolveStage(projectId, stageInput);
     const r = run(`INSERT INTO tasks (code, project_id, parent_id, seq, stage_id, title, description, field_summary, notes, assignee_id, assigned_by_id,
-        creator_id, start_date, due_date, priority, proof_type, status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?)`,
+        creator_id, start_date, due_date, priority, proof_type, status, recurrence_id, recurrence_seq, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?, ?, ?)`,
       code, projectId, parent?.id ?? null, seq, stageId, data.title, data.description, data.field_summary, data.notes, data.assignee_id,
-      data.assignee_id ? ctx.user.id : null, ctx.user.id, data.start_date, data.due_date, data.priority, data.proof_type, now, now);
+      data.assignee_id ? creatorId : null, creatorId, data.start_date, data.due_date, data.priority, data.proof_type,
+      recurrence?.id ?? null, recurrence?.seq ?? null, now, now);
     const id = Number(r.lastInsertRowid);
     const assignee = data.assignee_id ? one('SELECT name FROM users WHERE id = ?', data.assignee_id).name : 'sem responsável';
     const stageName = one('SELECT name FROM project_stages WHERE id = ?', stageId).name;
-    taskHistory(id, ctx.user.id, parent ? `Subtarefa criada em ${parent.code}` : 'Tarefa criada',
-      `Classificação: ${stageName} · Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
-    if (parent) taskHistory(parent.id, ctx.user.id, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
+    const created = recurrence ? `Tarefa criada automaticamente pela recorrência (${recurrence.seq}ª ocorrência)` : parent ? `Subtarefa criada em ${parent.code}` : 'Tarefa criada';
+    taskHistory(id, creatorId, created,
+      `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
+    if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption);
-    if (images.length) taskHistory(id, ctx.user.id, 'Imagens de referência anexadas', `${images.length} imagem(ns)`);
+    for (const f of copyFiles) {
+      const c = copyStored(f.stored_name);
+      if (c) run('INSERT INTO task_files (task_id, kind, stored_name, mime, size, caption, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
+        id, 'referencia', c.stored_name, f.mime, c.size, f.caption, creatorId, now);
+    }
+    const nImg = images.length + copyFiles.length;
+    if (nImg) taskHistory(id, creatorId, 'Imagens de referência anexadas', `${nImg} imagem(ns)`);
     return id;
-  });
+  }
 }
 
 const fmtDate = d => (d ? d.split('-').reverse().join('/') : 'sem prazo');
+export { fmtDate as fmtTaskDate };
 
 function assertDateOrder(start, due) {
   if (start && due && start > due) throw badRequest('O início previsto deve ser anterior ou igual ao prazo.');

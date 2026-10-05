@@ -45,3 +45,13 @@ export function deleteStored(storedName) {
   if (!/^[0-9a-f-]{36}\.(jpg|png|webp|svg)$/.test(storedName)) return;
   fs.rmSync(path.join(UPLOAD_DIR, storedName), { force: true });
 }
+
+// Copia um arquivo armazenado para um novo nome (ex.: imagens do molde de recorrência para cada ocorrência)
+export function copyStored(storedName) {
+  const buf = readStored(storedName);
+  if (!buf) return null;
+  const ext = storedName.split('.').pop();
+  const stored = `${crypto.randomUUID()}.${ext}`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, stored), buf);
+  return { stored_name: stored, size: buf.length };
+}

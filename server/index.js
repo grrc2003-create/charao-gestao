@@ -1,6 +1,7 @@
 // Servidor HTTP — API REST + arquivos estáticos. Sem dependências externas (Node 22.5+).
 import http from 'node:http';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { db, migrate, ROOT, one } from './db.js';
 import { Router, HttpError, send, readJson, badRequest, forbidden, intOrNull, str } from './lib/http.js';
@@ -26,6 +27,24 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(ROOT, 'public');
 // Modo demonstração: ligado no ambiente local; em produção só com DEMO=1
 const DEMO = process.env.DEMO === '1' || (process.env.NODE_ENV !== 'production' && process.env.DEMO !== '0');
+
+// Versão da interface (hash dos arquivos públicos): o navegador compara e recarrega quando há atualização
+function computeAppVersion() {
+  const h = crypto.createHash('sha1');
+  const walk = dir => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p); else h.update(e.name).update(fs.readFileSync(p));
+    }
+  };
+  walk(path.join(ROOT, 'public'));
+  return h.digest('hex').slice(0, 12);
+}
+let APP_VERSION = computeAppVersion();
+// Em desenvolvimento, recalcula a versão quando os arquivos mudam
+if (process.env.NODE_ENV !== 'production') {
+  try { fs.watch(path.join(ROOT, 'public'), { recursive: true }, () => { APP_VERSION = computeAppVersion(); }); } catch { /* sem suporte */ }
+}
 
 // Primeiro início com banco vazio: cria o administrador inicial (ADMIN_EMAIL/ADMIN_PASSWORD)
 // ou, se SEED_DEMO=1, carrega os dados de demonstração.
@@ -94,7 +113,7 @@ api.post('/api/auth/logout', (req, res) => {
 
 api.get('/api/auth/me', (req, res, { user }) => send(res, 200, { user: Users.me(user), demo: DEMO }));
 api.get('/api/health', (req, res) => send(res, 200, { ok: true }), { public: true });
-api.get('/api/config', (req, res) => send(res, 200, { demo: DEMO }), { public: true });
+api.get('/api/config', (req, res) => send(res, 200, { demo: DEMO, version: APP_VERSION }), { public: true });
 
 api.post('/api/auth/password', (req, res, { user, body }) => {
   Users.changeOwnPassword(user, body, clientIp(req));

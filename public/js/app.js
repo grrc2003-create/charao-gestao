@@ -16,7 +16,23 @@ import * as FieldList from './views/field-list.js';
 import * as Account from './views/account.js';
 import * as Audit from './views/audit.js';
 
-const state = { user: null, meta: null, demo: false };
+const state = { user: null, meta: null, demo: false, version: null };
+
+// Detecta nova versão publicada e recarrega a página (evita usar código antigo após atualização)
+let lastVersionCheck = 0;
+async function ensureLatestVersion() {
+  if (Date.now() - lastVersionCheck < 30000) return false;
+  lastVersionCheck = Date.now();
+  try {
+    const { version } = await fetch('/api/config', { cache: 'no-store' }).then(r => r.json());
+    if (state.version && version && version !== state.version) {
+      location.reload();
+      return true;
+    }
+    state.version = state.version || version;
+  } catch { /* sem conexão: segue com a versão atual */ }
+  return false;
+}
 
 const routes = [
   ['/', Dashboard.view],
@@ -113,6 +129,7 @@ function markNav(path) {
 
 let renderToken = 0;
 export async function render() {
+  if (await ensureLatestVersion()) return;
   const token = ++renderToken;
   if (!state.user) {
     document.body.className = 'login-mode';

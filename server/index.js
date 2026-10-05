@@ -30,14 +30,31 @@ const DEMO = process.env.DEMO === '1' || (process.env.NODE_ENV !== 'production' 
 // Primeiro início com banco vazio: cria o administrador inicial (ADMIN_EMAIL/ADMIN_PASSWORD)
 // ou, se SEED_DEMO=1, carrega os dados de demonstração.
 function bootstrap() {
-  if (one('SELECT COUNT(*) AS n FROM users').n > 0) return;
+  const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = (process.env.ADMIN_PASSWORD || '').trim();
+  if (one('SELECT COUNT(*) AS n FROM users').n > 0) {
+    // Recuperação de acesso: ADMIN_RESET=1 redefine (ou cria) o administrador com ADMIN_EMAIL/ADMIN_PASSWORD
+    if (process.env.ADMIN_RESET === '1' && email && password) {
+      validatePasswordStrength(password);
+      const existing = one('SELECT id FROM users WHERE email = ?', email);
+      if (existing) {
+        db.prepare(`UPDATE users SET password_hash = ?, role = 'admin', access_scope = 'total', active = 1, must_change_password = 0,
+          updated_at = datetime('now') WHERE id = ?`).run(hashPassword(password), existing.id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existing.id);
+      } else {
+        db.prepare(`INSERT INTO users (name, email, password_hash, role, access_scope, job_title)
+          VALUES (?, ?, ?, 'admin', 'total', 'Administrador do sistema')`).run(process.env.ADMIN_NAME || 'Administrador', email, hashPassword(password));
+      }
+      audit(null, 'system', null, 'Acesso de administrador redefinido via ADMIN_RESET', { email });
+      console.log(`[init] ADMIN_RESET: acesso do administrador redefinido para ${email}. Remova ADMIN_RESET e ADMIN_PASSWORD do ambiente.`);
+    }
+    return;
+  }
   if (process.env.SEED_DEMO === '1') {
     const n = seedDemo();
     console.log(`[init] dados de demonstração carregados (${n.tasks} tarefas)`);
     return;
   }
-  const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || '';
   if (!email || !password) {
     console.warn('[init] banco vazio: defina ADMIN_EMAIL e ADMIN_PASSWORD para criar o primeiro administrador.');
     return;
@@ -55,10 +72,11 @@ api.post('/api/auth/login', async (req, res, { body }) => {
   const email = str(body.email, { max: 160, required: true, label: 'E-mail' }).toLowerCase();
   const password = String(body.password || '');
   const key = `${clientIp(req)}|${email}`;
-  checkLoginRate(key);
+  try { checkLoginRate(key); } catch (e) { console.warn(`[auth] login bloqueado temporariamente: ${email}`); throw e; }
   const u = one('SELECT * FROM users WHERE email = ?', email);
   if (!u || !u.active || !verifyPassword(password, u.password_hash)) {
     registerLoginFailure(key);
+    console.warn(`[auth] falha de login: ${email} (${!u ? 'usuário inexistente' : !u.active ? 'usuário inativo' : 'senha incorreta'})`);
     audit(u?.id || null, 'auth', u?.id || null, 'Falha de login', { email }, clientIp(req));
     throw new HttpError(401, 'E-mail ou senha inválidos.');
   }

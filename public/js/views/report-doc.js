@@ -44,7 +44,7 @@ const stBadge = s => html`<span class="r-st" style="--c:${STATUS_COLOR[s]}">${ST
 function taskTable(tasks, showProject) {
   return html`<table class="r-table r-tasks"><thead><tr><th>Código</th><th>Tarefa</th>${showProject ? html`<th>Projeto</th>` : ''}<th>Responsável</th><th>Prazo</th><th>Prior.</th><th>Status</th></tr></thead>
     <tbody>${tasks.map(t => html`<tr><td class="mono nowrap">${t.code}</td>
-      <td><b>${t.title}</b>${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
+      <td>${t.parent_code ? html`<div class="muted small">↳ Subtarefa de ${t.parent_code}</div>` : ''}<b>${t.title}</b>${t.field_summary ? html`<div class="muted small">${t.field_summary}</div>` : ''}</td>
       ${showProject ? html`<td class="small">${t.project_code}</td>` : ''}
       <td class="small">${t.assignee_name || '—'}</td>
       <td class="nowrap small ${t.eff_status === 'atrasada' ? 'late' : ''}">${fmtDate(t.due_date)}${t.days_late ? html`<div class="small">${t.days_late}d atraso</div>` : ''}</td>
@@ -56,7 +56,7 @@ function evidence(t) {
   const refs = t.files.filter(f => f.kind === 'referencia');
   const keyHist = t.history.filter(h => /criada|Respons|Prazo|Enviada|Conferência|Devolvida|Concluída|reaberta/i.test(h.action));
   return html`<article class="r-evidence avoid">
-    <header><span class="mono">${t.code}</span><b>${t.title}</b>${stBadge(t.eff_status)}</header>
+    <header><span class="mono">${t.code}</span><b>${t.title}${t.parent_code ? html` <span class="muted small">(subtarefa de ${t.parent_code})</span>` : ''}</b>${stBadge(t.eff_status)}</header>
     <div class="r-ev-grid">
       <div><div class="r-lbl">Solicitação</div><p>${t.description}</p>
         <div class="small muted">Responsável: ${t.assignee_name || '—'} · Prazo: ${fmtDate(t.due_date)} · Comprovação: ${PROOF[t.proof_type].label}</div></div>

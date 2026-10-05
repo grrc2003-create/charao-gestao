@@ -138,7 +138,7 @@ export function fieldList(ctx, q) {
     issued_by: ctx.user.name,
     summary: summarize(tasks),
     tasks: tasks.map(t => ({
-      id: t.id, code: t.code, title: t.title,
+      id: t.id, code: t.code, title: t.title, parent_code: t.parent_code,
       short: t.field_summary || shorten(t.description),
       project_code: t.project_code, project_name: t.project_name,
       assignee_name: t.assignee_name, due_date: t.due_date, eff_status: t.eff_status, priority: t.priority,

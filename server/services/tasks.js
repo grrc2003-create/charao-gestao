@@ -17,9 +17,13 @@ const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardand
 const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client,
     a.name AS assignee_name, c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,
-    (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count
+    (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count,
+    pt.code AS parent_code, pt.title AS parent_title,
+    (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id) AS sub_total,
+    (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.status = 'concluida') AS sub_done
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
+  LEFT JOIN tasks pt ON pt.id = t.parent_id
   LEFT JOIN users a ON a.id = t.assignee_id
   LEFT JOIN users c ON c.id = t.creator_id
   LEFT JOIN users ab ON ab.id = t.assigned_by_id
@@ -69,7 +73,15 @@ export function permissionsFor(ctx, t) {
     review: review && t.status === 'aguardando_conferencia',
     reopen: manage && t.status === 'concluida',
     conclude_directly: manage && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || ctx.user.role === 'gestor'),
+    // Subtarefas: um nível. Quem gerencia a tarefa ou é o responsável por ela pode dividi-la.
+    add_subtask: !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
   };
+}
+
+// Tarefa principal só é entregue/concluída com todas as subtarefas concluídas
+function assertSubtasksDone(t) {
+  const pending = one(`SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND status <> 'concluida'`, t.id).n;
+  if (pending) throw badRequest(`Conclua as subtarefas antes: ${pending} pendente(s).`);
 }
 
 export function getTask(ctx, id) {
@@ -78,7 +90,15 @@ export function getTask(ctx, id) {
     FROM task_files f LEFT JOIN users u ON u.id = f.uploaded_by WHERE f.task_id = ? ORDER BY f.id`, id);
   const history = all(`SELECT h.id, h.action, h.details, h.created_at, u.name AS user_name
     FROM task_history h LEFT JOIN users u ON u.id = h.user_id WHERE h.task_id = ? ORDER BY h.id DESC`, id);
-  return { ...decorate(t), files, history, can: permissionsFor(ctx, t), proof_check: proofCheck(t, files) };
+  const ref = today();
+  const subtasks = all(`${BASE_SQL} WHERE t.parent_id = ? ORDER BY t.seq`, id)
+    .filter(s => canSeeTask(ctx, s)).map(s => decorate(s, ref));
+  const parent = t.parent_id ? one(`${BASE_SQL} WHERE t.id = ?`, t.parent_id) : null;
+  return {
+    ...decorate(t), files, history, subtasks,
+    parent_visible: !!(parent && canSeeTask(ctx, parent)),
+    can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
+  };
 }
 
 function proofCheck(t, files) {
@@ -99,6 +119,14 @@ function validateAssignee(assigneeId, projectId) {
 }
 
 export function createTask(ctx, body) {
+  const parentId = intOrNull(body.parent_id);
+  let parent = null;
+  if (parentId) {
+    parent = loadVisible(ctx, parentId);
+    if (parent.parent_id) throw badRequest('Subtarefas não podem ter novas subtarefas.');
+    if (!permissionsFor(ctx, parent).add_subtask) throw forbidden('Você não pode criar subtarefas nesta tarefa.');
+    body = { ...body, project_id: parent.project_id };
+  }
   const projectId = intOrNull(body.project_id);
   if (!projectId) throw badRequest('Projeto é obrigatório.');
   const project = one('SELECT * FROM projects WHERE id = ?', projectId);
@@ -119,19 +147,28 @@ export function createTask(ctx, body) {
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
 
   return tx(() => {
-    run('UPDATE projects SET task_seq = task_seq + 1 WHERE id = ?', projectId);
-    const seq = one('SELECT task_seq FROM projects WHERE id = ?', projectId).task_seq;
-    const code = `${project.code}-${String(seq).padStart(5, '0')}`;
+    let seq, code;
+    if (parent) {
+      // Código da subtarefa: código da tarefa-mãe + sequência (PRJ-001-00001-01)
+      run('UPDATE tasks SET sub_seq = sub_seq + 1 WHERE id = ?', parent.id);
+      seq = one('SELECT sub_seq FROM tasks WHERE id = ?', parent.id).sub_seq;
+      code = `${parent.code}-${String(seq).padStart(2, '0')}`;
+    } else {
+      run('UPDATE projects SET task_seq = task_seq + 1 WHERE id = ?', projectId);
+      seq = one('SELECT task_seq FROM projects WHERE id = ?', projectId).task_seq;
+      code = `${project.code}-${String(seq).padStart(5, '0')}`;
+    }
     const now = nowIso();
-    const r = run(`INSERT INTO tasks (code, project_id, seq, title, description, field_summary, notes, assignee_id, assigned_by_id,
+    const r = run(`INSERT INTO tasks (code, project_id, parent_id, seq, title, description, field_summary, notes, assignee_id, assigned_by_id,
         creator_id, due_date, priority, proof_type, status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?)`,
-      code, projectId, seq, data.title, data.description, data.field_summary, data.notes, data.assignee_id,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?)`,
+      code, projectId, parent?.id ?? null, seq, data.title, data.description, data.field_summary, data.notes, data.assignee_id,
       data.assignee_id ? ctx.user.id : null, ctx.user.id, data.due_date, data.priority, data.proof_type, now, now);
     const id = Number(r.lastInsertRowid);
     const assignee = data.assignee_id ? one('SELECT name FROM users WHERE id = ?', data.assignee_id).name : 'sem responsável';
-    taskHistory(id, ctx.user.id, 'Tarefa criada',
+    taskHistory(id, ctx.user.id, parent ? `Subtarefa criada em ${parent.code}` : 'Tarefa criada',
       `Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
+    if (parent) taskHistory(parent.id, ctx.user.id, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption);
     if (images.length) taskHistory(id, ctx.user.id, 'Imagens de referência anexadas', `${images.length} imagem(ns)`);
     return id;
@@ -268,15 +305,18 @@ export function transition(ctx, id, action, body = {}) {
         const files = all('SELECT kind FROM task_files WHERE task_id = ?', id);
         const pc = proofCheck(t, files);
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
+        assertSubtasksDone(t);
         change('aguardando_conferencia', ', delivered_at = ?, review_status = \'pendente\', review_comment = NULL, started_at = COALESCE(started_at, ?)', now, now);
         taskHistory(id, ctx.user.id, 'Enviada para conferência', pc.has_photo || pc.has_desc ? 'Comprovação anexada' : null);
         break;
       }
       case 'approve': {
         if (!can.review) throw forbidden('Você não pode conferir esta tarefa.');
+        assertSubtasksDone(t);
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', review_status = \'aprovada\', review_comment = ?, reviewed_by = ?, reviewed_at = ?, completed_at = ?', comment, ctx.user.id, now, now);
         taskHistory(id, ctx.user.id, 'Conferência aprovada — tarefa concluída', comment);
+        if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa concluída', `${t.code} · ${t.title}`);
         break;
       }
       case 'return': {
@@ -288,13 +328,18 @@ export function transition(ctx, id, action, body = {}) {
       }
       case 'conclude': {
         if (!can.conclude_directly) throw forbidden('Ação não permitida.');
+        assertSubtasksDone(t);
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', delivered_at = COALESCE(delivered_at, ?), completed_at = ?, reviewed_by = ?, reviewed_at = ?, review_status = \'aprovada\', review_comment = ?', now, now, ctx.user.id, now, comment);
         taskHistory(id, ctx.user.id, 'Concluída diretamente pelo gestor', comment);
+        if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa concluída', `${t.code} · ${t.title}`);
         break;
       }
       case 'reopen': {
         if (!can.reopen) throw forbidden('Ação não permitida.');
+        if (t.parent_id && one('SELECT status FROM tasks WHERE id = ?', t.parent_id).status === 'concluida') {
+          throw badRequest(`Reabra antes a tarefa principal ${t.parent_code}.`);
+        }
         const comment = str(body.comment, { max: 1000, required: true, label: 'Motivo da reabertura' });
         change('em_andamento', ', completed_at = NULL, delivered_at = NULL, review_status = NULL');
         taskHistory(id, ctx.user.id, 'Tarefa reaberta', comment);

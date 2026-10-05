@@ -1,5 +1,5 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
-import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar } from '../core.js';
+import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readImages, pickImages, lightbox } from '../ui.js';
 import { pageHead } from './shared.js';
 
@@ -19,6 +19,8 @@ function build(t, ctx) {
   const photos = t.files.filter(f => f.kind === 'execucao');
   const hasReturn = !!(t.exec_description || t.exec_notes || photos.length);
   const proof = PROOF[t.proof_type];
+  const subPending = (t.sub_total || 0) - (t.sub_done || 0);
+  const canSend = pc.ok && !subPending;
 
   const thumbs = (files, removable) => html`${files.map(f => html`<figure class="thumb" data-src="/api/files/${f.id}" data-caption="${f.caption || ''}">
     <img src="/api/files/${f.id}" alt="${f.caption || 'Imagem da tarefa'}" loading="lazy">
@@ -55,22 +57,46 @@ function build(t, ctx) {
         ${pc.need_desc ? html`<li class="${pc.has_desc ? 'ok' : 'no'}">${pc.has_desc ? '✓' : '○'} Descrição da execução</li>` : ''}
         ${!pc.need_photo && !pc.need_desc ? html`<li class="ok">✓ Nenhuma comprovação obrigatória</li>` : ''}
       </ul>
-      <button type="button" class="btn btn-success btn-block ${pc.ok ? 'hide-mobile' : ''}" data-act="submit" ${pc.ok ? '' : 'disabled'}>${icon('send')}Enviar para conferência</button>
+      <button type="button" class="btn btn-success btn-block ${canSend ? 'hide-mobile' : ''}" data-act="submit" ${canSend ? '' : 'disabled'}>${icon('send')}Enviar para conferência</button>
       ${!pc.ok ? html`<span class="muted" style="font-size:12.5px">Para enviar, registre: ${pc.missing.join(' e ')}.</span>` : ''}
+      ${subPending ? html`<span class="muted" style="font-size:12.5px">Conclua antes ${subPending} subtarefa(s) pendente(s).</span>` : ''}
     </div>` : '';
 
   const reviewActions = can.review ? html`<div class="grid grid-2 hide-mobile-grid" style="gap:8px">
       <button type="button" class="btn btn-success" data-act="approve">${icon('check')}Aprovar e concluir</button>
       <button type="button" class="btn btn-warn" data-act="return">${icon('back')}Devolver para ajustes</button></div>` : '';
 
-  const back = ctx.query.get('from') === 'project' ? `#/projetos/${t.project_id}` : '#/tarefas';
+  const back = t.parent_id && t.parent_visible ? `#/tarefas/${t.parent_id}`
+    : ctx.query.get('from') === 'project' ? `#/projetos/${t.project_id}` : '#/tarefas';
+  const backLabel = back.startsWith('#/tarefas/') ? t.parent_code : back === '#/tarefas' ? 'Tarefas' : t.project_code;
+
+  const subDone = t.subtasks.filter(s => s.status === 'concluida').length;
+  const subtaskRow = s => {
+    const d = dueInfo(s);
+    return html`<li><a class="row-link subtask-row st-${s.eff_status}" href="#/tarefas/${s.id}">
+      <div class="grow"><div class="row-title"><span class="mono muted" style="font-size:12px">${s.code}</span>${priorityTag(s.priority)}<span style="margin-left:auto">${statusBadge(s.eff_status, { short: true })}</span></div>
+        <div style="font-weight:600">${s.title}</div>
+        <div class="row-meta"><span>${icon('user')} ${s.assignee_name || 'Sem responsável'}</span><span class="${d.cls}">${icon('calendar')} ${d.text}</span>
+          <span>${PROOF[s.proof_type].icon} ${PROOF[s.proof_type].short}</span></div></div>
+      <span class="chev">${icon('chevron')}</span></a></li>`;
+  };
+  const subtasksBlock = !t.parent_id && (t.subtasks.length || can.add_subtask) ? html`
+      <section class="card block" aria-labelledby="blk-sub">
+        <header class="block-head"><span class="step" style="background:var(--navy-700)">${icon('tasks')}</span><h2 id="blk-sub">Subtarefas</h2>
+          <span class="right muted" style="font-size:12px">${t.subtasks.length ? `${subDone} de ${t.subtasks.length} concluídas` : ''}</span></header>
+        ${t.subtasks.length ? html`<div style="padding:12px 16px 0">${progress(Math.round((subDone / t.subtasks.length) * 100), 'Subtarefas concluídas')}</div>
+          <ul class="rows">${t.subtasks.map(subtaskRow)}</ul>` : html`<div class="block-body"><p class="muted" style="margin:0">Divida esta tarefa em etapas com responsável, prazo e comprovação próprios.</p></div>`}
+        ${can.add_subtask ? html`<div class="block-body" style="padding-top:8px"><a class="btn btn-ghost" href="#/tarefas/nova?pai=${t.id}">${icon('plus')}Adicionar subtarefa</a></div>` : ''}
+        ${t.subtasks.length && subDone < t.subtasks.length ? html`<div class="block-body" style="padding-top:0"><div class="notice">${icon('info')}<span>A tarefa principal só pode ser enviada para conferência ou concluída depois que todas as subtarefas estiverem concluídas.</span></div></div>` : ''}
+      </section>` : '';
 
   return {
     title: `${t.code} · ${t.title}`,
     html: html`
-      ${pageHead({ back: { href: back, label: back === '#/tarefas' ? 'Tarefas' : t.project_code }, title: '' })}
+      ${pageHead({ back: { href: back, label: backLabel }, title: '' })}
       <article class="card task-hero st-${t.eff_status}">
-        <div class="code"><span>${t.code}</span>${priorityTag(t.priority)}</div>
+        <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}</div>
+        ${t.parent_id ? html`<div class="parent-link">↳ Subtarefa de ${t.parent_visible ? html`<a href="#/tarefas/${t.parent_id}"><b>${t.parent_code}</b> · ${t.parent_title}</a>` : html`<b>${t.parent_code}</b>`}</div>` : ''}
         <h1>${t.title}</h1>
         <div class="facts">
           <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
@@ -126,6 +152,8 @@ function build(t, ctx) {
         </div>
       </section>
 
+      ${subtasksBlock}
+
       <section class="card block">
         <header class="block-head"><span class="step" style="background:var(--steel)">${icon('history')}</span><h2>Histórico</h2></header>
         <div class="block-body"><ul class="timeline">${t.history.map(h => html`<li>
@@ -133,7 +161,7 @@ function build(t, ctx) {
           <div class="who">${h.user_name || 'Sistema'} · ${fmtDateTime(h.created_at)}</div></li>`)}</ul></div>
       </section>
 
-      ${can.submit && pc.ok ? html`<div class="sticky-actions only-mobile" style="display:flex"><button type="button" class="btn btn-success" data-act="submit">${icon('send')}Enviar para conferência</button></div>` : ''}
+      ${can.submit && canSend ? html`<div class="sticky-actions only-mobile" style="display:flex"><button type="button" class="btn btn-success" data-act="submit">${icon('send')}Enviar para conferência</button></div>` : ''}
       ${can.review ? html`<div class="sticky-actions only-mobile" style="display:flex">
         <button type="button" class="btn btn-success" data-act="approve">${icon('check')}Aprovar</button>
         <button type="button" class="btn btn-warn" data-act="return">Devolver</button></div>` : ''}`,

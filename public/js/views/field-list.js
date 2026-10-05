@@ -20,6 +20,7 @@ export async function view({ query }) {
         <span class="fl-due ${t.eff_status === 'atrasada' ? 'late' : ''}">Prazo: <b>${fmtDate(t.due_date)}</b>${t.days_late ? ` (${t.days_late}d atraso)` : ''}</span>
       </div>
       <div class="fl-title">${t.title}</div>
+      ${t.parent_code ? html`<div class="fl-meta">↳ Subtarefa de <b>${t.parent_code}</b></div>` : ''}
       <div class="fl-desc">${t.short}</div>
       <div class="fl-meta">
         ${c.show_project ? html`<span>Projeto: <b>${t.project_code}</b> ${t.project_name}</span>` : ''}

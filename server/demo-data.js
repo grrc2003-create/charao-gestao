@@ -189,6 +189,35 @@ export function seedDemo() {
       }
     }
     for (const [p, n] of Object.entries(seqs)) run('UPDATE projects SET task_seq = ? WHERE id = ?', n, Number(p));
+    // Subtarefas de exemplo na concretagem da laje (PRJ-001)
+    const mother = one(`SELECT * FROM tasks WHERE title = 'Concretagem da laje do 4º pavimento'`);
+    const subs = [
+      ['Conferir fôrmas e escoramento', 'Verificar prumo, travamento e estanqueidade das fôrmas e escoras metálicas da laje.', 5, -1, 'foto', 'concluida'],
+      ['Programar caminhões-betoneira e bomba', 'Confirmar com a concreteira volume (42 m³), horário e bomba lança; registrar confirmação.', 4, 2, 'descricao', 'em_andamento'],
+      ['Moldar corpos de prova', 'Moldar 2 CPs por caminhão, identificar e armazenar em local protegido.', 4, 4, 'foto_descricao', 'aberta'],
+    ];
+    subs.forEach(([title, desc, assignee, dueOff, proof, st], i) => {
+      const code = `${mother.code}-${String(i + 1).padStart(2, '0')}`;
+      const created = ts(-6, 9, 30);
+      const done = st === 'concluida';
+      const r = run(`INSERT INTO tasks (code, project_id, parent_id, seq, title, description, assignee_id, assigned_by_id, creator_id, due_date,
+          priority, status, proof_type, exec_description, delivered_at, review_status, reviewed_by, reviewed_at, completed_at, started_at, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?, 'alta', ?,?,?,?,?,?,?,?,?,?,?)`,
+        code, mother.project_id, mother.id, i + 1, title, desc, assignee, 2, 2, addDays(T, dueOff), st, proof,
+        done ? 'Fôrmas e escoramento conferidos e liberados.' : null, done ? ts(-2, 16) : null, done ? 'aprovada' : null,
+        done ? 2 : null, done ? ts(-1, 10) : null, done ? ts(-1, 10) : null, st !== 'aberta' ? ts(-5, 8) : null, created, created);
+      const id = Number(r.lastInsertRowid);
+      hist(id, 2, `Subtarefa criada em ${mother.code}`, `Responsável: ${userName(assignee)} · Prazo: ${addDays(T, dueOff).split('-').reverse().join('/')}`, created);
+      hist(mother.id, 2, 'Subtarefa adicionada', `${code} · ${title} · Responsável: ${userName(assignee)}`, created);
+      if (done) {
+        file(id, 'execucao', title, assignee, ts(-2, 16), 'Escoramento');
+        hist(id, assignee, 'Enviada para conferência', 'Comprovação anexada', ts(-2, 16));
+        hist(id, 2, 'Conferência aprovada — tarefa concluída', null, ts(-1, 10));
+        hist(mother.id, 2, 'Subtarefa concluída', `${code} · ${title}`, ts(-1, 10));
+      }
+    });
+    run('UPDATE tasks SET sub_seq = ? WHERE id = ?', subs.length, mother.id);
+
     run(`INSERT INTO audit_log (actor_id, entity, entity_id, action, details) VALUES (1, 'system', NULL, 'Base de demonstração criada', NULL)`);
   });
 

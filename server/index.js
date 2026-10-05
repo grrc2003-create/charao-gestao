@@ -174,6 +174,9 @@ api.get('/api/tasks', (req, res, { ctx, query }) => {
   else if (assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id);
   else if (assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(assignee));
   if (priority.length) tasks = tasks.filter(t => priority.includes(t.priority));
+  const nivel = query.get('nivel');
+  if (nivel === 'principais') tasks = tasks.filter(t => !t.parent_id);
+  else if (nivel === 'subtarefas') tasks = tasks.filter(t => t.parent_id);
   if (due) {
     const open = t => t.status !== 'concluida';
     const within = n => t => open(t) && t.due_date && t.due_date >= ref && daysBetween(ref, t.due_date) <= n;

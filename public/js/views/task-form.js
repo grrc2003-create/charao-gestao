@@ -13,24 +13,30 @@ export async function view({ params, query, state, navigate }) {
   const editing = !!params.id;
   const t = editing ? await api(`/tasks/${params.id}`) : null;
   if (editing && !t.can.edit) throw new Error('Você não pode editar esta tarefa.');
+  // Subtarefa: herda o projeto da tarefa principal
+  const parent = !editing && query.get('pai') ? await api(`/tasks/${query.get('pai')}`) : editing && t.parent_id ? { id: t.parent_id, code: t.parent_code, title: t.parent_title } : null;
+  if (parent && !editing && !parent.can.add_subtask) throw new Error('Você não pode criar subtarefas nesta tarefa.');
   const projects = state.meta.projects.filter(p => !['concluido', 'cancelado'].includes(p.status) || (t && p.id === t.project_id));
-  const projectId = String(t?.project_id || query.get('projeto') || (projects.length === 1 ? projects[0].id : ''));
-  const v = t || { priority: 'media', proof_type: 'foto', assignee_id: null };
+  const projectId = String(t?.project_id || parent?.project_id || query.get('projeto') || (projects.length === 1 ? projects[0].id : ''));
+  const v = t || (parent
+    ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: parent.due_date }
+    : { priority: 'media', proof_type: 'foto', assignee_id: null });
   const pending = []; // imagens de referência escolhidas antes de salvar
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
 
   return {
-    title: editing ? `Editar ${t.code}` : 'Nova tarefa',
+    title: editing ? `Editar ${t.code}` : parent ? `Nova subtarefa · ${parent.code}` : 'Nova tarefa',
     html: html`
       ${pageHead({
-        back: { href: editing ? `#/tarefas/${t.id}` : projectId ? `#/projetos/${projectId}` : '#/tarefas', label: editing ? t.code : 'Voltar' },
-        eyebrow: editing ? t.code : 'Código gerado ao salvar (PRJ-000-00000)',
-        title: editing ? 'Editar solicitação' : 'Nova tarefa',
+        back: { href: editing ? `#/tarefas/${t.id}` : parent ? `#/tarefas/${parent.id}` : projectId ? `#/projetos/${projectId}` : '#/tarefas', label: editing ? t.code : parent ? parent.code : 'Voltar' },
+        eyebrow: editing ? t.code : parent ? `Código gerado ao salvar (${parent.code}-00)` : 'Código gerado ao salvar (PRJ-000-00000)',
+        title: editing ? 'Editar solicitação' : parent ? 'Nova subtarefa' : 'Nova tarefa',
       })}
+      ${parent ? html`<div class="notice" style="max-width:860px;margin-bottom:14px">${icon('tasks')}<span>Subtarefa de <b>${parent.code}</b> · ${parent.title}. Ela tem responsável, prazo, comprovação, fotos, conferência e histórico próprios.${!editing && parent.due_date ? ` Prazo da tarefa principal: ${parent.due_date.split('-').reverse().join('/')}.` : ''}</span></div>` : ''}
       <form class="card card-pad form" id="task-form" novalidate style="max-width:860px">
         <fieldset class="fieldset form"><legend>Solicitação</legend>
           <div class="field"><label class="req" for="project_id">Projeto</label>
-            <select id="project_id" name="project_id" required ${editing ? 'disabled' : ''}>${opt('', 'Selecione o projeto', projectId)}${projects.map(p => opt(p.id, `${p.code} · ${p.name}`, projectId))}</select>
+            <select id="project_id" name="project_id" required ${editing || parent ? 'disabled' : ''}>${opt('', 'Selecione o projeto', projectId)}${projects.map(p => opt(p.id, `${p.code} · ${p.name}`, projectId))}</select>
             ${editing ? html`<span class="hint">O projeto não pode ser alterado após a criação (o código da tarefa depende dele).</span>` : ''}</div>
           <div class="field"><label class="req" for="title">Título</label><input id="title" name="title" type="text" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: Conferir armação das vigas do 4º pavimento"></div>
           <div class="field"><label class="req" for="description">Descrição detalhada</label>
@@ -64,7 +70,7 @@ export async function view({ params, query, state, navigate }) {
 
         <div class="form-error" hidden></div>
         <div class="form-actions">
-          <a class="btn btn-ghost" href="${editing ? `#/tarefas/${t.id}` : '#/tarefas'}">Cancelar</a>
+          <a class="btn btn-ghost" href="${editing ? `#/tarefas/${t.id}` : parent ? `#/tarefas/${parent.id}` : '#/tarefas'}">Cancelar</a>
           <button class="btn btn-primary" type="submit">${icon('check')}${editing ? 'Salvar alterações' : 'Criar tarefa'}</button>
         </div>
       </form>`,
@@ -116,6 +122,7 @@ export async function view({ params, query, state, navigate }) {
             navigate(`/tarefas/${t.id}`);
           } else {
             data.images = pending.map(p => ({ data: p.data }));
+            if (parent) { data.parent_id = parent.id; data.project_id = parent.project_id; }
             const r = await api('/tasks', { method: 'POST', body: data });
             toast('Tarefa criada.');
             navigate(`/tarefas/${r.id}`);

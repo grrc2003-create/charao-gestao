@@ -11,6 +11,7 @@ export async function view({ state, query, setQuery }) {
     assignee: query.get('assignee') || '',
     priority: query.get('priority') || '',
     due: query.get('due') || '',
+    nivel: query.get('nivel') || '',
   };
   // Contagem por status sem o filtro de status (para os chips)
   const [tasks, base] = await Promise.all([
@@ -19,7 +20,7 @@ export async function view({ state, query, setQuery }) {
   ]);
   const counts = Object.fromEntries(STATUS_ORDER.map(s => [s, base.filter(t => t.eff_status === s).length]));
   const meta = state.meta;
-  const advCount = ['project', 'assignee', 'priority', 'due'].filter(k => f[k]).length;
+  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel'].filter(k => f[k]).length;
   const opt = (v, l, cur) => html`<option value="${v}" ${cur === String(v) ? 'selected' : ''}>${l}</option>`;
 
   return {
@@ -49,6 +50,7 @@ export async function view({ state, query, setQuery }) {
           <select name="assignee" aria-label="Responsável">${opt('', 'Todos os responsáveis', f.assignee)}${opt('me', 'Minhas tarefas', f.assignee)}${opt('none', 'Sem responsável', f.assignee)}${meta.assignees.map(u => opt(u.id, u.name, f.assignee))}</select>
           <select name="due" aria-label="Prazo">${Object.entries(DUE).map(([k, l]) => opt(k, l, f.due))}</select>
           <select name="priority" aria-label="Prioridade">${opt('', 'Todas as prioridades', f.priority)}${Object.entries(PRIORITY).map(([k, l]) => opt(k, l, f.priority))}</select>
+          <select name="nivel" aria-label="Tipo">${opt('', 'Tarefas e subtarefas', f.nivel)}${opt('principais', 'Somente tarefas principais', f.nivel)}${opt('subtarefas', 'Somente subtarefas', f.nivel)}</select>
           ${advCount || f.q || f.status.length ? html`<button type="button" class="btn btn-ghost btn-sm" id="clear">${icon('x')}Limpar</button>` : ''}
         </div>
       </form>
@@ -80,7 +82,7 @@ export async function view({ state, query, setQuery }) {
         adv.hidden = !adv.hidden;
         e.currentTarget.setAttribute('aria-expanded', String(!adv.hidden));
       });
-      root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '' }));
+      root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '' }));
     },
   };
 }

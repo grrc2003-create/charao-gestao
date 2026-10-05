@@ -25,10 +25,22 @@ export function migrate() {
   for (const f of files) {
     if (applied.has(f)) continue;
     const sql = fs.readFileSync(path.join(dir, f), 'utf8');
-    tx(() => {
-      db.exec(sql);
-      db.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(f);
-    });
+    // Migrações que reconstroem tabelas desligam as FKs (fora da transação, exigência do SQLite)
+    // para que DROP TABLE não apague em cascata arquivos e históricos; a integridade é conferida ao final.
+    const fkOff = sql.startsWith('-- @foreign_keys_off');
+    if (fkOff) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      tx(() => {
+        db.exec(sql);
+        if (fkOff) {
+          const bad = db.prepare('PRAGMA foreign_key_check').all();
+          if (bad.length) throw new Error(`Migração ${f} violou integridade referencial (${bad.length} registros).`);
+        }
+        db.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(f);
+      });
+    } finally {
+      if (fkOff) db.exec('PRAGMA foreign_keys = ON');
+    }
     console.log(`[db] migração aplicada: ${f}`);
   }
 }

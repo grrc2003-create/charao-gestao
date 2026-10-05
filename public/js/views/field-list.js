@@ -19,7 +19,7 @@ export async function view({ query }) {
         <span class="fl-code">${t.code}</span>
         <span class="fl-st" style="--c:${STATUS_COLOR[t.eff_status]}">${STATUS[t.eff_status].label}</span>
         ${t.priority === 'urgente' || t.priority === 'alta' ? html`<span class="fl-prio">${PRIORITY[t.priority]}</span>` : ''}
-        <span class="fl-due ${t.eff_status === 'atrasada' ? 'late' : ''}">Prazo: <b>${fmtDate(t.due_date)}</b>${t.days_late ? ` (${t.days_late}d atraso)` : ''}${t.reschedule_count ? html` <span class="fl-resched">↻ ${t.reschedule_count}x · orig. ${fmtDate(t.original_due)}</span>` : ''}</span>
+        <span class="fl-due ${t.eff_status === 'atrasada' ? 'late' : ''}">Prazo: <b>${fmtDate(t.due_date)}</b>${t.days_late ? ` (${t.days_late}d atraso)` : ''}${t.reschedule_count ? html` <span class="fl-resched">↻ ${t.reschedule_count}x${t.chronic ? ' crônica' : ''} · orig. ${fmtDate(t.original_due)}</span>` : ''}</span>
       </div>
       <div class="fl-title">${t.title}</div>
       ${t.parent_code ? html`<div class="fl-meta">↳ Subtarefa de <b>${t.parent_code}</b></div>` : ''}

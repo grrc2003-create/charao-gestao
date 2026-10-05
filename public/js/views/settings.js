@@ -13,13 +13,23 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
 
 export async function view({ state }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
-  const reasons = await api('/settings/reasons', { query: { all: '1' } });
+  const [reasons, general] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general')]);
 
   return {
     title: 'Configurações',
     html: html`
       ${pageHead({ eyebrow: 'Cadastros gerais do sistema', title: 'Configurações',
         sub: 'Cadastros válidos para todos os projetos. As classificações (Grupo/Local/Etapa) continuam no cadastro de cada projeto.' })}
+      <section class="card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('alert')}Indicadores de prazo</h2></div>
+        <form class="card-body form" id="general-form" novalidate>
+          <div class="field" style="max-width:420px"><label for="chronic">Tarefa crônica a partir de quantos reagendamentos?</label>
+            <input id="chronic" name="chronic_reschedule_threshold" type="number" min="2" max="10" step="1" inputmode="numeric" value="${general.chronic_reschedule_threshold}">
+            <span class="hint">Tarefas reagendadas este número de vezes ou mais são destacadas como <b>crônicas</b> no Dashboard, nas listas e nos relatórios. Entre 2 e 10.</span></div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
+        </form>
+      </section>
       <section class="card" id="reasons-card" style="max-width:900px">
         <div class="card-head"><h2>${icon('reschedule')}Justificativas de reagendamento</h2><span class="sub">${reasons.filter(r => r.active).length} ativa(s)</span></div>
         <form class="card-body form" id="reasons-form" novalidate>
@@ -35,6 +45,16 @@ export async function view({ state }) {
         </form>
       </section>`,
     mount(root, ctx) {
+      const gf = root.querySelector('#general-form');
+      gf.addEventListener('submit', async e => {
+        e.preventDefault();
+        const gerr = gf.querySelector('.form-error');
+        gerr.hidden = true;
+        try {
+          await api('/settings/general', { method: 'PUT', body: { chronic_reschedule_threshold: Number(gf.chronic.value) } });
+          toast('Limite de tarefa crônica salvo.');
+        } catch (ex) { gerr.textContent = ex.message; gerr.hidden = false; }
+      });
       const f = root.querySelector('#reasons-form');
       const list = root.querySelector('#reason-list');
       const input = root.querySelector('#reason-new');

@@ -64,3 +64,36 @@ export function saveReasons(ctx, input, ip) {
   });
   return listReasons({ includeInactive: true });
 }
+
+// ---------- Configurações gerais (chave/valor) ----------
+const GENERAL = {
+  chronic_reschedule_threshold: { def: 3, min: 2, max: 10, label: 'Limite de tarefa crônica' },
+};
+
+export function getSetting(key) {
+  const r = one('SELECT value FROM app_settings WHERE key = ?', key);
+  const n = Number(r?.value);
+  return Number.isFinite(n) ? n : GENERAL[key].def;
+}
+
+export function getGeneral() {
+  return Object.fromEntries(Object.keys(GENERAL).map(k => [k, getSetting(k)]));
+}
+
+export function saveGeneral(ctx, body, ip) {
+  requireSettingsManager(ctx.user);
+  const changes = {};
+  for (const [k, spec] of Object.entries(GENERAL)) {
+    if (!(k in (body || {}))) continue;
+    const v = Number(body[k]);
+    if (!Number.isInteger(v) || v < spec.min || v > spec.max) throw badRequest(`${spec.label}: informe um número entre ${spec.min} e ${spec.max}.`);
+    const old = getSetting(k);
+    if (old !== v) {
+      run(`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, k, String(v));
+      changes[spec.label] = `${old} → ${v}`;
+    }
+  }
+  if (Object.keys(changes).length) audit(ctx.user.id, 'settings', null, 'Configurações gerais alteradas', changes, ip);
+  return getGeneral();
+}

@@ -2,8 +2,9 @@
 import { all, one } from '../db.js';
 import { badRequest, notFound, oneOf, intOrNull, date } from '../lib/http.js';
 import { canAccessProject, canSeeUser, teamIds } from '../lib/permissions.js';
-import { summarize, userStats, today } from './metrics.js';
+import { summarize, userStats, today, monthlyTrend, localDate } from './metrics.js';
 import { listVisible } from './tasks.js';
+import { getSetting } from './settings.js';
 
 export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral'];
 export const LEVELS = ['resumo', 'detalhado', 'completo'];
@@ -137,7 +138,9 @@ export function buildReport(ctx, q) {
     reasons: [...reasonCount].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     tasks: resched.sort((a, b) => b.reschedule_count - a.reschedule_count).map(t => ({
       id: t.id, code: t.code, title: t.title, assignee_name: t.assignee_name, original_due: t.original_due, due_date: t.due_date,
-      eff_status: t.eff_status, reschedule_count: t.reschedule_count, entries: rescheduleRows.filter(r => r.task_id === t.id),
+      eff_status: t.eff_status, reschedule_count: t.reschedule_count, late_episodes: t.late_episodes, chronic: t.chronic,
+      entries: rescheduleRows.filter(r => r.task_id === t.id)
+        .map(e => ({ ...e, kind: e.old_due && localDate(e.created_at) > e.old_due ? 'corretiva' : 'preventiva' })),
     })),
   };
   const critical = tasks.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 10);
@@ -146,6 +149,8 @@ export function buildReport(ctx, q) {
     type, level, from, to, include_done: includeDone, group, gantt: withGantt, stage_filter: stageNames,
     by_stage: groupByStage(tasks, type !== 'projeto'),
     reschedules: rescheduleSummary,
+    trend: monthlyTrend(tasks, today(), 6),
+    chronic_min: getSetting('chronic_reschedule_threshold'),
     gantt_tasks: withGantt ? (group === 'classificacao' ? tasks : [...tasks].sort(byStage)).map(ganttRow) : [],
     issued_at: new Date().toISOString(),
     issued_by: ctx.user.name,
@@ -204,7 +209,7 @@ export function fieldList(ctx, q) {
       short: t.field_summary || shorten(t.description),
       project_code: t.project_code, project_name: t.project_name,
       assignee_name: t.assignee_name, due_date: t.due_date, eff_status: t.eff_status, priority: t.priority,
-      notes: t.notes ? shorten(t.notes, 110) : null, proof_type: t.proof_type, days_late: t.days_late,
+      notes: t.notes ? shorten(t.notes, 110) : null, late_episodes: t.late_episodes, chronic: t.chronic, proof_type: t.proof_type, days_late: t.days_late,
     })),
   };
 }

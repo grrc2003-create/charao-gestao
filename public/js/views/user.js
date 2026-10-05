@@ -1,6 +1,7 @@
 // Tela individual do usuário: indicadores, comportamento operacional, tarefas próprias e visão da equipe.
 import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct } from '../core.js';
 import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR } from './shared.js';
+import { deadlineSection, deadlineTable } from './deadlines.js';
 
 export async function view({ params, query, setQuery, render, state }) {
   const d = await api(`/users/${params.id}`);
@@ -93,6 +94,13 @@ export async function view({ params, query, setQuery, render, state }) {
             <a class="btn btn-ghost btn-sm" href="#/imprimir/relatorio?type=usuario&id=${u.id}&level=detalhado">${icon('print')}Relatório individual</a>
           </div></div></section>
       </div>
+
+      ${deadlineSection(s, d.trend, {
+        chronicMin: d.chronic_min || 3,
+        sub: 'tarefas atribuídas a este usuário',
+        extra: d.team.length ? html`<div><div class="sub-label">Equipe sob gestão</div>
+          ${deadlineTable(d.team.filter(m => m.stats.with_due).map(m => ({ label: m.name, s: m.stats, href: `#/usuarios/${m.id}` })), 'Integrante')}</div>` : '',
+      })}
 
       <section class="section">
         <div class="tabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" data-tab="${k}" aria-selected="${tab === k}">${l}</button>`)}</div>

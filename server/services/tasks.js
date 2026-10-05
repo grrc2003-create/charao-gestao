@@ -8,7 +8,7 @@ import { decorate, today } from './metrics.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored } from './files.js';
 import { resolveStage } from './stages.js';
-import { activeReason } from './settings.js';
+import { activeReason, getSetting } from './settings.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
 export const PROOF_TYPES = ['nenhuma', 'foto', 'descricao', 'foto_descricao'];
@@ -36,12 +36,26 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
 
 const nowIso = () => new Date().toISOString();
 
+// Reagendamentos agrupados por tarefa (para os indicadores de prazo e repactuação)
+function reschedulesByTask(taskIds) {
+  const m = new Map();
+  if (!taskIds.length) return m;
+  const rows = taskIds.length > 500
+    ? all('SELECT task_id, old_due, new_due, created_at FROM task_reschedules ORDER BY id')
+    : all(`SELECT task_id, old_due, new_due, created_at FROM task_reschedules WHERE task_id IN (${taskIds.map(() => '?').join(',')}) ORDER BY id`, ...taskIds);
+  for (const r of rows) {
+    if (!m.has(r.task_id)) m.set(r.task_id, []);
+    m.get(r.task_id).push(r);
+  }
+  return m;
+}
+
 export function listVisible(ctx, where = '', ...params) {
   const ref = today();
-  return all(`${BASE_SQL} ${where} ORDER BY t.due_date IS NULL, t.due_date, t.id`, ...params)
-    .filter(t => canSeeTask(ctx, t))
-    .map(t => decorate(t, ref))
-    .sort(byWorkOrder);
+  const chronicMin = getSetting('chronic_reschedule_threshold');
+  const rows = all(`${BASE_SQL} ${where} ORDER BY t.due_date IS NULL, t.due_date, t.id`, ...params).filter(t => canSeeTask(ctx, t));
+  const rs = reschedulesByTask(rows.filter(t => t.reschedule_count).map(t => t.id));
+  return rows.map(t => decorate(t, ref, rs.get(t.id) || [], chronicMin)).sort(byWorkOrder);
 }
 
 // Pendências primeiro (atrasadas, depois por prazo), concluídas por último (mais recentes primeiro)
@@ -97,13 +111,19 @@ export function getTask(ctx, id) {
   const history = all(`SELECT h.id, h.action, h.details, h.created_at, u.name AS user_name
     FROM task_history h LEFT JOIN users u ON u.id = h.user_id WHERE h.task_id = ? ORDER BY h.created_at DESC, h.id DESC`, id);
   const ref = today();
-  const subtasks = all(`${BASE_SQL} WHERE t.parent_id = ? ORDER BY t.seq`, id)
-    .filter(s => canSeeTask(ctx, s)).map(s => decorate(s, ref));
+  const chronicMin = getSetting('chronic_reschedule_threshold');
+  const subRows = all(`${BASE_SQL} WHERE t.parent_id = ? ORDER BY t.seq`, id).filter(s => canSeeTask(ctx, s));
+  const subRs = reschedulesByTask(subRows.filter(s => s.reschedule_count).map(s => s.id));
+  const subtasks = subRows.map(s => decorate(s, ref, subRs.get(s.id) || [], chronicMin));
   const parent = t.parent_id ? one(`${BASE_SQL} WHERE t.id = ?`, t.parent_id) : null;
   const reschedules = all(`SELECT r.id, r.old_due, r.new_due, r.reason_name, r.note, r.created_at, u.name AS user_name
     FROM task_reschedules r LEFT JOIN users u ON u.id = r.user_id WHERE r.task_id = ? ORDER BY r.id`, id);
+  // Cada reagendamento marcado como preventivo ou corretivo
+  const { reschedule_entries: entries, ...dec } = decorate(t, ref, reschedules, chronicMin);
   return {
-    ...decorate(t), files, history, subtasks, reschedules,
+    ...dec, files, history, subtasks,
+    reschedules: entries,
+    chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
   };

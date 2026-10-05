@@ -1,5 +1,6 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
 import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR } from './shared.js';
+import { deadlineSection, deadlineTable } from './deadlines.js';
 
 export async function view({ params, query, setQuery, render }) {
   const p = await api(`/projects/${params.id}`);
@@ -66,6 +67,13 @@ export async function view({ params, query, setQuery, render }) {
               <span style="color:${s.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.summary.late}</b> atrasadas</span><span><b>${s.summary.done}</b> concluídas</span></div></div>
           <div class="proj-pct">${fmtPct(s.summary.completion_pct ?? 0)}</div></button></li>`)}</ul>
       </section>` : ''}
+
+      ${deadlineSection(p.summary, p.trend, {
+        chronicMin: p.chronic_min || 3,
+        sub: 'neste projeto',
+        extra: usedStages.length > 1 ? html`<div><div class="sub-label">Por classificação (Grupo/Local/Etapa)</div>
+          ${deadlineTable(usedStages.filter(s => s.summary.with_due).map(s => ({ label: s.name, s: s.summary })), 'Classificação')}</div>` : '',
+      })}
 
       <section class="section" id="proj-tasks">
         <div class="page-head" style="margin-bottom:10px">

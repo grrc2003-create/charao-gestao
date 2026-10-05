@@ -2,10 +2,11 @@
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } from '../lib/permissions.js';
-import { summarize } from './metrics.js';
+import { summarize, monthlyTrend } from './metrics.js';
 import { listVisible } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
+import { getSetting } from './settings.js';
 
 export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'];
 
@@ -42,6 +43,8 @@ export function getProject(ctx, id) {
   return {
     ...p,
     stages,
+    trend: monthlyTrend(tasks),
+    chronic_min: getSetting('chronic_reschedule_threshold'),
     members: members(id),
     summary: summarize(tasks),
     tasks,

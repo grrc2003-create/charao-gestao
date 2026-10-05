@@ -1,7 +1,7 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
 import { pageHead, taskList, bindCommon, STATUS_COLOR } from './shared.js';
 
-const DUE = { '': 'Qualquer prazo', vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo', reagendadas: 'Reagendadas' };
+const DUE = { '': 'Qualquer prazo', vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo', reagendadas: 'Reagendadas', ja_atrasadas: 'Ficaram atrasadas alguma vez', corretivas: 'Repactuadas após vencer', cronicas: 'Crônicas (muitos reagendamentos)' };
 
 export async function view({ state, query, setQuery }) {
   const f = {

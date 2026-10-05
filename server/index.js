@@ -18,7 +18,7 @@ import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
-import { summarize, userStats, today, daysBetween } from './services/metrics.js';
+import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
 import { all } from './db.js';
 
 migrate();
@@ -137,6 +137,11 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
   const team = [...ctx.team];
   send(res, 200, {
     summary: summarize(tasks),
+    trend: monthlyTrend(tasks),
+    chronic_min: Settings.getSetting('chronic_reschedule_threshold'),
+    // Tarefas com mais atrasos/repactuações (atenção)
+    deadline_watch: tasks.filter(t => t.late_episodes > 1 || t.chronic)
+      .sort((a, b) => b.late_episodes - a.late_episodes || b.reschedule_count - a.reschedule_count).slice(0, 6),
     projects: projects.filter(p => p.status !== 'cancelado'),
     users,
     upcoming,
@@ -211,6 +216,9 @@ api.get('/api/tasks', (req, res, { ctx, query }) => {
       '30d': within(30),
       sem_prazo: t => !t.due_date,
       reagendadas: t => t.reschedule_count > 0,
+      ja_atrasadas: t => t.ever_late,
+      corretivas: t => t.reschedules_corrective > 0,
+      cronicas: t => t.chronic,
     }[due];
     if (f) tasks = tasks.filter(f);
   }
@@ -281,6 +289,8 @@ api.get('/api/audit', (req, res, { user }) => {
 // Justificativas de reagendamento: todos os usuários leem as ativas (lista suspensa); gestores e administradores editam
 api.get('/api/settings/reasons', (req, res, { ctx, query }) =>
   send(res, 200, Settings.listReasons({ includeInactive: query.get('all') === '1' && canManageSettings(ctx.user) })));
+api.get('/api/settings/general', (req, res) => send(res, 200, Settings.getGeneral()));
+api.put('/api/settings/general', (req, res, { ctx, body }) => send(res, 200, Settings.saveGeneral(ctx, body, clientIp(req))));
 api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
 
 // ---------- Relatórios ----------

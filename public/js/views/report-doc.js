@@ -40,26 +40,61 @@ const groupTable = (title, rows, labelHead) => rows.length ? html`<section class
     <td class="num">${g.summary.in_progress}</td><td class="num ${g.summary.late ? 'late' : ''}">${g.summary.late}</td>
     <td class="num"><b>${fmtPct(g.summary.completion_pct ?? 0)}</b></td><td class="num">${fmtPct(g.summary.on_time_pct)}</td></tr>`)}</tbody></table></section>` : '';
 
-// Prazos e reagendamentos: indicadores, motivos e (detalhado/completo) histórico por tarefa
+// Prazos e repactuação: constância de atrasos e de reagendamentos, motivos, evolução e (detalhado) histórico por tarefa
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const n1 = v => String(v ?? 0).replace('.', ',');
+const lvl = (kind, s) => {
+  if (!s.with_due) return '';
+  const l = kind === 'late' ? (s.late_rate <= 15 ? 'bom' : s.late_rate <= 30 ? 'atencao' : 'critico')
+    : kind === 'corrective' ? (!s.reschedules || s.corrective_pct <= 30 ? 'bom' : s.corrective_pct <= 50 ? 'atencao' : 'critico')
+    : (!s.chronic ? 'bom' : (s.chronic / s.with_due) * 100 <= 5 ? 'atencao' : 'critico');
+  return html`<span class="r-sig r-sig-${l}">${{ bom: '● Bom', atencao: '▲ Atenção', critico: '■ Crítico' }[l]}</span>`;
+};
+const dlRow = (label, s) => html`<tr><td>${label}</td><td class="num">${s.with_due}</td><td class="num">${fmtPct(s.late_rate ?? 0)}</td>
+  <td class="num">${s.late_episodes}</td><td class="num">${fmtPct(s.reschedule_rate ?? 0)}</td><td class="num">${s.reschedules ? fmtPct(s.corrective_pct) : '—'}</td>
+  <td class="num">${s.chronic}</td><td class="num">${fmtPct(s.on_time_original_pct)}</td><td class="num">${fmtPct(s.on_time_pct)}</td></tr>`;
+const dlTable = (title, rows, head) => rows.length ? html`<h4 class="r-sub">${title}</h4>
+  <table class="r-table avoid"><thead><tr><th>${head}</th><th class="num">Com prazo</th><th class="num">Ficaram atrasadas</th><th class="num">Episódios</th>
+    <th class="num">Repactuação</th><th class="num">Corretiva</th><th class="num">Crônicas</th><th class="num">Pont. real</th><th class="num">Pont. vigente</th></tr></thead>
+  <tbody>${rows.map(g => dlRow(g.label, g.summary))}</tbody></table>` : '';
+
 function reschedSection(r) {
   const s = r.summary;
   const rs = r.reschedules;
-  if (!s.rescheduled) return html`<section class="r-section avoid"><h3 class="r-h">Prazos e reagendamentos</h3>
-    <p class="r-p muted">Nenhuma tarefa do escopo foi reagendada.</p></section>`;
+  if (!s.with_due) return '';
+  const d = s.reschedule_dist;
+  const trend = r.trend.filter(m => m.total);
   return html`<section class="r-section">
-    <h3 class="r-h">Prazos e reagendamentos</h3>
+    <h3 class="r-h">Prazos e repactuação</h3>
     <div class="r-kpis avoid" style="grid-template-columns:repeat(3,1fr)">
-      ${kpiBox('Tarefas reagendadas', s.rescheduled, `${Math.round((s.rescheduled / s.total) * 100)}% das tarefas`, '#C9520F')}
-      ${kpiBox('Total de reagendamentos', s.reschedules, null, '#C9520F')}
-      ${kpiBox('Média por tarefa reagendada', String(Math.round((s.reschedules / s.rescheduled) * 10) / 10).replace('.', ','), 'reagendamentos', '#707E8B')}
+      ${kpiBox(html`Ficaram atrasadas ${lvl('late', s)}`, fmtPct(s.late_rate ?? 0), `${s.ever_late} de ${s.with_due} tarefas, ao menos 1 vez`, '#C0392B')}
+      ${kpiBox('Episódios de atraso', s.late_episodes, `média ${n1(s.late_episodes_avg)} por tarefa`, '#C0392B')}
+      ${kpiBox('Taxa de repactuação', fmtPct(s.reschedule_rate ?? 0), `${s.rescheduled} tarefa(s) · ${s.reschedules} reagendamento(s)`, '#C9520F')}
+      ${kpiBox(html`Repactuação corretiva ${lvl('corrective', s)}`, fmtPct(s.corrective_pct ?? 0), `${s.corrective} após vencer · ${s.preventive} antes`, '#C9520F')}
+      ${kpiBox(html`Tarefas crônicas ${lvl('chronic', s)}`, s.chronic, `${r.chronic_min}+ reagendamentos · +${s.days_added} dia(s) acrescidos`, '#707E8B')}
+      ${kpiBox('Pontualidade real × repactuada', `${fmtPct(s.on_time_original_pct)} × ${fmtPct(s.on_time_pct)}`, 'prazo original × prazo vigente', '#2E8B57')}
     </div>
-    <table class="r-table avoid" style="margin-top:8px"><thead><tr><th>Justificativa</th><th class="num">Reagendamentos</th><th class="num">%</th></tr></thead>
-      <tbody>${rs.reasons.map(x => html`<tr><td>${x.name}</td><td class="num">${x.count}</td><td class="num">${Math.round((x.count / s.reschedules) * 100)}%</td></tr>`)}</tbody></table>
-    ${r.level !== 'resumo' ? html`<table class="r-table" style="margin-top:10px"><thead><tr><th>Tarefa</th><th>Prazo original → atual</th><th class="num">Vezes</th><th>Reagendamentos (justificativa · por · em)</th></tr></thead>
+    <p class="r-p small muted" style="margin-top:6px">Preventiva = reagendada antes de vencer (planejamento). Corretiva = reagendada com o prazo já vencido (cobre um atraso).
+      Episódio de atraso = repactuação corretiva, entrega após o prazo ou atraso atual. Semáforo: atraso ≤15% bom, ≤30% atenção; corretivas ≤30% bom, ≤50% atenção; crônicas nenhuma bom, até 5% atenção.</p>
+    <table class="r-table avoid" style="margin-top:6px"><thead><tr><th>Reagendamentos por tarefa</th><th class="num">Nenhum</th><th class="num">1 vez</th><th class="num">2 vezes</th><th class="num">3+ vezes</th></tr></thead>
+      <tbody><tr><td>Tarefas com prazo (${s.with_due})</td><td class="num">${d.r0}</td><td class="num">${d.r1}</td><td class="num">${d.r2}</td><td class="num"><b>${d.r3}</b></td></tr></tbody></table>
+    ${trend.length ? html`<h4 class="r-sub">Evolução mensal (mês do prazo original)</h4>
+      <table class="r-table avoid"><thead><tr><th>Mês</th><th class="num">Tarefas</th><th>Ficaram atrasadas</th><th>Repactuadas</th></tr></thead>
+      <tbody>${trend.map(m => html`<tr><td>${MONTHS[Number(m.month.slice(5, 7)) - 1]}/${m.month.slice(0, 4)}</td><td class="num">${m.total}</td>
+        <td><span class="r-mini" style="--w:${m.late_rate || 0}%;--c:#C0392B"></span> ${m.ever_late} (${fmtPct(m.late_rate ?? 0)})</td>
+        <td><span class="r-mini" style="--w:${m.reschedule_rate || 0}%;--c:#7A5BB8"></span> ${m.rescheduled} (${fmtPct(m.reschedule_rate ?? 0)})</td></tr>`)}</tbody></table>` : ''}
+    ${r.type !== 'usuario' ? dlTable('Por responsável', r.by_person.filter(g => g.summary.with_due), 'Responsável') : ''}
+    ${r.by_stage.length > 1 ? dlTable('Por classificação', r.by_stage.filter(g => g.summary.with_due), 'Classificação') : ''}
+    ${rs.reasons.length ? html`<h4 class="r-sub">Justificativas usadas</h4>
+      <table class="r-table avoid"><thead><tr><th>Justificativa</th><th class="num">Reagendamentos</th><th class="num">%</th></tr></thead>
+      <tbody>${rs.reasons.map(x => html`<tr><td>${x.name}</td><td class="num">${x.count}</td><td class="num">${Math.round((x.count / s.reschedules) * 100)}%</td></tr>`)}</tbody></table>` : ''}
+    ${r.level !== 'resumo' && rs.tasks.length ? html`<h4 class="r-sub">Tarefas repactuadas</h4>
+      <table class="r-table"><thead><tr><th>Tarefa</th><th>Prazo original → atual</th><th class="num">Vezes</th><th>Reagendamentos (tipo · justificativa · por · em)</th></tr></thead>
       <tbody>${rs.tasks.map(t => html`<tr><td><span class="mono">${t.code}</span><div><b>${t.title}</b></div><div class="muted small">${t.assignee_name || '—'}</div></td>
-        <td class="nowrap small">${fmtDate(t.original_due)} → <b>${fmtDate(t.due_date)}</b><div>${stBadge(t.eff_status)}</div></td>
-        <td class="num"><b>${t.reschedule_count}</b></td>
-        <td class="small">${t.entries.map((e, i) => html`<div>${i + 1}º ${fmtDate(e.old_due)} → ${fmtDate(e.new_due)} · <b>${e.reason_name}</b>${e.note ? ` — ${e.note}` : ''} <span class="muted">· ${e.user_name || '—'} · ${fmtDateTime(e.created_at)}</span></div>`)}</td></tr>`)}</tbody></table>` : ''}
+        <td class="nowrap small">${fmtDate(t.original_due)} → <b>${fmtDate(t.due_date)}</b><div>${stBadge(t.eff_status)}</div>
+          ${t.late_episodes ? html`<div class="r-resched">atrasou ${t.late_episodes}x</div>` : ''}</td>
+        <td class="num"><b>${t.reschedule_count}</b>${t.chronic ? html`<div class="r-resched">crônica</div>` : ''}</td>
+        <td class="small">${t.entries.map((e, i) => html`<div>${i + 1}º ${fmtDate(e.old_due)} → ${fmtDate(e.new_due)} · <span class="r-kind r-kind-${e.kind}">${e.kind === 'corretiva' ? 'Corretiva' : 'Preventiva'}</span> · <b>${e.reason_name}</b>${e.note ? ` — ${e.note}` : ''} <span class="muted">· ${e.user_name || '—'} · ${fmtDateTime(e.created_at)}</span></div>`)}</td></tr>`)}</tbody></table>` : ''}
   </section>`;
 }
 

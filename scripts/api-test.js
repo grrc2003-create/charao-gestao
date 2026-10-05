@@ -248,6 +248,50 @@ async function main() {
   ok((await ricardo('GET', `/tasks/${rTask}`)).data.reschedules[0].reason_name === reasons[1].name, 'histórico preserva o texto original da justificativa');
   ok((await ricardo('POST', `/tasks/${rTask}/reschedule`, { due_date: '2099-04-09', reason_id: used.id })).status === 400, 'justificativa inativa não pode ser usada');
 
+  console.log('Indicadores de prazo e repactuação');
+  const rsn = (await ricardo('GET', '/settings/reasons')).data[0].id;
+  const np2 = (await ricardo('POST', '/projects', { name: 'Obra Indicadores', client: 'Cliente Y' })).data.id;
+  const mk = async (title, due) => (await ricardo('POST', '/tasks', { project_id: np2, title, description: title, assignee_id: 2, due_date: due })).data.id;
+  const tPrev = await mk('Preventiva', '2099-06-10');
+  await ricardo('POST', `/tasks/${tPrev}/reschedule`, { due_date: '2099-06-20', reason_id: rsn });
+  const tCorr = await mk('Corretiva ainda atrasada', '2020-01-10');
+  await ricardo('POST', `/tasks/${tCorr}/reschedule`, { due_date: '2020-02-10', reason_id: rsn }); // vencido → corretiva; segue vencido
+  const tChr = await mk('Crônica', '2099-01-01');
+  for (const d of ['2099-01-05', '2099-01-09', '2099-01-12']) await ricardo('POST', `/tasks/${tChr}/reschedule`, { due_date: d, reason_id: rsn });
+  const tOk = await mk('Sem repactuação', '2099-01-01');
+  let x = (await ricardo('GET', `/tasks/${tPrev}`)).data;
+  ok(x.reschedules[0].kind === 'preventiva' && x.reschedules_preventive === 1 && x.late_episodes === 0, 'reagendamento antes do vencimento = preventivo (sem atraso)');
+  x = (await ricardo('GET', `/tasks/${tCorr}`)).data;
+  ok(x.reschedules[0].kind === 'corretiva' && x.reschedules_corrective === 1, 'reagendamento com prazo vencido = corretivo');
+  ok(x.late_episodes === 2 && x.ever_late, 'episódios de atraso: repactuação corretiva + atraso atual = 2');
+  ok((await ricardo('GET', `/tasks/${tChr}`)).data.chronic === true, 'tarefa reagendada 3x é crônica (limite padrão 3)');
+  ok(x.original_due === '2020-01-10' && (await ricardo('GET', `/tasks/${tPrev}`)).data.days_added === 10, 'prazo original e dias acrescidos');
+  const ps = (await ricardo('GET', `/projects/${np2}`)).data.summary;
+  ok(ps.with_due === 4 && ps.rescheduled === 3 && ps.reschedule_rate === 75, `taxa de repactuação (${ps.reschedule_rate}%)`);
+  ok(ps.preventive === 4 && ps.corrective === 1 && ps.corrective_pct === 20, 'preventivas × corretivas');
+  ok(ps.ever_late === 1 && ps.late_rate === 25 && ps.late_episodes === 2, 'taxa de atraso (alguma vez) e episódios');
+  ok(ps.chronic === 1 && ps.reschedule_dist.r0 === 1 && ps.reschedule_dist.r1 === 2 && ps.reschedule_dist.r3 === 1, 'distribuição 0/1/2/3+ e crônicas');
+  // Pontualidade real × repactuada: entrega após o prazo original e antes do prazo vigente
+  const tReal = await mk('Pontualidade', '2020-03-01');
+  await ricardo('POST', `/tasks/${tReal}/reschedule`, { due_date: '2099-03-01', reason_id: rsn });
+  await ricardo('POST', `/tasks/${tReal}/actions/submit`); // responsável = Ricardo (mk)
+  x = (await ricardo('GET', `/tasks/${tReal}`)).data;
+  ok(x.on_time === true && x.on_time_original === false, 'entrega no prazo repactuado, mas fora do prazo original');
+  ok((await ricardo('GET', '/tasks?due=ja_atrasadas')).data.some(t => t.id === tCorr) && !(await ricardo('GET', '/tasks?due=ja_atrasadas')).data.some(t => t.id === tPrev), 'filtro "ficaram atrasadas"');
+  ok((await ricardo('GET', '/tasks?due=corretivas')).data.every(t => t.reschedules_corrective > 0), 'filtro "repactuadas após atraso"');
+  ok((await ricardo('GET', '/tasks?due=cronicas')).data.some(t => t.id === tChr), 'filtro "crônicas"');
+  const dash = (await ricardo('GET', '/dashboard')).data;
+  ok(dash.trend.length === 6 && dash.summary.late_rate !== undefined && dash.deadline_watch.length > 0, 'dashboard com indicadores, evolução mensal e tarefas em atenção');
+  const urep = (await ricardo('GET', `/reports?type=projeto&id=${np2}&level=detalhado`)).data;
+  ok(urep.trend.length === 6 && urep.reschedules.tasks.find(t => t.id === tCorr).entries[0].kind === 'corretiva', 'relatório com evolução mensal e tipo de repactuação');
+  ok((await ricardo('GET', `/users/2`)).data.stats.behavior.some(l => l.includes('Repactuou')), 'resumo de comportamento comenta a repactuação');
+  // Limite de crônica configurável (gestor/admin)
+  ok((await marcos('PUT', '/settings/general', { chronic_reschedule_threshold: 2 })).status === 403, 'colaborador não altera o limite de crônica');
+  ok((await ricardo('PUT', '/settings/general', { chronic_reschedule_threshold: 1 })).status === 400, 'limite inválido é recusado');
+  ok((await ricardo('PUT', '/settings/general', { chronic_reschedule_threshold: 4 })).data.chronic_reschedule_threshold === 4, 'gestor altera o limite de crônica');
+  ok((await ricardo('GET', `/tasks/${tChr}`)).data.chronic === false, 'com limite 4, a tarefa reagendada 3x deixa de ser crônica');
+  await ricardo('PUT', '/settings/general', { chronic_reschedule_threshold: 3 });
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

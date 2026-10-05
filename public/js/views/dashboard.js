@@ -1,5 +1,6 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
 import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, STATUS_COLOR } from './shared.js';
+import { deadlineSection, deadlineTable } from './deadlines.js';
 
 export async function view({ state }) {
   const d = await api('/dashboard');
@@ -45,6 +46,22 @@ export async function view({ state }) {
         <div class="card-head"><h2>${icon('team')}Desempenho por usuário</h2><span class="sub">ordenado por entregas no prazo</span></div>
         ${ranking.length ? html`<ul class="rows">${ranking.map(userRankRow)}</ul>` : html`<div class="card-body muted">Sem dados de usuários para o seu perfil.</div>`}
       </section>
+
+      ${deadlineSection(s, d.trend, {
+        chronicMin: d.chronic_min,
+        sub: 'constância de atrasos e de repactuações',
+        extra: html`${d.users.length ? html`<div><div class="sub-label">Por responsável</div>${deadlineTable(
+          [...d.users].filter(u => u.stats.with_due).sort((a, b) => (b.stats.late_rate ?? 0) - (a.stats.late_rate ?? 0))
+            .map(u => ({ label: u.name, s: u.stats, href: `#/usuarios/${u.id}` })), 'Responsável')}</div>` : ''}
+          ${d.deadline_watch.length ? html`<div><div class="sub-label">Em atenção — tarefas que atrasaram mais de uma vez ou são crônicas</div>
+            <ul class="rows dl-watch">${d.deadline_watch.map(t => html`<li><a class="row-link" href="#/tarefas/${t.id}"><div class="grow">
+              <div class="row-title"><span class="mono muted" style="font-size:12px">${t.code}</span>
+                ${t.late_episodes ? html`<i class="late-badge">atrasou ${t.late_episodes}x</i>` : ''}
+                ${t.reschedule_count ? html`<i class="resched-badge ${t.chronic ? 'is-chronic' : ''}">↻ ${t.reschedule_count}x${t.chronic ? ' · crônica' : ''}</i>` : ''}</div>
+              <div class="truncate" style="font-weight:600">${t.title}</div>
+              <div class="row-meta"><span>${t.assignee_name || 'Sem responsável'}</span><span>${t.project_code}</span></div></div>
+              ${statusBadge(t.eff_status, { short: true })}</a></li>`)}</ul></div>` : ''}`,
+      })}
 
       ${d.team_summary ? html`<section class="card section">
         <div class="card-head"><h2>${icon('team')}Minha equipe</h2><a class="sub" href="#/usuarios/${u.id}">Ver detalhes</a></div>

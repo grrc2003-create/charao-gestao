@@ -102,7 +102,9 @@ function build(t, ctx) {
           <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
           <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}</div></div>
           <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
-            ${t.reschedule_count ? html`<button type="button" class="resched-badge" data-act="goresched" style="margin-top:4px;cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada</button>` : ''}</div></div>
+            <span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
+            ${t.reschedule_count ? html`<button type="button" class="resched-badge ${t.chronic ? 'is-chronic' : ''}" data-act="goresched" style="cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada${t.chronic ? ' · crônica' : ''}</button>` : ''}
+            ${t.late_episodes ? html`<i class="late-badge" title="Repactuações após vencer + entrega após o prazo + atraso atual">atrasou ${t.late_episodes}x</i>` : ''}</span></div></div>
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
           <div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>
         </div>
@@ -161,8 +163,13 @@ function build(t, ctx) {
       ${t.reschedules.length ? html`<section class="card block" id="resched" aria-labelledby="blk-resched">
         <header class="block-head"><span class="step" style="background:var(--orange-700)">${icon('reschedule')}</span><h2 id="blk-resched">Reagendamentos</h2>
           <span class="right muted" style="font-size:12px">${t.reschedules.length}x · prazo original ${fmtDate(t.original_due)}</span></header>
+        <div class="block-body" style="padding-bottom:0"><div class="stat-inline">
+          <span><b>${t.reschedules_preventive}</b> preventiva(s)</span><span><b>${t.reschedules_corrective}</b> corretiva(s)</span>
+          <span><b>${t.days_added > 0 ? '+' : ''}${t.days_added}</b> dia(s) no prazo</span><span>ficou atrasada <b>${t.late_episodes}</b>x</span>
+          ${t.chronic ? html`<span class="resched-badge is-chronic">crônica (${t.chronic_min}+ reagendamentos)</span>` : ''}</div></div>
         <div class="block-body"><ol class="resched-list">${t.reschedules.map((r, i) => html`<li>
-          <div class="dates"><span class="resched-badge">${i + 1}º</span><s>${fmtDate(r.old_due)}</s> → <span>${r.new_due ? fmtDate(r.new_due) : 'sem prazo'}</span></div>
+          <div class="dates"><span class="resched-badge">${i + 1}º</span><s>${fmtDate(r.old_due)}</s> → <span>${r.new_due ? fmtDate(r.new_due) : 'sem prazo'}</span>
+            <span class="kind-tag kind-${r.kind}" title="${r.kind === 'corretiva' ? 'Reagendada com o prazo já vencido' : 'Reagendada antes de vencer'}">${r.kind === 'corretiva' ? `Corretiva · ${r.late_days_at}d após vencer` : 'Preventiva'}</span></div>
           <div class="why"><b>Justificativa:</b> ${r.reason_name}${r.note ? html` — ${r.note}` : ''}</div>
           <div class="who">${r.user_name || '—'} · ${fmtDateTime(r.created_at)}</div></li>`)}</ol></div>
       </section>` : ''}

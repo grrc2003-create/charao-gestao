@@ -169,6 +169,17 @@
 .fl-resched { font-size: 7.5pt; font-weight: 700; color: #8C3D0B; background: #FFF1E8; border-radius: 3px; padding: 0 4px; margin-left: 4px; }
 .r-resched { font-size: 7.5pt; font-weight: 700; color: #8C3D0B; white-space: nowrap; }
 
+.r-sub { font-size: 8.5pt; font-weight: 700; color: #46535F; text-transform: uppercase; letter-spacing: .06em; margin: 12px 0 4px; break-after: avoid; page-break-after: avoid; }
+.r-h { break-after: avoid; page-break-after: avoid; }
+.r-sig { font-size: 7pt; font-weight: 700; border-radius: 8px; padding: 0 5px; margin-left: 4px; text-transform: none; letter-spacing: 0; }
+.r-sig-bom { color: #1F6B41; background: #E5F4EC; }
+.r-sig-atencao { color: #7A5208; background: #FBF1DC; }
+.r-sig-critico { color: #9E2B20; background: #FBE9E7; }
+.r-mini { display: inline-block; width: 60px; height: 7px; background: linear-gradient(90deg, var(--c) var(--w), #EEF0F2 var(--w)); border-radius: 2px; vertical-align: 0; }
+.r-kind { font-weight: 700; }
+.r-kind-corretiva { color: #9E2B20; }
+.r-kind-preventiva { color: #1F6B41; }
+
 /* ---------- Impressão ---------- */
 @page {
   size: A4;

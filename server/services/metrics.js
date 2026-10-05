@@ -19,22 +19,51 @@ export function effectiveStatus(t, ref = today()) {
   return t.status;
 }
 
+// ---------- Prazos e repactuação ----------
+// Preventiva: reagendada até o dia do prazo vigente. Corretiva: reagendada com o prazo já vencido (cobre um atraso).
+// Episódios de atraso = repactuações corretivas + entrega após o prazo + atraso atual.
+export function deadlineStats(t, reschedules = [], ref = today(), chronicMin = 3) {
+  let preventive = 0, corrective = 0, daysAdded = 0;
+  const entries = reschedules.map(r => {
+    const madeOn = localDate(r.created_at);
+    const kind = r.old_due && madeOn > r.old_due ? 'corretiva' : 'preventiva';
+    if (kind === 'corretiva') corrective++; else preventive++;
+    if (r.old_due && r.new_due) daysAdded += daysBetween(r.old_due, r.new_due);
+    return { ...r, kind, late_days_at: kind === 'corretiva' ? daysBetween(r.old_due, madeOn) : 0 };
+  });
+  return { entries, preventive, corrective, daysAdded, chronic: reschedules.length >= chronicMin };
+}
+
 // Enriquecimento com dados derivados (usado em listas, telas e relatórios)
-export function decorate(t, ref = today()) {
+export function decorate(t, ref = today(), reschedules = null, chronicMin = 3) {
   const eff = effectiveStatus(t, ref);
   const deliveredDate = localDate(t.delivered_at);
   const delivered = !!deliveredDate && (t.status === 'aguardando_conferencia' || t.status === 'concluida');
   let daysLate = 0;
   if (delivered && t.due_date && deliveredDate > t.due_date) daysLate = daysBetween(t.due_date, deliveredDate);
   else if (eff === 'atrasada') daysLate = daysBetween(t.due_date, ref);
+  const ds = deadlineStats(t, reschedules || [], ref, chronicMin);
+  const lateNow = eff === 'atrasada' ? 1 : 0;
+  const deliveredLate = delivered && t.due_date && deliveredDate > t.due_date ? 1 : 0;
+  const lateEpisodes = ds.corrective + deliveredLate + lateNow;
+  const originalDue = t.original_due || t.due_date || null;
   return {
     ...t,
     eff_status: eff,
     delivered,
     delivered_date: deliveredDate,
     on_time: delivered ? !t.due_date || deliveredDate <= t.due_date : null,
+    // Pontualidade "real": contra o prazo ORIGINAL (antes de qualquer repactuação)
+    on_time_original: delivered ? !originalDue || deliveredDate <= originalDue : null,
     days_late: daysLate,
     days_to_due: t.due_date && !delivered ? daysBetween(ref, t.due_date) : null,
+    late_episodes: lateEpisodes,
+    ever_late: lateEpisodes > 0,
+    reschedules_preventive: ds.preventive,
+    reschedules_corrective: ds.corrective,
+    days_added: ds.daysAdded,
+    chronic: ds.chronic,
+    ...(reschedules ? { reschedule_entries: ds.entries } : {}),
   };
 }
 
@@ -43,8 +72,22 @@ const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 export function summarize(tasks, ref = today()) {
   const by = Object.fromEntries(STATUSES.map(s => [s, 0]));
   let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0, rescheduled = 0, reschedules = 0;
+  let withDue = 0, everLate = 0, episodes = 0, preventive = 0, corrective = 0, chronic = 0, daysAdded = 0, onTimeOriginal = 0;
+  const dist = { r0: 0, r1: 0, r2: 0, r3: 0 };
   for (const t of tasks) {
     if (t.reschedule_count) { rescheduled++; reschedules += t.reschedule_count; }
+    if (t.due_date || t.original_due) {
+      withDue++;
+      const n = t.reschedule_count || 0;
+      dist[n >= 3 ? 'r3' : `r${n}`]++;
+    }
+    if (t.ever_late) everLate++;
+    episodes += t.late_episodes || 0;
+    preventive += t.reschedules_preventive || 0;
+    corrective += t.reschedules_corrective || 0;
+    if (t.chronic) chronic++;
+    daysAdded += t.days_added || 0;
+    if (t.delivered && t.on_time_original) onTimeOriginal++;
     by[t.eff_status]++;
     if (t.delivered) {
       delivered++;
@@ -71,7 +114,41 @@ export function summarize(tasks, ref = today()) {
     due_soon: dueSoon,
     rescheduled,
     reschedules,
+    // Prazos e repactuação
+    with_due: withDue,
+    reschedule_rate: pct(rescheduled, withDue),
+    reschedules_per_task: withDue ? Math.round((reschedules / withDue) * 100) / 100 : 0,
+    reschedules_per_rescheduled: rescheduled ? Math.round((reschedules / rescheduled) * 10) / 10 : 0,
+    preventive,
+    corrective,
+    corrective_pct: pct(corrective, reschedules),
+    chronic,
+    days_added: daysAdded,
+    days_added_avg: reschedules ? Math.round((daysAdded / reschedules) * 10) / 10 : 0,
+    reschedule_dist: dist,
+    ever_late: everLate,
+    late_rate: pct(everLate, withDue),
+    late_episodes: episodes,
+    late_episodes_avg: withDue ? Math.round((episodes / withDue) * 100) / 100 : 0,
+    on_time_original: onTimeOriginal,
+    on_time_original_pct: pct(onTimeOriginal, delivered),
   };
+}
+
+// Evolução mensal (mês do prazo original): % de tarefas que atrasaram ao menos uma vez e % repactuadas
+export function monthlyTrend(tasks, ref = today(), months = 6) {
+  const out = [];
+  let [y, m] = ref.slice(0, 7).split('-').map(Number);
+  for (let i = 0; i < months; i++) {
+    out.unshift(`${y}-${String(m).padStart(2, '0')}`);
+    m--; if (!m) { m = 12; y--; }
+  }
+  return out.map(month => {
+    const ts = tasks.filter(t => (t.original_due || t.due_date || '').startsWith(month));
+    const late = ts.filter(t => t.ever_late).length;
+    const resch = ts.filter(t => t.reschedule_count > 0).length;
+    return { month, total: ts.length, ever_late: late, rescheduled: resch, late_rate: pct(late, ts.length), reschedule_rate: pct(resch, ts.length) };
+  });
 }
 
 // Indicadores individuais (tarefas atribuídas ao usuário + origem das tarefas)
@@ -94,16 +171,28 @@ export function userStats(user, tasks, usersById) {
   };
 }
 
+const br = v => String(v).replace('.', ',');
+
 export function behaviorSummary(s, assigned, selfCreated) {
   const lines = [];
   if (!assigned) return ['Sem tarefas atribuídas no período considerado.'];
   if (s.on_time_pct === null) lines.push('Ainda não há entregas registradas para medir pontualidade.');
-  else if (s.on_time_pct >= 90) lines.push(`Pontualidade excelente: ${s.on_time_pct}% das entregas dentro do prazo.`);
-  else if (s.on_time_pct >= 70) lines.push(`Pontualidade boa (${s.on_time_pct}%), com espaço para reduzir atrasos.`);
-  else lines.push(`Pontualidade baixa (${s.on_time_pct}%): recomenda-se revisar prazos e prioridades.`);
-  if (s.late > 0) lines.push(`${s.late} tarefa(s) em atraso no momento${s.avg_delay_days ? `, atraso médio de ${s.avg_delay_days} dia(s)` : ''}.`);
+  else if (s.on_time_pct >= 90) lines.push(`Pontualidade excelente: ${br(s.on_time_pct)}% das entregas dentro do prazo.`);
+  else if (s.on_time_pct >= 70) lines.push(`Pontualidade boa (${br(s.on_time_pct)}%), com espaço para reduzir atrasos.`);
+  else lines.push(`Pontualidade baixa (${br(s.on_time_pct)}%): recomenda-se revisar prazos e prioridades.`);
+  if (s.late > 0) lines.push(`${s.late} tarefa(s) em atraso no momento${s.avg_delay_days ? `, atraso médio de ${br(s.avg_delay_days)} dia(s)` : ''}.`);
   else lines.push('Nenhuma tarefa em atraso no momento.');
   if (s.review > 0) lines.push(`${s.review} entrega(s) aguardando conferência.`);
+  if (s.ever_late) lines.push(`${String(s.late_rate).replace('.', ',')}% das tarefas com prazo ficaram atrasadas ao menos uma vez (${s.late_episodes} episódio(s) de atraso).`);
+  if (s.reschedules) {
+    lines.push(`Repactuou o prazo de ${String(s.reschedule_rate).replace('.', ',')}% das tarefas: ${s.preventive} preventiva(s) e ${s.corrective} corretiva(s), +${s.days_added} dia(s) no total.`);
+    if (s.corrective_pct > 50) lines.push('A maior parte das repactuações ocorre com o prazo já vencido — sinal de atraso recorrente.');
+    else lines.push('A maior parte das repactuações é feita antes do vencimento — sinal de planejamento.');
+  }
+  if (s.chronic) lines.push(`${s.chronic} tarefa(s) crônica(s), com reagendamentos repetidos.`);
+  if (s.on_time_original_pct !== null && s.on_time_pct !== null && s.on_time_pct - s.on_time_original_pct >= 10) {
+    lines.push(`Pontualidade cai de ${String(s.on_time_pct).replace('.', ',')}% para ${String(s.on_time_original_pct).replace('.', ',')}% quando medida contra o prazo original.`);
+  }
   if (selfCreated / assigned >= 0.4) lines.push('Perfil proativo: cria boa parte das próprias tarefas.');
   if (s.in_progress + s.open > 8) lines.push('Carga elevada de tarefas abertas — avaliar redistribuição.');
   return lines;

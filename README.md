@@ -63,7 +63,15 @@ Interface, regras de negócio e dados estão separados: as telas só conversam c
 - **Classificação (Grupo/Local/Etapa)**: cadastrada por projeto (formulário do projeto). Toda tarefa pertence a uma classificação; sem escolha, assume **Geral**. Classificações com tarefas não podem ser removidas (apenas renomeadas). Filtro em Tarefas, andamento por classificação no painel do projeto, agrupamento nos relatórios e na lista de campo.
 - **Cronograma (Gantt)**: nos relatórios (página A4 paisagem). Início = início previsto da tarefa (campo opcional) ou, na falta dele, início da execução/data de criação; fim = prazo (ou conclusão).
 - **Reagendamento de prazos**: alterar um prazo já definido (botão "Reagendar prazo" ou edição da tarefa) exige uma justificativa da lista cadastrada em **Configurações** (comum a todos os projetos) e, opcionalmente, uma observação — obrigatória para "Outro motivo". Cada reagendamento guarda prazo anterior, novo prazo, justificativa, usuário e data/hora; a tarefa mostra quantas vezes foi reagendada e o prazo original. Definir o primeiro prazo de uma tarefa sem prazo não conta como reagendamento. Pontualidade e atraso seguem calculados sobre o prazo vigente. Quem pode reagendar: quem pode editar a tarefa (administrador, gestor responsável, criador).
-- **Configurações** (Gestor e Administrador): justificativas de reagendamento — incluir, renomear, ordenar, inativar; as já usadas não podem ser excluídas e o histórico guarda o texto usado na época.
+- **Indicadores de prazo e repactuação** (Dashboard, projeto, usuário e relatórios):
+  - *Ficaram atrasadas*: % das tarefas com prazo que passaram do prazo vigente ao menos uma vez.
+  - *Episódio de atraso*: cada repactuação feita com o prazo já vencido, a entrega após o prazo e o atraso atual contam 1 (a tarefa mostra "atrasou Nx").
+  - *Preventiva × corretiva*: reagendamento antes de vencer (planejamento) × depois de vencer (cobre um atraso).
+  - *Taxa de repactuação*, distribuição 0/1/2/3+, *dias acrescidos*, *tarefas crônicas* (limite em Configurações, padrão 3).
+  - *Pontualidade real × repactuada*: entregas até o prazo original × até o prazo vigente.
+  - Evolução mensal (mês do prazo original), comparação por responsável e por classificação, semáforo (atraso ≤15% bom, ≤30% atenção; corretivas ≤30% bom, ≤50% atenção; crônicas: nenhuma bom, até 5% atenção).
+  - Filtros em Tarefas: "Ficaram atrasadas alguma vez", "Repactuadas após vencer", "Crônicas".
+- **Configurações** (Gestor e Administrador): limite de tarefa crônica e justificativas de reagendamento — incluir, renomear, ordenar, inativar; as já usadas não podem ser excluídas e o histórico guarda o texto usado na época.
 - **Histórico**: criação, mudança de responsável, prazo, prioridade, status, comprovação, envio, devolução, conclusão e reabertura — com usuário, data e hora.
 - **Auditoria administrativa**: logins, falhas de login, criação/alteração de usuários e permissões, projetos.
 

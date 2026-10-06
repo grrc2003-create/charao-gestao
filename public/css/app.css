@@ -45,6 +45,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Elementos com o atributo hidden nunca aparecem, mesmo quando a classe define display */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font);

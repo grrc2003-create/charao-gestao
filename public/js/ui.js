@@ -1,5 +1,5 @@
 // Componentes de interface: toast, modal/bottom-sheet, confirmação, leitura de imagens e PDFs.
-import { html, esc, icon } from './core.js';
+import { html, raw, esc, icon } from './core.js';
 
 export function toast(msg, type = 'ok') {
   let host = document.getElementById('toasts');
@@ -90,52 +90,44 @@ export function readImages(files, max = 1600, quality = 0.82) {
   })));
 }
 
-export function pickImages({ capture = false, multiple = true, accept = 'image/*' } = {}) {
-  return new Promise(resolve => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = accept;
-    input.multiple = multiple;
-    if (capture) input.capture = 'environment';
-    input.onchange = () => resolve(input.files?.length ? input.files : null);
-    input.addEventListener('cancel', () => resolve(null));
-    input.click();
-  });
-}
+// Seletor nativo: <label> com o <input type=file> dentro da página. É o único acionamento que todos os
+// celulares respeitam (iPhone/Safari e navegadores embutidos ignoram ou descartam inputs acionados por código).
+// camera: abre direto a câmera traseira (atributo capture).
+export const CAMERA_ACCEPT = 'image/*';
+export const fileInput = ({ camera = false, pdf = false, multiple = !camera, data = '' } = {}) =>
+  html`<input type="file" hidden accept="${pdf ? 'application/pdf,.pdf' : CAMERA_ACCEPT}" ${camera ? raw('capture="environment"') : ''} ${multiple ? 'multiple' : ''} ${data ? raw(data) : ''}>`;
 
 // Menu "Anexar": câmera do celular, galeria ou arquivo PDF. Retorna os arquivos escolhidos (ou null).
 export function pickAttachments({ pdf = true } = {}) {
-  const touch = window.matchMedia('(pointer: coarse)').matches;
   return new Promise(resolve => {
     const wrap = document.createElement('div');
     wrap.className = 'sheet-backdrop';
-    const opt = (src, ic, title, sub) => html`<button type="button" class="attach-opt" data-src="${src}">${icon(ic)}<span><b>${title}</b><small>${sub}</small></span></button>`;
+    const opt = (input, ic, title, sub) => html`<label class="attach-opt">${input}${icon(ic)}<span><b>${title}</b><small>${sub}</small></span></label>`;
     wrap.innerHTML = html`<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
       <div class="sheet-grip" aria-hidden="true"></div>
       <header class="sheet-head"><h2 id="sheet-title">Anexar</h2>
         <button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></header>
       <div class="sheet-body attach-menu">
-        ${touch ? opt('camera', 'camera', 'Tirar foto', 'Abre a câmera do celular') : ''}
-        ${opt('gallery', 'image', touch ? 'Galeria' : 'Imagem', touch ? 'Escolher fotos já salvas no aparelho' : 'JPG, PNG ou WEBP do computador')}
-        ${pdf ? opt('pdf', 'file', 'Arquivo PDF', 'Laudos, projetos, notas… até 8 MB por arquivo') : ''}
+        ${opt(fileInput({ camera: true }), 'camera', 'Tirar foto', 'Abre a câmera do celular')}
+        ${opt(fileInput(), 'image', 'Galeria', 'Escolher fotos já salvas no aparelho')}
+        ${pdf ? opt(fileInput({ pdf: true }), 'file', 'Arquivo PDF', 'Laudos, projetos, notas… até 8 MB por arquivo') : ''}
       </div></div>`.toString();
     document.body.appendChild(wrap);
     document.body.classList.add('no-scroll');
-    const close = () => {
+    let done = false;
+    const close = val => {
+      if (done) return;
+      done = true;
       wrap.classList.add('closing');
       document.body.classList.remove('no-scroll');
       setTimeout(() => wrap.remove(), 180);
+      resolve(val);
     };
-    wrap.addEventListener('click', e => {
-      const b = e.target.closest('[data-src]');
-      if (!b) { if (e.target === wrap || e.target.closest('[data-close]')) { close(); resolve(null); } return; }
-      close();
-      // Abre o seletor ainda dentro do toque do usuário (exigência dos navegadores móveis)
-      const src = b.dataset.src;
-      pickImages(src === 'camera' ? { capture: true, multiple: false } : src === 'pdf' ? { accept: 'application/pdf,.pdf' } : {}).then(resolve);
-    });
-    wrap.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); resolve(null); } });
-    setTimeout(() => wrap.querySelector('.attach-opt')?.focus(), 50);
+    wrap.querySelectorAll('input[type=file]').forEach(inp => inp.addEventListener('change', () => {
+      if (inp.files?.length) close([...inp.files]);
+    }));
+    wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-close]')) close(null); });
+    wrap.addEventListener('keydown', e => { if (e.key === 'Escape') close(null); });
   });
 }
 

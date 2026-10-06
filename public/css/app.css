@@ -475,6 +475,7 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
   background: var(--surface); font: 620 13.5px var(--font); color: var(--navy); cursor: pointer; text-align: left;
 }
 .action-tile svg { width: 22px; height: 22px; }
+label.action-tile, label.add-thumb, label.attach-opt { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .action-tile small { font-weight: 400; color: var(--muted); font-size: 11.5px; }
 .action-tile.done { border-color: #B7DCC6; background: var(--st-concluida-bg); }
 .action-tile.done small { color: var(--st-concluida); font-weight: 600; }

@@ -1,6 +1,6 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
-import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox } from '../ui.js';
+import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
@@ -49,7 +49,9 @@ function build(t, ctx) {
       <div class="sub-label">Registrar retorno</div>
       <div class="action-grid">
         ${tile('desc', 'edit', t.exec_description ? 'Editar descrição' : 'Adicionar descrição', !!t.exec_description, pc.need_desc)}
-        ${tile('photos', 'camera', 'Fotos ou PDF', pc.need_photo ? pc.has_photo : photos.length > 0, pc.need_photo)}
+        <label class="action-tile ${pc.has_photo ? 'done' : ''} ${pc.need_photo ? 'required' : ''}">${fileInput({ camera: true, data: 'data-upload="execucao"' })}
+          ${icon('camera')}Tirar foto<small>${pc.has_photo ? '✓ Registrado' : 'Abre a câmera'}</small></label>
+        ${tile('photos', 'image', 'Galeria ou PDF', photos.length > 0, false)}
         ${tile('notes', 'note', t.exec_notes ? 'Editar observação' : 'Adicionar observação', !!t.exec_notes, false)}
         ${can.start ? html`<button type="button" class="action-tile" data-act="start">${icon('clock')}Iniciar execução<small>Marca como em andamento</small></button>` : ''}
       </div>
@@ -161,7 +163,8 @@ function build(t, ctx) {
             ${t.exec_description ? html`<div><div class="sub-label">Descrição da execução</div><div class="text-content">${t.exec_description}</div></div>` : ''}
             ${photos.length || can.execute ? html`<div><div class="sub-label">${icon('camera')} Fotos e anexos da execução (${photos.length})</div>
               <div class="thumbs">${thumbs(photos, can.execute)}
-              ${can.execute ? html`<button type="button" class="add-thumb" data-act="photos">${icon('camera')}Foto ou PDF</button>` : ''}</div></div>` : ''}
+              ${can.execute ? html`<label class="add-thumb">${fileInput({ camera: true, data: 'data-upload="execucao"' })}${icon('camera')}Tirar foto</label>
+                <button type="button" class="add-thumb" data-act="photos">${icon('image')}Galeria ou PDF</button>` : ''}</div></div>` : ''}
             ${t.exec_notes ? html`<div><div class="sub-label">Observações do responsável</div><div class="note-box">${t.exec_notes}</div></div>` : ''}`
           : html`<div class="empty-exec">
               <div class="big">Ainda não há retorno do responsável</div>
@@ -221,7 +224,9 @@ function mount(root, t, ctx) {
   };
   const upload = async kind => {
     const files = await pickAttachments();
-    if (!files) return;
+    if (files) await uploadFiles(kind, files);
+  };
+  const uploadFiles = async (kind, files) => {
     await run(async () => {
       toast('Enviando arquivos…', 'warn');
       const items = await readAttachments(files);
@@ -356,6 +361,12 @@ function mount(root, t, ctx) {
   root.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => {
     e.preventDefault();
     actions[b.dataset.act]?.();
+  }));
+  // Botões nativos de câmera: a foto chega pelo evento change do próprio input
+  root.querySelectorAll('input[data-upload]').forEach(inp => inp.addEventListener('change', () => {
+    const files = [...(inp.files || [])];
+    inp.value = '';
+    if (files.length) uploadFiles(inp.dataset.upload, files);
   }));
   root.querySelectorAll('.thumb[data-src]').forEach(f => f.addEventListener('click', e => {
     if (e.target.closest('[data-rm]')) return;

@@ -33,8 +33,12 @@ function client() {
     if (sc) cookie = sc.split(';')[0];
     let data = null;
     try { data = await res.json(); } catch {}
-    return { status: res.status, data };
+    return { status: res.status, data, headers: res.headers };
   };
+}
+async function cookieOf(email, password = PW) {
+  const r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'charao-app' }, body: JSON.stringify({ email, password }) });
+  return (r.headers.get('set-cookie') || '').split(';')[0];
 }
 async function login(email, password = PW) {
   const c = client();
@@ -504,6 +508,29 @@ async function main() {
   ok((await ana('PUT', `/users/${extId}`, { login_enabled: true, email: 'jose@alfa.com' })).status === 400, 'ligar o acesso exige senha');
   ok((await ana('PUT', `/users/${extId}`, { login_enabled: true, email: 'jose@alfa.com', password: 'jose12345' })).status === 200, 'ligar o acesso na edição');
   ok((await client()('POST', '/auth/login', { email: 'jose@alfa.com', password: 'jose12345' })).data?.user?.must_change_password === 1, 'terceirizado liberado faz login e precisa trocar a senha');
+
+  console.log('Anexos em PDF');
+  const pdfData = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 1 0 obj<<>>endobj trailer<<>> %%EOF').toString('base64');
+  const tPdf = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Laudo de estanqueidade', description: 'Teste da laje', assignee_id: 4, proof_type: 'foto', due_date: '2099-03-01',
+    images: [{ data: pdfData, name: 'Projeto impermeabilização.pdf' }] })).data.id;
+  let tp = (await marcos('GET', `/tasks/${tPdf}`)).data;
+  ok(tp.files.length === 1 && tp.files[0].mime === 'application/pdf' && tp.files[0].original_name === 'Projeto impermeabilização.pdf', 'PDF de referência anexado na criação, com nome original');
+  ok(tp.history.some(h => h.action === 'Imagens de referência anexadas' && h.details === '1 PDF'), 'histórico registra o PDF anexado');
+  const fakePdf = 'data:application/pdf;base64,' + Buffer.from('<script>alert(1)</script>').toString('base64');
+  ok((await marcos('POST', `/tasks/${tPdf}/files`, { kind: 'execucao', images: [{ data: fakePdf, name: 'x.pdf' }] })).status === 400, 'arquivo que não é PDF de verdade é recusado');
+  tp = (await marcos('POST', `/tasks/${tPdf}/files`, { kind: 'execucao', images: [{ data: pdfData, name: '../../laudo final.pdf' }] })).data;
+  const exPdf = tp.files.find(f => f.kind === 'execucao');
+  ok(exPdf?.original_name === 'laudo final.pdf', 'PDF da execução anexado (nome sem caminho)');
+  ok(!tp.proof_check.ok && tp.proof_check.missing.includes('foto da execução'), 'PDF não substitui a foto quando a comprovação exige foto');
+  tp = (await marcos('POST', `/tasks/${tPdf}/files`, { kind: 'execucao', images: [{ data: tinyPng() }, { data: pdfData, name: 'ART.pdf' }] })).data;
+  ok(tp.proof_check.ok && tp.history.some(h => h.details === '1 imagem(ns) e 1 PDF'), 'foto + PDF juntos no mesmo envio');
+  const dl = await fetch(`${BASE}/api/files/${exPdf.id}`, { headers: { cookie: await cookieOf('marcos@charao.eng.br') } });
+  ok(dl.status === 200 && dl.headers.get('content-type') === 'application/pdf' && /inline; filename=/.test(dl.headers.get('content-disposition') || '') && dl.headers.get('x-content-type-options') === 'nosniff', 'PDF abre no navegador com o nome original');
+  const etag = dl.headers.get('etag');
+  ok(etag && (await fetch(`${BASE}/api/files/${exPdf.id}`, { headers: { cookie: await cookieOf('marcos@charao.eng.br'), 'if-none-match': etag } })).status === 304, 'navegador revalida o arquivo pelo ETag (sem servir anexo antigo do cache)');
+  ok((await camila('GET', `/tasks/${tPdf}`)).status === 404 && (await fetch(`${BASE}/api/files/${exPdf.id}`, { headers: { cookie: await cookieOf('camila@charao.eng.br') } })).status !== 200, 'quem não vê a tarefa não abre o PDF');
+  const rp = (await ricardo('GET', `/reports?type=projeto&id=1&level=completo`)).data;
+  ok(JSON.stringify(rp).includes('laudo final.pdf'), 'relatório completo lista os PDFs anexados');
 
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });

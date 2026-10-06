@@ -58,7 +58,7 @@ function attachEvidence(tasks) {
   if (!tasks.length) return tasks;
   const ids = tasks.map(t => t.id);
   const ph = ids.map(() => '?').join(',');
-  const files = all(`SELECT id, task_id, kind, caption, created_at FROM task_files WHERE task_id IN (${ph}) ORDER BY id`, ...ids);
+  const files = all(`SELECT id, task_id, kind, mime, caption, original_name, created_at FROM task_files WHERE task_id IN (${ph}) ORDER BY id`, ...ids);
   const hist = all(`SELECT h.task_id, h.action, h.details, h.created_at, u.name AS user_name FROM task_history h
     LEFT JOIN users u ON u.id = h.user_id WHERE h.task_id IN (${ph}) ORDER BY h.id`, ...ids);
   return tasks.map(t => ({

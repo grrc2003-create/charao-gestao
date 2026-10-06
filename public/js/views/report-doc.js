@@ -134,8 +134,10 @@ function taskTable(tasks, showProject, labelOf, hideStage = false) {
 }
 
 function evidence(t) {
-  const photos = t.files.filter(f => f.kind === 'execucao');
-  const refs = t.files.filter(f => f.kind === 'referencia');
+  const isPdf = f => f.mime === 'application/pdf';
+  const photos = t.files.filter(f => f.kind === 'execucao' && !isPdf(f));
+  const refs = t.files.filter(f => f.kind === 'referencia' && !isPdf(f));
+  const pdfs = t.files.filter(isPdf);
   const keyHist = t.history.filter(h => /criada|Respons|Prazo|Enviada|Conferência|Devolvida|Concluída|reaberta/i.test(h.action));
   return html`<article class="r-evidence avoid">
     <header><span class="mono">${t.code}</span><b>${t.title}${t.parent_code ? html` <span class="muted small">(subtarefa de ${t.parent_code})</span>` : ''}</b>${stBadge(t.eff_status)}</header>
@@ -152,6 +154,7 @@ function evidence(t) {
       ${refs.map(f => html`<figure><img src="/api/files/${f.id}" alt=""><figcaption>Referência${f.caption ? ` · ${f.caption}` : ''}</figcaption></figure>`)}
       ${photos.map(f => html`<figure><img src="/api/files/${f.id}" alt=""><figcaption>Execução · ${fmtDate(f.created_at.slice(0, 10))}${f.caption ? ` · ${f.caption}` : ''}</figcaption></figure>`)}
     </div>` : html`<div class="small muted">Sem imagens anexadas.</div>`}
+    ${pdfs.length ? html`<div class="small r-pdfs">${icon('file')} Anexos PDF: ${pdfs.map((f, i) => html`${i ? ' · ' : ''}<a href="/api/files/${f.id}" target="_blank" rel="noopener">${f.original_name || 'documento.pdf'}</a> (${f.kind === 'execucao' ? 'execução' : 'referência'})`)}</div>` : ''}
     ${keyHist.length ? html`<div class="r-hist">${keyHist.map(h => html`<span>${fmtDateTime(h.created_at)} · ${h.user_name || 'Sistema'} · ${h.action}</span>`)}</div>` : ''}
   </article>`;
 }

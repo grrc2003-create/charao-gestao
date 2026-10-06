@@ -1,5 +1,5 @@
-// Componentes de interface: toast, modal/bottom-sheet, confirmação, leitura de imagens.
-import { html, esc } from './core.js';
+// Componentes de interface: toast, modal/bottom-sheet, confirmação, leitura de imagens e PDFs.
+import { html, esc, icon } from './core.js';
 
 export function toast(msg, type = 'ok') {
   let host = document.getElementById('toasts');
@@ -90,16 +90,87 @@ export function readImages(files, max = 1600, quality = 0.82) {
   })));
 }
 
-export function pickImages({ capture = false, multiple = true } = {}) {
+export function pickImages({ capture = false, multiple = true, accept = 'image/*' } = {}) {
   return new Promise(resolve => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*';
+    input.accept = accept;
     input.multiple = multiple;
     if (capture) input.capture = 'environment';
     input.onchange = () => resolve(input.files?.length ? input.files : null);
+    input.addEventListener('cancel', () => resolve(null));
     input.click();
   });
+}
+
+// Menu "Anexar": câmera do celular, galeria ou arquivo PDF. Retorna os arquivos escolhidos (ou null).
+export function pickAttachments({ pdf = true } = {}) {
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet-backdrop';
+    const opt = (src, ic, title, sub) => html`<button type="button" class="attach-opt" data-src="${src}">${icon(ic)}<span><b>${title}</b><small>${sub}</small></span></button>`;
+    wrap.innerHTML = html`<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-grip" aria-hidden="true"></div>
+      <header class="sheet-head"><h2 id="sheet-title">Anexar</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></header>
+      <div class="sheet-body attach-menu">
+        ${touch ? opt('camera', 'camera', 'Tirar foto', 'Abre a câmera do celular') : ''}
+        ${opt('gallery', 'image', touch ? 'Galeria' : 'Imagem', touch ? 'Escolher fotos já salvas no aparelho' : 'JPG, PNG ou WEBP do computador')}
+        ${pdf ? opt('pdf', 'file', 'Arquivo PDF', 'Laudos, projetos, notas… até 8 MB por arquivo') : ''}
+      </div></div>`.toString();
+    document.body.appendChild(wrap);
+    document.body.classList.add('no-scroll');
+    const close = () => {
+      wrap.classList.add('closing');
+      document.body.classList.remove('no-scroll');
+      setTimeout(() => wrap.remove(), 180);
+    };
+    wrap.addEventListener('click', e => {
+      const b = e.target.closest('[data-src]');
+      if (!b) { if (e.target === wrap || e.target.closest('[data-close]')) { close(); resolve(null); } return; }
+      close();
+      // Abre o seletor ainda dentro do toque do usuário (exigência dos navegadores móveis)
+      const src = b.dataset.src;
+      pickImages(src === 'camera' ? { capture: true, multiple: false } : src === 'pdf' ? { accept: 'application/pdf,.pdf' } : {}).then(resolve);
+    });
+    wrap.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); resolve(null); } });
+    setTimeout(() => wrap.querySelector('.attach-opt')?.focus(), 50);
+  });
+}
+
+const MAX_PDF = 8 * 1024 * 1024;
+export const isPdfFile = f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+
+// Imagens são reduzidas no aparelho; PDFs seguem como estão (até 8 MB cada)
+export async function readAttachments(files) {
+  const list = [...files].slice(0, 10);
+  const pdfs = list.filter(isPdfFile);
+  for (const f of pdfs) if (f.size > MAX_PDF) throw new Error(`O PDF "${f.name}" passa de 8 MB.`);
+  const out = await readImages(list.filter(f => !isPdfFile(f)));
+  for (const f of pdfs) {
+    const data = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).replace(/^data:[^;,]*;base64,/, 'data:application/pdf;base64,'));
+      r.onerror = () => reject(new Error(`Não foi possível ler ${f.name}`));
+      r.readAsDataURL(f);
+    });
+    out.push({ data, name: f.name, pdf: true });
+  }
+  return out;
+}
+
+// Divide o envio em lotes que cabem no limite de uma requisição
+export function batchBySize(items, max = 10_000_000) {
+  const out = [];
+  let cur = [], size = 0;
+  for (const it of items) {
+    if (cur.length && size + it.data.length > max) { out.push(cur); cur = []; size = 0; }
+    cur.push(it);
+    size += it.data.length;
+  }
+  if (cur.length) out.push(cur);
+  return out;
 }
 
 export function lightbox(src, caption) {

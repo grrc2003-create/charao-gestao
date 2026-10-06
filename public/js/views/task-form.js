@@ -1,5 +1,5 @@
 import { html, api, icon, PRIORITY, PROOF } from '../core.js';
-import { toast, readImages, pickImages } from '../ui.js';
+import { toast, readAttachments, pickAttachments } from '../ui.js';
 import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
 
@@ -22,7 +22,7 @@ export async function view({ params, query, state, navigate }) {
   const v = t || (parent
     ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: parent.due_date, stage_id: parent.stage_id }
     : { priority: 'media', proof_type: 'foto', assignee_id: null });
-  const pending = []; // imagens de referência escolhidas antes de salvar
+  const pending = []; // imagens/PDFs de referência escolhidos antes de salvar
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
 
   return {
@@ -81,9 +81,9 @@ export async function view({ params, query, state, navigate }) {
 
         ${!editing && !parent ? recurrenceFieldset() : ''}
 
-        ${!editing ? html`<fieldset class="fieldset form"><legend>Imagens de referência</legend>
-          <div class="thumbs" id="ref-thumbs"><button type="button" class="add-thumb" id="add-ref">${icon('image')}Adicionar imagem</button></div>
-          <span class="hint">Fotos do local, croquis ou trechos de projeto. Reduzidas automaticamente para envio.</span>
+        ${!editing ? html`<fieldset class="fieldset form"><legend>Referências (imagens ou PDF)</legend>
+          <div class="thumbs" id="ref-thumbs"><button type="button" class="add-thumb" id="add-ref">${icon('image')}Foto, imagem ou PDF</button></div>
+          <span class="hint">Fotos do local, croquis, trechos de projeto ou PDFs (até 8 MB cada). Fotos são reduzidas automaticamente para envio.</span>
         </fieldset>` : ''}
 
         <div class="form-error" hidden></div>
@@ -144,17 +144,22 @@ export async function view({ params, query, state, navigate }) {
         thumbsEl.querySelectorAll('.thumb').forEach(n => n.remove());
         pending.forEach((img, i) => {
           const fig = document.createElement('figure');
-          fig.className = 'thumb';
-          fig.innerHTML = `<img alt="Referência ${i + 1}"><button type="button" class="rm" aria-label="Remover">✕</button>`;
-          fig.querySelector('img').src = img.data;
+          fig.className = img.pdf ? 'thumb thumb-pdf' : 'thumb';
+          if (img.pdf) {
+            fig.innerHTML = `<a>${icon('file')}<span class="pdf-tag">PDF</span><span class="pdf-name"></span></a><button type="button" class="rm" aria-label="Remover">✕</button>`;
+            fig.querySelector('.pdf-name').textContent = img.name;
+          } else {
+            fig.innerHTML = `<img alt="Referência ${i + 1}"><button type="button" class="rm" aria-label="Remover">✕</button>`;
+            fig.querySelector('img').src = img.data;
+          }
           fig.querySelector('.rm').onclick = () => { pending.splice(i, 1); drawThumbs(); };
           thumbsEl.insertBefore(fig, thumbsEl.lastElementChild);
         });
       };
       root.querySelector('#add-ref')?.addEventListener('click', async () => {
-        const files = await pickImages();
+        const files = await pickAttachments();
         if (!files) return;
-        try { pending.push(...(await readImages(files))); drawThumbs(); } catch (e) { toast(e.message, 'err'); }
+        try { pending.push(...(await readAttachments(files))); drawThumbs(); } catch (e) { toast(e.message, 'err'); }
       });
 
       f.addEventListener('submit', async e => {
@@ -172,7 +177,8 @@ export async function view({ params, query, state, navigate }) {
             toast('Tarefa atualizada.');
             navigate(`/tarefas/${t.id}`);
           } else {
-            data.images = pending.map(p => ({ data: p.data }));
+            if (pending.reduce((n, p) => n + p.data.length, 0) > 10_000_000) throw new Error('As referências somam mais de 10 MB. Crie a tarefa com menos arquivos e anexe os demais depois, na própria tarefa.');
+            data.images = pending.map(p => ({ data: p.data, name: p.name }));
             if (parent) { data.parent_id = parent.id; data.project_id = parent.project_id; }
             if (rec?.enabled()) {
               const r = await api('/recurrences', { method: 'POST', body: { ...data, ...rec.read() } });

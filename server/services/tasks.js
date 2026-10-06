@@ -6,7 +6,7 @@ import {
 } from '../lib/permissions.js';
 import { decorate, today } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
-import { saveImageFromDataUrl, deleteStored, copyStored } from './files.js';
+import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
 
@@ -143,7 +143,7 @@ function assertSubtasksDone(t) {
 
 export function getTask(ctx, id) {
   const t = loadVisible(ctx, id);
-  const files = all(`SELECT f.id, f.kind, f.mime, f.size, f.caption, f.created_at, f.uploaded_by, u.name AS uploaded_by_name
+  const files = all(`SELECT f.id, f.kind, f.mime, f.size, f.caption, f.original_name, f.created_at, f.uploaded_by, u.name AS uploaded_by_name
     FROM task_files f LEFT JOIN users u ON u.id = f.uploaded_by WHERE f.task_id = ? ORDER BY f.id`, id);
   const history = all(`SELECT h.id, h.action, h.details, h.created_at, u.name AS user_name
     FROM task_history h LEFT JOIN users u ON u.id = h.user_id WHERE h.task_id = ? ORDER BY h.created_at DESC, h.id DESC`, id);
@@ -167,7 +167,7 @@ export function getTask(ctx, id) {
 }
 
 function proofCheck(t, files) {
-  const hasPhoto = files.some(f => f.kind === 'execucao');
+  const hasPhoto = files.some(f => f.kind === 'execucao' && !isPdf(f.mime)); // PDF não substitui a foto exigida
   const hasDesc = !!(t.exec_description && t.exec_description.trim().length >= 5);
   const needPhoto = t.proof_type === 'foto' || t.proof_type === 'foto_descricao';
   const needDesc = t.proof_type === 'descricao' || t.proof_type === 'foto_descricao';
@@ -247,14 +247,14 @@ export function insertTask({ project, parent = null, data, stageInput, creatorId
     taskHistory(id, creatorId, created,
       `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
     if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
-    for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption);
+    for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption, img.name);
     for (const f of copyFiles) {
       const c = copyStored(f.stored_name);
-      if (c) run('INSERT INTO task_files (task_id, kind, stored_name, mime, size, caption, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
-        id, 'referencia', c.stored_name, f.mime, c.size, f.caption, creatorId, now);
+      if (c) run('INSERT INTO task_files (task_id, kind, stored_name, mime, size, caption, original_name, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        id, 'referencia', c.stored_name, f.mime, c.size, f.caption, f.original_name || null, creatorId, now);
     }
     const nImg = images.length + copyFiles.length;
-    if (nImg) taskHistory(id, creatorId, 'Imagens de referência anexadas', `${nImg} imagem(ns)`);
+    if (nImg) taskHistory(id, creatorId, 'Imagens de referência anexadas', countLabel([...images.map(i => pdfData(i.data)), ...copyFiles.map(f => isPdf(f.mime))]));
     return id;
   }
 }
@@ -376,10 +376,18 @@ function autoStart(ctx, t) {
   }
 }
 
-function addFileInternal(ctx, taskId, kind, dataUrl, caption) {
+function addFileInternal(ctx, taskId, kind, dataUrl, caption, name) {
   const f = saveImageFromDataUrl(dataUrl);
-  run('INSERT INTO task_files (task_id, kind, stored_name, mime, size, caption, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
-    taskId, kind, f.stored_name, f.mime, f.size, str(caption, { max: 200, label: 'Legenda' }), ctx.user.id, nowIso());
+  run('INSERT INTO task_files (task_id, kind, stored_name, mime, size, caption, original_name, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+    taskId, kind, f.stored_name, f.mime, f.size, str(caption, { max: 200, label: 'Legenda' }), isPdf(f.mime) ? cleanFileName(name) || 'documento.pdf' : null,
+    ctx.user.id, nowIso());
+}
+
+const pdfData = d => typeof d === 'string' && d.startsWith('data:application/pdf');
+// "2 imagem(ns) e 1 PDF"
+function countLabel(flags) {
+  const pdf = flags.filter(Boolean).length, img = flags.length - pdf;
+  return [img ? `${img} imagem(ns)` : '', pdf ? `${pdf} PDF` : ''].filter(Boolean).join(' e ');
 }
 
 export function addFiles(ctx, id, body) {
@@ -387,16 +395,16 @@ export function addFiles(ctx, id, body) {
   assertNotCancelled(t);
   const kind = oneOf(body.kind, ['referencia', 'execucao'], 'Tipo do arquivo');
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
-  if (!images.length) throw badRequest('Nenhuma imagem enviada.');
+  if (!images.length) throw badRequest('Nenhum arquivo enviado.');
   if (kind === 'execucao') {
-    if (!canExecuteTask(ctx, t)) throw forbidden('Apenas o responsável pode anexar fotos da execução.');
-    if (!['aberta', 'em_andamento'].includes(t.status)) throw badRequest('Não é possível anexar fotos neste status.');
+    if (!canExecuteTask(ctx, t)) throw forbidden('Apenas o responsável pode anexar a comprovação da execução.');
+    if (!['aberta', 'em_andamento'].includes(t.status)) throw badRequest('Não é possível anexar arquivos neste status.');
   } else {
     if (!canManageTask(ctx, t) || t.status === 'concluida') throw forbidden('Você não pode anexar referências nesta tarefa.');
   }
   tx(() => {
-    for (const img of images) addFileInternal(ctx, id, kind, img.data, img.caption);
-    taskHistory(id, ctx.user.id, kind === 'execucao' ? 'Fotos de comprovação enviadas' : 'Imagens de referência anexadas', withBehalf(ctx, t, `${images.length} imagem(ns)`));
+    for (const img of images) addFileInternal(ctx, id, kind, img.data, img.caption, img.name);
+    taskHistory(id, ctx.user.id, kind === 'execucao' ? 'Fotos de comprovação enviadas' : 'Imagens de referência anexadas', withBehalf(ctx, t, countLabel(images.map(i => pdfData(i.data)))));
     if (kind === 'execucao') autoStart(ctx, t);
   });
 }
@@ -443,7 +451,7 @@ export function transition(ctx, id, action, body = {}) {
         break;
       case 'submit': {
         if (!can.submit) throw forbidden('Ação não permitida.');
-        const files = all('SELECT kind FROM task_files WHERE task_id = ?', id);
+        const files = all('SELECT kind, mime FROM task_files WHERE task_id = ?', id);
         const pc = proofCheck(t, files);
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
         assertSubtasksDone(t);

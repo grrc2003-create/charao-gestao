@@ -1,6 +1,6 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
-import { toast, sheet, confirmSheet, readImages, pickImages, lightbox } from '../ui.js';
+import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
@@ -22,10 +22,14 @@ function build(t, ctx) {
   const subPending = (t.sub_total || 0) - (t.sub_done || 0);
   const canSend = pc.ok && !subPending;
 
-  const thumbs = (files, removable) => html`${files.map(f => html`<figure class="thumb" data-src="/api/files/${f.id}" data-caption="${f.caption || ''}">
+  const rmBtn = (f, removable) => (removable ? html`<button type="button" class="rm" data-rm="${f.id}" aria-label="Remover anexo">✕</button>` : '');
+  const thumbs = (files, removable) => html`${files.map(f => (f.mime === 'application/pdf'
+    ? html`<figure class="thumb thumb-pdf"><a href="/api/files/${f.id}" target="_blank" rel="noopener" title="Abrir ${f.original_name || 'PDF'}">
+        ${icon('file')}<span class="pdf-tag">PDF</span><span class="pdf-name">${f.original_name || 'documento.pdf'}</span></a>${rmBtn(f, removable)}</figure>`
+    : html`<figure class="thumb" data-src="/api/files/${f.id}" data-caption="${f.caption || ''}">
     <img src="/api/files/${f.id}" alt="${f.caption || 'Imagem da tarefa'}" loading="lazy">
     ${f.caption ? html`<figcaption>${f.caption}</figcaption>` : ''}
-    ${removable ? html`<button type="button" class="rm" data-rm="${f.id}" aria-label="Remover imagem">✕</button>` : ''}</figure>`)}`;
+    ${rmBtn(f, removable)}</figure>`))}`;
 
   const reviewBox = () => {
     if (t.status === 'aguardando_conferencia') return html`<div class="review-box review-pendente"><b>${icon('clock')} Aguardando conferência</b>
@@ -45,7 +49,7 @@ function build(t, ctx) {
       <div class="sub-label">Registrar retorno</div>
       <div class="action-grid">
         ${tile('desc', 'edit', t.exec_description ? 'Editar descrição' : 'Adicionar descrição', !!t.exec_description, pc.need_desc)}
-        ${tile('photos', 'camera', 'Adicionar fotos', photos.length > 0, pc.need_photo)}
+        ${tile('photos', 'camera', 'Fotos ou PDF', pc.need_photo ? pc.has_photo : photos.length > 0, pc.need_photo)}
         ${tile('notes', 'note', t.exec_notes ? 'Editar observação' : 'Adicionar observação', !!t.exec_notes, false)}
         ${can.start ? html`<button type="button" class="action-tile" data-act="start">${icon('clock')}Iniciar execução<small>Marca como em andamento</small></button>` : ''}
       </div>
@@ -155,9 +159,9 @@ function build(t, ctx) {
           ${reviewBox()}
           ${hasReturn ? html`
             ${t.exec_description ? html`<div><div class="sub-label">Descrição da execução</div><div class="text-content">${t.exec_description}</div></div>` : ''}
-            ${photos.length || can.execute ? html`<div><div class="sub-label">${icon('camera')} Fotos da execução (${photos.length})</div>
+            ${photos.length || can.execute ? html`<div><div class="sub-label">${icon('camera')} Fotos e anexos da execução (${photos.length})</div>
               <div class="thumbs">${thumbs(photos, can.execute)}
-              ${can.execute ? html`<button type="button" class="add-thumb" data-act="photos">${icon('camera')}Adicionar foto</button>` : ''}</div></div>` : ''}
+              ${can.execute ? html`<button type="button" class="add-thumb" data-act="photos">${icon('camera')}Foto ou PDF</button>` : ''}</div></div>` : ''}
             ${t.exec_notes ? html`<div><div class="sub-label">Observações do responsável</div><div class="note-box">${t.exec_notes}</div></div>` : ''}`
           : html`<div class="empty-exec">
               <div class="big">Ainda não há retorno do responsável</div>
@@ -216,13 +220,17 @@ function mount(root, t, ctx) {
     }
   };
   const upload = async kind => {
-    const files = await pickImages({ capture: false });
+    const files = await pickAttachments();
     if (!files) return;
     await run(async () => {
-      toast('Enviando imagens…', 'warn');
-      const imgs = await readImages(files);
-      return api(`/tasks/${t.id}/files`, { method: 'POST', body: { kind, images: imgs.map(i => ({ data: i.data })) } });
-    }, kind === 'execucao' ? 'Fotos da execução anexadas.' : 'Referências anexadas.');
+      toast('Enviando arquivos…', 'warn');
+      const items = await readAttachments(files);
+      let updated;
+      for (const batch of batchBySize(items)) {
+        updated = await api(`/tasks/${t.id}/files`, { method: 'POST', body: { kind, images: batch.map(i => ({ data: i.data, name: i.name })) } });
+      }
+      return updated;
+    }, kind === 'execucao' ? 'Comprovação da execução anexada.' : 'Referências anexadas.');
   };
 
   const textSheet = (field, title, label, value, hint) => sheet({
@@ -349,13 +357,13 @@ function mount(root, t, ctx) {
     e.preventDefault();
     actions[b.dataset.act]?.();
   }));
-  root.querySelectorAll('.thumb').forEach(f => f.addEventListener('click', e => {
+  root.querySelectorAll('.thumb[data-src]').forEach(f => f.addEventListener('click', e => {
     if (e.target.closest('[data-rm]')) return;
     lightbox(f.dataset.src, f.dataset.caption);
   }));
   root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', async e => {
     e.stopPropagation();
-    if (!(await confirmSheet('Remover imagem', 'A remoção ficará registrada no histórico.', 'Remover', true))) return;
-    run(() => api(`/tasks/${t.id}/files/${b.dataset.rm}`, { method: 'DELETE' }), 'Imagem removida.');
+    if (!(await confirmSheet('Remover anexo', 'A remoção ficará registrada no histórico.', 'Remover', true))) return;
+    run(() => api(`/tasks/${t.id}/files/${b.dataset.rm}`, { method: 'DELETE' }), 'Anexo removido.');
   }));
 }

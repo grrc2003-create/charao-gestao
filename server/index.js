@@ -270,16 +270,30 @@ api.post('/api/tasks/:id/actions/:action', (req, res, { ctx, params, body }) => 
 });
 
 api.get('/api/files/:id', (req, res, { ctx, params }) => {
-  const f = Tasks.fileForUser(ctx, intOrNull(params.id));
+  sendFile(req, res, Tasks.fileForUser(ctx, intOrNull(params.id)));
+});
+
+// PDF abre no visualizador do navegador (inline) com o nome original; imagens com CSP restrita
+// O nome armazenado é único por arquivo: serve de ETag, e o navegador revalida (o id pode ser reaproveitado após uma exclusão)
+function sendFile(req, res, f) {
+  const etag = `"${f.stored_name}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': 'private, no-cache' });
+    return res.end();
+  }
   const buf = readStored(f.stored_name);
   if (!buf) throw new HttpError(404, 'Arquivo indisponível.');
-  send(res, 200, buf, {
-    'Content-Type': f.mime,
-    'Cache-Control': 'private, max-age=86400',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
-    'X-Content-Type-Options': 'nosniff',
-  });
-});
+  send(res, 200, buf, { ...fileHeaders(f), ETag: etag });
+}
+
+function fileHeaders(f) {
+  const h = { 'Content-Type': f.mime, 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' };
+  if (f.mime === 'application/pdf') {
+    const name = f.original_name || 'documento.pdf';
+    h['Content-Disposition'] = `inline; filename="${name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '')}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+  } else h['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'";
+  return h;
+}
 
 // ---------- Usuários ----------
 api.get('/api/users', (req, res, { ctx }) => send(res, 200, Users.listUsers(ctx)));
@@ -317,10 +331,7 @@ api.post('/api/recurrences/:id/end', (req, res, { ctx, params, body }) => {
   send(res, 200, { ...Recurrences.getRecurrence(ctx, intOrNull(params.id)), cancelled: r.cancelled });
 });
 api.get('/api/recurrence-files/:id', (req, res, { ctx, params }) => {
-  const f = Recurrences.recurrenceFileForUser(ctx, intOrNull(params.id));
-  const buf = readStored(f.stored_name);
-  if (!buf) throw new HttpError(404, 'Arquivo indisponível.');
-  send(res, 200, buf, { 'Content-Type': f.mime, 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' });
+  sendFile(req, res, Recurrences.recurrenceFileForUser(ctx, intOrNull(params.id)));
 });
 
 // ---------- Configurações ----------

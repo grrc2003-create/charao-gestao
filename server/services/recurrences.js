@@ -7,7 +7,7 @@ import { today, addDays } from './metrics.js';
 import { FREQS, END_TYPES, occurrenceDates, describeRule } from './recurrence-rules.js';
 import { insertTask, validateAssignee, listVisible, listCancelled, PRIORITIES, PROOF_TYPES } from './tasks.js';
 import { resolveStage } from './stages.js';
-import { saveImageFromDataUrl } from './files.js';
+import { saveImageFromDataUrl, cleanFileName, isPdf } from './files.js';
 import { taskHistory, audit } from './audit.js';
 
 const nowIso = () => new Date().toISOString();
@@ -109,7 +109,7 @@ export function generateFor(recId, ref = today()) {
   const rule = ruleOf(r);
   const horizon = addDays(ref, r.lead_days);
   const dates = [...occurrenceDates(rule, { until: horizon, limit: r.generated_count + 200 })].slice(r.generated_count);
-  const files = all('SELECT stored_name, mime, caption FROM recurrence_files WHERE recurrence_id = ?', r.id);
+  const files = all('SELECT stored_name, mime, caption, original_name FROM recurrence_files WHERE recurrence_id = ?', r.id);
   const created = [];
   tx(() => {
     let seq = r.generated_count;
@@ -172,8 +172,8 @@ export function createRecurrence(ctx, body, ip) {
     const rid = Number(r.lastInsertRowid);
     for (const img of images) {
       const f = saveImageFromDataUrl(img.data);
-      run('INSERT INTO recurrence_files (recurrence_id, stored_name, mime, size, caption, uploaded_by) VALUES (?,?,?,?,?,?)',
-        rid, f.stored_name, f.mime, f.size, str(img.caption, { max: 200, label: 'Legenda' }), ctx.user.id);
+      run('INSERT INTO recurrence_files (recurrence_id, stored_name, mime, size, caption, original_name, uploaded_by) VALUES (?,?,?,?,?,?,?)',
+        rid, f.stored_name, f.mime, f.size, str(img.caption, { max: 200, label: 'Legenda' }), isPdf(f.mime) ? cleanFileName(img.name) || 'documento.pdf' : null, ctx.user.id);
     }
     audit(ctx.user.id, 'recurrence', rid, 'Recorrência criada', { projeto: project.code, titulo: t.title, regra: describeRule(rule) }, ip);
     return rid;
@@ -201,7 +201,7 @@ export function getRecurrence(ctx, id) {
   const rule = ruleOf(r);
   d.next_dates = r.active ? [...occurrenceDates(rule, { limit: r.generated_count + 6 })].slice(r.generated_count) : [];
   d.total_planned = r.end_type === 'nunca' ? null : [...occurrenceDates(rule, { limit: 501 })].length;
-  d.files = all('SELECT id, mime, caption FROM recurrence_files WHERE recurrence_id = ? ORDER BY id', id);
+  d.files = all('SELECT id, mime, caption, original_name FROM recurrence_files WHERE recurrence_id = ? ORDER BY id', id);
   d.tasks = [...listVisible(ctx, 'WHERE t.recurrence_id = ?', id), ...listCancelled(ctx, 'WHERE t.recurrence_id = ?', id)]
     .sort((a, b) => (a.recurrence_seq || 0) - (b.recurrence_seq || 0));
   return d;

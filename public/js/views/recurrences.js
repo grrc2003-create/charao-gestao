@@ -77,7 +77,9 @@ export async function view({ params, navigate }) {
             <dt>Comprovação</dt><dd>${PROOF[r.proof_type].label}</dd>
             ${r.notes ? html`<dt>Observações</dt><dd>${r.notes}</dd>` : ''}
           </dl>
-          ${r.files.length ? html`<div class="thumbs" style="margin-top:10px">${r.files.map(f => html`<figure class="thumb"><img src="/api/recurrence-files/${f.id}" alt="Referência"></figure>`)}</div>` : ''}
+          ${r.files.length ? html`<div class="thumbs" style="margin-top:10px">${r.files.map(f => (f.mime === 'application/pdf'
+            ? html`<figure class="thumb thumb-pdf"><a href="/api/recurrence-files/${f.id}" target="_blank" rel="noopener">${icon('file')}<span class="pdf-tag">PDF</span><span class="pdf-name">${f.original_name || 'documento.pdf'}</span></a></figure>`
+            : html`<figure class="thumb"><img src="/api/recurrence-files/${f.id}" alt="Referência"></figure>`))}</div>` : ''}
         </section>
       </div>
       <section class="section">

@@ -86,6 +86,12 @@ export function canExecuteTask(ctx, t) {
   return t.assignee_id === ctx.user.id || isLeaderOfNoLogin(ctx, t);
 }
 
+// Alocar (trocar o responsável): qualquer pessoa liberada no projeto que veja a tarefa, enquanto ela não foi entregue
+export function canReassignTask(ctx, t) {
+  if (t.cancelled_at || !['aberta', 'em_andamento'].includes(t.status)) return false;
+  return canManageTask(ctx, t) || (canSeeTask(ctx, t) && canAccessProject(ctx.user, t.project_id, ctx.projects));
+}
+
 export function canCreateTaskIn(ctx, projectId) {
   return canAccessProject(ctx.user, projectId, ctx.projects);
 }

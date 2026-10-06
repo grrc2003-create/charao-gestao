@@ -2,7 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
-  canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
+  canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
 import { decorate, today, daysBetween } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
@@ -108,6 +108,7 @@ export function permissionsFor(ctx, t) {
   const editableExec = execute && (t.status === 'aberta' || t.status === 'em_andamento');
   return {
     edit: manage && t.status !== 'concluida',
+    reassign: canReassignTask(ctx, t),
     reschedule: manage && t.status !== 'concluida' && !!t.due_date,
     execute: editableExec,
     start: execute && t.status === 'aberta',
@@ -337,6 +338,26 @@ export function updateTask(ctx, id, body) {
     }
     for (const [label, from, to] of changes) taskHistory(id, ctx.user.id, label, from || to ? `${from} → ${to}` : null);
   });
+}
+
+// Ação dedicada "Alterar responsável": qualquer pessoa liberada no projeto pode alocar a tarefa para outra pessoa do projeto
+export function reassignTask(ctx, id, body) {
+  const t = loadVisible(ctx, id);
+  if (!canReassignTask(ctx, t)) {
+    throw t.cancelled_at || !['aberta', 'em_andamento'].includes(t.status)
+      ? badRequest('Só é possível trocar o responsável de tarefas abertas ou em andamento.')
+      : forbidden('Você não pode alterar o responsável desta tarefa.');
+  }
+  const aid = validateAssignee(intOrNull(body.assignee_id), t.project_id);
+  if (!aid) throw badRequest('Selecione o novo responsável.');
+  if (aid === t.assignee_id) throw badRequest('Esta pessoa já é a responsável pela tarefa.');
+  const note = str(body.note, { max: 500, label: 'Motivo' });
+  const name = uid => (uid ? one('SELECT name FROM users WHERE id = ?', uid)?.name : 'sem responsável');
+  tx(() => {
+    run('UPDATE tasks SET assignee_id = ?, assigned_by_id = ?, updated_at = ? WHERE id = ?', aid, ctx.user.id, nowIso(), id);
+    taskHistory(id, ctx.user.id, 'Responsável alterado', `${name(t.assignee_id)} → ${name(aid)}${note ? ` · Motivo: ${note}` : ''}`);
+  });
+  return name(aid);
 }
 
 // Ação dedicada "Reagendar" (mesma regra da edição, exigindo uma nova data)

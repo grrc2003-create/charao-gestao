@@ -120,8 +120,9 @@ function build(t, ctx) {
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
           <div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>
         </div>
-        ${can.edit || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        ${can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
           ${can.edit ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
+          ${can.reassign ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
           ${can.reschedule ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
           ${can.conclude_directly ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
           ${can.reopen ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
@@ -246,6 +247,28 @@ function mount(root, t, ctx) {
   });
 
   const actions = {
+    reassign: async () => {
+      let people;
+      try { people = await api(`/projects/${t.project_id}/assignees`); } catch (e) { return toast(e.message, 'err'); }
+      const others = people.filter(u => u.id !== t.assignee_id);
+      if (!others.length) return toast('Não há outras pessoas com acesso a este projeto. Inclua-as na equipe do projeto.', 'warn');
+      const r = await sheet({
+        title: 'Alterar responsável',
+        submitLabel: 'Alocar tarefa',
+        body: html`<p class="muted" style="margin:0 0 10px">Responsável atual: <b>${t.assignee_name || 'sem responsável'}</b></p>
+          <div class="field"><label class="req" for="na">Novo responsável</label>
+            <select id="na" name="assignee_id" required><option value="">Selecione</option>${others.map(u => html`<option value="${u.id}">${u.name}${u.is_external ? ` · Terceirizado${u.company ? ` (${u.company})` : ''}` : u.job_title ? ` · ${u.job_title}` : ''}</option>`)}</select>
+            <span class="hint">Somente pessoas da equipe do projeto ${t.project_code}.</span></div>
+          <div class="field"><label for="nn">Motivo (opcional)</label><input id="nn" name="note" type="text" maxlength="500" placeholder="Ex.: assume a frente de serviço do bloco B"></div>`,
+        onSubmit: d => {
+          if (!d.assignee_id) throw new Error('Selecione o novo responsável.');
+          return api(`/tasks/${t.id}/assignee`, { method: 'POST', body: d });
+        },
+      });
+      if (!r || !r.id) return;
+      toast(`Tarefa alocada para ${r.assignee_name}.`);
+      if (r.hidden) ctx.navigate('/tarefas'); else refresh(r);
+    },
     goresched: () => root.querySelector('#resched')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     reschedule: async () => {
       let reasons;

@@ -216,6 +216,14 @@ api.post('/api/tasks/:id/reactivate', (req, res, { ctx, params, body }) => {
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
 api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200, Tasks.deleteTask(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/tasks/:id/assignee', (req, res, { ctx, params, body }) => {
+  const id = intOrNull(params.id);
+  const newName = Tasks.reassignTask(ctx, id, body);
+  // Quem só vê as próprias tarefas deixa de ver a tarefa que repassou
+  let t;
+  try { t = Tasks.getTask(ctx, id); } catch { t = { id, hidden: true, assignee_name: newName }; }
+  send(res, 200, t);
+});
 api.post('/api/tasks/:id/reschedule', (req, res, { ctx, params, body }) => {
   Tasks.rescheduleTask(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));

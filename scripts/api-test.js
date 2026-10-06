@@ -567,6 +567,22 @@ async function main() {
   ok((await ricardo('GET', `/projects/${pNew}/assignees`)).data.some(u => u.id === 7), 'editar o projeto sem mexer na equipe mantém as liberações');
   ok((await ana('GET', '/audit')).data.some(a => a.action === 'Projeto atualizado' && /equipe_e_acesso/.test(JSON.stringify(a.details || a))), 'alteração de equipe/acesso registrada na auditoria');
 
+  console.log('Alocar tarefa para outra pessoa do projeto');
+  const tA = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Tarefa para repassar', description: 'x', assignee_id: 4, proof_type: 'nenhuma', due_date: '2099-05-01' })).data.id;
+  let ta = (await felipeC('GET', `/tasks/${tA}`)).data;
+  ok(ta.can.reassign && !ta.can.edit, 'colaborador do projeto pode alocar a tarefa (sem poder editar o resto)');
+  ta = (await felipeC('POST', `/tasks/${tA}/assignee`, { assignee_id: 7, note: 'Bruno assume as instalações' })).data;
+  ok(ta.assignee_id === 7 && ta.history.some(h => h.action === 'Responsável alterado' && h.details.includes('Marcos Silva → Bruno Costa') && h.details.includes('Bruno assume')), 'colaborador aloca para outra pessoa do projeto, com histórico');
+  ok((await felipeC('POST', `/tasks/${tA}/assignee`, { assignee_id: 3 })).status === 400, 'não aloca para quem não tem acesso ao projeto');
+  ok((await felipeC('POST', `/tasks/${tA}/assignee`, { assignee_id: 7 })).status === 400, 'não aloca para quem já é o responsável');
+  ok((await camila('POST', `/tasks/${tA}/assignee`, { assignee_id: 5 })).status === 404, 'quem não está no projeto não aloca');
+  const brunoC = await login('bruno@charao.eng.br');
+  const rb = (await brunoC('POST', `/tasks/${tA}/assignee`, { assignee_id: 4 })).data;
+  ok(rb.assignee_name === 'Marcos Silva' && (rb.hidden || rb.assignee_id === 4), 'quem só vê as próprias tarefas pode repassar a sua (e deixa de vê-la sem erro)');
+  await marcos('PATCH', `/tasks/${tA}/execution`, { exec_description: 'ok' });
+  await marcos('POST', `/tasks/${tA}/actions/submit`);
+  ok((await felipeC('POST', `/tasks/${tA}/assignee`, { assignee_id: 5 })).status === 400 && !(await felipeC('GET', `/tasks/${tA}`)).data.can.reassign, 'tarefa entregue para conferência não troca de responsável');
+
   console.log('Perfil Coordenador (gestor que também aprova as próprias tarefas)');
   const coordId = (await ana('POST', '/users', { name: 'Carla Coordenadora', email: 'carla@charao.eng.br', role: 'coordenador', access_scope: 'projetos', project_ids: [1], password: 'coord1234' })).data.id;
   ok((await ana('GET', `/users/${coordId}`)).data.user.role === 'coordenador', 'administrador cadastra o perfil Coordenador');

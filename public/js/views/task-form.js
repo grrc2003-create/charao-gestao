@@ -121,7 +121,7 @@ export async function view({ params, query, state, navigate }) {
         try {
           const users = await api(`/projects/${pid}/assignees`);
           const cur = assigneeSel.value || v.assignee_id || (editing ? '' : state.user.id);
-          assigneeSel.innerHTML = html`<option value="">Sem responsável (definir depois)</option>${users.map(u => opt(u.id, `${u.name}${u.job_title ? ` · ${u.job_title}` : ''}`, cur))}`.toString();
+          assigneeSel.innerHTML = html`<option value="">Sem responsável (definir depois)</option>${users.map(u => opt(u.id, `${u.name}${u.is_external ? ` · Terceirizado${u.company ? ` (${u.company})` : ''}` : u.job_title ? ` · ${u.job_title}` : ''}`, cur))}`.toString();
         } catch (e) { toast(e.message, 'err'); }
       };
       loadAssignees(projectId);

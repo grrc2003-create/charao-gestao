@@ -105,7 +105,8 @@ function build(t, ctx) {
         <h1>${t.title}</h1>
         <div class="facts">
           <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
-          <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}</div></div>
+          <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}
+            ${t.assignee_external ? html`<small>Terceirizado${t.assignee_company ? ` · ${t.assignee_company}` : ''} · líder: ${t.assignee_leader_name || '—'}</small>` : ''}</div></div>
           <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.cancelled_at ? 'Tarefa cancelada' : t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
             <span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
             ${t.reschedule_count ? html`<button type="button" class="resched-badge ${t.chronic ? 'is-chronic' : ''}" data-act="goresched" style="cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada${t.chronic ? ' · crônica' : ''}</button>` : ''}
@@ -160,7 +161,8 @@ function build(t, ctx) {
             ${t.exec_notes ? html`<div><div class="sub-label">Observações do responsável</div><div class="note-box">${t.exec_notes}</div></div>` : ''}`
           : html`<div class="empty-exec">
               <div class="big">Ainda não há retorno do responsável</div>
-              <div class="muted" style="font-size:13.5px">${can.execute ? 'Registre a execução abaixo e envie para conferência.' : `Aguardando ${t.assignee_name || 'definição do responsável'}.`}</div>
+              <div class="muted" style="font-size:13.5px">${can.execute ? (t.assignee_external && t.assignee_id !== ctx.state.user.id ? `Você é o líder de ${t.assignee_name} (terceirizado): registre a execução em nome dele e envie para conferência.` : 'Registre a execução abaixo e envie para conferência.')
+                : t.assignee_external ? `Aguardando o registro do líder ${t.assignee_leader_name || ''} em nome de ${t.assignee_name} (terceirizado).` : `Aguardando ${t.assignee_name || 'definição do responsável'}.`}</div>
             </div>`}
           ${execActions}
           ${reviewActions}

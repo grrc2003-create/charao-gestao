@@ -11,11 +11,12 @@ import { getSetting } from './settings.js';
 export const ROLES = ['admin', 'gestor', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company';
 
 export function publicUser(ctx, u) {
   const out = { ...u };
   delete out.password_hash;
+  if (isPlaceholderEmail(out.email)) out.email = null;
   if (!canSeePersonalData(ctx, u.id)) { delete out.email; delete out.phone; }
   return out;
 }
@@ -66,6 +67,30 @@ export function getUser(ctx, id) {
   };
 }
 
+// Terceirizado: sem login (senha inutilizável), e-mail opcional (só contato), líder interno obrigatório.
+const NO_LOGIN = '!sem-login';
+const placeholderEmail = () => `terceirizado-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@sem-login.charao`;
+export const isPlaceholderEmail = e => /@sem-login\.charao$/.test(e || '');
+
+function readExternalBody(body, current) {
+  const email = str(body.email, { max: 160, label: 'E-mail' })?.toLowerCase();
+  if (email && !isPlaceholderEmail(email) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw badRequest('E-mail inválido.');
+  const d = {
+    name: str(body.name, { max: 120, required: true, label: 'Nome' }),
+    email: email || (current && isPlaceholderEmail(current.email) ? current.email : placeholderEmail()),
+    role: 'colaborador',
+    access_scope: 'proprias',
+    manager_id: intOrNull(body.manager_id),
+    job_title: str(body.job_title, { max: 120, label: 'Função' }),
+    phone: str(body.phone, { max: 40, label: 'Telefone' }),
+    company: str(body.company, { max: 160, label: 'Empresa terceirizada' }),
+  };
+  if (!d.manager_id) throw badRequest('Informe o líder do terceirizado (colaborador, gestor ou administrador).');
+  const leader = one('SELECT * FROM users WHERE id = ?', d.manager_id);
+  if (!leader || !leader.active || leader.is_external) throw badRequest('O líder deve ser um usuário interno ativo (colaborador, gestor ou administrador).');
+  return d;
+}
+
 function readUserBody(body, { creating }) {
   const d = {
     name: str(body.name, { max: 120, required: true, label: 'Nome' }),
@@ -93,9 +118,21 @@ function assertNoManagerCycle(userId, managerId) {
 
 export function createUser(ctx, body, ip) {
   requireAdmin(ctx.user);
+  if (body.role === 'terceirizado') {
+    const d = readExternalBody(body);
+    if (one('SELECT id FROM users WHERE email = ?', d.email)) throw badRequest('Já existe um usuário com este e-mail.');
+    return tx(() => {
+      const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, is_external, company, must_change_password)
+        VALUES (?,?,?,?,?,?,?,?,1,?,0)`, d.name, d.email, NO_LOGIN, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.company);
+      const id = Number(r.lastInsertRowid);
+      audit(ctx.user.id, 'user', id, 'Terceirizado cadastrado (sem login)', { nome: d.name, empresa: d.company || '—', lider: one('SELECT name FROM users WHERE id = ?', d.manager_id).name }, ip);
+      return id;
+    });
+  }
   const { d, projectIds } = readUserBody(body, { creating: true });
   if (one('SELECT id FROM users WHERE email = ?', d.email)) throw badRequest('Já existe um usuário com este e-mail.');
   assertNoManagerCycle(null, d.manager_id);
+  if (d.manager_id && one('SELECT is_external FROM users WHERE id = ?', d.manager_id)?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
   return tx(() => {
     const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, must_change_password)
       VALUES (?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone);
@@ -110,6 +147,9 @@ export function updateUser(ctx, id, body, ip) {
   requireAdmin(ctx.user);
   const u = one('SELECT * FROM users WHERE id = ?', id);
   if (!u) throw notFound('Usuário não encontrado.');
+  if (u.is_external) return updateExternal(ctx, u, body, ip);
+  if (body.role === 'terceirizado') throw badRequest('Um usuário interno não pode ser convertido em terceirizado. Cadastre um novo terceirizado.');
+  if (body.manager_id && one('SELECT is_external FROM users WHERE id = ?', intOrNull(body.manager_id))?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
   const { d, projectIds } = readUserBody({ ...u, ...body }, { creating: false });
   const dup = one('SELECT id FROM users WHERE email = ? AND id <> ?', d.email, id);
   if (dup) throw badRequest('Já existe um usuário com este e-mail.');
@@ -143,7 +183,9 @@ function ensureAnotherAdmin(exceptId) {
 
 export function resetPassword(ctx, id, body, ip) {
   requireAdmin(ctx.user);
-  if (!one('SELECT id FROM users WHERE id = ?', id)) throw notFound();
+  const target = one('SELECT id, is_external FROM users WHERE id = ?', id);
+  if (!target) throw notFound();
+  if (target.is_external) throw badRequest('Terceirizados não têm login.');
   validatePasswordStrength(body.password);
   run(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = datetime('now') WHERE id = ?`, hashPassword(body.password), id);
   destroyUserSessions(id);
@@ -160,4 +202,16 @@ export function changeOwnPassword(user, body, ip) {
 
 export function assertCanSeeUser(ctx, id) {
   if (!canSeeUser(ctx, id)) throw forbidden();
+}
+
+function updateExternal(ctx, u, body, ip) {
+  const d = readExternalBody({ ...u, ...body }, u);
+  const dup = one('SELECT id FROM users WHERE email = ? AND id <> ?', d.email, u.id);
+  if (dup) throw badRequest('Já existe um usuário com este e-mail.');
+  const active = body.active === undefined ? u.active : body.active ? 1 : 0;
+  tx(() => {
+    run(`UPDATE users SET name=?, email=?, manager_id=?, job_title=?, phone=?, company=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.name, d.email, d.manager_id, d.job_title, d.phone, d.company, active, u.id);
+    audit(ctx.user.id, 'user', u.id, 'Terceirizado atualizado', { nome: d.name, empresa: d.company || '—', lider: one('SELECT name FROM users WHERE id = ?', d.manager_id).name, ativo: !!active }, ip);
+  });
 }

@@ -72,7 +72,7 @@ function readProjectBody(body) {
     lead_id: intOrNull(body.lead_id),
   };
   if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('A previsão de término deve ser posterior ao início.');
-  if (d.lead_id && !one('SELECT id FROM users WHERE id = ? AND active = 1', d.lead_id)) throw badRequest('Responsável inválido.');
+  if (d.lead_id && !one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', d.lead_id)) throw badRequest('Responsável técnico deve ser um usuário interno ativo.');
   const memberIds = [...new Set((Array.isArray(body.member_ids) ? body.member_ids : []).map(intOrNull).filter(Boolean))];
   for (const m of memberIds) if (!one('SELECT id FROM users WHERE id = ?', m)) throw badRequest('Membro inválido.');
   return { d, memberIds };

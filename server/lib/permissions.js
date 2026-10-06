@@ -66,14 +66,17 @@ export function canManageTask(ctx, t) {
 }
 
 // Conferir (aprovar/devolver). O próprio responsável não confere a própria entrega, salvo admin.
+// O responsável não confere a própria entrega; o líder de um terceirizado também não (ele registrou a execução)
 export function canReviewTask(ctx, t) {
   if (!canManageTask(ctx, t)) return false;
-  return isAdmin(ctx.user) || t.assignee_id !== ctx.user.id;
+  if (isAdmin(ctx.user)) return true;
+  return t.assignee_id !== ctx.user.id && !(t.assignee_external && t.assignee_leader_id === ctx.user.id);
 }
 
 // Somente o responsável registra a execução (gestores/admin podem concluir diretamente)
+// Terceirizado não tem login: o líder dele registra a execução em seu nome
 export function canExecuteTask(ctx, t) {
-  return t.assignee_id === ctx.user.id;
+  return t.assignee_id === ctx.user.id || (!!t.assignee_external && t.assignee_leader_id === ctx.user.id);
 }
 
 export function canCreateTaskIn(ctx, projectId) {
@@ -108,16 +111,22 @@ export function requireAdmin(user) {
 }
 
 // Usuários que podem ser responsáveis por tarefas de um projeto
+// Internos com acesso ao projeto + terceirizados cujo líder tem acesso (herdam o acesso do líder)
 export function usersWithProjectAccess(projectId) {
-  return all(`SELECT u.id, u.name, u.job_title, u.role FROM users u
-    WHERE u.active = 1 AND (u.role = 'admin' OR u.access_scope = 'total'
+  const internos = all(`SELECT u.id, u.name, u.job_title, u.role, u.is_external, u.company FROM users u
+    WHERE u.active = 1 AND u.is_external = 0 AND (u.role = 'admin' OR u.access_scope = 'total'
       OR EXISTS (SELECT 1 FROM user_project_access a WHERE a.user_id = u.id AND a.project_id = ?)
       OR EXISTS (SELECT 1 FROM projects p WHERE p.id = ? AND p.lead_id = u.id))
     ORDER BY u.name`, projectId, projectId);
+  const ids = new Set(internos.map(u => u.id));
+  const externos = all(`SELECT id, name, job_title, role, is_external, company, manager_id FROM users WHERE active = 1 AND is_external = 1 ORDER BY name`)
+    .filter(u => ids.has(u.manager_id));
+  return [...internos, ...externos];
 }
 
 export function userHasProjectAccess(userId, projectId) {
   const u = one('SELECT * FROM users WHERE id = ? AND active = 1', userId);
   if (!u) return false;
+  if (u.is_external) return !!u.manager_id && u.manager_id !== u.id && userHasProjectAccess(u.manager_id, projectId);
   return canAccessProject(u, projectId);
 }

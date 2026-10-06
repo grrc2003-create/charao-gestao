@@ -744,3 +744,5 @@ table.data.dl-table td.num, table.data.dl-table th.num { text-align: right; whit
 .rec-tag::before { content: "⟳"; font-size: 12px; }
 
 .form-row[hidden] { display: none !important; }
+
+.pill-ext { background: #EEF2F7; color: #3E5A78; border-color: #CBD6E2; border-style: dashed; }

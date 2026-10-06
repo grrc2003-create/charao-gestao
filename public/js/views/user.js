@@ -1,5 +1,5 @@
 // Tela individual do usuário: indicadores, comportamento operacional, tarefas próprias e visão da equipe.
-import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct } from '../core.js';
+import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct, roleLabel } from '../core.js';
 import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
@@ -62,8 +62,9 @@ export async function view({ params, query, setQuery, render, state }) {
             <h1>${u.name}</h1>
             <div class="muted">${u.job_title || '—'}</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-              <span class="pill ${u.role === 'admin' ? 'pill-orange' : ''}">${ROLE[u.role]}</span>
-              ${u.manager_name ? html`<span class="pill pill-sand">Gestor: ${u.manager_name}</span>` : ''}
+              <span class="pill ${u.is_external ? 'pill-ext' : u.role === 'admin' ? 'pill-orange' : ''}">${roleLabel(u)}</span>
+              ${u.company ? html`<span class="pill pill-sand">${u.company}</span>` : ''}
+              ${u.manager_name ? html`<span class="pill pill-sand">${u.is_external ? 'Líder' : 'Gestor'}: ${u.manager_name}</span>` : ''}
               ${d.team.length ? html`<span class="pill pill-sand">${d.team.length} na equipe</span>` : ''}
               ${!u.active ? html`<span class="pill" style="color:var(--st-atrasada)">Inativo</span>` : ''}
             </div>
@@ -73,8 +74,9 @@ export async function view({ params, query, setQuery, render, state }) {
             ${isMe ? html`<a class="btn btn-ghost btn-sm" href="#/conta">${icon('key')}Minha conta</a>` : ''}
           </div>
         </div>
-        ${u.email ? html`<hr class="divider"><dl class="kv"><dt>E-mail</dt><dd>${u.email}</dd>${u.phone ? html`<dt>Telefone</dt><dd>${u.phone}</dd>` : ''}
-          ${d.can_edit ? html`<dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd>` : ''}</dl>` : ''}
+        ${u.is_external ? html`<div class="notice" style="margin-top:12px">${icon('info')}<span>Terceirizado sem login. ${u.manager_name ? html`A execução das tarefas é registrada pelo líder <b>${u.manager_name}</b>.` : ''}</span></div>` : ''}
+        ${u.email || u.phone ? html`<hr class="divider"><dl class="kv">${u.email ? html`<dt>E-mail</dt><dd>${u.email}</dd>` : ''}${u.phone ? html`<dt>Telefone</dt><dd>${u.phone}</dd>` : ''}
+          ${d.can_edit && !u.is_external ? html`<dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd>` : ''}</dl>` : ''}
       </section>
 
       <div class="kpis section">

@@ -290,6 +290,17 @@ export function seedDemo() {
     }
   }
 
+  // Terceirizado de exemplo (sem login), liderado pelo mestre de obras
+  const extId = Number(run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, is_external, company)
+    VALUES ('José Ferreira', 'terceirizado-demo@sem-login.charao', '!sem-login', 'colaborador', 'proprias', 4, 'Encarregado de alvenaria', '(51) 99700-1234', 1, 'Empreiteira Alfa')`).lastInsertRowid);
+  const p1 = one('SELECT * FROM projects WHERE id = 1');
+  const alv = one(`SELECT id FROM project_stages WHERE project_id = 1 AND name = 'Alvenaria'`).id;
+  for (const [title, desc, off] of [['Alvenaria das unidades 501 a 504', 'Executar alvenaria de vedação das unidades 501 a 504 conforme projeto.', 6],
+    ['Encunhamento da alvenaria do 4º pavimento', 'Executar encunhamento com argamassa expansiva em todas as paredes do 4º pavimento.', -1]]) {
+    insertTask({ project: p1, data: { title, description: desc, field_summary: null, notes: null, priority: 'media', proof_type: 'foto',
+      assignee_id: extId, due_date: addDays(T, off), start_date: null }, stageInput: alv, creatorId: 2 });
+  }
+
   // Tarefas recorrentes de exemplo
   let monday = addDays(T, 1);
   while (new Date(Date.parse(monday + 'T00:00:00Z')).getUTCDay() !== 1) monday = addDays(monday, 1);

@@ -96,9 +96,9 @@ api.post('/api/auth/login', async (req, res, { body }) => {
   const key = `${clientIp(req)}|${email}`;
   try { checkLoginRate(key); } catch (e) { console.warn(`[auth] login bloqueado temporariamente: ${email}`); throw e; }
   const u = one('SELECT * FROM users WHERE email = ?', email);
-  if (!u || !u.active || !verifyPassword(password, u.password_hash)) {
+  if (!u || !u.active || u.is_external || !verifyPassword(password, u.password_hash)) {
     registerLoginFailure(key);
-    console.warn(`[auth] falha de login: ${email} (${!u ? 'usuário inexistente' : !u.active ? 'usuário inativo' : 'senha incorreta'})`);
+    console.warn(`[auth] falha de login: ${email} (${!u ? 'usuário inexistente' : !u.active ? 'usuário inativo' : u.is_external ? 'terceirizado sem login' : 'senha incorreta'})`);
     audit(u?.id || null, 'auth', u?.id || null, 'Falha de login', { email }, clientIp(req));
     throw new HttpError(401, 'E-mail ou senha inválidos.');
   }
@@ -160,7 +160,7 @@ api.get('/api/meta', (req, res, { ctx }) => {
   const projects = all(`SELECT id, code, name, status, kind FROM projects ORDER BY kind = 'interno', code`)
     .filter(p => ctx.projects === null || ctx.projects.has(p.id))
     .map(p => ({ ...p, stages: all('SELECT id, name, is_default FROM project_stages WHERE project_id = ? ORDER BY is_default DESC, sort_order, id', p.id) }));
-  const users = all(`SELECT id, name, role, job_title, active, manager_id FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
+  const users = all(`SELECT id, name, role, job_title, active, manager_id, is_external, company FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
   // Para filtros de tarefas também listamos responsáveis visíveis nas tarefas (sem dados pessoais)
   const assignees = new Map();
   for (const t of Tasks.listVisible(ctx)) if (t.assignee_id) assignees.set(t.assignee_id, { id: t.assignee_id, name: t.assignee_name });
@@ -287,7 +287,7 @@ api.post('/api/users', (req, res, { ctx, body }) => send(res, 201, { id: Users.c
 // Diretório mínimo (nome/cargo) para seleção de responsáveis/equipe — sem dados pessoais
 api.get('/api/users/directory', (req, res, { ctx }) => {
   if (!isAdmin(ctx.user) && ctx.user.role !== 'gestor') throw forbidden();
-  send(res, 200, all(`SELECT id, name, job_title, role, active FROM users WHERE active = 1 ORDER BY name`));
+  send(res, 200, all(`SELECT id, name, job_title, role, active, is_external, company FROM users WHERE active = 1 ORDER BY is_external, name`));
 });
 api.get('/api/users/:id', (req, res, { ctx, params }) => send(res, 200, Users.getUser(ctx, intOrNull(params.id))));
 api.put('/api/users/:id', (req, res, { ctx, params, body }) => {

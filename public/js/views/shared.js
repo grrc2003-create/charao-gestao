@@ -127,7 +127,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
       <div class="tc-meta">
         ${showProject ? html`<span>${icon('projects')}<em>${t.project_name}</em></span>` : ''}
         ${t.stage_name && !t.stage_default ? html`<span style="grid-column:1/-1"><em class="stage-tag">${t.stage_name}</em></span>` : ''}
-        ${showAssignee ? html`<span>${icon('user')}<em>${t.assignee_name || 'Sem responsável'}</em></span>` : ''}
+        ${showAssignee ? html`<span>${icon('user')}<em>${t.assignee_name || 'Sem responsável'}${t.assignee_external ? ' (terc.)' : ''}</em></span>` : ''}
         <span class="${due.cls}">${icon('calendar')}<em>${due.text}</em>${t.reschedule_count ? html`<i class="resched-badge ${t.chronic ? 'is-chronic' : ''}" title="Reagendada ${t.reschedule_count}x">↻${t.reschedule_count}</i>` : ''}</span>
         <span>${priorityTag(t.priority)}</span>
       </div></a>`;
@@ -140,7 +140,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
         <td class="mono nowrap">${t.code}</td>
         <td>${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}<div class="t-title">${t.recurrence_id ? html`<span class="rec-tag" title="Tarefa recorrente">${t.recurrence_seq}ª</span> ` : ''}${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>${t.stage_name && !t.stage_default ? html`<div style="margin-top:3px"><span class="stage-tag">${t.stage_name}</span></div>` : ''}${t.exec_count || t.ref_count ? html`<div class="t-sub">${t.ref_count ? `${t.ref_count} ref.` : ''} ${t.exec_count ? `· ${t.exec_count} foto(s) execução` : ''}</div>` : ''}</td>
         ${showProject ? html`<td><div>${t.project_name}</div><div class="t-sub mono">${t.project_code}</div></td>` : ''}
-        ${showAssignee ? html`<td class="nowrap">${t.assignee_name || html`<span class="muted">—</span>`}</td>` : ''}
+        ${showAssignee ? html`<td class="nowrap">${t.assignee_name || html`<span class="muted">—</span>`}${t.assignee_external ? html`<div class="t-sub">Terceirizado${t.assignee_company ? ` · ${t.assignee_company}` : ''}</div>` : ''}</td>` : ''}
         <td class="nowrap ${due.cls}">${due.text}${t.reschedule_count ? html` <i class="resched-badge ${t.chronic ? 'is-chronic' : ''}" title="Reagendada ${t.reschedule_count}x · prazo original ${fmtDate(t.original_due)}${t.chronic ? ' · crônica' : ''}">↻${t.reschedule_count}</i>` : ''}${t.late_episodes > 1 ? html` <i class="late-badge" title="Ficou atrasada ${t.late_episodes} vezes">${t.late_episodes}x</i>` : ''}</td>
         <td>${priorityTag(t.priority)}</td>
         <td>${statusBadge(t.eff_status)}${lateDoneTag(t) ? html`<div style="margin-top:3px">${lateDoneTag(t)}</div>` : ''}</td></tr>`;

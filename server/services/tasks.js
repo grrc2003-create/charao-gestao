@@ -17,7 +17,8 @@ const PROOF_LABEL = { nenhuma: 'Nenhuma', foto: 'Somente foto', descricao: 'Some
 const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', concluida: 'Concluída' };
 
 const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
-    a.name AS assignee_name, c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
+    a.name AS assignee_name, a.is_external AS assignee_external, a.manager_id AS assignee_leader_id, a.company AS assignee_company, (SELECT lu.name FROM users lu WHERE lu.id = a.manager_id) AS assignee_leader_name,
+    c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count,
     pt.code AS parent_code, pt.title AS parent_title,
@@ -39,6 +40,9 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
   LEFT JOIN users cb ON cb.id = t.cancelled_by`;
 
 const nowIso = () => new Date().toISOString();
+// Execução registrada pelo líder em nome de um terceirizado (fica explícito no histórico)
+const onBehalf = (ctx, t) => (t.assignee_external && t.assignee_id !== ctx.user.id ? `Registrado por ${ctx.user.name} (líder) em nome de ${t.assignee_name} (terceirizado)` : null);
+const withBehalf = (ctx, t, details) => [details, onBehalf(ctx, t)].filter(Boolean).join(' · ') || null;
 
 // Reagendamentos agrupados por tarefa (para os indicadores de prazo e repactuação)
 function reschedulesByTask(taskIds) {
@@ -359,8 +363,8 @@ export function updateExecution(ctx, id, body) {
   if (!fields.length) return;
   tx(() => {
     run(`UPDATE tasks SET ${fields.map(f => `${f} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...fields.map(f => next[f]), nowIso(), id);
-    if ('exec_description' in next) taskHistory(id, ctx.user.id, 'Descrição da execução registrada');
-    if ('exec_notes' in next) taskHistory(id, ctx.user.id, 'Observação da execução registrada');
+    if ('exec_description' in next) taskHistory(id, ctx.user.id, 'Descrição da execução registrada', onBehalf(ctx, t));
+    if ('exec_notes' in next) taskHistory(id, ctx.user.id, 'Observação da execução registrada', onBehalf(ctx, t));
     autoStart(ctx, t);
   });
 }
@@ -392,7 +396,7 @@ export function addFiles(ctx, id, body) {
   }
   tx(() => {
     for (const img of images) addFileInternal(ctx, id, kind, img.data, img.caption);
-    taskHistory(id, ctx.user.id, kind === 'execucao' ? 'Fotos de comprovação enviadas' : 'Imagens de referência anexadas', `${images.length} imagem(ns)`);
+    taskHistory(id, ctx.user.id, kind === 'execucao' ? 'Fotos de comprovação enviadas' : 'Imagens de referência anexadas', withBehalf(ctx, t, `${images.length} imagem(ns)`));
     if (kind === 'execucao') autoStart(ctx, t);
   });
 }
@@ -444,7 +448,7 @@ export function transition(ctx, id, action, body = {}) {
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
         assertSubtasksDone(t);
         change('aguardando_conferencia', ', delivered_at = ?, review_status = \'pendente\', review_comment = NULL, started_at = COALESCE(started_at, ?)', now, now);
-        taskHistory(id, ctx.user.id, 'Enviada para conferência', pc.has_photo || pc.has_desc ? 'Comprovação anexada' : null);
+        taskHistory(id, ctx.user.id, 'Enviada para conferência', withBehalf(ctx, t, pc.has_photo || pc.has_desc ? 'Comprovação anexada' : null));
         break;
       }
       case 'approve': {

@@ -257,7 +257,7 @@ api.post('/api/users', (req, res, { ctx, body }) => send(res, 201, { id: Users.c
 // Diretório mínimo (nome/cargo) para seleção de responsáveis/equipe — sem dados pessoais
 api.get('/api/users/directory', (req, res, { ctx }) => {
   if (!isAdmin(ctx.user) && ctx.user.role !== 'gestor') throw forbidden();
-  send(res, 200, all(`SELECT id, name, job_title, role, active, is_external, company FROM users WHERE active = 1 ORDER BY is_external, name`));
+  send(res, 200, all(`SELECT id, name, job_title, role, access_scope, active, is_external, company FROM users WHERE active = 1 ORDER BY is_external, name`));
 });
 api.get('/api/users/:id', (req, res, { ctx, params }) => send(res, 200, Users.getUser(ctx, intOrNull(params.id))));
 api.put('/api/users/:id', (req, res, { ctx, params, body }) => {

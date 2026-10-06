@@ -129,9 +129,13 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <button type="button" class="btn btn-ghost" id="stage-add-btn">${icon('plus')}Adicionar</button>
           </div>
         </fieldset>
-        <fieldset class="fieldset form"><legend>Equipe / responsáveis</legend>
-          <span class="hint">Integrantes da equipe do projeto. O acesso ao sistema é controlado separadamente em <b>Usuários → Permissões</b>.</span>
-          <div class="checks">${active.map(u => html`<label><input type="checkbox" name="member" value="${u.id}" ${memberIds.has(u.id) ? 'checked' : ''}>${u.name}<span class="muted" style="font-size:12px">${u.job_title || ''}</span></label>`)}</div>
+        <fieldset class="fieldset form"><legend>Equipe do projeto (acesso)</legend>
+          <span class="hint">Quem estiver marcado <b>vê este projeto e pode ser responsável pelas tarefas dele</b>. É a mesma liberação de <b>Usuários → Permissões</b>: marcar libera, desmarcar retira.</span>
+          <div class="checks">${active.map(u => {
+            const full = u.role === 'admin' || u.access_scope === 'total';
+            return html`<label><input type="checkbox" name="member" value="${u.id}" ${memberIds.has(u.id) || full ? 'checked' : ''} ${full ? 'disabled' : ''}>${u.name}
+              <span class="muted" style="font-size:12px">${full ? 'acesso a todos os projetos' : u.is_external ? `Terceirizado${u.company ? ` · ${u.company}` : ''}` : u.job_title || ''}</span></label>`;
+          })}</div>
         </fieldset>
         <div class="form-error" hidden></div>
         <div class="form-actions">
@@ -176,7 +180,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
-        data.member_ids = [...f.querySelectorAll('[name=member]:checked')].map(c => Number(c.value));
+        data.member_ids = [...f.querySelectorAll('[name=member]:checked:not(:disabled)')].map(c => Number(c.value));
         data.stages = [...f.querySelectorAll('.stage-item:not(.stage-default)')].map(li => ({ id: li.dataset.id ? Number(li.dataset.id) : null, name: li.querySelector('input').value }));
         delete data.member;
         err.hidden = true;

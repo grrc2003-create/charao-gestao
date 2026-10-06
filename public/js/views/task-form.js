@@ -55,7 +55,7 @@ export async function view({ params, query, state, navigate }) {
           <div class="form-row">
             <div class="field"><label for="assignee_id">Responsável</label>
               <select id="assignee_id" name="assignee_id"><option value="">Selecione o projeto primeiro</option></select>
-              <span class="hint">Somente usuários com acesso ao projeto.</span></div>
+              <span class="hint" id="assignee-hint">Aparecem os usuários e terceirizados da equipe do projeto. Não encontrou alguém? Inclua a pessoa na equipe (Projetos → Editar) ou libere o projeto em Usuários.</span></div>
             <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}"></div>
           </div>
           <div class="form-row" id="start-row">

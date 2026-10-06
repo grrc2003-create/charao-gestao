@@ -549,6 +549,24 @@ async function main() {
   const rtQ = (await ricardo('GET', `/reports?type=tarefas&level=detalhado&q=${encodeURIComponent('alvenaria')}`)).data;
   ok(rtQ.summary.total === (await ricardo('GET', '/tasks?q=alvenaria')).data.length && rtQ.scope.subtitle.includes('Busca'), 'busca por texto vale no relatório');
 
+  console.log('Equipe do projeto libera o acesso (responsáveis)');
+  const extT = (await ana('POST', '/users', { role: 'terceirizado', name: 'Carlos Pintor', manager_id: 4, project_ids: [1] })).data.id;
+  const pNew = (await ricardo('POST', '/projects', { name: 'Obra Equipe', client: 'Cliente E', member_ids: [5, extT] })).data.id;
+  let asg = (await ricardo('GET', `/projects/${pNew}/assignees`)).data.map(u => u.id);
+  ok(asg.includes(5) && asg.includes(extT), 'quem é marcado na equipe aparece como responsável (colaborador e terceirizado)');
+  ok(!asg.includes(6), 'quem não está na equipe nem tem acesso total não aparece');
+  const felipeC = await login('felipe@charao.eng.br');
+  ok((await felipeC('GET', '/projects')).data.some(p => p.id === pNew), 'integrante da equipe passa a ver o projeto');
+  ok((await ana('GET', '/users/5')).data.user.project_ids.includes(pNew), 'liberação aparece em Usuários → Permissões');
+  await ana('PUT', '/users/7', { project_ids: [...(await ana('GET', '/users/7')).data.user.project_ids, pNew] });
+  ok((await ricardo('GET', `/projects/${pNew}`)).data.members.some(m => m.id === 7), 'liberação feita em Usuários aparece na equipe do projeto');
+  await ricardo('PUT', `/projects/${pNew}`, { member_ids: [extT, 7] });
+  asg = (await ricardo('GET', `/projects/${pNew}/assignees`)).data.map(u => u.id);
+  ok(!asg.includes(5) && !(await felipeC('GET', '/projects')).data.some(p => p.id === pNew), 'desmarcar da equipe retira a liberação');
+  await ricardo('PUT', `/projects/${pNew}`, { name: 'Obra Equipe 2' });
+  ok((await ricardo('GET', `/projects/${pNew}/assignees`)).data.some(u => u.id === 7), 'editar o projeto sem mexer na equipe mantém as liberações');
+  ok((await ana('GET', '/audit')).data.some(a => a.action === 'Projeto atualizado' && /equipe_e_acesso/.test(JSON.stringify(a.details || a))), 'alteração de equipe/acesso registrada na auditoria');
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

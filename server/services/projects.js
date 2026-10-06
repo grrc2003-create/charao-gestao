@@ -13,9 +13,29 @@ export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'con
 
 const BASE = `SELECT p.*, l.name AS lead_name FROM projects p LEFT JOIN users l ON l.id = p.lead_id`;
 
+// Equipe = usuários com o projeto liberado (mesma liberação de Usuários → Permissões)
 function members(projectId) {
-  return all(`SELECT u.id, u.name, u.job_title FROM project_members m JOIN users u ON u.id = m.user_id
-    WHERE m.project_id = ? ORDER BY u.name`, projectId);
+  return all(`SELECT u.id, u.name, u.job_title, u.is_external FROM users u
+    WHERE EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = ? AND m.user_id = u.id)
+       OR EXISTS (SELECT 1 FROM user_project_access a WHERE a.project_id = ? AND a.user_id = u.id)
+    ORDER BY u.is_external, u.name`, projectId, projectId);
+}
+
+// Marcar na equipe libera o projeto; desmarcar retira a liberação (admins e acesso total sempre têm acesso)
+function syncTeam(projectId, memberIds, before = []) {
+  const want = new Set(memberIds);
+  const had = new Set(before);
+  run('DELETE FROM project_members WHERE project_id = ?', projectId);
+  for (const m of want) {
+    run('INSERT OR IGNORE INTO project_members (project_id, user_id) VALUES (?,?)', projectId, m);
+    const u = one('SELECT role, access_scope FROM users WHERE id = ?', m);
+    if (u && u.role !== 'admin' && u.access_scope !== 'total') run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', m, projectId);
+  }
+  const removed = [...had].filter(id => !want.has(id));
+  for (const m of removed) run('DELETE FROM user_project_access WHERE user_id = ? AND project_id = ?', m, projectId);
+  const name = id => one('SELECT name FROM users WHERE id = ?', id)?.name;
+  const added = [...want].filter(id => !had.has(id));
+  return added.length || removed.length ? { incluidos: added.map(name), removidos: removed.map(name) } : null;
 }
 
 export function listProjects(ctx, tasks = listVisible(ctx)) {
@@ -74,7 +94,7 @@ function readProjectBody(body) {
   if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('A previsão de término deve ser posterior ao início.');
   if (d.lead_id && !one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', d.lead_id)) throw badRequest('Responsável técnico deve ser um usuário interno ativo.');
   const memberIds = [...new Set((Array.isArray(body.member_ids) ? body.member_ids : []).map(intOrNull).filter(Boolean))];
-  for (const m of memberIds) if (!one('SELECT id FROM users WHERE id = ?', m)) throw badRequest('Membro inválido.');
+  for (const m of memberIds) if (!one('SELECT id FROM users WHERE id = ?', m)) throw badRequest('Integrante da equipe inválido.');
   return { d, memberIds };
 }
 
@@ -117,14 +137,14 @@ export function createProject(ctx, body, ip) {
       lead_id, kind, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, kind, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
-    for (const m of memberIds) run('INSERT INTO project_members (project_id, user_id) VALUES (?,?)', id, m);
+    const teamLog = syncTeam(id, memberIds);
     defaultStageId(id);
     const stagesLog = syncStages(id, body.stages);
     // Quem cria um projeto (sem acesso total) recebe acesso a ele
     if (!isAdmin(ctx.user) && ctx.user.access_scope !== 'total') {
       run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', ctx.user.id, id);
     }
-    audit(ctx.user.id, 'project', id, 'Projeto criado', { code, name: d.name, classificacoes: stagesLog?.criadas || [] }, ip);
+    audit(ctx.user.id, 'project', id, 'Projeto criado', { code, name: d.name, classificacoes: stagesLog?.criadas || [], equipe: teamLog?.incluidos || [] }, ip);
     return id;
   });
 }
@@ -138,11 +158,10 @@ export function updateProject(ctx, id, body, ip) {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
       lead_id=?, updated_at=? WHERE id=?`,
       d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, new Date().toISOString(), id);
-    run('DELETE FROM project_members WHERE project_id = ?', id);
-    for (const m of memberIds) run('INSERT INTO project_members (project_id, user_id) VALUES (?,?)', id, m);
+    const teamLog = body.member_ids !== undefined ? syncTeam(id, memberIds, members(id).map(m => m.id)) : null;
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));
     const stagesLog = syncStages(id, body.stages);
-    audit(ctx.user.id, 'project', id, 'Projeto atualizado', { campos: changed, ...(stagesLog ? { classificacoes: stagesLog } : {}) }, ip);
+    audit(ctx.user.id, 'project', id, 'Projeto atualizado', { campos: changed, ...(stagesLog ? { classificacoes: stagesLog } : {}), ...(teamLog ? { equipe_e_acesso: teamLog } : {}) }, ip);
   });
 }
 

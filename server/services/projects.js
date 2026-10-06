@@ -117,7 +117,7 @@ export function ensureInternalArea() {
     defaultStageId(id);
     ['Administrativo', 'Comercial', 'Financeiro', 'Equipamentos e manutenção', 'Pessoas (RH)', 'Segurança do trabalho']
       .forEach((n, i) => run('INSERT INTO project_stages (project_id, name, sort_order) VALUES (?,?,?)', id, n, i + 1));
-    for (const g of all(`SELECT id FROM users WHERE role = 'gestor' AND access_scope <> 'total'`)) {
+    for (const g of all(`SELECT id FROM users WHERE role IN ('gestor','coordenador') AND access_scope <> 'total'`)) {
       run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', g.id, id);
     }
     run(`INSERT INTO app_settings (key, value) VALUES ('internal_area_created', ?)`, String(id));

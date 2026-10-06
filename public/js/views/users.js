@@ -9,7 +9,7 @@ export async function list({ state }) {
   const row = u => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">
     ${avatar(u.name)}
     <div class="grow">
-      <div class="row-title">${u.name} <span class="pill ${u.is_external ? 'pill-ext' : u.role === 'admin' ? 'pill-orange' : u.role === 'gestor' ? '' : 'pill-sand'}">${roleLabel(u)}</span>
+      <div class="row-title">${u.name} <span class="pill ${u.is_external ? 'pill-ext' : u.role === 'admin' ? 'pill-orange' : u.role === 'gestor' || u.role === 'coordenador' ? '' : 'pill-sand'}">${roleLabel(u)}</span>
         ${!u.active ? html`<span class="pill" style="color:var(--st-atrasada)">Inativo</span>` : ''}</div>
       <div class="row-meta"><span>${u.job_title || '—'}</span>${u.company ? html`<span>${u.company}</span>` : ''}
         ${u.manager_name ? html`<span>${u.is_external ? 'Líder' : 'Gestor'}: ${u.manager_name}</span>` : ''}
@@ -29,12 +29,12 @@ export async function list({ state }) {
       ${pageHead({
         eyebrow: isAdmin ? 'Acessos, perfis e equipes' : 'Sua equipe',
         title: 'Usuários',
-        sub: isAdmin ? 'Gerencie logins individuais, perfis (Administrador, Gestor, Colaborador), hierarquia e restrição por projeto.'
+        sub: isAdmin ? 'Gerencie logins individuais, perfis (Administrador, Gestor, Coordenador, Colaborador, Terceirizado), hierarquia e restrição por projeto.'
           : 'Você visualiza o próprio perfil e os integrantes da equipe sob sua gestão.',
         actions: isAdmin ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a><a class="btn btn-ghost" href="#/auditoria">${icon('shield')}Auditoria</a><a class="btn btn-ghost" href="#/usuarios/novo?perfil=terceirizado">${icon('plus')}Novo terceirizado</a><a class="btn btn-accent" href="#/usuarios/novo">${icon('plus')}Novo usuário</a>`
           : state.meta.can.manage_settings ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a>` : '',
       })}
-      ${['admin', 'gestor', 'colaborador', 'terceirizado'].filter(r => byRole(r).length).map(r => html`<section class="card section">
+      ${['admin', 'gestor', 'coordenador', 'colaborador', 'terceirizado'].filter(r => byRole(r).length).map(r => html`<section class="card section">
         <div class="card-head"><h2>${ROLE[r]}${r === 'terceirizado' ? 's' : 'es'}</h2><span class="sub">${r === 'terceirizado' ? `${byRole(r).length} · sem login: o líder registra e confere` : byRole(r).length}</span></div>
         <ul class="rows">${byRole(r).map(row)}</ul></section>`)}
       ${isAdmin ? html`<a class="fab" href="#/usuarios/novo" aria-label="Novo usuário">${icon('plus')}</a>` : ''}`,
@@ -86,8 +86,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         </fieldset>
 
         <fieldset class="fieldset form"><legend>Perfil e hierarquia</legend>
-          <div class="segmented ${editing ? 'seg-3' : 'seg-4'}">
-            ${[['admin', 'Controle total, usuários e permissões'], ['gestor', 'Gerencia projetos e confere tarefas da equipe'], ['colaborador', 'Executa e cria tarefas nos projetos liberados'],
+          <div class="segmented ${editing && ext ? '' : 'seg-4'}">
+            ${[['admin', 'Controle total, usuários e permissões'], ['gestor', 'Gerencia projetos e confere tarefas da equipe'], ['coordenador', 'Igual ao gestor e também aprova as próprias tarefas'], ['colaborador', 'Executa e cria tarefas nos projetos liberados'],
               ['terceirizado', 'Responsável por tarefas, com líder; login opcional']]
               .filter(([k]) => !editing || (ext ? k === 'terceirizado' : k !== 'terceirizado'))
               .map(([k, d]) => html`<label><input type="radio" name="role" value="${k}" ${(ext ? k === 'terceirizado' : u.role === k) ? 'checked' : ''}>${ROLE[k]}<small>${d}</small></label>`)}

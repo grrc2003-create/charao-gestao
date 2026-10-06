@@ -445,6 +445,7 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .fact .k svg { width: 14px; height: 14px; }
 .fact .v { font-weight: 620; margin-top: 3px; font-size: 14px; overflow-wrap: anywhere; }
 .fact .v small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.fact .v .badge { white-space: normal; max-width: 100%; }
 .fact-wide { grid-column: span 2; }
 @media (min-width: 900px) { .fact-wide { grid-column: span 1; } }
 

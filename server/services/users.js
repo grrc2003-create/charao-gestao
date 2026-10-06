@@ -8,7 +8,7 @@ import { listVisible } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
 
-export const ROLES = ['admin', 'gestor', 'colaborador'];
+export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
 const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled';
@@ -90,9 +90,9 @@ function readExternalBody(body, current) {
     company: str(body.company, { max: 160, label: 'Empresa terceirizada' }),
     login_enabled: login ? 1 : 0,
   };
-  if (!d.manager_id) throw badRequest('Informe o líder do terceirizado (colaborador, gestor ou administrador).');
+  if (!d.manager_id) throw badRequest('Informe o líder do terceirizado (colaborador, coordenador, gestor ou administrador).');
   const leader = one('SELECT * FROM users WHERE id = ?', d.manager_id);
-  if (!leader || !leader.active || leader.is_external) throw badRequest('O líder deve ser um usuário interno ativo (colaborador, gestor ou administrador).');
+  if (!leader || !leader.active || leader.is_external) throw badRequest('O líder deve ser um usuário interno ativo (colaborador, coordenador, gestor ou administrador).');
   const projectIds = [...new Set((Array.isArray(body.project_ids) ? body.project_ids : []).map(intOrNull).filter(Boolean))];
   for (const p of projectIds) if (!one('SELECT id FROM projects WHERE id = ?', p)) throw badRequest('Projeto inválido na lista de acesso.');
   // O terceirizado só aparece nos projetos liberados a ele

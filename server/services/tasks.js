@@ -2,8 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
-  canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, userHasProjectAccess, isAdmin,
-} from '../lib/permissions.js';
+  canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
 import { decorate, today, daysBetween } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
@@ -115,7 +114,7 @@ export function permissionsFor(ctx, t) {
     submit: editableExec,
     review: review && t.status === 'aguardando_conferencia',
     reopen: manage && t.status === 'concluida',
-    conclude_directly: manage && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || ctx.user.role === 'gestor'),
+    conclude_directly: manage && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || isManagerRole(ctx.user)),
     // Subtarefas: um nível. Quem gerencia a tarefa ou é o responsável por ela pode dividi-la.
     add_subtask: !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
     cancel: manage && t.status !== 'concluida',

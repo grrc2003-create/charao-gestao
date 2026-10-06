@@ -567,6 +567,37 @@ async function main() {
   ok((await ricardo('GET', `/projects/${pNew}/assignees`)).data.some(u => u.id === 7), 'editar o projeto sem mexer na equipe mantém as liberações');
   ok((await ana('GET', '/audit')).data.some(a => a.action === 'Projeto atualizado' && /equipe_e_acesso/.test(JSON.stringify(a.details || a))), 'alteração de equipe/acesso registrada na auditoria');
 
+  console.log('Perfil Coordenador (gestor que também aprova as próprias tarefas)');
+  const coordId = (await ana('POST', '/users', { name: 'Carla Coordenadora', email: 'carla@charao.eng.br', role: 'coordenador', access_scope: 'projetos', project_ids: [1], password: 'coord1234' })).data.id;
+  ok((await ana('GET', `/users/${coordId}`)).data.user.role === 'coordenador', 'administrador cadastra o perfil Coordenador');
+  const membroId = (await ana('POST', '/users', { name: 'Diego Equipe', email: 'diego@charao.eng.br', role: 'colaborador', access_scope: 'projetos', project_ids: [1], password: 'diego1234', manager_id: coordId })).data.id;
+  ok((await ana('GET', `/users/${membroId}`)).data.user.manager_id === coordId, 'coordenador pode ser gestor direto de uma equipe');
+  const carla = await login('carla@charao.eng.br', 'coord1234');
+  const meCoord = (await carla('GET', '/meta')).data;
+  ok(meCoord?.can?.manage_projects === true, 'coordenador tem as permissões de gestão (projetos)');
+  ok((await carla('GET', '/users/directory')).status === 200, 'coordenador acessa o diretório de usuários (como o gestor)');
+  const thr = (await carla('GET', '/settings/general')).data.chronic_reschedule_threshold;
+  ok((await carla('PUT', '/settings/general', { chronic_reschedule_threshold: thr })).status === 200, 'coordenador altera as configurações (como o gestor)');
+  // Própria tarefa: executa, envia e aprova
+  const tOwn = (await carla('POST', '/tasks', { project_id: 1, title: 'Vistoria do coordenador', description: 'Vistoria', assignee_id: coordId, proof_type: 'descricao', due_date: '2099-04-01' })).data.id;
+  await carla('PATCH', `/tasks/${tOwn}/execution`, { exec_description: 'Vistoria realizada.' });
+  let tc = (await carla('POST', `/tasks/${tOwn}/actions/submit`)).data;
+  ok(tc.status === 'aguardando_conferencia' && tc.can.review, 'coordenador pode conferir a própria entrega');
+  ok((await carla('POST', `/tasks/${tOwn}/actions/approve`, {})).data.status === 'concluida', 'coordenador aprova a própria tarefa');
+  // Tarefa da equipe
+  const diego = await login('diego@charao.eng.br', 'diego1234');
+  const tTeam = (await carla('POST', '/tasks', { project_id: 1, title: 'Tarefa do Diego', description: 'x', assignee_id: membroId, proof_type: 'descricao', due_date: '2099-04-02' })).data.id;
+  await diego('PATCH', `/tasks/${tTeam}/execution`, { exec_description: 'Feito.' });
+  await diego('POST', `/tasks/${tTeam}/actions/submit`);
+  ok(!(await diego('GET', `/tasks/${tTeam}`)).data.can.review, 'colaborador continua sem conferir a própria entrega');
+  ok((await carla('POST', `/tasks/${tTeam}/actions/approve`, {})).data.status === 'concluida', 'coordenador aprova a tarefa da equipe');
+  // Gestor continua sem aprovar a própria
+  const tGest = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Tarefa do gestor', description: 'x', assignee_id: 2, proof_type: 'descricao', due_date: '2099-04-03' })).data.id;
+  await ricardo('PATCH', `/tasks/${tGest}/execution`, { exec_description: 'Feito.' });
+  const tg = (await ricardo('POST', `/tasks/${tGest}/actions/submit`)).data;
+  ok(!tg.can.review && (await ricardo('POST', `/tasks/${tGest}/actions/approve`, {})).status === 403, 'gestor continua sem aprovar a própria tarefa');
+  ok((await carla('GET', '/projects')).data.every(p => p.id === 1 || p.lead_id === coordId), 'coordenador respeita a restrição por projeto');
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

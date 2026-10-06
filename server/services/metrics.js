@@ -161,7 +161,7 @@ export function userStats(user, tasks, usersById) {
   const selfCreated = assigned.filter(t => t.creator_id === user.id);
   const byManager = assigned.filter(t => {
     const by = usersById.get(t.assigned_by_id || t.creator_id);
-    return by && by.id !== user.id && (by.role === 'gestor' || by.role === 'admin' || by.id === user.manager_id);
+    return by && by.id !== user.id && (by.role === 'gestor' || by.role === 'coordenador' || by.role === 'admin' || by.id === user.manager_id);
   });
   return {
     ...s,

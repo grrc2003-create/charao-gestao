@@ -2,7 +2,7 @@
 // Cada ocorrência é uma tarefa normal, criada `lead_days` dias antes do seu prazo.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
-import { isAdmin, canAccessProject, canCreateTaskIn, userHasProjectAccess } from '../lib/permissions.js';
+import { isAdmin, canAccessProject, canCreateTaskIn, userHasProjectAccess, isManagerRole } from '../lib/permissions.js';
 import { today, addDays } from './metrics.js';
 import { FREQS, END_TYPES, occurrenceDates, describeRule } from './recurrence-rules.js';
 import { insertTask, validateAssignee, listVisible, listCancelled, PRIORITIES, PROOF_TYPES } from './tasks.js';
@@ -88,7 +88,7 @@ function canSee(ctx, r) {
 function canManage(ctx, r) {
   const { user } = ctx;
   if (isAdmin(user) || r.created_by === user.id) return true;
-  return user.role === 'gestor' && canAccessProject(user, r.project_id, ctx.projects) && user.access_scope !== 'proprias';
+  return isManagerRole(user) && canAccessProject(user, r.project_id, ctx.projects) && user.access_scope !== 'proprias';
 }
 function load(ctx, id) {
   const r = one(`${BASE} WHERE r.id = ?`, id);

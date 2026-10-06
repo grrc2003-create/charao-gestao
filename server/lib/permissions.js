@@ -1,11 +1,14 @@
 // Regras de autorização — TODA verificação de acesso do backend passa por aqui.
 // Perfis: admin (controle total), gestor (gerencia projetos acessíveis e acompanha a equipe),
+// coordenador (igual ao gestor e também confere as próprias tarefas),
 // colaborador (executa e cria tarefas nos projetos acessíveis).
 // Escopo de acesso: total | projetos (lista liberada) | proprias (só tarefas próprias nos projetos liberados).
 import { all, one } from '../db.js';
 import { forbidden } from './http.js';
 
 export const isAdmin = u => u.role === 'admin';
+// Gestor e Coordenador têm as mesmas permissões de gestão
+export const isManagerRole = u => u.role === 'gestor' || u.role === 'coordenador';
 
 // null = todos os projetos; Set = apenas os ids listados
 export function accessibleProjectIds(user) {
@@ -58,7 +61,7 @@ export function canManageTask(ctx, t) {
   const { user } = ctx;
   if (isAdmin(user)) return true;
   if (t.creator_id === user.id) return true;
-  if (user.role === 'gestor') {
+  if (isManagerRole(user)) {
     if (t.assignee_id && ctx.team.has(t.assignee_id)) return true;
     return canAccessProject(user, t.project_id, ctx.projects) && user.access_scope !== 'proprias';
   }
@@ -70,10 +73,11 @@ export function canManageTask(ctx, t) {
 export const isLeaderOfNoLogin = (ctx, t) => !!t.assignee_external && !t.assignee_login && t.assignee_leader_id === ctx.user.id;
 
 // O responsável não confere a própria entrega. O líder de um terceirizado sem acesso confere a entrega dele.
+// Coordenador confere as tarefas da equipe e também as próprias.
 export function canReviewTask(ctx, t) {
   if (isLeaderOfNoLogin(ctx, t)) return true;
   if (!canManageTask(ctx, t)) return false;
-  return isAdmin(ctx.user) || t.assignee_id !== ctx.user.id;
+  return isAdmin(ctx.user) || ctx.user.role === 'coordenador' || t.assignee_id !== ctx.user.id;
 }
 
 // Somente o responsável registra a execução (gestores/admin podem concluir diretamente)
@@ -89,7 +93,7 @@ export function canCreateTaskIn(ctx, projectId) {
 export function canManageProject(ctx, projectId) {
   const { user } = ctx;
   if (isAdmin(user)) return true;
-  if (user.role !== 'gestor') return false;
+  if (!isManagerRole(user)) return false;
   return projectId == null || canAccessProject(user, projectId, ctx.projects);
 }
 
@@ -104,7 +108,7 @@ export function canSeePersonalData(ctx, userId) {
 }
 
 // Configurações gerais (ex.: justificativas de reagendamento): Gestor e Administrador
-export const canManageSettings = user => isAdmin(user) || user.role === 'gestor';
+export const canManageSettings = user => isAdmin(user) || isManagerRole(user);
 export function requireSettingsManager(user) {
   if (!canManageSettings(user)) throw forbidden('Apenas gestores e administradores alteram as configurações.');
 }

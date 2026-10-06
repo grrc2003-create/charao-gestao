@@ -10,7 +10,7 @@ import {
   checkLoginRate, registerLoginFailure, clearLoginFailures, hashPassword, validatePasswordStrength,
 } from './lib/auth.js';
 import { seedDemo } from './demo-data.js';
-import { accessContext, canSeeUser, isAdmin, requireAdmin, canManageSettings } from './lib/permissions.js';
+import { accessContext, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
@@ -170,7 +170,7 @@ api.get('/api/meta', (req, res, { ctx }) => {
     managers: users.filter(u => all('SELECT 1 FROM users WHERE manager_id = ? LIMIT 1', u.id).length),
     can: {
       manage_users: isAdmin(ctx.user),
-      manage_projects: isAdmin(ctx.user) || ctx.user.role === 'gestor',
+      manage_projects: isAdmin(ctx.user) || isManagerRole(ctx.user),
       view_audit: isAdmin(ctx.user),
       manage_settings: canManageSettings(ctx.user),
     },
@@ -256,7 +256,7 @@ api.get('/api/users', (req, res, { ctx }) => send(res, 200, Users.listUsers(ctx)
 api.post('/api/users', (req, res, { ctx, body }) => send(res, 201, { id: Users.createUser(ctx, body, clientIp(req)) }));
 // Diretório mínimo (nome/cargo) para seleção de responsáveis/equipe — sem dados pessoais
 api.get('/api/users/directory', (req, res, { ctx }) => {
-  if (!isAdmin(ctx.user) && ctx.user.role !== 'gestor') throw forbidden();
+  if (!isAdmin(ctx.user) && !isManagerRole(ctx.user)) throw forbidden();
   send(res, 200, all(`SELECT id, name, job_title, role, access_scope, active, is_external, company FROM users WHERE active = 1 ORDER BY is_external, name`));
 });
 api.get('/api/users/:id', (req, res, { ctx, params }) => send(res, 200, Users.getUser(ctx, intOrNull(params.id))));

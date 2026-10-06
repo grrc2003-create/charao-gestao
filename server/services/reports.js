@@ -3,10 +3,10 @@ import { all, one } from '../db.js';
 import { badRequest, notFound, oneOf, intOrNull, date } from '../lib/http.js';
 import { canAccessProject, canSeeUser, teamIds } from '../lib/permissions.js';
 import { summarize, userStats, today, monthlyTrend, localDate, PERIODS, groupByPeriod, periodKey, periodLabel, byDue } from './metrics.js';
-import { listVisible } from './tasks.js';
+import { listVisible, taskFilters, filterTasks, DUE_FILTERS } from './tasks.js';
 import { getSetting } from './settings.js';
 
-export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral'];
+export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral', 'tarefas'];
 export const LEVELS = ['resumo', 'detalhado', 'completo'];
 export const GROUPINGS = ['nenhum', 'classificacao', ...PERIODS];
 
@@ -76,7 +76,7 @@ export function buildReport(ctx, q) {
   const includeDone = q.include_done !== '0';
   const group = oneOf(q.group, GROUPINGS, 'Agrupamento', 'nenhum');
   const withGantt = q.gantt !== '0';
-  const stageFilter = String(q.stage || '').split(',').map(intOrNull).filter(Boolean);
+  const stageFilter = type === 'tarefas' ? [] : String(q.stage || '').split(',').map(intOrNull).filter(Boolean);
   const id = intOrNull(q.id);
   const all_ = listVisible(ctx);
   const map = usersMap();
@@ -103,12 +103,17 @@ export function buildReport(ctx, q) {
     tasks = all_.filter(t => team.has(t.assignee_id) || t.assignee_id === id);
     scope = { label: `Equipe de ${u.name}`, subtitle: `${team.size} integrante(s) sob gestão`, user: u };
     extra.manager_stats = userStats(u, all_, map);
+  } else if (type === 'tarefas') {
+    // Mesmos filtros da tela Tarefas (canceladas nunca entram em relatórios)
+    const f = taskFilters(k => (q[k] == null ? [] : [q[k]]));
+    tasks = filterTasks(ctx, f, { cancelled: 'nunca' });
+    scope = { label: 'Tarefas filtradas', subtitle: describeFilters(ctx, f, map), filters: true };
   } else {
     tasks = all_;
     scope = { label: 'Visão geral da operação', subtitle: 'Todos os projetos acessíveis ao emissor' };
   }
 
-  if (q.kind === 'obra' || q.kind === 'interno') tasks = tasks.filter(t => t.project_kind === q.kind);
+  if (type !== 'tarefas' && (q.kind === 'obra' || q.kind === 'interno')) tasks = tasks.filter(t => t.project_kind === q.kind);
   tasks = filterPeriod(tasks, from, to);
   if (!includeDone) tasks = tasks.filter(t => t.status !== 'concluida');
   let stageNames = [];
@@ -167,6 +172,32 @@ export function buildReport(ctx, q) {
     tasks: level === 'resumo' ? [] : level === 'completo' ? attachEvidence(tasks) : tasks,
     ...extra,
   };
+}
+
+const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', atrasada: 'Atrasada', concluida: 'Concluída' };
+const PRIORITY_LABEL = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
+
+// Texto dos filtros aplicados (aparece no cabeçalho do relatório)
+function describeFilters(ctx, f, users) {
+  const parts = [];
+  const statuses = f.status.filter(s => s !== 'cancelada');
+  if (statuses.length) parts.push(`Status: ${statuses.map(s => STATUS_LABEL[s] || s).join(', ')}`);
+  if (f.project) {
+    const p = one('SELECT code, name FROM projects WHERE id = ?', f.project);
+    if (p && canAccessProject(ctx.user, f.project, ctx.projects)) parts.push(`Projeto: ${p.code} · ${p.name}`);
+  }
+  if (f.assignee === 'me') parts.push(`Responsável: ${ctx.user.name}`);
+  else if (f.assignee === 'none') parts.push('Sem responsável');
+  else if (f.assignee) parts.push(`Responsável: ${users.get(intOrNull(f.assignee))?.name || '—'}`);
+  if (f.due && DUE_FILTERS[f.due]) parts.push(`Prazo: ${DUE_FILTERS[f.due]}`);
+  if (f.priority.length) parts.push(`Prioridade: ${f.priority.map(p => PRIORITY_LABEL[p] || p).join(', ')}`);
+  if (f.stage.length) parts.push(`Classificação: ${all(`SELECT name FROM project_stages WHERE id IN (${f.stage.map(() => '?').join(',')})`, ...f.stage).map(r => r.name).join(', ')}`);
+  if (f.kind === 'obra') parts.push('Somente obras');
+  if (f.kind === 'interno') parts.push('Somente áreas internas');
+  if (f.nivel === 'principais') parts.push('Somente tarefas principais');
+  if (f.nivel === 'subtarefas') parts.push('Somente subtarefas');
+  if (f.q) parts.push(`Busca: “${f.q}”`);
+  return parts.length ? parts.join(' · ') : 'Todas as tarefas visíveis ao emissor (sem filtros)';
 }
 
 // Lista de campo: várias tarefas compactas para imprimir e marcar à mão

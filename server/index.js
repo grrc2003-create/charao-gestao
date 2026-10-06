@@ -188,51 +188,7 @@ api.put('/api/projects/:id', (req, res, { ctx, params, body }) => {
 api.get('/api/projects/:id/assignees', (req, res, { ctx, params }) => send(res, 200, Projects.projectAssignees(ctx, intOrNull(params.id))));
 
 // ---------- Tarefas ----------
-api.get('/api/tasks', (req, res, { ctx, query }) => {
-  // "cancelada" é consultada à parte (não entra nas listas padrão nem nos indicadores)
-  const wantCancelled = query.getAll('status').includes('cancelada');
-  const onlyCancelled = wantCancelled && query.getAll('status').filter(Boolean).length === 1;
-  let tasks = [...(onlyCancelled ? [] : Tasks.listVisible(ctx)), ...(wantCancelled ? Tasks.listCancelled(ctx) : [])];
-  const q = (query.get('q') || '').trim().toLowerCase();
-  const status = query.getAll('status').filter(Boolean);
-  const project = intOrNull(query.get('project'));
-  const assignee = query.get('assignee');
-  const priority = query.getAll('priority').filter(Boolean);
-  const due = query.get('due');
-  const ref = today();
-  if (q) tasks = tasks.filter(t => [t.code, t.title, t.description, t.project_name, t.assignee_name].some(v => v && v.toLowerCase().includes(q)));
-  if (status.length) tasks = tasks.filter(t => status.includes(t.eff_status));
-  if (project) tasks = tasks.filter(t => t.project_id === project);
-  if (assignee === 'none') tasks = tasks.filter(t => !t.assignee_id);
-  else if (assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id);
-  else if (assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(assignee));
-  if (priority.length) tasks = tasks.filter(t => priority.includes(t.priority));
-  const kind = query.get('kind');
-  if (kind === 'obra' || kind === 'interno') tasks = tasks.filter(t => t.project_kind === kind);
-  const stages = query.getAll('stage').map(intOrNull).filter(Boolean);
-  if (stages.length) tasks = tasks.filter(t => stages.includes(t.stage_id));
-  const nivel = query.get('nivel');
-  if (nivel === 'principais') tasks = tasks.filter(t => !t.parent_id);
-  else if (nivel === 'subtarefas') tasks = tasks.filter(t => t.parent_id);
-  if (due) {
-    const open = t => t.status !== 'concluida';
-    const within = n => t => open(t) && t.due_date && t.due_date >= ref && daysBetween(ref, t.due_date) <= n;
-    const f = {
-      vencidas: t => t.eff_status === 'atrasada',
-      hoje: t => open(t) && t.due_date === ref,
-      '7d': within(7),
-      '30d': within(30),
-      sem_prazo: t => !t.due_date,
-      reagendadas: t => t.reschedule_count > 0,
-      ja_atrasadas: t => t.ever_late,
-      corretivas: t => t.reschedules_corrective > 0,
-      cronicas: t => t.chronic,
-      concluidas_atraso: t => t.status === 'concluida' && t.on_time === false,
-    }[due];
-    if (f) tasks = tasks.filter(f);
-  }
-  send(res, 200, tasks);
-});
+api.get('/api/tasks', (req, res, { ctx, query }) => send(res, 200, Tasks.filterTasks(ctx, Tasks.taskFilters(k => query.getAll(k)))));
 api.post('/api/tasks', (req, res, { ctx, body }) => send(res, 201, { id: Tasks.createTask(ctx, body) }));
 api.get('/api/tasks/:id', (req, res, { ctx, params }) => send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))));
 api.patch('/api/tasks/:id', (req, res, { ctx, params, body }) => {

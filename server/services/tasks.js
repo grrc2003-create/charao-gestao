@@ -4,7 +4,7 @@ import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '..
 import {
   canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, userHasProjectAccess, isAdmin,
 } from '../lib/permissions.js';
-import { decorate, today } from './metrics.js';
+import { decorate, today, daysBetween } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
@@ -552,4 +552,59 @@ export function deleteTask(ctx, id, body, ip) {
   });
   for (const f of files) deleteStored(f.stored_name);
   return { project_id: t.project_id, parent_id: t.parent_id };
+}
+
+// ---------- Filtros da tela Tarefas (compartilhados com o relatório "Tarefas filtradas") ----------
+export const DUE_FILTERS = {
+  vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo',
+  reagendadas: 'Reagendadas', ja_atrasadas: 'Ficaram atrasadas alguma vez', corretivas: 'Repactuadas após vencer',
+  cronicas: 'Crônicas (muitos reagendamentos)', concluidas_atraso: 'Concluídas com atraso',
+};
+
+// getAll(k) → lista de valores do parâmetro (aceita repetidos ou separados por vírgula)
+export function taskFilters(getAll) {
+  const list = k => getAll(k).flatMap(v => String(v ?? '').split(',')).map(v => v.trim()).filter(Boolean);
+  const first = k => list(k)[0] || '';
+  return {
+    q: (getAll('q')[0] || '').trim().toLowerCase(), status: list('status'), project: intOrNull(first('project')),
+    assignee: first('assignee'), priority: list('priority'), due: first('due'), kind: first('kind'),
+    stage: list('stage').map(intOrNull).filter(Boolean), nivel: first('nivel'),
+  };
+}
+
+// cancelled: 'incluir' (lista: quando o filtro pede canceladas) | 'nunca' (relatórios e indicadores)
+export function filterTasks(ctx, f, { cancelled = 'incluir' } = {}) {
+  const wantCancelled = cancelled === 'incluir' && f.status.includes('cancelada');
+  const onlyCancelled = wantCancelled && f.status.length === 1;
+  let tasks = [...(onlyCancelled ? [] : listVisible(ctx)), ...(wantCancelled ? listCancelled(ctx) : [])];
+  const ref = today();
+  if (f.q) tasks = tasks.filter(t => [t.code, t.title, t.description, t.project_name, t.assignee_name].some(v => v && v.toLowerCase().includes(f.q)));
+  if (f.status.length) tasks = tasks.filter(t => f.status.includes(t.eff_status));
+  if (f.project) tasks = tasks.filter(t => t.project_id === f.project);
+  if (f.assignee === 'none') tasks = tasks.filter(t => !t.assignee_id);
+  else if (f.assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id);
+  else if (f.assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(f.assignee));
+  if (f.priority.length) tasks = tasks.filter(t => f.priority.includes(t.priority));
+  if (f.kind === 'obra' || f.kind === 'interno') tasks = tasks.filter(t => t.project_kind === f.kind);
+  if (f.stage.length) tasks = tasks.filter(t => f.stage.includes(t.stage_id));
+  if (f.nivel === 'principais') tasks = tasks.filter(t => !t.parent_id);
+  else if (f.nivel === 'subtarefas') tasks = tasks.filter(t => t.parent_id);
+  if (f.due) {
+    const open = t => t.status !== 'concluida';
+    const within = n => t => open(t) && t.due_date && t.due_date >= ref && daysBetween(ref, t.due_date) <= n;
+    const fn = {
+      vencidas: t => t.eff_status === 'atrasada',
+      hoje: t => open(t) && t.due_date === ref,
+      '7d': within(7),
+      '30d': within(30),
+      sem_prazo: t => !t.due_date,
+      reagendadas: t => t.reschedule_count > 0,
+      ja_atrasadas: t => t.ever_late,
+      corretivas: t => t.reschedules_corrective > 0,
+      cronicas: t => t.chronic,
+      concluidas_atraso: t => t.status === 'concluida' && t.on_time === false,
+    }[f.due];
+    if (fn) tasks = tasks.filter(fn);
+  }
+  return tasks;
 }

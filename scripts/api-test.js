@@ -532,6 +532,23 @@ async function main() {
   const rp = (await ricardo('GET', `/reports?type=projeto&id=1&level=completo`)).data;
   ok(JSON.stringify(rp).includes('laudo final.pdf'), 'relatório completo lista os PDFs anexados');
 
+  console.log('Relatório da tela Tarefas (filtros aplicados)');
+  const lst = (await ricardo('GET', '/tasks?project=1&status=atrasada&status=em_andamento')).data;
+  const rtF = (await ricardo('GET', '/reports?type=tarefas&level=detalhado&project=1&status=atrasada,em_andamento')).data;
+  ok(rtF.type === 'tarefas' && rtF.summary.total === lst.length && rtF.tasks.map(t => t.id).sort().join() === lst.map(t => t.id).sort().join(), 'relatório traz exatamente as tarefas da lista filtrada');
+  ok(rtF.scope.subtitle.includes('Status: Atrasada, Em andamento') && rtF.scope.subtitle.includes('Projeto: PRJ-001'), 'cabeçalho descreve os filtros aplicados');
+  const lstMe = (await marcos('GET', '/tasks?assignee=me&due=7d')).data;
+  const rtMe = (await marcos('GET', '/reports?type=tarefas&level=resumo&assignee=me&due=7d')).data;
+  ok(rtMe.summary.total === lstMe.length && rtMe.scope.subtitle.includes('Responsável: Marcos Silva') && rtMe.scope.subtitle.includes('Próximos 7 dias'), 'filtros "Minhas tarefas" e prazo respeitados');
+  const rtAll = (await ricardo('GET', '/reports?type=tarefas&level=resumo')).data;
+  ok(rtAll.summary.total === (await ricardo('GET', '/tasks')).data.length && /sem filtros/.test(rtAll.scope.subtitle), 'sem filtros: todas as tarefas visíveis');
+  const rtJ = (await juliana('GET', '/reports?type=tarefas&level=detalhado&project=1')).data;
+  ok(rtJ.summary.total === 0 && !rtJ.scope.subtitle.includes('PRJ-001'), 'relatório não expõe projeto sem acesso');
+  const rtC = (await ricardo('GET', '/reports?type=tarefas&level=detalhado&status=cancelada')).data;
+  ok(rtC.tasks.every(t => t.eff_status !== 'cancelada'), 'canceladas não entram no relatório');
+  const rtQ = (await ricardo('GET', `/reports?type=tarefas&level=detalhado&q=${encodeURIComponent('alvenaria')}`)).data;
+  ok(rtQ.summary.total === (await ricardo('GET', '/tasks?q=alvenaria')).data.length && rtQ.scope.subtitle.includes('Busca'), 'busca por texto vale no relatório');
+
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });
   ok(nu.status === 201, 'admin cria usuário com acesso restrito');

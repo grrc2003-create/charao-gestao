@@ -5,7 +5,7 @@ import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js
 import { ganttChart } from './gantt.js';
 import { periodKey, periodInfo } from './periods.js';
 
-const TYPE_TITLE = { projeto: 'Relatório de Projeto', usuario: 'Relatório Individual', equipe: 'Relatório de Gestor e Equipe', geral: 'Relatório Geral da Operação' };
+const TYPE_TITLE = { projeto: 'Relatório de Projeto', usuario: 'Relatório Individual', equipe: 'Relatório de Gestor e Equipe', geral: 'Relatório Geral da Operação', tarefas: 'Relatório de Tarefas' };
 const LEVEL_TITLE = { resumo: 'Resumo', detalhado: 'Detalhado', completo: 'Completo com fotos' };
 
 function executiveSummary(r) {
@@ -183,6 +183,7 @@ export async function view({ query }) {
           <dt>Data de referência</dt><dd>${fmtDate(r.reference_date)}</dd>
           <dt>Período (prazo)</dt><dd>${r.from || r.to ? `${fmtDate(r.from)} a ${fmtDate(r.to)}` : 'Todos'}</dd>
           <dt>Organização</dt><dd>${ORG_LABEL[r.group] || 'Por status e prazo'}</dd>
+          ${r.scope.filters ? html`<dt>Filtros</dt><dd>Os mesmos da tela Tarefas (canceladas não entram)</dd>` : ''}
           ${r.stage_filter.length ? html`<dt>Classificações</dt><dd>${r.stage_filter.join(', ')}</dd>` : ''}
           ${r.kind ? html`<dt>Abrangência</dt><dd>${r.kind === 'interno' ? 'Somente áreas internas' : 'Somente obras'}</dd>` : ''}
           ${!r.include_done ? html`<dt>Filtro</dt><dd>Sem concluídas</dd>` : ''}
@@ -264,7 +265,16 @@ export async function view({ query }) {
       </footer>
     </article>`;
 
-  const back = r.type === 'projeto' ? `#/projetos/${q.id}` : r.type === 'usuario' || r.type === 'equipe' ? `#/usuarios/${q.id}` : '#/relatorios';
+  // Relatório de tarefas: volta para a lista com os mesmos filtros
+  const TASK_KEYS = ['q', 'status', 'project', 'assignee', 'priority', 'due', 'kind', 'stage', 'nivel'];
+  const taskQs = () => {
+    const u = new URLSearchParams();
+    for (const k of TASK_KEYS) for (const v of String(q[k] || '').split(',').filter(Boolean)) u.append(k, v);
+    if (['dia', 'semana', 'mes'].includes(r.group)) u.set('org', r.group);
+    return u.toString();
+  };
+  const back = r.type === 'projeto' ? `#/projetos/${q.id}` : r.type === 'usuario' || r.type === 'equipe' ? `#/usuarios/${q.id}`
+    : r.type === 'tarefas' ? `#/tarefas?${taskQs()}` : '#/relatorios';
   return {
     title: `${title} · ${r.scope.label}`,
     html: html`${printToolbar({
@@ -272,7 +282,8 @@ export async function view({ query }) {
       extra: html`<label class="pt-opt">Nível <select id="lvl">${Object.entries(LEVEL_TITLE).map(([k, l]) => html`<option value="${k}" ${r.level === k ? 'selected' : ''}>${l}</option>`)}</select></label>
         <label class="pt-opt">Organizar <select id="grp">${Object.entries(ORG_LABEL).map(([k, l]) => html`<option value="${k}" ${r.group === k ? 'selected' : ''}>${l}</option>`)}</select></label>
         <label class="pt-opt"><input type="checkbox" id="gnt" ${r.gantt ? 'checked' : ''}>Gantt</label>
-        <a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}">${icon('edit')}Configurar</a>`,
+        ${r.type === 'tarefas' ? html`<a class="btn btn-ghost btn-sm" href="${back}">${icon('filter')}Alterar filtros</a>`
+          : html`<a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}">${icon('edit')}Configurar</a>`}`,
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
       setPageFooter(`Charão · ${title} · ${r.scope.label}`);

@@ -1,4 +1,5 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
+import { sheet } from '../ui.js';
 import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions } from './shared.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 
@@ -43,6 +44,7 @@ export async function view({ state, query, setQuery }) {
         actions: html`
           ${f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?project=${f.project}${f.stage ? `&stage=${f.stage}` : ''}">${icon('checklist')}Lista de campo</a>` : ''}
           ${f.assignee && f.assignee !== 'none' && !f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?user=${f.assignee === 'me' ? state.user.id : f.assignee}">${icon('checklist')}Lista de campo</a>` : ''}
+          <button type="button" class="btn btn-ghost" id="emit-report">${icon('reports')}Emitir relatório</button>
           <a class="btn btn-ghost" href="#/recorrencias${f.project ? `?project=${f.project}` : ''}">${icon('history')}Recorrentes</a>
           <a class="btn btn-accent" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}">${icon('plus')}Nova tarefa</a>`,
       })}
@@ -98,6 +100,29 @@ export async function view({ state, query, setQuery }) {
         const adv = root.querySelector('#adv');
         adv.hidden = !adv.hidden;
         e.currentTarget.setAttribute('aria-expanded', String(!adv.hidden));
+      });
+      // Relatório A4 com exatamente os filtros aplicados na lista
+      root.querySelector('#emit-report').addEventListener('click', async () => {
+        const reportable = tasks.filter(t => t.eff_status !== 'cancelada').length;
+        const LV = [['resumo', 'Resumo', 'Indicadores e panorama'], ['detalhado', 'Detalhado', 'Indicadores + lista das tarefas'], ['completo', 'Completo com fotos', 'Tudo + registros, fotos e PDFs']];
+        const GR = [['classificacao', 'Por classificação'], ['nenhum', 'Por status e prazo'], ['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês']];
+        const r = await sheet({
+          title: 'Emitir relatório das tarefas',
+          submitLabel: 'Gerar relatório',
+          body: html`<p class="muted" style="margin:0 0 10px">${reportable} ${reportable === 1 ? 'tarefa' : 'tarefas'} com os filtros atuais${f.status.includes('cancelada') ? ' (canceladas não entram em relatórios)' : ''}.</p>
+            <div class="field"><span class="label">Nível de detalhe</span>
+              <div class="segmented seg-3">${LV.map(([k, l, d]) => html`<label><input type="radio" name="level" value="${k}" ${k === 'detalhado' ? 'checked' : ''}>${l}<small>${d}</small></label>`)}</div></div>
+            <div class="field"><label for="rg">Organização</label>
+              <select id="rg" name="group">${GR.map(([k, l]) => opt(k, l, f.org || 'classificacao'))}</select></div>
+            <label class="switch"><input type="checkbox" name="gantt" checked>Incluir cronograma (Gantt)</label>`,
+        });
+        if (!r) return;
+        const qs = new URLSearchParams({ type: 'tarefas', level: r.level, group: r.group });
+        if (!r.gantt) qs.set('gantt', '0');
+        for (const k of ['q', 'project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind']) if (f[k]) qs.set(k, f[k]);
+        const st = f.status.filter(s => s !== 'cancelada');
+        if (st.length) qs.set('status', st.join(','));
+        ctx.navigate(`/imprimir/relatorio?${qs}`);
       });
       root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '', stage: '', kind: '' }));
     },

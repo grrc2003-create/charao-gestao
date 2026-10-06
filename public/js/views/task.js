@@ -161,8 +161,8 @@ function build(t, ctx) {
             ${t.exec_notes ? html`<div><div class="sub-label">Observações do responsável</div><div class="note-box">${t.exec_notes}</div></div>` : ''}`
           : html`<div class="empty-exec">
               <div class="big">Ainda não há retorno do responsável</div>
-              <div class="muted" style="font-size:13.5px">${can.execute ? (t.assignee_external && t.assignee_id !== ctx.state.user.id ? `Você é o líder de ${t.assignee_name} (terceirizado): registre a execução em nome dele e envie para conferência.` : 'Registre a execução abaixo e envie para conferência.')
-                : t.assignee_external ? `Aguardando o registro do líder ${t.assignee_leader_name || ''} em nome de ${t.assignee_name} (terceirizado).` : `Aguardando ${t.assignee_name || 'definição do responsável'}.`}</div>
+              <div class="muted" style="font-size:13.5px">${can.execute ? (t.assignee_external && !t.assignee_login && t.assignee_id !== ctx.state.user.id ? `Você é o líder de ${t.assignee_name} (terceirizado sem login): registre a execução em nome dele; depois você mesmo confere a entrega.` : 'Registre a execução abaixo e envie para conferência.')
+                : t.assignee_external && !t.assignee_login ? `Aguardando o registro do líder ${t.assignee_leader_name || ''} em nome de ${t.assignee_name} (terceirizado).` : `Aguardando ${t.assignee_name || 'definição do responsável'}.`}</div>
             </div>`}
           ${execActions}
           ${reviewActions}

@@ -62,7 +62,7 @@ export function authenticate(req) {
     run('DELETE FROM sessions WHERE token_hash = ?', h);
     return null;
   }
-  const user = one('SELECT * FROM users WHERE id = ? AND active = 1 AND is_external = 0', s.user_id);
+  const user = one('SELECT * FROM users WHERE id = ? AND active = 1 AND login_enabled = 1', s.user_id);
   if (!user) return null;
   run('UPDATE sessions SET last_seen = datetime(\'now\'), expires_at = ? WHERE token_hash = ?', isoPlusHours(SESSION_HOURS), h);
   return user;

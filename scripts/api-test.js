@@ -447,22 +447,23 @@ async function main() {
   const rk = (await ricardo('GET', '/reports?type=geral&level=resumo&kind=interno')).data;
   ok(rk.kind === 'interno' && rk.by_project.every(g => g.label.startsWith('INT-')), 'relatório geral só das áreas internas');
 
-  console.log('Terceirizados (sem login, com líder)');
-  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'José Pedreiro' })).status === 400, 'terceirizado exige líder');
-  const extR = await ana('POST', '/users', { role: 'terceirizado', name: 'José Pedreiro', company: 'Empreiteira Alfa', job_title: 'Pedreiro', manager_id: 4 });
+  console.log('Terceirizados (com líder; login opcional)');
+  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'José Pedreiro', project_ids: [1] })).status === 400, 'terceirizado exige líder');
+  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'José Pedreiro', manager_id: 4, project_ids: [] })).status === 400, 'terceirizado exige projeto liberado');
+  const extR = await ana('POST', '/users', { role: 'terceirizado', name: 'José Pedreiro', company: 'Empreiteira Alfa', job_title: 'Pedreiro', manager_id: 4, project_ids: [1] });
   ok(extR.status === 201, 'terceirizado cadastrado sem e-mail e sem senha, com líder colaborador');
   const extId = extR.data.id;
-  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'X', manager_id: extId })).status === 400, 'outro terceirizado não pode ser líder');
+  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'X', manager_id: extId, project_ids: [1] })).status === 400, 'outro terceirizado não pode ser líder');
   const extU = (await ana('GET', `/users/${extId}`)).data.user;
-  ok(extU.is_external === 1 && extU.company === 'Empreiteira Alfa' && extU.email === null && extU.manager_id === 4, 'perfil terceirizado (e-mail fictício nunca exposto)');
-  ok((await ana('POST', `/users/${extId}/password`, { password: 'senha12345' })).status === 400, 'terceirizado não recebe senha');
-  const extEmail = (await ana('POST', '/users', { role: 'terceirizado', name: 'Ana Eletricista', email: 'ana.eletrica@alfa.com', manager_id: 2 })).data.id;
-  ok((await client()('POST', '/auth/login', { email: 'ana.eletrica@alfa.com', password: 'qualquer123' })).status === 401, 'terceirizado nunca consegue fazer login');
+  ok(extU.is_external === 1 && extU.company === 'Empreiteira Alfa' && extU.email === null && extU.manager_id === 4 && extU.login_enabled === 0, 'perfil terceirizado sem login (e-mail fictício nunca exposto)');
+  ok((await ana('POST', `/users/${extId}/password`, { password: 'senha12345' })).status === 400, 'terceirizado sem login não recebe senha');
+  await ana('POST', '/users', { role: 'terceirizado', name: 'Ana Eletricista', email: 'ana.eletrica@alfa.com', manager_id: 2, project_ids: [1] });
+  ok((await client()('POST', '/auth/login', { email: 'ana.eletrica@alfa.com', password: 'qualquer123' })).status === 401, 'terceirizado sem acesso não consegue fazer login');
   ok((await ana('PUT', '/users/4', { manager_id: extId })).status === 400, 'terceirizado não pode ser gestor de usuário interno');
   ok((await ana('PUT', '/projects/1', { lead_id: extId })).status === 400, 'terceirizado não pode ser responsável técnico de projeto');
-  // Acesso herdado do líder: Marcos tem PRJ-001..003, não PRJ-004
-  ok((await ricardo('GET', '/projects/1/assignees')).data.some(u => u.id === extId) && !(await juliana('GET', '/projects/4/assignees')).data.some(u => u.id === extId), 'terceirizado herda os projetos liberados do líder');
-  ok((await juliana('POST', '/tasks', { project_id: 4, title: 'X', description: 'x', assignee_id: extId })).status === 400, 'não pode ser responsável onde o líder não tem acesso');
+  // Projetos próprios: liberado só na PRJ-001, embora o líder (Marcos) tenha PRJ-001..003
+  ok((await ricardo('GET', '/projects/1/assignees')).data.some(u => u.id === extId) && !(await ricardo('GET', '/projects/2/assignees')).data.some(u => u.id === extId), 'terceirizado só aparece nos projetos liberados a ele');
+  ok((await ricardo('POST', '/tasks', { project_id: 2, title: 'X', description: 'x', assignee_id: extId })).status === 400, 'não pode ser responsável fora dos projetos liberados');
   const tExt = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Assentar blocos do 5º pavimento', description: 'Alvenaria do 5º pavimento', assignee_id: extId, proof_type: 'foto_descricao', due_date: '2099-02-01' })).data.id;
   let te = (await marcos('GET', `/tasks/${tExt}`)).data;
   ok(te.assignee_external === 1 && te.can.execute && te.can.submit, 'líder registra a execução em nome do terceirizado');
@@ -471,15 +472,38 @@ async function main() {
   await marcos('POST', `/tasks/${tExt}/files`, { kind: 'execucao', images: [{ data: tinyPng() }] });
   te = (await marcos('POST', `/tasks/${tExt}/actions/submit`)).data;
   ok(te.status === 'aguardando_conferencia' && te.history.some(h => h.action === 'Enviada para conferência' && h.details.includes('em nome de José Pedreiro (terceirizado)')), 'histórico registra "em nome de" o terceirizado');
-  ok((await marcos('POST', `/tasks/${tExt}/actions/approve`, {})).status === 403, 'líder não aprova a entrega que registrou');
-  ok((await ricardo('POST', `/tasks/${tExt}/actions/approve`, {})).data.status === 'concluida', 'outro gestor confere e conclui');
+  ok(te.can.review, 'líder (colaborador) pode conferir a entrega do terceirizado sem login');
+  ok((await marcos('POST', `/tasks/${tExt}/actions/return`, { comment: 'Faltou a foto do encunhamento.' })).data.status === 'em_andamento', 'líder devolve a entrega do terceirizado');
+  await marcos('POST', `/tasks/${tExt}/actions/submit`);
+  ok((await marcos('POST', `/tasks/${tExt}/actions/approve`, {})).data.status === 'concluida', 'líder aprova e conclui a entrega do terceirizado');
   const leaderView = (await marcos('GET', `/users/${extId}`)).data;
-  ok(leaderView.stats.assigned === 1 && leaderView.stats.done === 1, 'líder acompanha o desempenho do terceirizado');
+  ok(leaderView.stats.assigned === 1 && leaderView.stats.done === 1, 'líder avalia o desempenho do terceirizado');
   ok((await marcos('GET', '/users/4')).data.team.some(m => m.id === extId), 'terceirizado aparece na equipe do líder');
   ok((await camila('GET', `/users/${extId}`)).status === 404, 'quem não é líder nem admin não vê o terceirizado');
   ok((await ana('PUT', `/users/${extId}`, { role: 'admin', name: 'José Pedreiro', manager_id: 4 })).status === 200 && (await ana('GET', `/users/${extId}`)).data.user.role === 'colaborador', 'terceirizado não pode virar administrador');
   ok((await ana('PUT', '/users/6', { role: 'terceirizado' })).status === 400, 'usuário interno não é convertido em terceirizado');
   ok((await ana('GET', '/audit')).data.some(a => a.action === 'Terceirizado cadastrado (sem login)'), 'cadastro registrado na auditoria');
+
+  // Com acesso ao sistema: regras de Colaborador
+  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'Paulo Gesseiro', login_enabled: true, manager_id: 4, project_ids: [1], password: 'gesso1234' })).status === 400, 'acesso ao sistema exige e-mail');
+  ok((await ana('POST', '/users', { role: 'terceirizado', name: 'Paulo Gesseiro', email: 'paulo@gesso.com', login_enabled: true, manager_id: 4, project_ids: [1] })).status === 400, 'acesso ao sistema exige senha');
+  const extL = (await ana('POST', '/users', { role: 'terceirizado', name: 'Paulo Gesseiro', email: 'paulo@gesso.com', company: 'Gesso Sul', login_enabled: true, access_scope: 'projetos', manager_id: 4, project_ids: [1], password: 'gesso1234' })).data.id;
+  const paulo = await login('paulo@gesso.com', 'gesso1234');
+  ok((await paulo('GET', '/projects')).data.map(p => p.code).join() === 'PRJ-001', 'terceirizado com acesso vê só os projetos liberados');
+  const tL = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Forro de gesso do hall', description: 'Executar forro', assignee_id: extL, proof_type: 'descricao', due_date: '2099-02-01' })).data.id;
+  ok(!(await marcos('GET', `/tasks/${tL}`)).data.can.execute, 'com acesso: o líder não executa em nome dele');
+  let tl = (await paulo('GET', `/tasks/${tL}`)).data;
+  ok(tl.can.execute && !tl.can.review, 'com acesso: o próprio terceirizado executa e não confere');
+  await paulo('PATCH', `/tasks/${tL}/execution`, { exec_description: 'Forro executado.' });
+  tl = (await paulo('POST', `/tasks/${tL}/actions/submit`)).data;
+  ok(tl.status === 'aguardando_conferencia' && !tl.history.some(h => (h.details || '').includes('em nome de')), 'com acesso: envio registrado pelo próprio terceirizado');
+  ok(!(await marcos('GET', `/tasks/${tL}`)).data.can.review, 'com acesso: líder colaborador não confere (regra de Colaborador)');
+  ok((await ricardo('POST', `/tasks/${tL}/actions/approve`, {})).data.status === 'concluida', 'com acesso: gestor confere');
+  await ana('PUT', `/users/${extL}`, { login_enabled: false });
+  ok((await paulo('GET', '/projects')).status === 401 && (await client()('POST', '/auth/login', { email: 'paulo@gesso.com', password: 'gesso1234' })).status === 401, 'desligar o acesso encerra a sessão e bloqueia o login');
+  ok((await ana('PUT', `/users/${extId}`, { login_enabled: true, email: 'jose@alfa.com' })).status === 400, 'ligar o acesso exige senha');
+  ok((await ana('PUT', `/users/${extId}`, { login_enabled: true, email: 'jose@alfa.com', password: 'jose12345' })).status === 200, 'ligar o acesso na edição');
+  ok((await client()('POST', '/auth/login', { email: 'jose@alfa.com', password: 'jose12345' })).data?.user?.must_change_password === 1, 'terceirizado liberado faz login e precisa trocar a senha');
 
   console.log('Administração de usuários');
   const nu = await ana('POST', '/users', { name: 'Novo Teste', email: 'novo@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [3], password: 'senha1234', manager_id: 2 });

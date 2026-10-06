@@ -65,18 +65,21 @@ export function canManageTask(ctx, t) {
   return false;
 }
 
-// Conferir (aprovar/devolver). O próprio responsável não confere a própria entrega, salvo admin.
-// O responsável não confere a própria entrega; o líder de um terceirizado também não (ele registrou a execução)
+// Conferir (aprovar/devolver), salvo admin o responsável não confere a própria entrega.
+// Terceirizado sem acesso ao sistema: a tarefa é conduzida pelo líder (registra e confere a execução)
+export const isLeaderOfNoLogin = (ctx, t) => !!t.assignee_external && !t.assignee_login && t.assignee_leader_id === ctx.user.id;
+
+// O responsável não confere a própria entrega. O líder de um terceirizado sem acesso confere a entrega dele.
 export function canReviewTask(ctx, t) {
+  if (isLeaderOfNoLogin(ctx, t)) return true;
   if (!canManageTask(ctx, t)) return false;
-  if (isAdmin(ctx.user)) return true;
-  return t.assignee_id !== ctx.user.id && !(t.assignee_external && t.assignee_leader_id === ctx.user.id);
+  return isAdmin(ctx.user) || t.assignee_id !== ctx.user.id;
 }
 
 // Somente o responsável registra a execução (gestores/admin podem concluir diretamente)
-// Terceirizado não tem login: o líder dele registra a execução em seu nome
+// Terceirizado sem acesso ao sistema: o líder registra a execução em seu nome
 export function canExecuteTask(ctx, t) {
-  return t.assignee_id === ctx.user.id || (!!t.assignee_external && t.assignee_leader_id === ctx.user.id);
+  return t.assignee_id === ctx.user.id || isLeaderOfNoLogin(ctx, t);
 }
 
 export function canCreateTaskIn(ctx, projectId) {
@@ -110,23 +113,17 @@ export function requireAdmin(user) {
   if (!isAdmin(user)) throw forbidden('Apenas administradores podem realizar esta ação.');
 }
 
-// Usuários que podem ser responsáveis por tarefas de um projeto
-// Internos com acesso ao projeto + terceirizados cujo líder tem acesso (herdam o acesso do líder)
+// Usuários que podem ser responsáveis no projeto (terceirizados: somente se o projeto estiver liberado a eles)
 export function usersWithProjectAccess(projectId) {
-  const internos = all(`SELECT u.id, u.name, u.job_title, u.role, u.is_external, u.company FROM users u
-    WHERE u.active = 1 AND u.is_external = 0 AND (u.role = 'admin' OR u.access_scope = 'total'
+  return all(`SELECT u.id, u.name, u.job_title, u.role, u.is_external, u.company FROM users u
+    WHERE u.active = 1 AND (u.role = 'admin' OR u.access_scope = 'total'
       OR EXISTS (SELECT 1 FROM user_project_access a WHERE a.user_id = u.id AND a.project_id = ?)
       OR EXISTS (SELECT 1 FROM projects p WHERE p.id = ? AND p.lead_id = u.id))
-    ORDER BY u.name`, projectId, projectId);
-  const ids = new Set(internos.map(u => u.id));
-  const externos = all(`SELECT id, name, job_title, role, is_external, company, manager_id FROM users WHERE active = 1 AND is_external = 1 ORDER BY name`)
-    .filter(u => ids.has(u.manager_id));
-  return [...internos, ...externos];
+    ORDER BY u.is_external, u.name`, projectId, projectId);
 }
 
 export function userHasProjectAccess(userId, projectId) {
   const u = one('SELECT * FROM users WHERE id = ? AND active = 1', userId);
   if (!u) return false;
-  if (u.is_external) return !!u.manager_id && u.manager_id !== u.id && userHasProjectAccess(u.manager_id, projectId);
   return canAccessProject(u, projectId);
 }

@@ -14,7 +14,7 @@ export async function list({ state }) {
       <div class="row-meta"><span>${u.job_title || '—'}</span>${u.company ? html`<span>${u.company}</span>` : ''}
         ${u.manager_name ? html`<span>${u.is_external ? 'Líder' : 'Gestor'}: ${u.manager_name}</span>` : ''}
         ${u.team_size ? html`<span>${u.team_size} na equipe</span>` : ''}
-        ${isAdmin ? html`<span>${u.is_external ? 'Sem login' : u.access_scope === 'total' ? 'Acesso total' : u.access_scope === 'proprias' ? 'Só tarefas próprias' : 'Acesso por projeto'}</span>` : ''}</div>
+        ${isAdmin ? html`<span>${u.is_external && !u.login_enabled ? 'Sem login' : u.access_scope === 'total' ? 'Acesso total' : u.access_scope === 'proprias' ? 'Só tarefas próprias' : 'Acesso por projeto'}</span>` : ''}</div>
     </div>
     <div class="rank-metrics">
       <div class="ok"><b>${fmtPct(u.stats.on_time_pct)}</b>no prazo</div>
@@ -35,7 +35,7 @@ export async function list({ state }) {
           : state.meta.can.manage_settings ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a>` : '',
       })}
       ${['admin', 'gestor', 'colaborador', 'terceirizado'].filter(r => byRole(r).length).map(r => html`<section class="card section">
-        <div class="card-head"><h2>${ROLE[r]}${r === 'terceirizado' ? 's' : 'es'}</h2><span class="sub">${r === 'terceirizado' ? 'sem login · o líder registra a execução' : byRole(r).length}</span></div>
+        <div class="card-head"><h2>${ROLE[r]}${r === 'terceirizado' ? 's' : 'es'}</h2><span class="sub">${r === 'terceirizado' ? `${byRole(r).length} · sem login: o líder registra e confere` : byRole(r).length}</span></div>
         <ul class="rows">${byRole(r).map(row)}</ul></section>`)}
       ${isAdmin ? html`<a class="fab" href="#/usuarios/novo" aria-label="Novo usuário">${icon('plus')}</a>` : ''}`,
     mount: root => bindCommon(root),
@@ -52,6 +52,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
   ]);
   const u = detail?.user || { role: 'colaborador', access_scope: 'projetos', project_ids: [], active: 1, is_external: query.get('perfil') === 'terceirizado' ? 1 : 0 };
   const ext = !!u.is_external;
+  const hadLogin = editing && !!u.login_enabled;
   // Líderes possíveis de terceirizado: qualquer usuário interno ativo
   const leaders = users.filter(x => x.id !== u.id && x.active && !x.is_external);
   const projectSet = new Set(u.project_ids || []);
@@ -67,48 +68,47 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         eyebrow: 'Administração de acesso',
         title: editing ? (ext ? 'Editar terceirizado' : 'Editar usuário e permissões') : ext ? 'Novo terceirizado' : 'Novo usuário',
       })}
-      <div class="notice ext-only" style="max-width:860px;margin-bottom:14px" ${ext ? '' : 'hidden'}>${icon('info')}<span><b>Terceirizado não tem login.</b>
-        Serve para ser responsável por tarefas. O <b>líder</b> registra a execução em nome dele (descrição, fotos, envio para conferência) e acompanha o desempenho;
-        o terceirizado pode ser responsável nos projetos liberados ao líder.</span></div>
+      <div class="notice ext-only" style="max-width:860px;margin-bottom:14px" ${ext ? '' : 'hidden'}>${icon('info')}<span id="ext-notice"></span></div>
       <form class="card card-pad form" id="user-form" novalidate style="max-width:860px">
         <fieldset class="fieldset form"><legend>Dados do usuário</legend>
           <div class="form-row">
             <div class="field"><label class="req" for="name">Nome completo</label><input id="name" name="name" type="text" maxlength="120" required value="${u.name || ''}"></div>
-            <div class="field"><label class="${ext ? '' : 'req'}" for="email" id="email-label">${ext ? 'E-mail (contato, opcional)' : 'E-mail (login)'}</label><input id="email" name="email" type="email" maxlength="160" value="${u.email || ''}" autocomplete="off"></div>
+            <div class="field"><label for="email" id="email-label">E-mail (login)</label><input id="email" name="email" type="email" maxlength="160" value="${u.email || ''}" autocomplete="off"></div>
           </div>
           <div class="field ext-only" ${ext ? '' : 'hidden'}><label for="company">Empresa terceirizada</label><input id="company" name="company" type="text" maxlength="160" value="${u.company || ''}" placeholder="Ex.: Empreiteira Alfa"></div>
           <div class="form-row">
             <div class="field"><label for="job_title">Cargo / função</label><input id="job_title" name="job_title" type="text" maxlength="120" value="${u.job_title || ''}"></div>
             <div class="field"><label for="phone">Telefone</label><input id="phone" name="phone" type="tel" maxlength="40" value="${u.phone || ''}"></div>
           </div>
-          ${!editing ? html`<div class="field int-only" ${ext ? 'hidden' : ''}><label class="req" for="password">Senha provisória</label><input id="password" name="password" type="password" minlength="8" required autocomplete="new-password">
+          <label class="switch ext-only" ${ext ? '' : 'hidden'}><input type="checkbox" name="login_enabled" id="login_enabled" ${hadLogin ? 'checked' : ''}>Dar acesso ao sistema (login) — passa a seguir as regras de Colaborador</label>
+          ${!editing || (ext && !hadLogin) ? html`<div class="field" id="pw-field"><label class="req" for="password">Senha provisória</label><input id="password" name="password" type="password" minlength="8" autocomplete="new-password">
             <span class="hint">Mínimo de 8 caracteres com letras e números. O usuário deverá trocá-la no primeiro acesso.</span></div>` : ''}
         </fieldset>
 
         <fieldset class="fieldset form"><legend>Perfil e hierarquia</legend>
           <div class="segmented ${editing ? 'seg-3' : 'seg-4'}">
             ${[['admin', 'Controle total, usuários e permissões'], ['gestor', 'Gerencia projetos e confere tarefas da equipe'], ['colaborador', 'Executa e cria tarefas nos projetos liberados'],
-              ['terceirizado', 'Sem login; responsável por tarefas, com líder']]
+              ['terceirizado', 'Responsável por tarefas, com líder; login opcional']]
               .filter(([k]) => !editing || (ext ? k === 'terceirizado' : k !== 'terceirizado'))
               .map(([k, d]) => html`<label><input type="radio" name="role" value="${k}" ${(ext ? k === 'terceirizado' : u.role === k) ? 'checked' : ''}>${ROLE[k]}<small>${d}</small></label>`)}
           </div>
-          ${editing ? html`<span class="hint">${ext ? 'Um terceirizado não pode ser convertido em usuário com login; cadastre um novo usuário se necessário.' : 'Usuários internos não podem ser convertidos em terceirizados.'}</span>` : ''}
+          ${editing ? html`<span class="hint">${ext ? 'Um terceirizado continua terceirizado; o acesso ao sistema pode ser ligado ou desligado acima.' : 'Usuários internos não podem ser convertidos em terceirizados.'}</span>` : ''}
           <div class="field"><label for="manager_id" id="manager-label" class="${ext ? 'req' : ''}">${ext ? 'Líder (obrigatório)' : 'Gestor direto'}</label>
             <select id="manager_id" name="manager_id"><option value="">${ext ? 'Selecione o líder' : 'Sem gestor'}</option>${leaderOptions(ext)}</select>
             <span class="hint" id="manager-hint">${ext ? 'Colaborador, gestor ou administrador responsável pelo terceirizado.' : 'O gestor acompanha as tarefas e o desempenho deste usuário, mas não se torna responsável por elas.'}</span></div>
         </fieldset>
 
-        <fieldset class="fieldset form int-only" id="scope-fs" ${ext ? 'hidden' : ''}><legend>Acesso a dados</legend>
-          <div class="segmented seg-3">${Object.entries(SCOPE).map(([k, l]) => html`<label><input type="radio" name="access_scope" value="${k}" ${u.access_scope === k ? 'checked' : ''}>
+        <fieldset class="fieldset form" id="scope-fs"><legend>Acesso a dados</legend>
+          <div class="segmented seg-3" id="scope-seg">${Object.entries(SCOPE).map(([k, l]) => html`<label><input type="radio" name="access_scope" value="${k}" ${u.access_scope === k ? 'checked' : ''}>
             ${k === 'total' ? 'Total' : k === 'projetos' ? 'Por projeto' : 'Somente próprias'}<small>${l}</small></label>`)}</div>
           <div class="field" id="proj-access"><span class="label">Projetos liberados</span>
             <div class="checks">${projects.map(p => html`<label><input type="checkbox" name="project" value="${p.id}" ${projectSet.has(p.id) ? 'checked' : ''}><span class="mono muted">${p.code}</span>${p.name}</label>`)}</div>
-            <span class="hint">Usuários veem apenas dados dos projetos marcados. Administradores sempre têm acesso total.</span></div>
+            <span class="hint" id="proj-hint"></span></div>
         </fieldset>
 
         ${editing ? html`<fieldset class="fieldset form"><legend>Situação</legend>
           <label class="switch"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}>Usuário ativo (pode fazer login)</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap" class="int-only" ${ext ? 'hidden' : ''}><button type="button" class="btn btn-ghost btn-sm" id="reset-pw">${icon('key')}Redefinir senha</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" ${ext && !hadLogin ? 'hidden' : ''}><button type="button" class="btn btn-ghost btn-sm" id="reset-pw">${icon('key')}Redefinir senha</button></div>
           <span class="hint">Alterar permissões ou desativar encerra as sessões ativas do usuário. Último acesso: ${fmtDateTime(u.last_login_at)}</span>
         </fieldset>` : ''}
 
@@ -126,10 +126,18 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
       const sync = () => {
         const role = f.querySelector('[name=role]:checked')?.value;
         const isExt = role === 'terceirizado';
+        const hasLogin = !isExt || f.querySelector('#login_enabled').checked;
         root.querySelectorAll('.ext-only').forEach(e => (e.hidden = !isExt));
-        root.querySelectorAll('.int-only').forEach(e => (e.hidden = isExt));
-        root.querySelector('#email-label').textContent = isExt ? 'E-mail (contato, opcional)' : 'E-mail (login)';
-        root.querySelector('#email-label').classList.toggle('req', !isExt);
+        root.querySelector('#email-label').textContent = hasLogin ? 'E-mail (login)' : 'E-mail (contato, opcional)';
+        root.querySelector('#email-label').classList.toggle('req', hasLogin);
+        const pw = root.querySelector('#pw-field');
+        if (pw) pw.hidden = !hasLogin;
+        root.querySelector('#ext-notice').innerHTML = hasLogin
+          ? '<b>Terceirizado com acesso ao sistema.</b> Segue as mesmas regras de um Colaborador: faz login, registra a execução das próprias tarefas e envia para conferência. O líder acompanha como gestor direto.'
+          : '<b>Terceirizado sem login.</b> Serve para ser responsável por tarefas. O <b>líder</b> conduz a tarefa: registra a execução em nome dele (descrição, fotos), aprova ou devolve a entrega e acompanha o desempenho.';
+        root.querySelector('#proj-hint').textContent = isExt
+          ? 'O terceirizado só aparece (e só pode ser responsável) nos projetos marcados.'
+          : 'Usuários veem apenas dados dos projetos marcados. Administradores sempre têm acesso total.';
         root.querySelector('#manager-label').textContent = isExt ? 'Líder (obrigatório)' : 'Gestor direto';
         root.querySelector('#manager-label').classList.toggle('req', isExt);
         root.querySelector('#manager-hint').textContent = isExt ? 'Colaborador, gestor ou administrador responsável pelo terceirizado.'
@@ -138,10 +146,10 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           managerSel.innerHTML = html`<option value="">${isExt ? 'Selecione o líder' : 'Sem gestor'}</option>${leaderOptions(isExt)}`.toString();
           lastExt = isExt;
         }
-        if (isExt) return;
         const scope = f.querySelector('[name=access_scope]:checked')?.value;
         root.querySelector('#scope-fs').style.display = role === 'admin' ? 'none' : '';
-        root.querySelector('#proj-access').style.display = scope === 'total' ? 'none' : '';
+        root.querySelector('#scope-seg').style.display = hasLogin ? '' : 'none';
+        root.querySelector('#proj-access').style.display = hasLogin && scope === 'total' ? 'none' : '';
       };
       f.addEventListener('change', sync);
       sync();
@@ -161,6 +169,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         data.project_ids = [...f.querySelectorAll('[name=project]:checked')].map(c => Number(c.value));
         delete data.project;
         if (editing) data.active = f.querySelector('[name=active]').checked;
+        if (data.role === 'terceirizado' || (editing && ext)) data.login_enabled = f.querySelector('#login_enabled').checked;
         err.hidden = true;
         try {
           let id = u.id;

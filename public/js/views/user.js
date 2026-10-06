@@ -74,9 +74,10 @@ export async function view({ params, query, setQuery, render, state }) {
             ${isMe ? html`<a class="btn btn-ghost btn-sm" href="#/conta">${icon('key')}Minha conta</a>` : ''}
           </div>
         </div>
-        ${u.is_external ? html`<div class="notice" style="margin-top:12px">${icon('info')}<span>Terceirizado sem login. ${u.manager_name ? html`A execução das tarefas é registrada pelo líder <b>${u.manager_name}</b>.` : ''}</span></div>` : ''}
+        ${u.is_external ? html`<div class="notice" style="margin-top:12px">${icon('info')}<span>${u.login_enabled ? html`Terceirizado com acesso ao sistema (regras de Colaborador).${u.manager_name ? html` Líder: <b>${u.manager_name}</b>.` : ''}`
+          : html`Terceirizado sem login. ${u.manager_name ? html`O líder <b>${u.manager_name}</b> registra a execução e confere as entregas.` : ''}`}</span></div>` : ''}
         ${u.email || u.phone ? html`<hr class="divider"><dl class="kv">${u.email ? html`<dt>E-mail</dt><dd>${u.email}</dd>` : ''}${u.phone ? html`<dt>Telefone</dt><dd>${u.phone}</dd>` : ''}
-          ${d.can_edit && !u.is_external ? html`<dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd>` : ''}</dl>` : ''}
+          ${d.can_edit && (!u.is_external || u.login_enabled) ? html`<dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd>` : ''}</dl>` : ''}
       </section>
 
       <div class="kpis section">

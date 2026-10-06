@@ -17,7 +17,7 @@ const PROOF_LABEL = { nenhuma: 'Nenhuma', foto: 'Somente foto', descricao: 'Some
 const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', concluida: 'Concluída' };
 
 const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
-    a.name AS assignee_name, a.is_external AS assignee_external, a.manager_id AS assignee_leader_id, a.company AS assignee_company, (SELECT lu.name FROM users lu WHERE lu.id = a.manager_id) AS assignee_leader_name,
+    a.name AS assignee_name, a.is_external AS assignee_external, a.login_enabled AS assignee_login, a.manager_id AS assignee_leader_id, a.company AS assignee_company, (SELECT lu.name FROM users lu WHERE lu.id = a.manager_id) AS assignee_leader_name,
     c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'execucao') AS exec_count,
@@ -41,7 +41,7 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
 
 const nowIso = () => new Date().toISOString();
 // Execução registrada pelo líder em nome de um terceirizado (fica explícito no histórico)
-const onBehalf = (ctx, t) => (t.assignee_external && t.assignee_id !== ctx.user.id ? `Registrado por ${ctx.user.name} (líder) em nome de ${t.assignee_name} (terceirizado)` : null);
+const onBehalf = (ctx, t) => (t.assignee_external && !t.assignee_login && t.assignee_id !== ctx.user.id ? `Registrado por ${ctx.user.name} (líder) em nome de ${t.assignee_name} (terceirizado)` : null);
 const withBehalf = (ctx, t, details) => [details, onBehalf(ctx, t)].filter(Boolean).join(' · ') || null;
 
 // Reagendamentos agrupados por tarefa (para os indicadores de prazo e repactuação)

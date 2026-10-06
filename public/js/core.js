@@ -68,7 +68,7 @@ export const PROJECT_STATUS = {
   planejamento: 'Planejamento', em_andamento: 'Em andamento', pausado: 'Pausado', concluido: 'Concluído', cancelado: 'Cancelado',
 };
 export const ROLE = { admin: 'Administrador', gestor: 'Gestor', colaborador: 'Colaborador', terceirizado: 'Terceirizado' };
-// Perfil exibido (terceirizado é um colaborador sem login, com líder)
+// Perfil exibido (terceirizado: colaborador externo com líder; login opcional)
 export const roleLabel = u => (u?.is_external ? 'Terceirizado' : ROLE[u?.role] || '');
 export const SCOPE = {
   total: 'Acesso total (todos os projetos)',

@@ -1104,3 +1104,23 @@ textarea.wiz-input { min-height: 90px; }
 .stage-tpl-apply { display: grid; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line, #E4E1DA); min-width: 0; }
 .stage-tpl-apply > label { font-weight: 600; font-size: 13px; }
 .stage-tpl-apply select { flex: 1 1 200px; min-width: 0; }
+
+/* Check-list: botões de resposta e quadros de responsável/prazo mais compactos */
+.cli-answer { grid-template-columns: 1fr 1.15fr 0.7fr; gap: 5px; }
+.ans { flex-direction: row; gap: 5px; min-height: 40px; padding: 4px 6px; border-radius: 10px; font-size: 12.5px; }
+.ans-ic { font-size: 15px; }
+.ans-lb { white-space: nowrap; }
+.ans-cam { top: 2px; right: 3px; }
+.ans-cam svg { width: 11px; height: 11px; }
+.cli-facts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px; margin-top: 8px; }
+.cli > .cli-facts { margin: 8px 12px 0 16px; }
+.fact-who, .fact-due { gap: 6px; padding: 4px 8px; border-radius: 8px; }
+.fact-who > span, .fact-due > span { column-gap: 6px; line-height: 1.2; }
+.fact-who small, .fact-due small { font-size: 9.5px; }
+.fact-who b, .fact-due b { font-size: 13px; }
+.fact-due em { font-size: 11px; }
+.fact-who i { width: 24px; height: 24px; font-size: 9.5px; }
+.fact-due svg { width: 17px; height: 17px; }
+.cli-photos { align-items: center; }
+.cli-ph-add { width: auto; height: 36px; flex-direction: row; gap: 5px; padding: 0 12px; border-radius: 9px; font-size: 12.5px; font-weight: 600; }
+.cli-ph-add svg { width: 16px; height: 16px; }

@@ -93,7 +93,7 @@ export async function view({ params, query, state, navigate }) {
             </div></div>
           ${!editing ? html`<div class="cl-add-panel" id="cl-new-form">
             <div class="cl-add-head"><b>${icon('plus')} Novo item</b></div>
-            ${itemForm({ users: [], globalName: '', groups: [], keep: {}, photoRequired: photoRule === 'obrigatoria', quickList: photoRule !== 'obrigatoria' })}</div>
+            ${itemForm()}</div>
           <div class="cl-draft-head"><b id="cl-count">0 itens</b><button type="button" class="btn btn-ghost btn-sm" id="cl-clear" hidden>${icon('x')}Limpar lista</button></div>
           <div class="cl-draft" id="cl-draft"></div>` : html`<span class="hint">Os itens são incluídos, atribuídos e excluídos na própria tela do check-list.</span>`}
         </fieldset>
@@ -163,37 +163,25 @@ export async function view({ params, query, state, navigate }) {
         f.title.placeholder = cl ? 'Ex.: Check-list final de obra — Bloco A' : 'Ex.: Conferir armação das vigas do 4º pavimento';
       };
       f.querySelectorAll('[name=task_type]').forEach(r => r.addEventListener('change', syncType));
-      // Formulário do item (texto, grupo, responsável, descrição, início + dias, fotos de entrada)
+      // Novo item passo a passo (grupo, foto, descrição, responsável, início, término, observação)
       const itemEl = root.querySelector('#cl-new-form [data-cl-form]');
       const ruleRequired = () => f.querySelector('[name=photo_rule]:checked')?.value === 'obrigatoria';
-      const syncRule = () => {
-        if (!itemEl) return;
-        const req = ruleRequired();
-        const lb = itemEl.querySelector('[data-photo-label]');
-        lb.textContent = `Foto de entrada ${req ? '(obrigatória)' : '(opcional)'}`;
-        lb.classList.toggle('req', req);
-        itemEl.querySelector('[data-photo-hint]').hidden = !req;
-        const quick = itemEl.querySelector('.cl-quick');
-        if (quick) quick.hidden = req;
-      };
-      const syncTeam = () => {
-        if (!itemEl) return;
-        const sel = itemEl.querySelector('[data-f="assignee_id"]');
-        const cur = sel.value;
-        sel.innerHTML = html`<option value="">${globalName() ? `Responsável global (${globalName()})` : 'Responsável global'}</option>${team.map(u => html`<option value="${u.id}" ${String(u.id) === cur ? 'selected' : ''}>${u.name}${u.is_external ? ' · Terceirizado' : ''}</option>`)}`.toString();
-        const dl = itemEl.querySelector('#cl-groups-dl');
-        dl.innerHTML = html`${[...new Set(items.map(i => i.group).filter(Boolean))].map(g => html`<option value="${g}"></option>`)}`.toString();
-      };
+      // Grupos do passo a passo: classificações cadastradas no projeto escolhido
+      const projectGroups = () => (state.meta.projects.find(p => String(p.id) === String(f.project_id.value))?.stages || []).map(st => st.name);
+      let wizard = null;
+      const syncTeam = () => wizard?.refresh();
       if (draft) {
-        bindItemForm(itemEl, {
-          users: () => team, keep: {}, photoRequired: ruleRequired,
+        wizard = bindItemForm(itemEl, {
+          users: () => team, keep: {}, photoRequired: ruleRequired, quickList: () => !ruleRequired(),
+          groups: () => [...new Set([...projectGroups(), ...items.map(i => i.group).filter(Boolean)])], globalName,
           onAdd: async list => {
             items.push(...list);
             drawItems();
             syncTeam();
           },
         });
-        f.querySelectorAll('[name=photo_rule]').forEach(r => r.addEventListener('change', syncRule));
+        f.querySelectorAll('[name=photo_rule]').forEach(r => r.addEventListener('change', () => wizard.refresh()));
+        f.project_id.addEventListener('change', () => wizard.refresh());
         draft.addEventListener('click', e => {
           const rm = e.target.closest('.cl-draft-rm');
           if (!rm) return;

@@ -3,7 +3,7 @@
 // A regra de fotos é do check-list inteiro: obrigatória em todos os itens respondidos (exceto N/A) ou livre escolha.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull, date } from '../lib/http.js';
-import { today, addDays } from './metrics.js';
+import { today, addDays, daysBetween } from './metrics.js';
 import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
@@ -20,8 +20,14 @@ const nowIso = () => new Date().toISOString();
 const isOpen = t => !t.cancelled_at && ['aberta', 'em_andamento'].includes(t.status);
 const needsPhoto = (t, result) => t.photo_rule === 'obrigatoria' && (result === 'conforme' || result === 'nao_conforme');
 
-// Prazo do item: início + quantidade de dias (sem início, conta a partir de hoje)
+// Prazo do item: data de término informada (opcional, não pode ser antes do início) ou início + quantidade de dias
 function readDeadline(it, label) {
+  const end = date(it?.due_date || null, `Data de término (${label})`);
+  if (end) {
+    const startEnd = date(it?.start_date || null, `Data de início (${label})`);
+    if (startEnd && end < startEnd) throw badRequest(`A data de término não pode ser anterior à data de início (${label}).`);
+    return { start_date: startEnd, duration_days: startEnd ? daysBetween(startEnd, end) : null, due_date: end };
+  }
   const raw = it?.duration_days;
   const days = raw === '' || raw === null || raw === undefined ? null : Number(raw);
   if (days !== null && (!Number.isInteger(days) || days < 0 || days > 3650)) throw badRequest(`Prazo em dias inválido (${label}).`);
@@ -351,9 +357,13 @@ export function updateItem(ctx, taskId, itemId, body) {
     const v = str(body.description, { max: 2000, label: 'Descrição' }) || null;
     if (v !== item.description) { next.description = v; changes.push('descrição alterada'); }
   }
-  if ('start_date' in body || 'duration_days' in body) {
-    const d = readDeadline({ start_date: 'start_date' in body ? body.start_date : item.start_date, duration_days: 'duration_days' in body ? body.duration_days : item.duration_days }, 'item');
-    if (d.start_date !== item.start_date || d.duration_days !== item.duration_days) {
+  if ('start_date' in body || 'duration_days' in body || 'due_date' in body) {
+    const start = 'start_date' in body ? body.start_date : item.start_date;
+    const d = 'due_date' in body
+      ? readDeadline({ start_date: start, due_date: body.due_date }, 'item')
+      : 'duration_days' in body ? readDeadline({ start_date: start, duration_days: body.duration_days }, 'item')
+        : readDeadline({ start_date: start, due_date: item.due_date }, 'item');
+    if (d.start_date !== item.start_date || d.due_date !== item.due_date) {
       Object.assign(next, d);
       changes.push(`prazo: ${d.due_date ? d.due_date.split('-').reverse().join('/') : 'sem prazo'}`);
     }

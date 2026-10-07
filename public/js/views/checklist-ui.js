@@ -1,6 +1,6 @@
 // Check-list: cadastro rápido dos itens (Enter, colar lista, "# Grupo", "@Nome") e preenchimento item a item
 // numa tela só (Conforme / Não conforme / N/A, observação e fotos), com avanço automático para o próximo item.
-import { html, raw, api, icon, fmtDateTime } from '../core.js';
+import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, batchBySize } from '../ui.js';
 
 export const RESULT = {
@@ -49,126 +49,219 @@ export function parseLines(lines, users, state) {
 
 export const composerHint = html`<span class="hint">Um item por linha. <b># Cozinha</b> abre um grupo (ambiente/local) · <b>@Nome</b> no fim define o responsável do item (ou do grupo inteiro: <b># Elétrica @Bruno</b>).</span>`;
 
-// ---------- Formulário de item (criação do check-list e "Adicionar itens" na tarefa) ----------
-// Campos: item, grupo, responsável, descrição detalhada, início + prazo em dias (calcula a data) e fotos de entrada.
+// ---------- Novo item: passo a passo ----------
+// Grupo (classificações do projeto) → Foto (obrigatória ou opcional) → Descrição do item → Responsável → Início → Término → Observação.
 const fmtD = d => (d ? d.split('-').reverse().join('/') : '');
 const todayISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const plusDays = (d, n) => new Date(Date.parse(d) + n * 86400e3).toISOString().slice(0, 10);
 
-export function itemForm({ users, globalName, groups, keep = {}, photoRequired, quickList }) {
-  const opt = (v, l, cur) => html`<option value="${v}" ${String(cur ?? '') === String(v) ? 'selected' : ''}>${l}</option>`;
-  return html`<div class="cl-form" data-cl-form>
-    <div class="field"><label class="req">Item a verificar</label>
-      <input type="text" data-f="text" maxlength="300" placeholder="Ex.: Tomadas e interruptores funcionando" autocomplete="off" enterkeyhint="next"></div>
-    <div class="form-row">
-      <div class="field"><label>Grupo (ambiente/local)</label>
-        <input type="text" data-f="group" maxlength="80" value="${keep.group || ''}" list="cl-groups-dl" placeholder="Ex.: Cozinha" autocomplete="off">
-        <datalist id="cl-groups-dl">${groups.map(g => html`<option value="${g}"></option>`)}</datalist></div>
-      <div class="field"><label>Responsável</label>
-        <select data-f="assignee_id">${opt('', globalName ? `Responsável global (${globalName})` : 'Responsável global', keep.assignee_id)}${users.map(u => opt(u.id, `${u.name}${u.is_external ? ' · Terceirizado' : ''}`, keep.assignee_id))}</select></div>
-    </div>
-    <div class="field"><label>Descrição detalhada</label>
-      <textarea data-f="description" rows="2" maxlength="2000" placeholder="Como verificar, critério de aceite, referência de projeto…"></textarea></div>
-    <div class="cl-deadline">
-      <div class="field"><label>Início</label><input type="date" data-f="start_date" value="${keep.start_date || ''}"></div>
-      <div class="field"><label>Prazo (dias)</label><input type="number" data-f="duration_days" min="0" max="3650" inputmode="numeric" value="${keep.duration_days ?? ''}" placeholder="Ex.: 3"></div>
-      <div class="cl-due" data-due></div>
-    </div>
-    <div class="field"><span class="label ${photoRequired ? 'req' : ''}" data-photo-label>Foto de entrada ${photoRequired ? '(obrigatória)' : '(opcional)'}</span>
-      <div class="cli-photos" data-photos>
-        <label class="cli-ph-add">${fileInput({ camera: true, data: 'data-new-photo' })}${icon('camera')}<span>Foto</span></label>
-        <label class="cli-ph-add">${fileInput({ multiple: true, data: 'data-new-photo' })}${icon('image')}<span>Galeria</span></label>
-      </div>
-      <span class="hint" data-photo-hint ${photoRequired ? '' : 'hidden'}>Com a foto obrigatória, cada item precisa da foto de entrada (ela vira o “antes”).</span></div>
+export function itemForm() {
+  return html`<div class="cl-wiz" data-cl-form>
+    <div class="wiz-head"><span class="wiz-step" data-wiz-count></span><b data-wiz-title></b></div>
+    <div class="wiz-bar"><span data-wiz-bar></span></div>
+    <div class="wiz-body" data-wiz-body></div>
     <div class="form-error" data-err hidden></div>
-    <div class="cl-form-actions">
-      <button type="button" class="btn btn-primary" data-add-again>${icon('plus')}Adicionar e criar outro</button>
-      <button type="button" class="btn btn-ghost" data-add-close>${icon('check')}Adicionar e fechar</button>
-    </div>
-    ${quickList !== false ? html`<details class="cl-quick" ${quickList ? '' : 'hidden'}><summary>${icon('checklist')} Colar vários itens de uma vez (sem foto)</summary>
-      <textarea data-quick rows="5" placeholder="Um item por linha&#10;# Cozinha&#10;Tomadas funcionando @Bruno&#10;Pia sem vazamento"></textarea>
-      ${composerHint}
-      <button type="button" class="btn btn-ghost btn-sm" data-quick-add>${icon('plus')}Adicionar lista</button></details>` : ''}
+    <div class="wiz-nav" data-wiz-nav></div>
   </div>`;
 }
 
-// Liga o formulário: fotos, prazo calculado, validação e envio (onAdd recebe [{...item}] e devolve uma Promise)
-export function bindItemForm(el, { users, photoRequired, onAdd, onClose, keep }) {
+// users(), groups(), globalName(), photoRequired(), quickList() são funções (a lista pode mudar com o projeto/regra)
+export function bindItemForm(el, { users, groups, globalName = () => '', photoRequired, quickList = () => false, keep = {}, onAdd, onClose }) {
   const q = s => el.querySelector(s);
-  const f = k => el.querySelector(`[data-f="${k}"]`);
   const err = q('[data-err]');
-  let photos = [];
-  const drawPhotos = () => {
-    const box = q('[data-photos]');
-    box.querySelectorAll('.cli-ph').forEach(n => n.remove());
-    photos.forEach((p, i) => {
-      const fig = document.createElement('figure');
-      fig.className = 'cli-ph';
-      fig.innerHTML = '<img alt="Foto de entrada"><button type="button" class="rm" aria-label="Remover foto">✕</button>';
-      fig.querySelector('img').src = p.data;
-      fig.querySelector('.rm').onclick = () => { photos.splice(i, 1); drawPhotos(); };
-      box.insertBefore(fig, box.firstChild);
+  let item, step = 0;
+  const reset = () => {
+    item = { group: keep.group ?? undefined, images: [], text: '', assignee_id: keep.assignee_id ?? undefined,
+      start_date: keep.start_date || '', due_date: keep.due_date || '', description: '' };
+    step = 0;
+  };
+  reset();
+  const STEPS = () => [
+    { k: 'group', title: 'Grupo', optional: false },
+    { k: 'photo', title: 'Foto de entrada', optional: !photoRequired() },
+    { k: 'text', title: 'Descrição do item', optional: false },
+    { k: 'who', title: 'Responsável', optional: true },
+    { k: 'start', title: 'Data de início', optional: true },
+    { k: 'end', title: 'Data de término', optional: true },
+    { k: 'obs', title: 'Observação', optional: true },
+  ];
+  const fail = msg => { err.textContent = msg; err.hidden = !msg; };
+  const pick = (attr, val, label, on, sub = '') => html`<button type="button" class="wiz-opt ${on ? 'is-on' : ''}" ${raw(`${attr}="${esc(String(val))}"`)}>${label}${sub ? html`<small>${sub}</small>` : ''}</button>`;
+  const whoName = id => (id ? users().find(u => u.id === id)?.name || '—' : `Responsável global${globalName() ? ` (${globalName()})` : ''}`);
+
+  const bodyFor = s => {
+    switch (s.k) {
+      case 'group': {
+        const list = groups();
+        return html`<p class="wiz-q">Em qual grupo (ambiente/local/etapa) fica este item?</p>
+          <div class="wiz-opts">${list.map(g => pick('data-group', g, g, item.group === g))}${pick('data-group', '', 'Sem grupo', item.group === null)}</div>
+          ${!list.length ? html`<span class="hint">O projeto ainda não tem classificações. Cadastre em Projetos → Editar → Classificação.</span>`
+            : html`<span class="hint">As opções são as classificações cadastradas na obra.</span>`}
+          ${quickList() ? html`<details class="cl-quick"><summary>${icon('checklist')} Colar vários itens de uma vez (sem foto)</summary>
+            <textarea data-quick rows="5" placeholder="Um item por linha&#10;# Cozinha&#10;Tomadas funcionando @Bruno&#10;Pia sem vazamento"></textarea>
+            ${composerHint}
+            <button type="button" class="btn btn-ghost btn-sm" data-quick-add>${icon('plus')}Adicionar lista</button></details>` : ''}`;
+      }
+      case 'photo':
+        return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto de entrada do item (obrigatória).' : 'Quer registrar uma foto de entrada? (opcional)'}</p>
+          <div class="wiz-photo">
+            <label class="wiz-cam">${fileInput({ camera: true, data: 'data-new-photo' })}${icon('camera')}<span>${item.images.length ? 'Tirar outra foto' : 'Tirar foto'}</span></label>
+            <label class="wiz-gal">${fileInput({ multiple: true, data: 'data-new-photo' })}${icon('image')}<span>Galeria</span></label>
+          </div>
+          <div class="cli-photos" data-photos>${item.images.map((p, i) => html`<figure class="cli-ph"><img src="${p.data}" alt="Foto de entrada ${i + 1}"><button type="button" class="rm" data-rm-photo="${i}" aria-label="Remover foto">✕</button></figure>`)}</div>
+          <span class="hint">A foto de entrada é o “antes” do item.</span>`;
+      case 'text':
+        return html`<p class="wiz-q">O que deve ser verificado?</p>
+          <input type="text" class="wiz-input" data-f="text" maxlength="300" value="${item.text}" placeholder="Ex.: Tomadas e interruptores funcionando" autocomplete="off" enterkeyhint="next">`;
+      case 'who':
+        return html`<p class="wiz-q">Quem responde este item? (opcional)</p>
+          <div class="wiz-opts is-list">${pick('data-who', '', whoName(null), !item.assignee_id, 'padrão')}${users().map(u => pick('data-who', u.id, u.name, item.assignee_id === u.id, u.is_external ? `Terceirizado${u.company ? ` · ${u.company}` : ''}` : u.job_title || ''))}</div>`;
+      case 'start':
+        return html`<p class="wiz-q">Quando começa? (opcional)</p>
+          <input type="date" class="wiz-input" data-f="start_date" value="${item.start_date}">
+          <div class="wiz-quick">${pick('data-start', todayISO(), 'Hoje', item.start_date === todayISO())}${pick('data-start', plusDays(todayISO(), 1), 'Amanhã', item.start_date === plusDays(todayISO(), 1))}</div>`;
+      case 'end': {
+        const base = item.start_date || todayISO();
+        return html`<p class="wiz-q">Até quando deve estar pronto? (opcional)</p>
+          <input type="date" class="wiz-input" data-f="due_date" value="${item.due_date}" min="${item.start_date || ''}">
+          <div class="wiz-quick">${[1, 3, 7, 15].map(n => pick('data-end', plusDays(base, n), `+${n} ${n === 1 ? 'dia' : 'dias'}`, item.due_date === plusDays(base, n)))}</div>
+          <span class="hint">${item.start_date ? `Início em ${fmtD(item.start_date)}.` : 'Sem data de início: os atalhos contam a partir de hoje.'}</span>`;
+      }
+      case 'obs':
+        return html`<p class="wiz-q">Alguma observação? (opcional)</p>
+          <textarea class="wiz-input" data-f="description" rows="3" maxlength="2000" placeholder="Como verificar, critério de aceite, referência de projeto…">${item.description}</textarea>
+          <div class="wiz-sum">
+            ${summaryRow(0, 'Grupo', item.group || 'Sem grupo')}
+            ${summaryRow(1, 'Foto', item.images.length ? `${item.images.length} foto(s)` : 'sem foto')}
+            ${summaryRow(2, 'Item', item.text)}
+            ${summaryRow(3, 'Responsável', whoName(item.assignee_id))}
+            ${summaryRow(4, 'Início', fmtD(item.start_date) || '—')}
+            ${summaryRow(5, 'Término', fmtD(item.due_date) || '—')}
+          </div>`;
+    }
+    return '';
+  };
+  const summaryRow = (i, label, value) => html`<button type="button" class="wiz-sum-row" data-goto="${i}"><span>${label}</span><b>${value}</b><em>alterar</em></button>`;
+
+  const navFor = (s, last) => html`
+    ${step > 0 ? html`<button type="button" class="btn btn-ghost" data-back>${icon('back')}Voltar</button>` : html`<span></span>`}
+    ${last ? html`<div class="wiz-final">
+        <button type="button" class="btn btn-primary" data-add-again>${icon('plus')}Adicionar e criar outro</button>
+        <button type="button" class="btn btn-ghost" data-add-close>${icon('check')}Adicionar e fechar</button></div>`
+      : html`<div class="wiz-final">${s.optional ? html`<button type="button" class="btn btn-ghost" data-skip>Pular</button>` : ''}
+        <button type="button" class="btn btn-primary" data-next>Próximo${icon('chevron')}</button></div>`}`;
+
+  // Lê o que foi digitado no passo atual antes de sair dele
+  const collect = () => {
+    const v = k => q(`[data-f="${k}"]`)?.value;
+    const s = STEPS()[step];
+    if (s.k === 'text') item.text = (v('text') || '').trim();
+    if (s.k === 'start') item.start_date = v('start_date') || '';
+    if (s.k === 'end') item.due_date = v('due_date') || '';
+    if (s.k === 'obs') item.description = (v('description') || '').trim();
+  };
+  const validate = () => {
+    const s = STEPS()[step];
+    if (s.k === 'group' && item.group === undefined) return 'Escolha o grupo do item (ou “Sem grupo”).';
+    if (s.k === 'photo' && photoRequired() && !item.images.length) return 'Foto obrigatória: tire ou escolha a foto de entrada para continuar.';
+    if (s.k === 'text' && !item.text) return 'Descreva o item a verificar.';
+    if (s.k === 'end' && item.due_date && item.start_date && item.due_date < item.start_date) return 'A data de término não pode ser anterior à data de início.';
+    return '';
+  };
+  const render = () => {
+    const steps = STEPS();
+    const s = steps[step];
+    q('[data-wiz-count]').textContent = `Passo ${step + 1} de ${steps.length}`;
+    q('[data-wiz-title]').textContent = s.title + (s.optional ? ' (opcional)' : '');
+    q('[data-wiz-bar]').style.width = `${Math.round(((step + 1) / steps.length) * 100)}%`;
+    q('[data-wiz-body]').innerHTML = bodyFor(s).toString();
+    q('[data-wiz-nav]').innerHTML = navFor(s, step === steps.length - 1).toString();
+    fail('');
+    bindStep();
+    const first = q('[data-wiz-body] .wiz-input');
+    if (first) setTimeout(() => first.focus({ preventScroll: true }), 30);
+  };
+  const go = i => { collect(); step = Math.max(0, Math.min(STEPS().length - 1, i)); render(); };
+  const next = () => {
+    collect();
+    const e = validate();
+    if (e) return fail(e);
+    go(step + 1);
+  };
+  const submit = async again => {
+    collect();
+    for (let i = 0; i < STEPS().length; i++) {
+      step = i;
+      const e = validate();
+      if (e) { render(); return fail(e); }
+    }
+    step = STEPS().length - 1;
+    const out = { text: item.text, group: item.group || null, images: item.images.slice(), description: item.description || null,
+      assignee_id: item.assignee_id || null, start_date: item.start_date || null, due_date: item.due_date || null };
+    el.querySelectorAll('[data-add-again],[data-add-close]').forEach(b => (b.disabled = true));
+    try {
+      Object.assign(keep, { group: out.group, assignee_id: out.assignee_id, start_date: out.start_date, due_date: out.due_date });
+      await onAdd([out], again);
+      reset();
+      render();
+      if (!again) onClose?.();
+    } catch (e) {
+      fail(e.message);
+      el.querySelectorAll('[data-add-again],[data-add-close]').forEach(b => (b.disabled = false));
+    }
+  };
+
+  const bindStep = () => {
+    el.querySelectorAll('[data-group]').forEach(b => b.addEventListener('click', () => { item.group = b.dataset.group || null; next(); }));
+    el.querySelectorAll('[data-who]').forEach(b => b.addEventListener('click', () => { item.assignee_id = b.dataset.who ? Number(b.dataset.who) : null; next(); }));
+    el.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => { q('[data-f="start_date"]').value = b.dataset.start; next(); }));
+    el.querySelectorAll('[data-end]').forEach(b => b.addEventListener('click', () => { q('[data-f="due_date"]').value = b.dataset.end; next(); }));
+    el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => go(Number(b.dataset.goto))));
+    el.querySelectorAll('[data-rm-photo]').forEach(b => b.addEventListener('click', () => { item.images.splice(Number(b.dataset.rmPhoto), 1); render(); }));
+    el.querySelectorAll('input[data-new-photo]').forEach(inp => inp.addEventListener('change', async () => {
+      const files = [...(inp.files || [])];
+      inp.value = '';
+      if (!files.length) return;
+      try {
+        const first = !item.images.length;
+        item.images.push(...(await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data })));
+        // Primeira foto tirada: segue direto para o próximo passo
+        if (first && item.images.length) go(step + 1); else render();
+      } catch (e) { toast(e.message, 'err'); }
+    }));
+    q('[data-next]')?.addEventListener('click', next);
+    q('[data-skip]')?.addEventListener('click', () => {
+      const s = STEPS()[step];
+      if (s.k === 'who') item.assignee_id = null;
+      if (s.k === 'start') item.start_date = '';
+      if (s.k === 'end') item.due_date = '';
+      if (s.k === 'photo') item.images = [];
+      step = Math.min(STEPS().length - 1, step + 1);
+      render();
+    });
+    q('[data-back]')?.addEventListener('click', () => go(step - 1));
+    q('[data-add-again]')?.addEventListener('click', () => submit(true));
+    q('[data-add-close]')?.addEventListener('click', () => submit(false));
+    q('[data-quick-add]')?.addEventListener('click', async () => {
+      const state = { group: null, groupAssignee: null };
+      const { items, unknown } = parseLines(q('[data-quick]').value.split(/\r?\n/), users(), state);
+      if (unknown.length) toast(`Não encontrei na equipe do projeto: ${[...new Set(unknown)].join(', ')}. O item ficou com o responsável global.`, 'warn');
+      if (!items.length) return fail('Cole ao menos um item (um por linha).');
+      try { await onAdd(items, true); } catch (e) { fail(e.message); }
     });
   };
-  const showDue = () => {
-    const days = f('duration_days').value;
-    const start = f('start_date').value || todayISO();
-    q('[data-due]').innerHTML = days !== '' && Number(days) >= 0
-      ? `${icon('calendar')}<span>Prazo<b>${fmtD(plusDays(start, Number(days)))}</b></span>` : '<span class="muted">Sem prazo</span>';
-  };
-  el.querySelectorAll('input[data-new-photo]').forEach(inp => inp.addEventListener('change', async () => {
-    const files = [...(inp.files || [])];
-    inp.value = '';
-    if (!files.length) return;
-    try { photos.push(...(await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data }))); drawPhotos(); }
-    catch (e) { toast(e.message, 'err'); }
-  }));
-  f('start_date').addEventListener('input', showDue);
-  f('duration_days').addEventListener('input', showDue);
-  showDue();
-  const read = () => ({
-    text: f('text').value.trim(), group: f('group').value.trim() || null, description: f('description').value.trim() || null,
-    assignee_id: f('assignee_id').value ? Number(f('assignee_id').value) : null,
-    start_date: f('start_date').value || null, duration_days: f('duration_days').value === '' ? null : Number(f('duration_days').value),
-    images: photos.slice(),
-  });
-  const fail = msg => { err.textContent = msg; err.hidden = false; };
-  const submit = async again => {
-    err.hidden = true;
-    const it = read();
-    if (!it.text) { fail('Informe o item a verificar.'); return f('text').focus(); }
-    if (photoRequired() && !it.images.length) return fail('Foto obrigatória: tire ou escolha a foto de entrada do item.');
-    const btns = el.querySelectorAll('[data-add-again],[data-add-close]');
-    btns.forEach(b => (b.disabled = true));
-    try {
-      if (keep) Object.assign(keep, { group: it.group, assignee_id: it.assignee_id, start_date: it.start_date, duration_days: it.duration_days });
-      await onAdd([it], again);
-      // Mantém grupo, responsável e prazo para o próximo item; limpa texto, descrição e fotos
-      f('text').value = '';
-      f('description').value = '';
-      photos = [];
-      drawPhotos();
-      if (again) f('text').focus(); else onClose?.();
-    } catch (e) { fail(e.message); }
-    finally { btns.forEach(b => (b.disabled = false)); }
-  };
-  q('[data-add-again]').addEventListener('click', () => submit(true));
-  q('[data-add-close]').addEventListener('click', () => submit(false));
-  // Enter no campo do item adiciona e já abre o próximo; nos demais campos não envia o formulário da página
+  // Enter avança (exceto na observação); nunca envia o formulário da página
   el.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return;
-    e.preventDefault();
-    if (e.target === f('text')) submit(true);
+    if (e.target.tagName === 'INPUT') { e.preventDefault(); next(); }
   });
-  const quick = q('[data-quick-add]');
-  if (quick) quick.addEventListener('click', async () => {
-    const state = { group: f('group').value.trim() || null, groupAssignee: f('assignee_id').value ? Number(f('assignee_id').value) : null };
-    const { items, unknown } = parseLines(q('[data-quick]').value.split(/\r?\n/), users(), state);
-    if (unknown.length) toast(`Não encontrei na equipe do projeto: ${[...new Set(unknown)].join(', ')}. O item ficou com o responsável global.`, 'warn');
-    if (!items.length) return fail('Cole ao menos um item (um por linha).');
-    try { await onAdd(items, true); q('[data-quick]').value = ''; } catch (e) { fail(e.message); }
-  });
-  return { focus: () => f('text').focus() };
+  render();
+  return {
+    focus: () => { const i = q('[data-wiz-body] .wiz-input, [data-wiz-body] .wiz-opt'); i?.focus({ preventScroll: true }); },
+    refresh: render,
+    // group definido (botão "+ Item" de um grupo): já começa no passo seguinte ao grupo
+    startAt: group => { reset(); if (group !== undefined) { item.group = group || null; step = 1; } render(); },
+  };
 }
 
 // Lista em construção (formulário de criação do check-list)
@@ -179,7 +272,7 @@ export function renderDraft(items, users, globalName) {
   return html`${items.map((it, i) => {
     const head = it.group !== group ? html`<div class="cl-draft-group">${it.group || 'Sem grupo'}</div>` : '';
     group = it.group;
-    const due = it.duration_days !== null && it.duration_days !== undefined ? plusDays(it.start_date || todayISO(), it.duration_days) : null;
+    const due = it.due_date || (it.duration_days !== null && it.duration_days !== undefined ? plusDays(it.start_date || todayISO(), it.duration_days) : null);
     return html`${head}<div class="cl-draft-card" data-i="${i}">
       ${it.images?.length ? html`<img class="cl-draft-ph" src="${it.images[0].data}" alt="">` : html`<span class="cl-draft-ph is-empty">${icon('camera')}</span>`}
       <div class="cl-draft-txt"><b>${i + 1}. ${it.text}</b>
@@ -230,7 +323,7 @@ function itemCard(t, it, c) {
       ${due}
       ${it.result ? html`<span class="cli-when">${icon('check')}${it.answered_by_name || '—'} · ${shortDate(it.answered_at)}</span>` : ''}
     </div>
-    ${it.description ? html`<div class="cli-desc">${it.description}</div>` : ''}`;
+    ${it.description ? html`<div class="cli-desc"><b>Obs.:</b> ${it.description}</div>` : ''}`;
   const ansBtn = r => {
     const on = it.result === r;
     const inner = html`<span class="ans-ic">${RESULT[r].short}</span><span class="ans-lb">${RESULT[r].label}</span>`;
@@ -318,8 +411,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
       </div>
       ${c.can_manage_items ? html`<div class="cl-add-panel" id="cl-add-panel" ${st.adding ? '' : 'hidden'}>
         <div class="cl-add-head"><b>${icon('plus')} Novo item</b><button type="button" class="icon-btn" id="cl-add-close" aria-label="Fechar">✕</button></div>
-        ${itemForm({ users: t._team || [], globalName: t.assignee_name, groups: [...new Set(c.items.map(i => i.group).filter(Boolean))],
-          keep: st.keep || {}, photoRequired: c.photo_rule === 'obrigatoria', quickList: c.photo_rule !== 'obrigatoria' })}
+        ${itemForm()}
       </div>` : ''}
       <div class="cl-list" data-filter="${f}">
         ${groups.map(g => {
@@ -348,6 +440,9 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
 }
 
 const personOptions = (users, cur, globalName) => html`<option value="">Responsável global${globalName ? ` (${globalName})` : ''}</option>${users.map(u => html`<option value="${u.id}" ${String(cur ?? '') === String(u.id) ? 'selected' : ''}>${u.name}${u.is_external ? ' · Terceirizado' : ''}</option>`)}`;
+
+// Grupos possíveis: classificações cadastradas na obra + grupos já usados no check-list
+const groupOptions = t => [...new Set([...(t._groups || []), ...t.checklist.items.map(i => i.group).filter(Boolean)])];
 
 export function bindChecklist(root, t, ctx, refresh) {
   const c = t.checklist;
@@ -444,7 +539,7 @@ export function bindChecklist(root, t, ctx, refresh) {
     st.adding = true;
     panel.hidden = false;
     root.querySelector('#cl-add-toggle')?.setAttribute('aria-expanded', 'true');
-    if (group !== undefined) panel.querySelector('[data-f="group"]').value = group || '';
+    form?.startAt(group);
     panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
     setTimeout(() => form?.focus(), 250);
   };
@@ -453,11 +548,10 @@ export function bindChecklist(root, t, ctx, refresh) {
   root.querySelector('#cl-add-close')?.addEventListener('click', closeAdd);
   root.querySelectorAll('[data-add-group]').forEach(b => b.addEventListener('click', () => openAdd(b.dataset.addGroup)));
   if (panel) {
-    if (!st.keep) st.keep = { group: c.items.at(-1)?.group || null };
-    if (!panel.querySelector('[data-f="group"]').value && st.keep.group) panel.querySelector('[data-f="group"]').value = st.keep.group;
+    if (!st.keep) st.keep = {};
     form = bindItemForm(panel.querySelector('[data-cl-form]'), {
-      users: team, keep: st.keep,
-      photoRequired: () => c.photo_rule === 'obrigatoria',
+      users: team, keep: st.keep, groups: () => groupOptions(t), globalName: () => t.assignee_name || '',
+      photoRequired: () => c.photo_rule === 'obrigatoria', quickList: () => c.photo_rule !== 'obrigatoria',
       onAdd: async (items, again) => {
         // Envia em lotes que cabem numa requisição (fotos de entrada)
         let updated;
@@ -476,17 +570,17 @@ export function bindChecklist(root, t, ctx, refresh) {
     e.preventDefault();
     e.stopPropagation();
     const it = c.items.find(x => x.id === Number(b.dataset.editItem));
-    const groups = [...new Set(c.items.map(i => i.group).filter(Boolean))];
     const pending = sheet({
       title: `Item ${it.seq}`,
       submitLabel: 'Salvar',
-      body: html`<div class="field"><label class="req" for="ei-text">Texto do item</label><input id="ei-text" name="text" type="text" maxlength="300" required value="${it.text}"></div>
-        <div class="field"><label for="ei-group">Grupo (ambiente/local)</label><input id="ei-group" name="group" type="text" maxlength="80" value="${it.group || ''}" list="ei-groups" placeholder="Sem grupo">
-          <datalist id="ei-groups">${groups.map(g => html`<option value="${g}"></option>`)}</datalist></div>
+      body: html`<div class="field"><label for="ei-group">Grupo</label><select id="ei-group" name="group">
+          ${[...new Set([...groupOptions(t), ...(it.group ? [it.group] : [])])].map(g => html`<option value="${g}" ${g === it.group ? 'selected' : ''}>${g}</option>`)}
+          <option value="" ${!it.group ? 'selected' : ''}>Sem grupo</option></select></div>
+        <div class="field"><label class="req" for="ei-text">Descrição do item</label><input id="ei-text" name="text" type="text" maxlength="300" required value="${it.text}"></div>
         <div class="field"><label for="ei-who">Responsável</label><select id="ei-who" name="assignee_id">${personOptions(team(), it.assignee_id, t.assignee_name)}</select></div>
-        <div class="field"><label for="ei-desc">Descrição detalhada</label><textarea id="ei-desc" name="description" rows="3" maxlength="2000">${it.description || ''}</textarea></div>
-        <div class="form-row"><div class="field"><label for="ei-start">Início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
-          <div class="field"><label for="ei-days">Prazo (dias)</label><input id="ei-days" name="duration_days" type="number" min="0" max="3650" inputmode="numeric" value="${it.duration_days ?? ''}"></div></div>
+        <div class="form-row"><div class="field"><label for="ei-start">Data de início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
+          <div class="field"><label for="ei-end">Data de término</label><input id="ei-end" name="due_date" type="date" value="${it.due_date || ''}"></div></div>
+        <div class="field"><label for="ei-desc">Observação</label><textarea id="ei-desc" name="description" rows="3" maxlength="2000">${it.description || ''}</textarea></div>
         <div class="field"><span class="label">Fotos de entrada (${it.refs.length})</span>
           <div class="cli-photos">${it.refs.map(f => html`<figure class="cli-ph"><img src="/api/checklist-files/${f.id}" alt="Foto de entrada"><button type="button" class="rm" data-rm-ref="${f.id}" aria-label="Remover foto de entrada">✕</button></figure>`)}
             <label class="cli-ph-add">${fileInput({ camera: true, data: 'data-ref-photo' })}${icon('camera')}<span>Foto</span></label>
@@ -494,7 +588,7 @@ export function bindChecklist(root, t, ctx, refresh) {
         ${!it.result ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-del-in-sheet>${icon('trash')}Excluir este item</button>`
           : html`<span class="hint">Item já respondido: pode ser editado, mas não excluído.</span>`}`,
       onSubmit: d => api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, assignee_id: d.assignee_id || null,
-        description: d.description, start_date: d.start_date || null, duration_days: d.duration_days === '' ? null : Number(d.duration_days) } }),
+        description: d.description, start_date: d.start_date || null, due_date: d.due_date || null } }),
     });
     // Fotos de entrada: incluir/remover direto pela janela (fecha e atualiza a tela)
     document.querySelectorAll('.sheet input[data-ref-photo]').forEach(inp => inp.addEventListener('change', async () => {

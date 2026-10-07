@@ -647,8 +647,12 @@ async function main() {
   ok(cl.checklist.items.find(i => i.id === iPia).text === 'Pia e sifão sem vazamentos' && cl.history.some(h => h.action === 'Item do check-list alterado'), 'responsável global edita o texto do item');
   cl = (await marcos('PATCH', `/tasks/${clId}/items/${iPia}`, { description: 'Verificar sifão e flexíveis', start_date: '2099-06-01', duration_days: 4 })).data;
   ok(cl.checklist.items.find(i => i.id === iPia).due_date === '2099-06-05' && cl.checklist.items.find(i => i.id === iPia).description === 'Verificar sifão e flexíveis', 'edita descrição e prazo do item (início + dias)');
+  cl = (await marcos('PATCH', `/tasks/${clId}/items/${iPia}`, { start_date: '2099-06-01', due_date: '2099-06-10' })).data;
+  ok(cl.checklist.items.find(i => i.id === iPia).due_date === '2099-06-10', 'edita o prazo pela data de término');
+  ok((await marcos('PATCH', `/tasks/${clId}/items/${iPia}`, { start_date: '2099-06-10', due_date: '2099-06-01' })).status === 400, 'término antes do início é recusado');
   ok((await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Área externa', text: 'Calçada limpa' }] })).status === 400, 'item incluído depois também exige foto de entrada');
-  cl = (await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Área externa', text: 'Calçada limpa', images: ph(), duration_days: 5 }] })).data;
+  cl = (await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Área externa', text: 'Calçada limpa', images: ph(), start_date: '2099-07-01', due_date: '2099-07-04' }] })).data;
+  ok(cl.checklist.items.find(i => i.text === 'Calçada limpa').due_date === '2099-07-04', 'item novo com data de início e de término');
   const iCal = cl.checklist.items.find(i => i.text === 'Calçada limpa').id;
   ok(cl.checklist.items.length === 5, 'gestor adiciona item depois de criado');
   cl = (await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Cozinha', text: 'Exaustor funcionando', images: ph() }] })).data;

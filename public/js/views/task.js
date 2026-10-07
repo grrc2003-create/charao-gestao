@@ -10,7 +10,10 @@ const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atra
 export async function view(ctx) {
   const t = await api(`/tasks/${ctx.params.id}`);
   // Check-list: equipe do projeto para atribuir itens (só para quem gerencia os itens)
-  if (t.checklist?.can_manage_items) t._team = await api(`/projects/${t.project_id}/assignees`).catch(() => []);
+  if (t.checklist?.can_manage_items) {
+    t._team = await api(`/projects/${t.project_id}/assignees`).catch(() => []);
+    t._groups = (ctx.state.meta.projects.find(p => p.id === t.project_id)?.stages || []).map(s => s.name);
+  }
   return build(t, ctx);
 }
 
@@ -215,7 +218,7 @@ function build(t, ctx) {
 
 function mount(root, t, ctx) {
   const refresh = updated => {
-    if (t._team && !updated._team) updated._team = t._team;
+    if (t._team && !updated._team) { updated._team = t._team; updated._groups = t._groups; }
     const v = build(updated, ctx);
     root.innerHTML = v.html.toString();
     v.mount(root);

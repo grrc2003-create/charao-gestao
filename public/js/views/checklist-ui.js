@@ -314,13 +314,23 @@ function itemCard(t, it, c) {
       ? html`<span class="cli-state st-${it.result}">${RESULT[it.result].short} ${RESULT[it.result].label}</span>${it.nc_count ? html`<span class="cli-fixed" title="Ficou não conforme ${it.nc_count} vez(es) antes de ser corrigido">corrigido · ${it.nc_count}x não conforme</span>` : ''}`
       : html`<span class="cli-state st-pending">Pendente</span>`;
   const menu = c.can_manage_items ? html`<button type="button" class="cli-menu" data-edit-item="${it.id}" aria-label="Editar item ${it.seq}">${icon('more')}</button>` : '';
-  const due = it.due_date ? html`<span class="cli-due ${it.overdue ? 'is-late' : ''}">${icon('calendar')}${it.overdue ? 'Atrasado · ' : 'Até '}${fmtD(it.due_date)}</span>` : '';
+  // Destaque de responsável e prazo (cor do prazo pela urgência)
+  const dueBox = (() => {
+    if (!it.due_date) return html`<span class="fact-due is-none">${icon('calendar')}<span><small>Prazo</small><b>Sem prazo</b></span></span>`;
+    const days = Math.round((Date.parse(it.due_date) - Date.parse(todayISO())) / 86400e3);
+    const [cls, rel] = it.resolved ? ['is-done', it.start_date ? `início ${fmtD(it.start_date)}` : '']
+      : days < 0 ? ['is-late', `atrasado há ${-days} ${days === -1 ? 'dia' : 'dias'}`]
+        : days === 0 ? ['is-soon', 'vence hoje'] : days <= 2 ? ['is-soon', `falta${days > 1 ? 'm' : ''} ${days} ${days === 1 ? 'dia' : 'dias'}`]
+          : ['is-ok', `faltam ${days} dias`];
+    return html`<span class="fact-due ${cls}">${icon('calendar')}<span><small>Prazo</small><b>${fmtD(it.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span></span>`;
+  })();
   const head = html`<div class="cli-top"><span class="cli-num">${it.seq}</span><span class="cli-title">${it.text}</span>${menu}</div>
+    <div class="cli-facts">
+      <span class="fact-who ${it.mine ? 'is-mine' : ''}"><i>${initials(it.responsible_name)}</i><span><small>Responsável${it.assignee_id ? '' : ' (global)'}${it.mine ? ' · seu item' : ''}</small><b>${it.responsible_name}</b></span></span>
+      ${dueBox}
+    </div>
     <div class="cli-meta">
       ${state}
-      <span class="who-chip ${it.mine ? 'is-mine' : ''}"><i>${initials(it.responsible_name)}</i>${it.responsible_name}${it.assignee_id ? '' : ' · global'}</span>
-      ${it.mine && !it.resolved ? html`<span class="mine-chip">seu item</span>` : ''}
-      ${due}
       ${it.result ? html`<span class="cli-when">${icon('check')}${it.answered_by_name || '—'} · ${shortDate(it.answered_at)}</span>` : ''}
     </div>
     ${it.description ? html`<div class="cli-desc"><b>Obs.:</b> ${it.description}</div>` : ''}`;

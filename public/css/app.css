@@ -1030,3 +1030,31 @@ textarea.wiz-input { min-height: 90px; }
 .cl-dash-nums .is-nc b { color: var(--st-atrasada); } .cl-dash-nums .is-late b { color: var(--st-atrasada); }
 .cl-dash-due { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
 .cl-dash-due svg { width: 14px; height: 14px; }
+
+/* Check-list: responsável e prazo em destaque */
+.cli-facts { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 10px 0 0; }
+.cli > .cli-facts { margin: 10px 12px 0 16px; }
+@media (min-width: 560px) { .cli-facts { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); } }
+.fact-who, .fact-due { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.fact-who > span, .fact-due > span { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; line-height: 1.25; }
+.fact-who small, .fact-due small { flex-basis: 100%; }
+.fact-who small, .fact-due small { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.fact-who b, .fact-due b { font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.fact-due em { font-style: normal; font-size: 12px; font-weight: 650; }
+.fact-who i { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 800; background: var(--navy); color: #fff; }
+.fact-who.is-mine { border-color: color-mix(in srgb, var(--orange) 45%, var(--line)); background: var(--orange-50); }
+.fact-who.is-mine i { background: var(--orange); }
+.fact-who.is-mine small { color: var(--orange-700); }
+.fact-due svg { flex: none; width: 22px; height: 22px; color: var(--c, var(--navy)); }
+.fact-due.is-ok { --c: var(--st-em_andamento); background: var(--st-em_andamento-bg); border-color: color-mix(in srgb, var(--c) 25%, transparent); }
+.fact-due.is-ok em { color: var(--c); }
+.fact-due.is-soon { --c: var(--st-aguardando_conferencia); background: var(--st-aguardando_conferencia-bg); border-color: color-mix(in srgb, var(--c) 35%, transparent); }
+.fact-due.is-soon em, .fact-due.is-soon b { color: var(--c); }
+.fact-due.is-late { --c: var(--st-atrasada); background: var(--st-atrasada); border-color: var(--st-atrasada); }
+.fact-due.is-late svg, .fact-due.is-late small, .fact-due.is-late b, .fact-due.is-late em { color: #fff; }
+.fact-due.is-done { --c: var(--steel); }
+.fact-due.is-done em { color: var(--muted); font-weight: 500; }
+.fact-due.is-none { --c: var(--steel-300); }
+.fact-due.is-none b { color: var(--muted); font-weight: 500; }
+/* Fotos de capa / antes × depois com tamanho limitado em telas largas */
+@media (min-width: 720px) { .cli-cover { max-width: 460px; } .cli-ba { max-width: 560px; } }

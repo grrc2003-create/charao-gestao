@@ -71,7 +71,7 @@ export async function view({ params, query }) {
       <div class="r-item-meta small">
         ${!levels.includes('grupo') && i.group ? html`<span class="r-stage">${i.group}</span>` : ''}
         <span>Responsável: <b>${i.responsible_name}</b></span>
-        ${i.due_date ? html`<span class="${i.overdue ? 'late' : ''}">Prazo: ${fmtDate(i.due_date)}${i.overdue ? ' · atrasado' : ''}</span>` : ''}
+        ${i.due_date ? html`<span class="${i.overdue ? 'late' : ''}">Prazo: <b>${fmtDate(i.due_date)}</b>${i.overdue ? ' · atrasado' : ''}</span>` : ''}
         ${i.result ? html`<span>Respondido por ${i.answered_by_name || '—'} em ${fmtDateTime(i.answered_at)}</span>` : ''}
       </div>
       ${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}

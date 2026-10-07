@@ -302,6 +302,35 @@ export function seedDemo() {
       assignee_id: extId, due_date: addDays(T, off), start_date: null }, stageInput: alv, creatorId: 2 });
   }
 
+  // Check-list de exemplo: vistoria final da unidade 501, com responsáveis por item e foto obrigatória
+  {
+    const G = (group, who, list) => list.map(text => ({ group, text, assignee_id: who }));
+    const items = [
+      ...G('Cozinha', 7, ['Tomadas e interruptores funcionando', 'Ponto de gás testado e identificado']),
+      ...G('Cozinha', null, ['Pia e sifão sem vazamentos', 'Revestimento sem peças ocas ou trincadas']),
+      ...G('Banheiro', 5, ['Caimento do piso para o ralo', 'Louças e metais fixados e sem vazamento', 'Rejunte do box completo']),
+      ...G('Sala e dormitórios', extId, ['Pintura sem manchas ou falhas', 'Rodapés fixados e alinhados']),
+      ...G('Sala e dormitórios', null, ['Portas e fechaduras funcionando', 'Esquadrias com vedação e sem riscos']),
+      ...G('Área externa', null, ['Limpeza final da unidade']),
+    ];
+    const clId = insertTask({ project: p1, data: { task_type: 'checklist', photo_rule: 'obrigatoria', items, title: 'Check-list final — Unidade 501',
+      description: 'Vistoria final antes da entrega ao cliente. Registrar foto em todos os itens avaliados.', field_summary: null, notes: null,
+      priority: 'alta', proof_type: 'nenhuma', assignee_id: 4, due_date: addDays(T, 5), start_date: null }, stageInput: null, creatorId: 2 });
+    const answer = (seq, result, by, note) => {
+      const it = one('SELECT id, text FROM checklist_items WHERE task_id = ? AND seq = ?', clId, seq);
+      run('UPDATE checklist_items SET result = ?, note = ?, answered_by = ?, answered_at = ? WHERE id = ?', result, note, by, new Date().toISOString(), it.id);
+      if (result !== 'na') {
+        const f = saveDemoSvg(svgRef(it.text, result === 'conforme' ? 'execucao' : 'referencia'));
+        run('INSERT INTO checklist_files (item_id, stored_name, mime, size, uploaded_by) VALUES (?,?,?,?,?)', it.id, f.stored_name, f.mime, f.size, by);
+      }
+    };
+    answer(1, 'conforme', 7, null);
+    answer(2, 'conforme', 7, null);
+    answer(3, 'nao_conforme', 4, 'Sifão da pia gotejando; acionar hidráulica.');
+    answer(5, 'conforme', 5, null);
+    run(`UPDATE tasks SET status = 'em_andamento', started_at = ? WHERE id = ?`, new Date().toISOString(), clId);
+  }
+
   // Tarefas recorrentes de exemplo
   let monday = addDays(T, 1);
   while (new Date(Date.parse(monday + 'T00:00:00Z')).getUTCDay() !== 1) monday = addDays(monday, 1);

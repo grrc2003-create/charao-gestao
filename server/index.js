@@ -17,6 +17,7 @@ import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
 import * as Recurrences from './services/recurrences.js';
+import * as Checklist from './services/checklist.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
@@ -153,6 +154,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     me: userStats(ctx.user, tasks, map),
     team_summary: team.length ? summarize(tasks.filter(t => ctx.team.has(t.assignee_id))) : null,
     team_size: team.length,
+    my_checklist: Checklist.myPendingItems(ctx),
   });
 });
 
@@ -216,6 +218,19 @@ api.post('/api/tasks/:id/reactivate', (req, res, { ctx, params, body }) => {
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
 api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200, Tasks.deleteTask(ctx, intOrNull(params.id), body, clientIp(req))));
+// ---------- Check-list (itens) ----------
+const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));
+api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
+api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { Checklist.assignItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
+api.patch('/api/tasks/:id/items/:iid', (req, res, { ctx, params, body }) => { Checklist.updateItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
+api.delete('/api/tasks/:id/items/:iid', (req, res, { ctx, params }) => { Checklist.deleteItem(ctx, intOrNull(params.id), intOrNull(params.iid)); taskOut(res, ctx, intOrNull(params.id)); });
+api.post('/api/tasks/:id/items/:iid/answer', (req, res, { ctx, params, body }) => { Checklist.answerItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
+api.delete('/api/tasks/:id/items/:iid/files/:fid', (req, res, { ctx, params }) => {
+  Checklist.removeItemFile(ctx, intOrNull(params.id), intOrNull(params.iid), intOrNull(params.fid));
+  taskOut(res, ctx, intOrNull(params.id));
+});
+api.get('/api/checklist-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Checklist.checklistFileForUser(ctx, intOrNull(params.id))));
+
 api.post('/api/tasks/:id/assignee', (req, res, { ctx, params, body }) => {
   const id = intOrNull(params.id);
   const newName = Tasks.reassignTask(ctx, id, body);

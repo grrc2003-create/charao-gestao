@@ -194,6 +194,8 @@ function describeFilters(ctx, f, users) {
   if (f.stage.length) parts.push(`Classificação: ${all(`SELECT name FROM project_stages WHERE id IN (${f.stage.map(() => '?').join(',')})`, ...f.stage).map(r => r.name).join(', ')}`);
   if (f.kind === 'obra') parts.push('Somente obras');
   if (f.kind === 'interno') parts.push('Somente áreas internas');
+  if (f.tipo === 'checklist') parts.push('Somente check-lists');
+  if (f.tipo === 'tarefa') parts.push('Somente tarefas (sem check-lists)');
   if (f.nivel === 'principais') parts.push('Somente tarefas principais');
   if (f.nivel === 'subtarefas') parts.push('Somente subtarefas');
   if (f.q) parts.push(`Busca: “${f.q}”`);

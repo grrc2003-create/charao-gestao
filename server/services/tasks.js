@@ -8,6 +8,7 @@ import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
+import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
 export const PROOF_TYPES = ['nenhuma', 'foto', 'descricao', 'foto_descricao'];
@@ -27,7 +28,10 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     (SELECT COUNT(*) FROM tasks s WHERE s.parent_id = t.id AND s.cancelled_at IS NULL AND s.status = 'concluida') AS sub_done,
     cb.name AS cancelled_by_name,
     (SELECT rc.title FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_title,
-    (SELECT rc.active FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_active
+    (SELECT rc.active FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_active,
+    (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id) AS cl_total,
+    (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND ci.result IS NOT NULL) AS cl_done,
+    (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND ci.result = 'nao_conforme') AS cl_nc
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id
@@ -91,7 +95,7 @@ function rawTask(id) {
   return t;
 }
 
-function loadVisible(ctx, id) {
+export function loadVisible(ctx, id) {
   const t = rawTask(id);
   if (!canSeeTask(ctx, t)) throw notFound('Tarefa não encontrada.');
   return t;
@@ -117,7 +121,7 @@ export function permissionsFor(ctx, t) {
     reopen: manage && t.status === 'concluida',
     conclude_directly: manage && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || isManagerRole(ctx.user)),
     // Subtarefas: um nível. Quem gerencia a tarefa ou é o responsável por ela pode dividi-la.
-    add_subtask: !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
+    add_subtask: t.task_type !== 'checklist' && !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
     cancel: manage && t.status !== 'concluida',
     ...deletePermission(ctx, t),
   };
@@ -132,7 +136,15 @@ function deletePermission(ctx, t) {
   if (t.exec_description || t.exec_notes) blocks.push('há descrição ou observação de execução');
   if (one(`SELECT 1 FROM task_files WHERE task_id = ? AND kind = 'execucao' LIMIT 1`, t.id)) blocks.push('há fotos de execução');
   if (one('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1', t.id)) blocks.push('possui subtarefas');
+  if (t.task_type === 'checklist' && answeredCount(t.id)) blocks.push('há itens do check-list respondidos');
   return { delete: !blocks.length, delete_blocked: blocks.length ? `Não pode ser excluída: ${blocks.join(', ')}. Use "Cancelar tarefa".` : null };
+}
+
+// Check-list só é entregue/concluído com todos os itens respondidos (e com as fotos, quando obrigatórias)
+function assertChecklistDone(t) {
+  if (t.task_type !== 'checklist') return;
+  const c = checklistCheck(t);
+  if (!c.ok) throw badRequest(`Check-list incompleto: ${c.missing.join(' e ')}.`);
 }
 
 // Tarefa principal só é entregue/concluída com todas as subtarefas concluídas
@@ -163,7 +175,14 @@ export function getTask(ctx, id) {
     chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
+    ...(t.task_type === 'checklist' ? checklistDetail(ctx, t) : {}),
   };
+}
+
+// Check-list: itens + conferência do preenchimento no lugar da comprovação
+function checklistDetail(ctx, t) {
+  const checklist = checklistView(ctx, t);
+  return { checklist, proof_check: { need_photo: false, need_desc: false, has_photo: false, has_desc: false, ok: checklist.check.ok, missing: checklist.check.missing } };
 }
 
 function proofCheck(t, files) {
@@ -199,17 +218,22 @@ export function createTask(ctx, body) {
   if (!canCreateTaskIn(ctx, projectId)) throw forbidden('Você não tem acesso a este projeto.');
   if (['concluido', 'cancelado'].includes(project.status)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
 
+  const isChecklist = body.task_type === 'checklist';
+  if (isChecklist && parent) throw badRequest('Check-list não pode ser subtarefa.');
   const data = {
+    task_type: isChecklist ? 'checklist' : 'tarefa',
+    photo_rule: isChecklist ? oneOf(body.photo_rule, PHOTO_RULES, 'Regra de fotos', 'livre') : null,
     title: str(body.title, { max: 160, required: true, label: 'Título' }),
-    description: str(body.description, { max: 5000, required: true, label: 'Descrição' }),
+    description: str(body.description, { max: 5000, required: !isChecklist, label: 'Descrição' }) || '',
     field_summary: str(body.field_summary, { max: 180, label: 'Resumo para campo' }),
     notes: str(body.notes, { max: 2000, label: 'Observações' }),
     due_date: date(body.due_date, 'Prazo'),
     start_date: date(body.start_date, 'Início previsto'),
     priority: oneOf(body.priority, PRIORITIES, 'Prioridade', 'media'),
-    proof_type: oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação', 'nenhuma'),
+    proof_type: isChecklist ? 'nenhuma' : oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação', 'nenhuma'),
     assignee_id: validateAssignee(intOrNull(body.assignee_id), projectId),
   };
+  if (isChecklist) data.items = readItems(body.items, projectId, { required: true });
   assertDateOrder(data.start_date, data.due_date);
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
   return tx(() => insertTask({ project, parent, data, stageInput: body.stage_id, creatorId: ctx.user.id, images, ctx }));
@@ -234,18 +258,20 @@ export function insertTask({ project, parent = null, data, stageInput, creatorId
     const now = nowIso();
     // Sem classificação escolhida, a tarefa assume "Geral"
     const stageId = resolveStage(projectId, stageInput);
+    const isChecklist = data.task_type === 'checklist';
     const r = run(`INSERT INTO tasks (code, project_id, parent_id, seq, stage_id, title, description, field_summary, notes, assignee_id, assigned_by_id,
-        creator_id, start_date, due_date, priority, proof_type, status, recurrence_id, recurrence_seq, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?, ?, ?)`,
+        creator_id, start_date, due_date, priority, proof_type, status, recurrence_id, recurrence_seq, task_type, photo_rule, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'aberta', ?, ?, ?, ?, ?, ?)`,
       code, projectId, parent?.id ?? null, seq, stageId, data.title, data.description, data.field_summary, data.notes, data.assignee_id,
       data.assignee_id ? creatorId : null, creatorId, data.start_date, data.due_date, data.priority, data.proof_type,
-      recurrence?.id ?? null, recurrence?.seq ?? null, now, now);
+      recurrence?.id ?? null, recurrence?.seq ?? null, isChecklist ? 'checklist' : 'tarefa', isChecklist ? data.photo_rule : null, now, now);
     const id = Number(r.lastInsertRowid);
     const assignee = data.assignee_id ? one('SELECT name FROM users WHERE id = ?', data.assignee_id).name : 'sem responsável';
     const stageName = one('SELECT name FROM project_stages WHERE id = ?', stageId).name;
-    const created = recurrence ? `Tarefa criada automaticamente pela recorrência (${recurrence.seq}ª ocorrência)` : parent ? `Subtarefa criada em ${parent.code}` : 'Tarefa criada';
+    const created = recurrence ? `Tarefa criada automaticamente pela recorrência (${recurrence.seq}ª ocorrência)` : parent ? `Subtarefa criada em ${parent.code}` : isChecklist ? 'Check-list criado' : 'Tarefa criada';
     taskHistory(id, creatorId, created,
-      `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · Comprovação: ${PROOF_LABEL[data.proof_type]}`);
+      `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável${isChecklist ? ' global' : ''}: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · ${isChecklist ? `${data.items.length} item(ns) · ${PHOTO_RULE_LABEL[data.photo_rule]}` : `Comprovação: ${PROOF_LABEL[data.proof_type]}`}`);
+    if (isChecklist) insertItems(id, data.items);
     if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption, img.name);
     for (const f of copyFiles) {
@@ -284,7 +310,8 @@ export function updateTask(ctx, id, body) {
     }
   };
   if ('title' in body) set('title', str(body.title, { max: 160, required: true, label: 'Título' }), 'Título alterado');
-  if ('description' in body) set('description', str(body.description, { max: 5000, required: true, label: 'Descrição' }), 'Descrição alterada', () => '');
+  if ('description' in body) set('description', str(body.description, { max: 5000, required: t.task_type !== 'checklist', label: 'Descrição' }) || '', 'Descrição alterada', () => '');
+  if (t.task_type === 'checklist' && 'photo_rule' in body) set('photo_rule', oneOf(body.photo_rule, PHOTO_RULES, 'Regra de fotos'), 'Regra de fotos do check-list alterada', v => PHOTO_RULE_LABEL[v]);
   if ('field_summary' in body) set('field_summary', str(body.field_summary, { max: 180, label: 'Resumo para campo' }), 'Resumo para campo alterado', () => '');
   if ('notes' in body) set('notes', str(body.notes, { max: 2000, label: 'Observações' }), 'Observações alteradas', () => '');
   // Prazo: definir um prazo inexistente é livre; alterar um prazo já definido é REAGENDAMENTO,
@@ -389,7 +416,7 @@ export function updateExecution(ctx, id, body) {
   });
 }
 
-function autoStart(ctx, t) {
+export function autoStart(ctx, t) {
   if (t.status === 'aberta') {
     run(`UPDATE tasks SET status = 'em_andamento', started_at = COALESCE(started_at, ?) WHERE id = ?`, nowIso(), t.id);
     taskHistory(t.id, ctx.user.id, 'Status alterado', 'Aberta → Em andamento');
@@ -474,6 +501,7 @@ export function transition(ctx, id, action, body = {}) {
         const files = all('SELECT kind, mime FROM task_files WHERE task_id = ?', id);
         const pc = proofCheck(t, files);
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
+        assertChecklistDone(t);
         assertSubtasksDone(t);
         change('aguardando_conferencia', ', delivered_at = ?, review_status = \'pendente\', review_comment = NULL, started_at = COALESCE(started_at, ?)', now, now);
         taskHistory(id, ctx.user.id, 'Enviada para conferência', withBehalf(ctx, t, pc.has_photo || pc.has_desc ? 'Comprovação anexada' : null));
@@ -498,6 +526,7 @@ export function transition(ctx, id, action, body = {}) {
       case 'conclude': {
         if (!can.conclude_directly) throw forbidden('Ação não permitida.');
         assertSubtasksDone(t);
+        assertChecklistDone(t);
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', delivered_at = COALESCE(delivered_at, ?), completed_at = ?, reviewed_by = ?, reviewed_at = ?, review_status = \'aprovada\', review_comment = ?', now, now, ctx.user.id, now, comment);
         taskHistory(id, ctx.user.id, 'Concluída diretamente pelo gestor', comment);
@@ -560,7 +589,7 @@ export function deleteTask(ctx, id, body, ip) {
   if (!can.delete) throw can.delete_blocked ? badRequest(can.delete_blocked) : forbidden('Apenas administradores excluem tarefas.');
   const reason = str(body.reason, { max: 1000, required: true, label: 'Motivo da exclusão' });
   if (reason.length < 5) throw badRequest('Descreva o motivo da exclusão.');
-  const files = all('SELECT stored_name FROM task_files WHERE task_id = ?', id);
+  const files = [...all('SELECT stored_name FROM task_files WHERE task_id = ?', id), ...checklistStoredFiles(id)];
   const resch = one('SELECT COUNT(*) AS n FROM task_reschedules WHERE task_id = ?', id).n;
   tx(() => {
     run('DELETE FROM tasks WHERE id = ?', id); // histórico, imagens e reagendamentos saem em cascata
@@ -588,7 +617,7 @@ export function taskFilters(getAll) {
   return {
     q: (getAll('q')[0] || '').trim().toLowerCase(), status: list('status'), project: intOrNull(first('project')),
     assignee: first('assignee'), priority: list('priority'), due: first('due'), kind: first('kind'),
-    stage: list('stage').map(intOrNull).filter(Boolean), nivel: first('nivel'),
+    stage: list('stage').map(intOrNull).filter(Boolean), nivel: first('nivel'), tipo: first('tipo'),
   };
 }
 
@@ -602,11 +631,12 @@ export function filterTasks(ctx, f, { cancelled = 'incluir' } = {}) {
   if (f.status.length) tasks = tasks.filter(t => f.status.includes(t.eff_status));
   if (f.project) tasks = tasks.filter(t => t.project_id === f.project);
   if (f.assignee === 'none') tasks = tasks.filter(t => !t.assignee_id);
-  else if (f.assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id);
+  else if (f.assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id || ctx.checklist?.has(t.id));
   else if (f.assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(f.assignee));
   if (f.priority.length) tasks = tasks.filter(t => f.priority.includes(t.priority));
   if (f.kind === 'obra' || f.kind === 'interno') tasks = tasks.filter(t => t.project_kind === f.kind);
   if (f.stage.length) tasks = tasks.filter(t => f.stage.includes(t.stage_id));
+  if (f.tipo === 'checklist' || f.tipo === 'tarefa') tasks = tasks.filter(t => (t.task_type || 'tarefa') === f.tipo);
   if (f.nivel === 'principais') tasks = tasks.filter(t => !t.parent_id);
   else if (f.nivel === 'subtarefas') tasks = tasks.filter(t => t.parent_id);
   if (f.due) {

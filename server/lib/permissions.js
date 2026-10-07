@@ -44,7 +44,10 @@ export function teamIds(userId) {
 
 // Contexto de acesso calculado uma vez por requisição
 export function accessContext(user) {
-  return { user, projects: accessibleProjectIds(user), team: teamIds(user.id) };
+  // Check-lists em que o usuário (ou um terceirizado sem acesso liderado por ele) é responsável por algum item
+  const checklist = new Set(all(`SELECT DISTINCT ci.task_id FROM checklist_items ci LEFT JOIN users u ON u.id = ci.assignee_id
+    WHERE ci.assignee_id = ? OR (u.is_external = 1 AND u.login_enabled = 0 AND u.manager_id = ?)`, user.id, user.id).map(r => r.task_id));
+  return { user, projects: accessibleProjectIds(user), team: teamIds(user.id), checklist };
 }
 
 export function canSeeTask(ctx, t) {
@@ -52,6 +55,7 @@ export function canSeeTask(ctx, t) {
   if (isAdmin(user)) return true;
   if (t.assignee_id === user.id || t.creator_id === user.id) return true;
   if (t.assignee_id && ctx.team.has(t.assignee_id)) return true; // gestor acompanha a equipe
+  if (ctx.checklist?.has(t.id)) return true; // responsável por itens do check-list
   if (!canAccessProject(user, t.project_id, ctx.projects)) return false;
   return user.access_scope !== 'proprias';
 }

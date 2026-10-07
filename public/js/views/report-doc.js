@@ -145,7 +145,8 @@ function evidence(t) {
       <div><div class="r-lbl">Solicitação</div><p>${t.description}</p>
         <div class="small muted">Responsável: ${t.assignee_name || '—'} · Prazo: ${fmtDate(t.due_date)} · Comprovação: ${PROOF[t.proof_type].label}</div></div>
       <div><div class="r-lbl">Execução</div>
-        ${t.exec_description ? html`<p>${t.exec_description}</p>` : html`<p class="muted">Sem descrição de execução registrada.</p>`}
+        ${t.task_type === 'checklist' ? html`<p><b>Check-list:</b> ${t.cl_done} de ${t.cl_total} itens respondidos${t.cl_nc ? ` · ${t.cl_nc} não conforme(s)` : ''}. Detalhes no relatório do check-list.</p>` : ''}
+        ${t.exec_description ? html`<p>${t.exec_description}</p>` : t.task_type === 'checklist' ? '' : html`<p class="muted">Sem descrição de execução registrada.</p>`}
         ${t.exec_notes ? html`<p class="small"><b>Obs.:</b> ${t.exec_notes}</p>` : ''}
         ${t.delivered_date ? html`<div class="small">Entregue em ${fmtDate(t.delivered_date)} ${t.on_time ? '· no prazo' : `· ${t.days_late}d de atraso`}</div>` : ''}
         ${t.review_status ? html`<div class="small">Conferência: <b>${{ pendente: 'pendente', aprovada: 'aprovada', devolvida: 'devolvida' }[t.review_status]}</b>${t.reviewer_name ? ` por ${t.reviewer_name}` : ''}${t.review_comment ? ` — “${t.review_comment}”` : ''}</div>` : ''}</div>
@@ -266,7 +267,7 @@ export async function view({ query }) {
     </article>`;
 
   // Relatório de tarefas: volta para a lista com os mesmos filtros
-  const TASK_KEYS = ['q', 'status', 'project', 'assignee', 'priority', 'due', 'kind', 'stage', 'nivel'];
+  const TASK_KEYS = ['q', 'status', 'project', 'assignee', 'priority', 'due', 'kind', 'stage', 'nivel', 'tipo'];
   const taskQs = () => {
     const u = new URLSearchParams();
     for (const k of TASK_KEYS) for (const v of String(q[k] || '').split(',').filter(Boolean)) u.append(k, v);

@@ -2,6 +2,7 @@ import { html, api, icon, PRIORITY, PROOF } from '../core.js';
 import { toast, readAttachments, pickAttachments } from '../ui.js';
 import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
+import { bindComposer, renderDraft, composerHint, PHOTO_RULE } from './checklist-ui.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -23,6 +24,10 @@ export async function view({ params, query, state, navigate }) {
     ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: parent.due_date, stage_id: parent.stage_id }
     : { priority: 'media', proof_type: 'foto', assignee_id: null });
   const pending = []; // imagens/PDFs de referência escolhidos antes de salvar
+  // Tipo: tarefa comum ou check-list (escolhido só na criação; subtarefa é sempre tarefa comum)
+  const canChooseType = !editing && !parent;
+  const isChecklist = editing ? t.task_type === 'checklist' : query.get('tipo') === 'checklist';
+  const photoRule = (t && t.photo_rule) || 'obrigatoria';
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
 
   return {
@@ -35,6 +40,11 @@ export async function view({ params, query, state, navigate }) {
       })}
       ${parent ? html`<div class="notice" style="max-width:860px;margin-bottom:14px">${icon('tasks')}<span>Subtarefa de <b>${parent.code}</b> · ${parent.title}. Ela tem responsável, prazo, comprovação, fotos, conferência e histórico próprios.${!editing && parent.due_date ? ` Prazo da tarefa principal: ${parent.due_date.split('-').reverse().join('/')}.` : ''}</span></div>` : ''}
       <form class="card card-pad form" id="task-form" novalidate style="max-width:860px">
+        ${canChooseType ? html`<fieldset class="fieldset form"><legend>Tipo</legend>
+          <div class="segmented">
+            <label><input type="radio" name="task_type" value="tarefa" ${!isChecklist ? 'checked' : ''}>${icon('tasks')} Tarefa<small>Execução com comprovação (foto/descrição) e conferência</small></label>
+            <label><input type="radio" name="task_type" value="checklist" ${isChecklist ? 'checked' : ''}>${icon('checklist')} Check-list<small>Lista de itens Conforme / Não conforme / N/A, preenchida numa tela só</small></label>
+          </div></fieldset>` : ''}
         <fieldset class="fieldset form"><legend>Solicitação</legend>
           <div class="field"><label class="req" for="project_id">Projeto</label>
             <select id="project_id" name="project_id" required ${editing || parent ? 'disabled' : ''}>${opt('', 'Selecione o projeto ou área interna', projectId)}${projectOptions(projects, projectId, opt)}</select>
@@ -43,7 +53,7 @@ export async function view({ params, query, state, navigate }) {
             <select id="stage_id" name="stage_id"><option value="">Geral</option></select>
             <span class="hint">Opcional. Sem classificação, a tarefa fica em <b>Geral</b>. As opções são cadastradas no projeto.</span></div>
           <div class="field"><label class="req" for="title">Título</label><input id="title" name="title" type="text" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: Conferir armação das vigas do 4º pavimento"></div>
-          <div class="field"><label class="req" for="description">Descrição detalhada</label>
+          <div class="field"><label class="${isChecklist ? '' : 'req'}" for="description" id="desc-label">${isChecklist ? 'Descrição (opcional)' : 'Descrição detalhada'}</label>
             <textarea id="description" name="description" rows="5" maxlength="5000" required placeholder="O que deve ser feito, onde, critérios de aceite e referências de projeto.">${v.description || ''}</textarea></div>
           <div class="field"><label for="field_summary">Resumo para lista de campo</label>
             <input id="field_summary" name="field_summary" type="text" maxlength="180" value="${v.field_summary || ''}" placeholder="Frase curta e objetiva (até 180 caracteres)">
@@ -55,6 +65,7 @@ export async function view({ params, query, state, navigate }) {
           <div class="form-row">
             <div class="field"><label for="assignee_id">Responsável</label>
               <select id="assignee_id" name="assignee_id"><option value="">Selecione o projeto primeiro</option></select>
+              <span class="hint cl-only" ${isChecklist ? '' : 'hidden'}><b>Responsável global</b>: acompanha todos os itens, responde os que não têm responsável próprio e envia o check-list para conferência.</span>
               <span class="hint" id="assignee-hint">Aparecem os usuários e terceirizados da equipe do projeto. Não encontrou alguém? Inclua a pessoa na equipe (Projetos → Editar) ou libere o projeto em Usuários.</span></div>
             <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}"></div>
           </div>
@@ -74,12 +85,24 @@ export async function view({ params, query, state, navigate }) {
             <div class="segmented seg-4">${Object.entries(PRIORITY).map(([k, l]) => html`<label><input type="radio" name="priority" value="${k}" ${v.priority === k ? 'checked' : ''}><span class="prio prio-${k}">${l}</span></label>`)}</div></div>
         </fieldset>
 
-        <fieldset class="fieldset form"><legend>Comprovação exigida</legend>
+        <fieldset class="fieldset form cl-only" id="cl-fs" ${isChecklist ? '' : 'hidden'}><legend>Itens do check-list</legend>
+          <div class="field"><span class="label">Fotos dos itens</span>
+            <div class="segmented">
+              <label><input type="radio" name="photo_rule" value="obrigatoria" ${photoRule === 'obrigatoria' ? 'checked' : ''}>${icon('camera')} Obrigatória em todos<small>Para marcar Conforme ou Não conforme é preciso tirar foto (N/A não exige)</small></label>
+              <label><input type="radio" name="photo_rule" value="livre" ${photoRule === 'livre' ? 'checked' : ''}>${icon('image')} Livre escolha<small>Cada item pode ter foto, mas não é obrigatório</small></label>
+            </div></div>
+          ${!editing ? html`<div class="field"><label for="cl-new">Novo item</label>
+            <input id="cl-new" type="text" maxlength="400" placeholder="Ex.: # Cozinha  ·  Tomadas funcionando @Bruno" autocomplete="off">${composerHint}</div>
+          <div class="cl-draft-head"><b id="cl-count">0 itens</b><button type="button" class="btn btn-ghost btn-sm" id="cl-clear" hidden>${icon('x')}Limpar lista</button></div>
+          <div class="cl-draft" id="cl-draft"></div>` : html`<span class="hint">Os itens são incluídos, atribuídos e excluídos na própria tela do check-list.</span>`}
+        </fieldset>
+
+        <fieldset class="fieldset form task-only" id="proof-fs" ${isChecklist ? 'hidden' : ''}><legend>Comprovação exigida</legend>
           <div class="segmented seg-4">${Object.entries(PROOF).map(([k, p]) => html`<label><input type="radio" name="proof_type" value="${k}" ${v.proof_type === k ? 'checked' : ''}>
             <span class="seg-ic" aria-hidden="true">${p.icon}</span>${k === 'nenhuma' ? 'Nenhuma' : p.label}<small>${PROOF_HELP[k]}</small></label>`)}</div>
         </fieldset>
 
-        ${!editing && !parent ? recurrenceFieldset() : ''}
+        ${!editing && !parent ? html`<div class="task-only" ${isChecklist ? 'hidden' : ''}>${recurrenceFieldset()}</div>` : ''}
 
         ${!editing ? html`<fieldset class="fieldset form"><legend>Referências (imagens ou PDF)</legend>
           <div class="thumbs" id="ref-thumbs"><button type="button" class="add-thumb" id="add-ref">${icon('image')}Foto, imagem ou PDF</button></div>
@@ -89,7 +112,7 @@ export async function view({ params, query, state, navigate }) {
         <div class="form-error" hidden></div>
         <div class="form-actions">
           <a class="btn btn-ghost" href="${editing ? `#/tarefas/${t.id}` : parent ? `#/tarefas/${parent.id}` : '#/tarefas'}">Cancelar</a>
-          <button class="btn btn-primary" type="submit">${icon('check')}${editing ? 'Salvar alterações' : 'Criar tarefa'}</button>
+          <button class="btn btn-primary" type="submit">${icon('check')}<span id="submit-label">${editing ? 'Salvar alterações' : isChecklist ? 'Criar check-list' : 'Criar tarefa'}</span></button>
         </div>
       </form>`,
     mount(root) {
@@ -101,7 +124,7 @@ export async function view({ params, query, state, navigate }) {
           root.querySelector('#due-label').textContent = on ? 'Prazo da 1ª ocorrência' : 'Prazo';
           root.querySelector('#due-label').classList.toggle('req', on);
           root.querySelector('#start-row').hidden = on;
-          f.querySelector('[type=submit]').lastChild.textContent = on ? 'Criar tarefa recorrente' : 'Criar tarefa';
+          root.querySelector('#submit-label').textContent = on ? 'Criar tarefa recorrente' : 'Criar tarefa';
         },
       }) : null;
       // Reagendamento: alterar um prazo já definido exige justificativa
@@ -115,11 +138,65 @@ export async function view({ params, query, state, navigate }) {
         f.due_date.addEventListener('change', sync);
       }
       const assigneeSel = f.querySelector('#assignee_id');
+      // ---------- Check-list: tipo, itens e cadastro rápido ----------
+      let team = [];
+      const items = [];
+      const clState = { group: null, groupAssignee: null };
+      const typeIs = () => (f.querySelector('[name=task_type]:checked')?.value || (isChecklist ? 'checklist' : 'tarefa')) === 'checklist';
+      const globalName = () => team.find(u => String(u.id) === assigneeSel.value)?.name || '';
+      const draft = root.querySelector('#cl-draft');
+      const drawItems = () => {
+        if (!draft) return;
+        draft.innerHTML = renderDraft(items, team, globalName()).toString();
+        root.querySelector('#cl-count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'itens'}`;
+        root.querySelector('#cl-clear').hidden = !items.length;
+      };
+      const syncType = () => {
+        const cl = typeIs();
+        root.querySelectorAll('.cl-only').forEach(e => (e.hidden = !cl));
+        root.querySelectorAll('.task-only').forEach(e => (e.hidden = cl));
+        const rec = root.querySelector('#rec-on');
+        if (cl && rec?.checked) rec.click();
+        root.querySelector('#desc-label').textContent = cl ? 'Descrição (opcional)' : 'Descrição detalhada';
+        root.querySelector('#desc-label').classList.toggle('req', !cl);
+        root.querySelector('#submit-label').textContent = editing ? 'Salvar alterações' : cl ? 'Criar check-list' : 'Criar tarefa';
+        f.title.placeholder = cl ? 'Ex.: Check-list final de obra — Bloco A' : 'Ex.: Conferir armação das vigas do 4º pavimento';
+      };
+      f.querySelectorAll('[name=task_type]').forEach(r => r.addEventListener('change', syncType));
+      if (draft) {
+        bindComposer(root.querySelector('#cl-new'), {
+          users: () => team, state: clState,
+          onAdd: list => {
+            items.push(...list);
+            drawItems();
+            draft.lastElementChild?.scrollIntoView({ block: 'nearest' });
+          },
+        });
+        draft.addEventListener('input', e => {
+          const row = e.target.closest('[data-i]');
+          if (row && e.target.classList.contains('cl-draft-text')) items[Number(row.dataset.i)].text = e.target.value;
+        });
+        draft.addEventListener('change', e => {
+          const row = e.target.closest('[data-i]');
+          if (row && e.target.classList.contains('cl-draft-who')) items[Number(row.dataset.i)].assignee_id = e.target.value ? Number(e.target.value) : null;
+        });
+        draft.addEventListener('click', e => {
+          const rm = e.target.closest('.cl-draft-rm');
+          if (!rm) return;
+          items.splice(Number(rm.closest('[data-i]').dataset.i), 1);
+          drawItems();
+        });
+        root.querySelector('#cl-clear').addEventListener('click', () => { items.length = 0; clState.group = null; clState.groupAssignee = null; drawItems(); });
+        assigneeSel.addEventListener('change', drawItems);
+        drawItems();
+      }
 
       const loadAssignees = async pid => {
         if (!pid) { assigneeSel.innerHTML = '<option value="">Selecione o projeto primeiro</option>'; return; }
         try {
           const users = await api(`/projects/${pid}/assignees`);
+          team = users;
+          drawItems();
           const cur = assigneeSel.value || v.assignee_id || (editing ? '' : state.user.id);
           assigneeSel.innerHTML = html`<option value="">Sem responsável (definir depois)</option>${users.map(u => opt(u.id, `${u.name}${u.is_external ? ` · Terceirizado${u.company ? ` (${u.company})` : ''}` : u.job_title ? ` · ${u.job_title}` : ''}`, cur))}`.toString();
         } catch (e) { toast(e.message, 'err'); }
@@ -180,7 +257,14 @@ export async function view({ params, query, state, navigate }) {
             if (pending.reduce((n, p) => n + p.data.length, 0) > 10_000_000) throw new Error('As referências somam mais de 10 MB. Crie a tarefa com menos arquivos e anexe os demais depois, na própria tarefa.');
             data.images = pending.map(p => ({ data: p.data, name: p.name }));
             if (parent) { data.parent_id = parent.id; data.project_id = parent.project_id; }
-            if (rec?.enabled()) {
+            if (typeIs()) {
+              const list = items.map(i => ({ ...i, text: i.text.trim() })).filter(i => i.text);
+              if (!list.length) throw new Error('Inclua ao menos um item no check-list (digite o item e tecle Enter).');
+              data.task_type = 'checklist';
+              data.items = list;
+              delete data.proof_type;
+            }
+            if (!typeIs() && rec?.enabled()) {
               const r = await api('/recurrences', { method: 'POST', body: { ...data, ...rec.read() } });
               toast(r.generated ? `Recorrência criada: ${r.generated} ocorrência(s) já gerada(s).` : 'Recorrência criada. As ocorrências serão geradas conforme a antecedência.');
               navigate(`/recorrencias/${r.id}`);

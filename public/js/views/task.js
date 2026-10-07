@@ -2,12 +2,15 @@
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
+import { checklistSection, bindChecklist, PHOTO_RULE } from './checklist-ui.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
   : t.days_to_due === 0 ? 'Vence hoje' : t.days_to_due === 1 ? 'Vence amanhã' : `Faltam ${t.days_to_due} dias`;
 
 export async function view(ctx) {
   const t = await api(`/tasks/${ctx.params.id}`);
+  // Check-list: equipe do projeto para atribuir itens (só para quem gerencia os itens)
+  if (t.checklist?.can_manage_items) t._team = await api(`/projects/${t.project_id}/assignees`).catch(() => []);
   return build(t, ctx);
 }
 
@@ -118,9 +121,11 @@ function build(t, ctx) {
             ${t.reschedule_count ? html`<button type="button" class="resched-badge ${t.chronic ? 'is-chronic' : ''}" data-act="goresched" style="cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada${t.chronic ? ' · crônica' : ''}</button>` : ''}
             ${t.late_episodes ? html`<i class="late-badge" title="Repactuações após vencer + entrega após o prazo + atraso atual">atrasou ${t.late_episodes}x</i>` : ''}</span></div></div>
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
-          <div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>
+          ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
+            : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
-        ${can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          ${t.checklist ? html`<a class="btn btn-ghost btn-sm" href="#/imprimir/checklist/${t.id}">${icon('print')}Relatório PDF</a>` : ''}
           ${can.edit ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
           ${can.reassign ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
           ${can.reschedule ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
@@ -155,7 +160,7 @@ function build(t, ctx) {
         </div>
       </section>
 
-      <section class="card block block-exec" aria-labelledby="blk-exec">
+      ${t.checklist ? checklistSection(t, { reviewBox: reviewBox(), reviewActions, can }) : html`<section class="card block block-exec" aria-labelledby="blk-exec">
         <header class="block-head"><span class="step">2</span><h2 id="blk-exec">Execução</h2>
           <span class="right">${t.status === 'concluida' ? statusBadge('concluida', { short: true }) : t.status === 'aguardando_conferencia' ? statusBadge('aguardando_conferencia', { short: true }) : ''}</span></header>
         <div class="block-body">
@@ -175,7 +180,7 @@ function build(t, ctx) {
           ${execActions}
           ${reviewActions}
         </div>
-      </section>
+      </section>`}
 
       ${subtasksBlock}
 
@@ -210,6 +215,7 @@ function build(t, ctx) {
 
 function mount(root, t, ctx) {
   const refresh = updated => {
+    if (t._team && !updated._team) updated._team = t._team;
     const v = build(updated, ctx);
     root.innerHTML = v.html.toString();
     v.mount(root);
@@ -381,6 +387,7 @@ function mount(root, t, ctx) {
     },
   };
 
+  if (t.checklist) bindChecklist(root, t, ctx, refresh);
   root.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => {
     e.preventDefault();
     actions[b.dataset.act]?.();

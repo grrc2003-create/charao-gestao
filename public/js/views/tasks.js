@@ -17,6 +17,7 @@ export async function view({ state, query, setQuery }) {
     stage: query.get('stage') || '',
     org: readOrg(query),
     kind: query.get('kind') || '',
+    tipo: query.get('tipo') || '',
   };
   // Contagem por status sem o filtro de status (para os chips)
   const [tasks, base, cancelled] = await Promise.all([
@@ -26,7 +27,7 @@ export async function view({ state, query, setQuery }) {
   ]);
   const counts = Object.fromEntries(STATUS_ORDER.map(s => [s, base.filter(t => t.eff_status === s).length]));
   const meta = state.meta;
-  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind'].filter(k => f[k]).length;
+  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo'].filter(k => f[k]).length;
   const opt = (v, l, cur) => html`<option value="${v}" ${cur === String(v) ? 'selected' : ''}>${l}</option>`;
   // Classificações: do projeto escolhido, ou agrupadas por projeto
   const selProject = meta.projects.find(p => String(p.id) === f.project);
@@ -46,6 +47,7 @@ export async function view({ state, query, setQuery }) {
           ${f.assignee && f.assignee !== 'none' && !f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?user=${f.assignee === 'me' ? state.user.id : f.assignee}">${icon('checklist')}Lista de campo</a>` : ''}
           <button type="button" class="btn btn-ghost" id="emit-report">${icon('reports')}Emitir relatório</button>
           <a class="btn btn-ghost" href="#/recorrencias${f.project ? `?project=${f.project}` : ''}">${icon('history')}Recorrentes</a>
+          <a class="btn btn-ghost" href="#/tarefas/nova?tipo=checklist${f.project ? `&projeto=${f.project}` : ''}">${icon('checklist')}Novo check-list</a>
           <a class="btn btn-accent" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}">${icon('plus')}Nova tarefa</a>`,
       })}
       <form class="toolbar" id="filters" role="search">
@@ -66,6 +68,7 @@ export async function view({ state, query, setQuery }) {
           <select name="priority" aria-label="Prioridade">${opt('', 'Todas as prioridades', f.priority)}${Object.entries(PRIORITY).map(([k, l]) => opt(k, l, f.priority))}</select>
           <select name="stage" aria-label="Classificação">${opt('', 'Todas as classificações', f.stage)}${stageOptions}</select>
           ${meta.projects.some(p => p.kind === 'interno') ? html`<select name="kind" aria-label="Obras ou interno">${opt('', 'Obras e interno', f.kind)}${opt('obra', 'Somente obras', f.kind)}${opt('interno', 'Somente interno (empresa)', f.kind)}</select>` : ''}
+          <select name="tipo" aria-label="Tarefas ou check-lists">${opt('', 'Tarefas e check-lists', f.tipo)}${opt('tarefa', 'Somente tarefas', f.tipo)}${opt('checklist', 'Somente check-lists', f.tipo)}</select>
           <select name="nivel" aria-label="Tipo">${opt('', 'Tarefas e subtarefas', f.nivel)}${opt('principais', 'Somente tarefas principais', f.nivel)}${opt('subtarefas', 'Somente subtarefas', f.nivel)}</select>
           ${advCount || f.q || f.status.length ? html`<button type="button" class="btn btn-ghost btn-sm" id="clear">${icon('x')}Limpar</button>` : ''}
         </div>
@@ -119,12 +122,12 @@ export async function view({ state, query, setQuery }) {
         if (!r) return;
         const qs = new URLSearchParams({ type: 'tarefas', level: r.level, group: r.group });
         if (!r.gantt) qs.set('gantt', '0');
-        for (const k of ['q', 'project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind']) if (f[k]) qs.set(k, f[k]);
+        for (const k of ['q', 'project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo']) if (f[k]) qs.set(k, f[k]);
         const st = f.status.filter(s => s !== 'cancelada');
         if (st.length) qs.set('status', st.join(','));
         ctx.navigate(`/imprimir/relatorio?${qs}`);
       });
-      root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '', stage: '', kind: '' }));
+      root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '', stage: '', kind: '', tipo: '' }));
     },
   };
 }

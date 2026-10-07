@@ -29,6 +29,13 @@ export async function view({ state }) {
         sub: `${plural(d.projects.filter(p => p.status === 'em_andamento').length, 'obra ativa', 'obras ativas')} · ${plural(s.total, 'tarefa visível', 'tarefas visíveis')} para o seu perfil`,
         actions: html`<a class="btn btn-ghost" href="#/relatorios">${icon('reports')}Relatórios</a><a class="btn btn-accent" href="#/tarefas/nova">${icon('plus')}Nova tarefa</a>`,
       })}
+      ${d.my_checklist?.length ? html`<section class="card section cl-alert">
+        <div class="card-head"><h2>${icon('checklist')} Itens de check-list para você</h2><a class="sub" href="#/tarefas?tipo=checklist&assignee=me">Ver check-lists</a></div>
+        <ul class="rows">${d.my_checklist.map(c => html`<li><a class="row-link" href="#/tarefas/${c.id}">
+          <div class="grow"><div class="row-title"><span class="mono muted" style="font-size:12px">${c.code}</span> ${c.title}</div>
+            <div class="row-meta"><span>${c.project_code} · ${c.project_name}</span>${c.due_date ? html`<span>${icon('calendar')} ${c.due_date.split('-').reverse().join('/')}</span>` : ''}</div></div>
+          <span class="pill pill-orange">${c.pending} ${c.pending === 1 ? 'item pendente' : 'itens pendentes'}</span><span class="chev">${icon('chevron')}</span></a></li>`)}</ul>
+      </section>` : ''}
       ${kpiBlock(s, { linkBase: '#/tarefas' })}
 
       <div class="grid grid-dash section">

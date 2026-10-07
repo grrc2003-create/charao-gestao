@@ -583,6 +583,61 @@ async function main() {
   await marcos('POST', `/tasks/${tA}/actions/submit`);
   ok((await felipeC('POST', `/tasks/${tA}/assignee`, { assignee_id: 5 })).status === 400 && !(await felipeC('GET', `/tasks/${tA}`)).data.can.reassign, 'tarefa entregue para conferência não troca de responsável');
 
+  console.log('Check-list (itens, responsáveis por item, foto obrigatória, conferência)');
+  const clBase = { project_id: 1, task_type: 'checklist', title: 'Check-list final de obra — Bloco A', assignee_id: 4, photo_rule: 'obrigatoria', due_date: '2099-06-01' };
+  ok((await ricardo('POST', '/tasks', { ...clBase, items: [] })).status === 400, 'check-list exige ao menos um item');
+  ok((await ricardo('POST', '/tasks', { ...clBase, items: [{ text: 'X', assignee_id: 6 }] })).status === 400, 'responsável do item precisa ter acesso ao projeto');
+  const clR = await ricardo('POST', '/tasks', { ...clBase, items: [
+    { group: 'Cozinha', text: 'Tomadas e interruptores funcionando', assignee_id: 7 },
+    { group: 'Cozinha', text: 'Pia sem vazamentos' },
+    { group: 'Sala', text: 'Pintura sem manchas', assignee_id: 5 },
+    { group: 'Sala', text: 'Rejunte do piso', assignee_id: extT },
+  ] });
+  ok(clR.status === 201, 'gestor cria check-list sem descrição, com itens agrupados e responsáveis por item');
+  const clId = clR.data.id;
+  let cl = (await ricardo('GET', `/tasks/${clId}`)).data;
+  ok(cl.task_type === 'checklist' && cl.checklist.items.length === 4 && cl.checklist.photo_rule === 'obrigatoria' && !cl.can.add_subtask, 'check-list com 4 itens, regra de foto e sem subtarefas');
+  ok(cl.checklist.items[1].responsible_name === 'Marcos Silva' && cl.checklist.items[0].responsible_name === 'Bruno Costa', 'item sem responsável fica com o responsável global');
+  ok(cl.history.some(h => h.action === 'Check-list criado' && h.details.includes('4 item(ns)')), 'histórico registra a criação do check-list');
+  // Bruno só vê as próprias tarefas, mas tem item no check-list
+  ok((await brunoC('GET', `/tasks/${clId}`)).status === 200, 'responsável por item vê o check-list (mesmo com escopo só próprias)');
+  ok((await brunoC('GET', '/tasks?assignee=me')).data.some(t => t.id === clId), '"Minhas tarefas" inclui o check-list com itens meus');
+  ok((await brunoC('GET', '/dashboard')).data.my_checklist.some(c => c.id === clId && c.pending === 1), 'Dashboard avisa os itens pendentes do usuário');
+  const [iTom, iPia, iPint, iRej] = cl.checklist.items.map(i => i.id);
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iPint}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).status === 403, 'não responde item de outro responsável');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme' })).status === 400, 'foto obrigatória bloqueia resposta sem foto');
+  cl = (await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).data;
+  ok(cl.checklist.items[0].result === 'conforme' && cl.checklist.items[0].files.length === 1 && cl.checklist.items[0].answered_by_name === 'Bruno Costa' && cl.status === 'em_andamento', 'responsável do item responde com foto (tarefa entra em andamento)');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { images: [{ data: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 x %%EOF').toString('base64') }] })).status === 400, 'item do check-list aceita só fotos');
+  const clFileId = cl.checklist.items[0].files[0].id;
+  ok((await brunoC('DELETE', `/tasks/${clId}/items/${iTom}/files/${clFileId}`)).status === 400, 'não remove a única foto obrigatória de item respondido');
+  ok((await felipeC('POST', `/tasks/${clId}/items/${iPint}/answer`, { result: 'na' })).status === 200, 'N/A não exige foto');
+  cl = (await marcos('POST', `/tasks/${clId}/items/${iPia}/answer`, { result: 'nao_conforme', note: 'Sifão gotejando', images: [{ data: tinyPng() }] })).data;
+  ok(cl.checklist.items[1].result === 'nao_conforme' && cl.checklist.items[1].note === 'Sifão gotejando', 'responsável global responde item sem responsável, com observação');
+  ok(!cl.checklist.check.ok && (await marcos('POST', `/tasks/${clId}/actions/submit`)).status === 400, 'envio bloqueado com item sem resposta');
+  cl = (await marcos('POST', `/tasks/${clId}/items/${iRej}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).data;
+  ok(cl.history.some(h => h.action === 'Item do check-list respondido' && h.details.includes('em nome de Carlos Pintor')), 'líder responde o item do terceirizado sem acesso (histórico "em nome de")');
+  ok((await marcos('POST', `/tasks/${clId}/items`, { items: [{ text: 'Novo' }] })).status === 403, 'colaborador não altera os itens do check-list');
+  cl = (await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Área externa', text: 'Calçada limpa' }] })).data;
+  const iCal = cl.checklist.items.find(i => i.text === 'Calçada limpa').id;
+  ok(cl.checklist.items.length === 5, 'gestor adiciona item depois de criado');
+  cl = (await ricardo('POST', `/tasks/${clId}/items/assign`, { item_ids: [iCal], assignee_id: 5 })).data;
+  ok(cl.checklist.items.find(i => i.id === iCal).assignee_id === 5, 'atribui responsável a itens em lote');
+  ok((await ricardo('DELETE', `/tasks/${clId}/items/${iTom}`)).status === 400, 'item respondido não pode ser excluído');
+  ok((await felipeC('POST', `/tasks/${clId}/items/${iCal}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).status === 200, 'novo responsável responde o item atribuído');
+  ok((await fetch(`${BASE}/api/checklist-files/${clFileId}`, { headers: { cookie: await cookieOf('bruno@charao.eng.br') } })).status === 200
+    && (await fetch(`${BASE}/api/checklist-files/${clFileId}`, { headers: { cookie: await cookieOf('camila@charao.eng.br') } })).status === 404, 'foto do item só abre para quem vê o check-list');
+  const byType = (await ricardo('GET', '/tasks?tipo=checklist')).data;
+  ok(byType.every(t => t.task_type === 'checklist') && byType.some(t => t.id === clId), 'filtro por tipo Check-list');
+  ok((await ana('GET', `/tasks/${clId}`)).data.can.delete === false, 'check-list com itens respondidos não pode ser excluído definitivamente');
+  cl = (await marcos('POST', `/tasks/${clId}/actions/submit`)).data;
+  ok(cl.status === 'aguardando_conferencia' && cl.cl_total === 5 && cl.cl_done === 5 && cl.cl_nc === 1, 'com todos os itens respondidos o check-list vai para conferência');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'na' })).status === 400, 'depois de entregue os itens não mudam');
+  ok((await ricardo('POST', `/tasks/${clId}/actions/approve`, {})).data.status === 'concluida', 'gestor confere e conclui o check-list');
+  const clLivre = (await ricardo('POST', '/tasks', { ...clBase, photo_rule: 'livre', items: [{ text: 'Item livre' }] })).data.id;
+  const il = (await ricardo('GET', `/tasks/${clLivre}`)).data.checklist.items[0].id;
+  ok((await marcos('POST', `/tasks/${clLivre}/items/${il}/answer`, { result: 'conforme' })).status === 200, 'foto livre: responde sem foto');
+
   console.log('Perfil Coordenador (gestor que também aprova as próprias tarefas)');
   const coordId = (await ana('POST', '/users', { name: 'Carla Coordenadora', email: 'carla@charao.eng.br', role: 'coordenador', access_scope: 'projetos', project_ids: [1], password: 'coord1234' })).data.id;
   ok((await ana('GET', `/users/${coordId}`)).data.user.role === 'coordenador', 'administrador cadastra o perfil Coordenador');

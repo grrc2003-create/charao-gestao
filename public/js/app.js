@@ -13,6 +13,7 @@ import * as User from './views/user.js';
 import * as Reports from './views/reports.js';
 import * as ReportDoc from './views/report-doc.js';
 import * as FieldList from './views/field-list.js';
+import * as ReportChecklist from './views/report-checklist.js';
 import * as Account from './views/account.js';
 import * as Audit from './views/audit.js';
 import * as Settings from './views/settings.js';
@@ -53,6 +54,7 @@ const routes = [
   ['/relatorios', Reports.view],
   ['/imprimir/relatorio', ReportDoc.view, { print: true }],
   ['/imprimir/campo', FieldList.view, { print: true }],
+  ['/imprimir/checklist/:id', ReportChecklist.view, { print: true }],
   ['/conta', Account.view],
   ['/auditoria', Audit.view],
   ['/configuracoes', Settings.view],

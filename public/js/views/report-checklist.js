@@ -56,19 +56,22 @@ export async function view({ params, query }) {
     : i.result === 'conforme' ? { t: i.nc_count ? `Corrigido · ${i.nc_count}x NC` : 'Conforme', c: RES_COLOR.conforme }
       : i.result === 'na' ? { t: i.nc_count ? 'Encerrado (N/A)' : 'N/A', c: RES_COLOR.na } : { t: 'Pendente', c: '#A86F0E' };
   const fig = (f, label, color) => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${label ? html`<b style="color:${color}">${label}</b> · ` : ''}${fmtDateTime(f.created_at)}</figcaption></figure>`;
-  // Fotos do item, em ordem: todas as do cadastro e as de cada resposta do histórico (nada quando não há fotos)
+  // Quadro de fotos do item: "Não conformidade" (cadastro + respostas Não conforme) e "Correção" (Conforme/N/A).
+  // Miniaturas pequenas com a data; nada quando o item não tem fotos.
   const photosOf = i => {
     if (!withPhotos) return '';
     const seen = new Set();
-    const out = [];
-    const add = (f, label, color) => { if (f && !seen.has(f.id)) { seen.add(f.id); out.push(fig(f, label, color)); } };
-    i.refs.forEach(f => add(f, 'CADASTRO', '#C0392B'));
-    for (const h of i.history.filter(h => !h.registration)) {
-      const [label, color] = h.result === 'nao_conforme' ? ['NÃO CONFORME', '#C0392B'] : h.result === 'conforme' ? ['DEPOIS', '#2E8B57'] : ['N/A', '#6E7A86'];
-      h.files.forEach(f => add(f, label, color));
-    }
-    i.files.forEach(f => add(f, i.open_nc ? 'NÃO CONFORME' : 'FOTO', '#46535F'));
-    return out.length ? html`<div class="r-photos r-ph-2">${out}</div>` : '';
+    const nc = [], fix = [];
+    const add = (list, f) => { if (f && !seen.has(f.id)) { seen.add(f.id); list.push(f); } };
+    i.refs.forEach(f => add(nc, f));
+    for (const h of i.history.filter(h => !h.registration)) h.files.forEach(f => add(h.result === 'nao_conforme' ? nc : fix, f));
+    i.files.forEach(f => add(i.resolved ? fix : nc, f));
+    if (!nc.length && !fix.length) return '';
+    const thumbs = list => html`<div class="r-pb-grid">${list.map(f => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${fmtDateTime(f.created_at).replace(/\/\d{4},/, ',')}</figcaption></figure>`)}</div>`;
+    return html`<div class="r-pbox ${nc.length && fix.length ? 'is-two' : ''}">
+      ${nc.length ? html`<div class="r-pb-col"><div class="r-pb-h is-nc">Não conformidade · ${nc.length} foto(s)</div>${thumbs(nc)}</div>` : ''}
+      ${fix.length ? html`<div class="r-pb-col"><div class="r-pb-h is-ok">${i.result === 'na' ? 'Encerramento (N/A)' : 'Correção'} · ${fix.length} foto(s)</div>${thumbs(fix)}</div>` : ''}
+    </div>`;
   };
   // Prazo em destaque, com a cor pela urgência (vencido, vence em até 2 dias, no prazo, resolvido, sem prazo)
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);

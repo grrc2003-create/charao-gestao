@@ -1124,3 +1124,53 @@ textarea.wiz-input { min-height: 90px; }
 .cli-photos { align-items: center; }
 .cli-ph-add { width: auto; height: 36px; flex-direction: row; gap: 5px; padding: 0 12px; border-radius: 9px; font-size: 12.5px; font-weight: 600; }
 .cli-ph-add svg { width: 16px; height: 16px; }
+
+/* Check-list: item recolhido (descrição · prazo · situação); abre ao tocar */
+.cli > summary.cli-sum { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 9px 10px 9px 14px; }
+.cli-sum .cli-num { width: 24px; height: 24px; border-radius: 7px; font-size: 11.5px; margin: 0; }
+.cli-sum .cli-title { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.cli-sum-r { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.cli-chev { display: grid; place-items: center; color: var(--muted); transition: transform .15s; }
+.cli-chev svg { width: 16px; height: 16px; transform: rotate(90deg); }
+.cli[open] > summary .cli-chev { transform: rotate(180deg); }
+.cli[open] > summary { border-bottom: 1px dashed var(--line); }
+.cli-sum .cli-state { font-size: 11px; padding: 2px 8px; }
+.cli-due { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 8px;
+  color: var(--ink-2); background: var(--navy-50); border: 1px solid transparent; }
+.cli-due svg { width: 12px; height: 12px; }
+.cli-due.is-ok { color: var(--st-em_andamento); background: var(--st-em_andamento-bg); }
+.cli-due.is-week { color: #7A5A00; background: #FFF3C4; border-color: #E9C94A; }
+.cli-due.is-today { color: #fff; background: #F26B21; }
+.cli-due.is-late { color: #fff; background: var(--st-atrasada); }
+.cli-due.is-done, .cli-due.is-none { color: var(--muted); background: transparent; border-color: var(--line); font-weight: 600; }
+/* Item atrasado: card todo em vermelho; vence hoje: laranja; na semana: amarelo (barra lateral) */
+.cli.cli-due-late:not(.res-conforme):not(.res-na) { --bar: var(--st-atrasada); border-color: color-mix(in srgb, var(--st-atrasada) 45%, var(--line)); background: color-mix(in srgb, var(--st-atrasada) 5%, var(--surface)); }
+.cli.cli-due-today { --bar: #F26B21; border-color: color-mix(in srgb, #F26B21 45%, var(--line)); }
+.cli.cli-due-week.res-pending { --bar: #E9C94A; }
+.cli-detail { padding: 8px 0 0; }
+.cli-detail > .cli-top-open { display: flex; justify-content: flex-end; padding: 0 12px 0 16px; margin-bottom: -30px; position: relative; z-index: 1; pointer-events: none; }
+.cli-detail > .cli-top-open .cli-menu { pointer-events: auto; }
+.cli-detail > .cli-top-open:empty { display: none; }
+.cli-detail > .cli-tags { margin: 0 52px 6px 16px; }
+.cli-detail > .cli-facts { margin: 0 52px 0 16px; }
+.cli-detail > .cli-meta { padding: 0 12px 0 16px; margin-left: 0; }
+.cli-detail > .cli-desc { padding: 0 12px 0 16px; margin: 6px 0 0; }
+.cli-detail .cli-body { padding-top: 10px; }
+/* Prazo (detalhe): vence hoje laranja, na semana amarelo */
+.fact-due.is-today { --c: #fff; background: #F26B21; border-color: #F26B21; }
+.fact-due.is-today svg, .fact-due.is-today small, .fact-due.is-today b, .fact-due.is-today em { color: #fff; }
+.fact-due.is-week { --c: #7A5A00; background: #FFF3C4; border-color: #E9C94A; }
+.fact-due.is-week b, .fact-due.is-week em, .fact-due.is-week small { color: #7A5A00; }
+/* Computador: botões e quadros na largura do conteúdo, sem esticar */
+@media (min-width: 720px) {
+  .cli-answer { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ans { flex: none; min-height: 34px; padding: 4px 14px; font-size: 12.5px; }
+  .ans-cam { position: static; margin-left: 2px; }
+  .cli-facts { grid-template-columns: repeat(2, minmax(0, 240px)); }
+  .cli > summary.cli-sum { padding: 7px 10px 7px 14px; }
+}
+@media (max-width: 559px) {
+  .cli > summary.cli-sum { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .cli-sum-r { grid-column: 2 / 3; justify-content: flex-start; }
+  .cli-chev { grid-row: 1; grid-column: 3; }
+}

@@ -304,7 +304,18 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', by: 'group' });
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', by: 'group', open: new Set() });
+
+// Urgência do prazo: atrasado (vermelho) · vence hoje (laranja) · nos próximos 7 dias (amarelo) · depois (azul)
+export function dueLevel(due, resolved, today = todayISO()) {
+  if (!due) return { cls: 'is-none', rel: '' };
+  const days = Math.round((Date.parse(due) - Date.parse(today)) / 86400e3);
+  if (resolved) return { cls: 'is-done', rel: '' };
+  if (days < 0) return { cls: 'is-late', rel: `atrasado há ${-days} ${days === -1 ? 'dia' : 'dias'}` };
+  if (days === 0) return { cls: 'is-today', rel: 'vence hoje' };
+  if (days <= 7) return { cls: 'is-week', rel: `falta${days > 1 ? 'm' : ''} ${days} ${days === 1 ? 'dia' : 'dias'}` };
+  return { cls: 'is-ok', rel: `faltam ${days} dias` };
+}
 
 // Filtro por grupo e/ou responsável (tela e relatório). '' = todos; '~' = sem grupo / sem responsável.
 export const NONE = '~';
@@ -379,22 +390,33 @@ function itemCard(t, it, c) {
   // Destaque de responsável e prazo (cor do prazo pela urgência)
   const dueBox = (() => {
     if (!it.due_date) return html`<span class="fact-due is-none">${icon('calendar')}<span><small>Prazo</small><b>Sem prazo</b></span></span>`;
-    const days = Math.round((Date.parse(it.due_date) - Date.parse(todayISO())) / 86400e3);
-    const [cls, rel] = it.resolved ? ['is-done', it.start_date ? `início ${fmtD(it.start_date)}` : '']
-      : days < 0 ? ['is-late', `atrasado há ${-days} ${days === -1 ? 'dia' : 'dias'}`]
-        : days === 0 ? ['is-soon', 'vence hoje'] : days <= 2 ? ['is-soon', `falta${days > 1 ? 'm' : ''} ${days} ${days === 1 ? 'dia' : 'dias'}`]
-          : ['is-ok', `faltam ${days} dias`];
+    const lv = dueLevel(it.due_date, it.resolved);
+    const cls = lv.cls;
+    const rel = it.resolved ? (it.start_date ? `início ${fmtD(it.start_date)}` : '') : lv.rel;
     return html`<span class="fact-due ${cls}">${icon('calendar')}<span><small>Prazo</small><b>${fmtD(it.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span></span>`;
   })();
   const nPhotos = new Set([...it.refs, ...it.files, ...it.history.flatMap(h => h.files)].map(f => f.id)).size;
-  const head = html`<div class="cli-top"><span class="cli-num">${it.seq}</span><span class="cli-title">${it.text}</span>${menu}</div>
+  const lv = dueLevel(it.due_date, it.resolved);
+  const mainState = it.open_nc ? html`<span class="cli-state st-nao_conforme">✗ Não conforme${ncTimes}</span>`
+    : it.result ? html`<span class="cli-state st-${it.result}">${RESULT[it.result].short} ${RESULT[it.result].label}</span>`
+      : html`<span class="cli-state st-pending">Pendente</span>`;
+  const summary = html`<summary class="cli-sum">
+      <span class="cli-num">${it.seq}</span>
+      <span class="cli-title">${it.text}</span>
+      <span class="cli-sum-r">
+        <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
+        ${mainState}
+      </span>
+      <span class="cli-chev" aria-hidden="true">${icon('chevron')}</span>
+    </summary>`;
+  const head = html`<div class="cli-top cli-top-open">${menu}</div>
     ${it.specialty || (it.group && uiOf(t.id).by === 'spec') ? html`<div class="cli-tags">${it.specialty ? html`<span class="cli-spec">${it.specialty}</span>` : ''}${it.group && uiOf(t.id).by === 'spec' ? html`<span class="cli-grp">${it.group}</span>` : ''}</div>` : ''}
     <div class="cli-facts">
       <span class="fact-who ${it.mine ? 'is-mine' : ''}"><i>${initials(it.responsible_name)}</i><span><small>Responsável${it.assignee_id ? '' : ' (global)'}${it.mine ? ' · seu item' : ''}</small><b>${it.responsible_name}</b></span></span>
       ${dueBox}
     </div>
     <div class="cli-meta">
-      ${state}
+      ${it.nc_count && it.result && !it.open_nc ? html`<span class="cli-fixed" title="Ficou não conforme ${it.nc_count} vez(es) antes de ser corrigido">corrigido · ${it.nc_count}x não conforme</span>` : ''}
       ${nPhotos ? html`<button type="button" class="cli-phcount" data-gallery aria-label="Ver as ${nPhotos} foto(s) do item">${icon('image')}${nPhotos} foto${nPhotos > 1 ? 's' : ''}</button>` : ''}
       ${it.result ? html`<span class="cli-when">${icon('check')}${it.answered_by_name || '—'} · ${shortDate(it.answered_at)}</span>` : ''}
     </div>
@@ -445,15 +467,11 @@ function itemCard(t, it, c) {
         <input type="text" data-note-item="${it.id}" maxlength="1000" value="${it.note || ''}" placeholder="${it.result === 'nao_conforme' ? 'Descreva o problema encontrado' : 'Observação'}"></label>`
       : it.note ? html`<div class="cli-note-text"><b>${it.result === 'nao_conforme' ? 'Problema:' : 'Obs.:'}</b> ${it.note}</div>` : ''}
     ${history}`;
-  const nothing = !it.can_answer && !it.files.length && !it.note && !it.history.length;
-  const attrs = `id="cli-${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"`;
-  const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''}`;
-  // Resolvidos (Conforme/N/A) ficam recolhidos numa linha — com a miniatura do antes × depois quando houve correção
-  const mini = it.before && it.after ? html`<span class="cli-mini-ba ${it.before.kind === 'referencia' ? 'is-ref' : ''}"><img src="/api/checklist-files/${it.before.id}" alt="Antes" loading="lazy"><img src="/api/checklist-files/${it.after.id}" alt="Depois" loading="lazy"></span>` : '';
-  return it.resolved
-    ? (nothing ? html`<article class="${cls}" ${raw(attrs)}>${head}<div class="cli-body"></div></article>`
-      : html`<details class="${cls}" ${raw(attrs)}><summary>${head}${mini}<span class="cli-more">${it.can_answer ? 'tocar para ver, alterar ou incluir fotos' : 'ver fotos e histórico'}</span></summary><div class="cli-body">${body}</div></details>`)
-    : html`<article class="${cls}" ${raw(attrs)}>${head}<div class="cli-body">${body}</div></article>`;
+  const attrs = `id="cli-${it.id}" data-item-id="${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"`;
+  const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''} cli-due-${lv.cls.slice(3)}`;
+  // Recolhido: só descrição, prazo e situação. Ao tocar, abre com responsável, fotos, botões e histórico.
+  const isOpen = uiOf(t.id).open.has(it.id);
+  return html`<details class="${cls}" ${raw(attrs)} ${isOpen ? 'open' : ''}>${summary}<div class="cli-detail">${head}<div class="cli-body">${body}</div></div></details>`;
 }
 
 export function checklistSection(t, { reviewBox, reviewActions, can }) {
@@ -586,10 +604,17 @@ export function bindChecklist(root, t, ctx, refresh) {
   };
   const answer = (itemId, body, msg) => run(async () => {
     const updated = await api(`/tasks/${t.id}/items/${itemId}/answer`, { method: 'POST', body });
-    if ('result' in body) scrollTo = nextAfter(itemId);
+    if ('result' in body) {
+      scrollTo = nextAfter(itemId);
+      if (scrollTo !== itemId) { st.open.delete(itemId); st.open.add(scrollTo); }
+    }
     return updated;
   }, msg);
 
+  list.querySelectorAll('details.cli').forEach(d => d.addEventListener('toggle', () => {
+    const id = Number(d.dataset.itemId);
+    if (d.open) st.open.add(id); else st.open.delete(id);
+  }));
   // Grupo / responsável: esconde itens e grupos fora do filtro (os chips continuam valendo por cima)
   const byId = new Map(c.items.map(i => [i.id, i]));
   const applySel = () => {
@@ -798,6 +823,6 @@ export function bindChecklist(root, t, ctx, refresh) {
     const el = scrollTo === 'cl-new' ? panel : root.querySelector(`#cli-${scrollTo}`);
     const isForm = scrollTo === 'cl-new';
     scrollTo = null;
-    if (el) setTimeout(() => { el.scrollIntoView({ block: isForm ? 'start' : 'center', behavior: 'smooth' }); if (isForm) form?.focus(); }, 30);
+    if (el) setTimeout(() => { el.scrollIntoView({ block: isForm ? 'start' : 'nearest', behavior: 'smooth' }); if (isForm) form?.focus(); }, 30);
   }
 }

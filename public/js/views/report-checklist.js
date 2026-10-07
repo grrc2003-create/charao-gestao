@@ -106,7 +106,7 @@ export async function view({ params, query, state }) {
     if (!i.due_date) return html`<span class="r-fact is-none"><small>Prazo</small><b>Sem prazo</b></span>`;
     const days = Math.round((Date.parse(i.due_date) - Date.parse(today)) / 86400e3);
     const [cls, rel] = i.resolved ? ['is-done', ''] : days < 0 ? ['is-late', `atrasado há ${-days} ${days === -1 ? 'dia' : 'dias'}`]
-      : days === 0 ? ['is-soon', 'vence hoje'] : days <= 2 ? ['is-soon', `falta${days > 1 ? 'm' : ''} ${days} ${days === 1 ? 'dia' : 'dias'}`] : ['is-ok', `faltam ${days} dias`];
+      : days === 0 ? ['is-today', 'vence hoje'] : days <= 7 ? ['is-week', `falta${days > 1 ? 'm' : ''} ${days} ${days === 1 ? 'dia' : 'dias'}`] : ['is-ok', `faltam ${days} dias`];
     return html`<span class="r-fact ${cls}"><small>Prazo</small><b>${fmtDate(i.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span>`;
   };
   const itemBlock = i => {

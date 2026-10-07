@@ -256,3 +256,7 @@
 
 /* Check-list: especialidade do item */
 .r-spec { background: #E7EEF5; border-color: #CFDCE8; color: #2A3D50; }
+
+/* Prazo: vence hoje (laranja) · nos próximos 7 dias (amarelo) */
+.r-fact.is-today { background: #F26B21; border-color: #F26B21; } .r-fact.is-today small, .r-fact.is-today b, .r-fact.is-today em { color: #fff; }
+.r-fact.is-week { background: #FFF3C4; border-color: #E9C94A; } .r-fact.is-week b, .r-fact.is-week em { color: #7A5A00; }

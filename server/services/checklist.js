@@ -2,7 +2,8 @@
 // (sem responsável = o responsável global da tarefa), resposta Conforme / Não conforme / N/A, observação e fotos.
 // A regra de fotos é do check-list inteiro: obrigatória em todos os itens respondidos (exceto N/A) ou livre escolha.
 import { all, one, run, tx } from '../db.js';
-import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
+import { badRequest, forbidden, notFound, str, oneOf, intOrNull, date } from '../lib/http.js';
+import { today, addDays } from './metrics.js';
 import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
@@ -19,15 +20,34 @@ const nowIso = () => new Date().toISOString();
 const isOpen = t => !t.cancelled_at && ['aberta', 'em_andamento'].includes(t.status);
 const needsPhoto = (t, result) => t.photo_rule === 'obrigatoria' && (result === 'conforme' || result === 'nao_conforme');
 
-// Itens enviados pelo formulário: [{ group, text, assignee_id }] (responsável validado contra a equipe do projeto)
-export function readItems(list, projectId, { required = false } = {}) {
+// Prazo do item: início + quantidade de dias (sem início, conta a partir de hoje)
+function readDeadline(it, label) {
+  const raw = it?.duration_days;
+  const days = raw === '' || raw === null || raw === undefined ? null : Number(raw);
+  if (days !== null && (!Number.isInteger(days) || days < 0 || days > 3650)) throw badRequest(`Prazo em dias inválido (${label}).`);
+  let start = date(it?.start_date || null, `Data de início (${label})`);
+  if (days !== null && !start) start = today();
+  return { start_date: start, duration_days: days, due_date: start && days !== null ? addDays(start, days) : null };
+}
+
+// Itens enviados pelo formulário: [{ group, text, description, assignee_id, start_date, duration_days, images }]
+// (responsável validado contra a equipe do projeto; com foto obrigatória, cada item novo precisa da foto de entrada)
+export function readItems(list, projectId, { required = false, requirePhoto = false } = {}) {
   const arr = Array.isArray(list) ? list : [];
   if (arr.length > MAX_ITEMS) throw badRequest(`O check-list aceita no máximo ${MAX_ITEMS} itens.`);
-  const items = arr.map((it, i) => ({
-    group: str(it?.group, { max: 80, label: 'Grupo' }) || null,
-    text: str(it?.text, { max: 300, required: true, label: `Texto do item ${i + 1}` }),
-    assignee_id: validateAssignee(intOrNull(it?.assignee_id), projectId),
-  }));
+  const items = arr.map((it, i) => {
+    const text = str(it?.text, { max: 300, required: true, label: `Texto do item ${i + 1}` });
+    const images = Array.isArray(it?.images) ? it.images.slice(0, MAX_PHOTOS_PER_SEND) : [];
+    if (requirePhoto && !images.length) throw badRequest(`Foto obrigatória: o item "${text}" precisa de uma foto de entrada.`);
+    return {
+      group: str(it?.group, { max: 80, label: 'Grupo' }) || null,
+      text,
+      description: str(it?.description, { max: 2000, label: `Descrição do item ${i + 1}` }) || null,
+      assignee_id: validateAssignee(intOrNull(it?.assignee_id), projectId),
+      ...readDeadline(it, `item ${i + 1}`),
+      images,
+    };
+  });
   if (required && !items.length) throw badRequest('Inclua ao menos um item no check-list.');
   return items;
 }
@@ -42,10 +62,13 @@ function slotFor(taskId, group) {
   return one('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM checklist_items WHERE task_id = ?', taskId).n;
 }
 
-export function insertItems(taskId, items) {
+// Grava os itens (e as fotos de entrada). userId = quem está criando.
+export function insertItems(taskId, items, userId) {
   for (const it of items) {
-    run('INSERT INTO checklist_items (task_id, seq, group_name, text, assignee_id, created_at) VALUES (?,?,?,?,?,?)',
-      taskId, slotFor(taskId, it.group), it.group, it.text, it.assignee_id, nowIso());
+    const id = Number(run(`INSERT INTO checklist_items (task_id, seq, group_name, text, description, assignee_id, start_date, duration_days, due_date, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`, taskId, slotFor(taskId, it.group), it.group, it.text, it.description || null, it.assignee_id,
+      it.start_date || null, it.duration_days ?? null, it.due_date || null, nowIso()).lastInsertRowid);
+    if (it.images?.length) saveItemPhotos({ user: { id: userId } }, id, it.images, null, 'referencia');
   }
 }
 
@@ -85,28 +108,32 @@ function historyByItem(taskId) {
     WHERE ci.task_id = ? ORDER BY a.id`, taskId).map(a => ({ ...a, files: [] }));
   const byAnswer = new Map(answers.map(a => [a.id, a]));
   const m = new Map();
-  const of = id => { if (!m.has(id)) m.set(id, { answers: [], loose: [] }); return m.get(id); };
+  const of = id => { if (!m.has(id)) m.set(id, { answers: [], loose: [], refs: [] }); return m.get(id); };
   for (const a of answers) of(a.item_id).answers.push(a);
-  for (const f of all(`SELECT f.id, f.item_id, f.answer_id, f.mime, f.created_at FROM checklist_files f
+  for (const f of all(`SELECT f.id, f.item_id, f.answer_id, f.kind, f.mime, f.created_at FROM checklist_files f
       JOIN checklist_items ci ON ci.id = f.item_id WHERE ci.task_id = ? ORDER BY f.id`, taskId)) {
     const ans = f.answer_id && byAnswer.get(f.answer_id);
-    if (ans) ans.files.push(f); else of(f.item_id).loose.push(f);
+    if (f.kind === 'referencia') of(f.item_id).refs.push(f);
+    else if (ans) ans.files.push(f); else of(f.item_id).loose.push(f);
   }
   return m;
 }
 
-// Estado do item: resposta atual, fotos atuais, quantas vezes ficou não conforme e o par antes × depois
-function itemState(item, h = { answers: [], loose: [] }) {
+// Estado do item: resposta atual, fotos atuais, quantas vezes ficou não conforme e o par antes × depois.
+// "Antes" = foto da não conformidade mais recente ou, se nunca houve, a foto de entrada do item.
+function itemState(item, h = { answers: [], loose: [], refs: [] }) {
   const current = item.result ? h.answers.at(-1) || null : null;
   const ncs = h.answers.filter(a => a.result === 'nao_conforme');
   const lastNcPhoto = [...ncs].reverse().map(a => a.files.at(-1)).find(Boolean) || null;
   const currentFiles = current ? current.files : [];
+  const beforePhoto = lastNcPhoto || h.refs[0] || null;
+  const afterPhoto = item.result === 'conforme' ? currentFiles[0] || null : null;
   return {
-    current, currentFiles, loose: h.loose, answers: h.answers, nc_count: ncs.length,
-    // Capa: no Não conforme, a foto mais recente da não conformidade; no Conforme após não conformidade, antes × depois
-    before: lastNcPhoto && item.result === 'conforme' ? lastNcPhoto : null,
-    after: item.result === 'conforme' && lastNcPhoto ? currentFiles[0] || null : null,
-    cover: item.result === 'nao_conforme' ? currentFiles.at(-1) || lastNcPhoto : null,
+    current, currentFiles, loose: h.loose, refs: h.refs, answers: h.answers, nc_count: ncs.length,
+    before: beforePhoto && afterPhoto ? beforePhoto : null,
+    after: beforePhoto && afterPhoto ? afterPhoto : null,
+    // Capa: Não conforme → foto mais recente da não conformidade; ainda sem resposta → foto de entrada
+    cover: item.result === 'nao_conforme' ? currentFiles.at(-1) || lastNcPhoto : !item.result ? h.refs[0] || null : null,
   };
 }
 
@@ -130,6 +157,7 @@ export function checklistCheck(t) {
 export function checklistView(ctx, t) {
   const rows = all(`${ITEM_SQL} WHERE ci.task_id = ? ORDER BY ci.seq`, t.id);
   const hist = historyByItem(t.id);
+  const ref = today();
   const items = rows.map(i => {
     const st = itemState(i, hist.get(i.id));
     return {
@@ -137,6 +165,9 @@ export function checklistView(ctx, t) {
       assignee_id: i.assignee_id, assignee_name: i.assignee_name, assignee_external: !!i.a_external,
       responsible_name: i.assignee_name || t.assignee_name || 'Sem responsável',
       result: i.result, resolved: isResolved(i.result), note: i.note, answered_by_name: i.answered_by_name, answered_at: i.answered_at,
+      description: i.description, start_date: i.start_date, duration_days: i.duration_days, due_date: i.due_date,
+      overdue: !isResolved(i.result) && !!i.due_date && i.due_date < ref,
+      refs: st.refs,
       files: [...st.currentFiles, ...st.loose], loose_count: st.loose.length,
       nc_count: st.nc_count, before: st.before, after: st.after, cover: st.cover,
       history: st.answers.map(a => ({ id: a.id, result: a.result, note: a.note, reason: a.reason, user_name: a.user_name, created_at: a.created_at, files: a.files })),
@@ -153,6 +184,7 @@ export function checklistView(ctx, t) {
       total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0,
       conforme: count('conforme'), nao_conforme: count('nao_conforme'), na: count('na'), pending: items.filter(i => !i.result).length,
       nc_total: items.reduce((n, i) => n + i.nc_count, 0),
+      overdue: items.filter(i => i.overdue).length,
       mine_pending: items.filter(i => i.mine && !i.resolved).length,
     },
     check: check(t, rows, hist),
@@ -184,7 +216,7 @@ function behalfText(ctx, t, item) {
   return null;
 }
 
-function saveItemPhotos(ctx, itemId, images, answerId) {
+function saveItemPhotos(ctx, itemId, images, answerId, kind = 'resposta') {
   const saved = [];
   try {
     for (const img of images) {
@@ -197,8 +229,8 @@ function saveItemPhotos(ctx, itemId, images, answerId) {
     throw e;
   }
   for (const f of saved) {
-    run('INSERT INTO checklist_files (item_id, answer_id, stored_name, mime, size, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?)',
-      itemId, answerId ?? null, f.stored_name, f.mime, f.size, ctx.user.id, nowIso());
+    run('INSERT INTO checklist_files (item_id, answer_id, kind, stored_name, mime, size, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?,?)',
+      itemId, answerId ?? null, kind, f.stored_name, f.mime, f.size, ctx.user.id, nowIso());
   }
   return saved.length;
 }
@@ -222,7 +254,7 @@ export function answerItem(ctx, taskId, itemId, body = {}) {
   }
   const note = 'note' in body ? str(body.note, { max: 1000, label: 'Observação' }) : undefined;
   const images = Array.isArray(body.images) ? body.images.slice(0, MAX_PHOTOS_PER_SEND) : [];
-  const loose = one('SELECT COUNT(*) AS n FROM checklist_files WHERE item_id = ? AND answer_id IS NULL', item.id).n;
+  const loose = one(`SELECT COUNT(*) AS n FROM checklist_files WHERE item_id = ? AND answer_id IS NULL AND kind = 'resposta'`, item.id).n;
   // Foto obrigatória: cada resposta Conforme/Não conforme precisa da sua própria foto (a do "depois" não é a do "antes")
   if (changing && needsPhoto(t, result) && images.length + loose === 0) {
     throw badRequest('Foto obrigatória: tire uma foto do item para responder.');
@@ -237,7 +269,7 @@ export function answerItem(ctx, taskId, itemId, body = {}) {
       const ansNote = note !== undefined ? note : null;
       const ansId = Number(run('INSERT INTO checklist_answers (item_id, result, note, reason, user_id, created_at) VALUES (?,?,?,?,?,?)',
         item.id, result, ansNote, reason, ctx.user.id, now).lastInsertRowid);
-      run('UPDATE checklist_files SET answer_id = ? WHERE item_id = ? AND answer_id IS NULL', ansId, item.id);
+      run(`UPDATE checklist_files SET answer_id = ? WHERE item_id = ? AND answer_id IS NULL AND kind = 'resposta'`, ansId, item.id);
       n = images.length ? saveItemPhotos(ctx, item.id, images, ansId) : 0;
       run('UPDATE checklist_items SET result = ?, note = ?, answered_by = ?, answered_at = ? WHERE id = ?', result, ansNote, ctx.user.id, now, item.id);
       const ncs = one(`SELECT COUNT(*) AS n FROM checklist_answers WHERE item_id = ? AND result = 'nao_conforme'`, item.id).n;
@@ -264,9 +296,14 @@ export function answerItem(ctx, taskId, itemId, body = {}) {
 export function removeItemFile(ctx, taskId, itemId, fileId) {
   const t = loadChecklistTask(ctx, taskId);
   const item = loadItem(t, itemId);
-  if (!canAnswerItem(ctx, t, item)) throw forbidden('Você não pode alterar as fotos deste item.');
   const f = one('SELECT * FROM checklist_files WHERE id = ? AND item_id = ?', fileId, item.id);
   if (!f) throw notFound('Foto não encontrada.');
+  if (f.kind === 'referencia') {
+    if (!canManageItems(ctx, t)) throw forbidden('Você não pode alterar a foto de entrada deste item.');
+    if (t.photo_rule === 'obrigatoria' && one(`SELECT COUNT(*) AS n FROM checklist_files WHERE item_id = ? AND kind = 'referencia'`, item.id).n <= 1) {
+      throw badRequest('A foto de entrada é obrigatória neste check-list. Inclua a nova foto antes de remover esta.');
+    }
+  } else if (!canAnswerItem(ctx, t, item)) throw forbidden('Você não pode alterar as fotos deste item.');
   const cur = currentAnswerId(item);
   if (cur && f.answer_id === cur && needsPhoto(t, item.result) && one('SELECT COUNT(*) AS n FROM checklist_files WHERE answer_id = ?', cur).n <= 1) {
     throw badRequest('A foto é obrigatória neste check-list. Anexe a nova foto antes de remover esta.');
@@ -287,11 +324,11 @@ function assertManage(ctx, t) {
 export function addItems(ctx, taskId, body) {
   const t = loadChecklistTask(ctx, taskId);
   assertManage(ctx, t);
-  const items = readItems(body.items, t.project_id, { required: true });
+  const items = readItems(body.items, t.project_id, { required: true, requirePhoto: t.photo_rule === 'obrigatoria' });
   const total = one('SELECT COUNT(*) AS n FROM checklist_items WHERE task_id = ?', t.id).n;
   if (total + items.length > MAX_ITEMS) throw badRequest(`O check-list aceita no máximo ${MAX_ITEMS} itens.`);
   tx(() => {
-    insertItems(t.id, items);
+    insertItems(t.id, items, ctx.user.id);
     taskHistory(t.id, ctx.user.id, 'Itens adicionados ao check-list', `${items.length} item(ns)`);
   });
 }
@@ -309,6 +346,17 @@ export function updateItem(ctx, taskId, itemId, body) {
   if ('group' in body) {
     const v = str(body.group, { max: 80, label: 'Grupo' }) || null;
     if (v !== item.group_name) { next.group_name = v; changes.push(`grupo: ${v || 'sem grupo'}`); }
+  }
+  if ('description' in body) {
+    const v = str(body.description, { max: 2000, label: 'Descrição' }) || null;
+    if (v !== item.description) { next.description = v; changes.push('descrição alterada'); }
+  }
+  if ('start_date' in body || 'duration_days' in body) {
+    const d = readDeadline({ start_date: 'start_date' in body ? body.start_date : item.start_date, duration_days: 'duration_days' in body ? body.duration_days : item.duration_days }, 'item');
+    if (d.start_date !== item.start_date || d.duration_days !== item.duration_days) {
+      Object.assign(next, d);
+      changes.push(`prazo: ${d.due_date ? d.due_date.split('-').reverse().join('/') : 'sem prazo'}`);
+    }
   }
   if ('assignee_id' in body) {
     const v = validateAssignee(intOrNull(body.assignee_id), t.project_id);
@@ -328,6 +376,19 @@ export function updateItem(ctx, taskId, itemId, body) {
     if (rest.length) run(`UPDATE checklist_items SET ${rest.map(f => `${f} = ?`).join(', ')} WHERE id = ?`, ...rest.map(f => next[f]), item.id);
     if (groupChanged) moveToGroup(t.id, item.id, group);
     taskHistory(t.id, ctx.user.id, 'Item do check-list alterado', `${item.seq}. ${item.text} · ${changes.join(' · ')}`);
+  });
+}
+
+// Fotos de entrada (referência) de um item já criado
+export function addReferencePhotos(ctx, taskId, itemId, body) {
+  const t = loadChecklistTask(ctx, taskId);
+  assertManage(ctx, t);
+  const item = loadItem(t, itemId);
+  const images = Array.isArray(body.images) ? body.images.slice(0, MAX_PHOTOS_PER_SEND) : [];
+  if (!images.length) throw badRequest('Nenhuma foto enviada.');
+  tx(() => {
+    const n = saveItemPhotos(ctx, item.id, images, null, 'referencia');
+    taskHistory(t.id, ctx.user.id, 'Foto de entrada incluída no item', `${item.seq}. ${item.text} · ${n} foto(s)`);
   });
 }
 

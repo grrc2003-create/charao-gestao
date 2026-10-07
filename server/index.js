@@ -221,6 +221,7 @@ api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200,
 // ---------- Check-list (itens) ----------
 const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));
 api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
+api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }) => { Checklist.addReferencePhotos(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { Checklist.assignItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.patch('/api/tasks/:id/items/:iid', (req, res, { ctx, params, body }) => { Checklist.updateItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.delete('/api/tasks/:id/items/:iid', (req, res, { ctx, params }) => { Checklist.deleteItem(ctx, intOrNull(params.id), intOrNull(params.iid)); taskOut(res, ctx, intOrNull(params.id)); });

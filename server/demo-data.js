@@ -1,6 +1,6 @@
 // Dados de DEMONSTRAÇÃO (fictícios). Usado por `npm run seed` e, se SEED_DEMO=1, no primeiro início com banco vazio.
 // Senha de todos os usuários de demonstração: charao2026
-import { run, one, tx } from './db.js';
+import { run, one, all, tx } from './db.js';
 import { hashPassword } from './lib/auth.js';
 import { saveDemoSvg } from './services/files.js';
 import { today, addDays } from './services/metrics.js';
@@ -316,6 +316,15 @@ export function seedDemo() {
     const clId = insertTask({ project: p1, data: { task_type: 'checklist', photo_rule: 'obrigatoria', items, title: 'Check-list final — Unidade 501',
       description: 'Vistoria final antes da entrega ao cliente. Registrar foto em todos os itens avaliados.', field_summary: null, notes: null,
       priority: 'alta', proof_type: 'nenhuma', assignee_id: 4, due_date: addDays(T, 5), start_date: null }, stageInput: null, creatorId: 2 });
+    // Foto de entrada, descrição e prazo (início + dias) de cada item
+    const details = { 3: ['Abrir torneira por 2 minutos e verificar sifão e flexíveis.', -6, 3], 5: ['Jogar água e verificar se escoa todo para o ralo, sem empoçar.', -5, 2],
+      8: ['Verificar paredes e teto com luz rasante.', 0, 4], 12: ['Retirar entulho, varrer e limpar vidros.', 2, 3] };
+    for (const it of all('SELECT id, seq, text FROM checklist_items WHERE task_id = ?', clId)) {
+      const f = saveDemoSvg(svgRef(`${it.text} (entrada)`, 'referencia'));
+      run(`INSERT INTO checklist_files (item_id, kind, stored_name, mime, size, uploaded_by) VALUES (?, 'referencia', ?,?,?, 2)`, it.id, f.stored_name, f.mime, f.size);
+      const d = details[it.seq];
+      if (d) run('UPDATE checklist_items SET description = ?, start_date = ?, duration_days = ?, due_date = ? WHERE id = ?', d[0], addDays(T, d[1]), d[2], addDays(T, d[1] + d[2]), it.id);
+    }
     // Cada resposta entra no histórico do item com a própria foto (antes × depois)
     const answer = (seq, result, by, note, daysAgo = 0) => {
       const it = one('SELECT id, text FROM checklist_items WHERE task_id = ? AND seq = ?', clId, seq);

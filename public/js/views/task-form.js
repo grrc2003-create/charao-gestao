@@ -1,8 +1,8 @@
 import { html, api, icon, PRIORITY, PROOF } from '../core.js';
-import { toast, readAttachments, pickAttachments } from '../ui.js';
+import { toast, readAttachments, pickAttachments, batchBySize } from '../ui.js';
 import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
-import { bindComposer, renderDraft, composerHint, PHOTO_RULE } from './checklist-ui.js';
+import { renderDraft, itemForm, bindItemForm, PHOTO_RULE } from './checklist-ui.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -91,8 +91,9 @@ export async function view({ params, query, state, navigate }) {
               <label><input type="radio" name="photo_rule" value="obrigatoria" ${photoRule === 'obrigatoria' ? 'checked' : ''}>${icon('camera')} Obrigatória em todos<small>Para marcar Conforme ou Não conforme é preciso tirar foto (N/A não exige)</small></label>
               <label><input type="radio" name="photo_rule" value="livre" ${photoRule === 'livre' ? 'checked' : ''}>${icon('image')} Livre escolha<small>Cada item pode ter foto, mas não é obrigatório</small></label>
             </div></div>
-          ${!editing ? html`<div class="field"><label for="cl-new">Novo item</label>
-            <input id="cl-new" type="text" maxlength="400" placeholder="Ex.: # Cozinha  ·  Tomadas funcionando @Bruno" autocomplete="off">${composerHint}</div>
+          ${!editing ? html`<div class="cl-add-panel" id="cl-new-form">
+            <div class="cl-add-head"><b>${icon('plus')} Novo item</b></div>
+            ${itemForm({ users: [], globalName: '', groups: [], keep: {}, photoRequired: photoRule === 'obrigatoria', quickList: photoRule !== 'obrigatoria' })}</div>
           <div class="cl-draft-head"><b id="cl-count">0 itens</b><button type="button" class="btn btn-ghost btn-sm" id="cl-clear" hidden>${icon('x')}Limpar lista</button></div>
           <div class="cl-draft" id="cl-draft"></div>` : html`<span class="hint">Os itens são incluídos, atribuídos e excluídos na própria tela do check-list.</span>`}
         </fieldset>
@@ -141,7 +142,6 @@ export async function view({ params, query, state, navigate }) {
       // ---------- Check-list: tipo, itens e cadastro rápido ----------
       let team = [];
       const items = [];
-      const clState = { group: null, groupAssignee: null };
       const typeIs = () => (f.querySelector('[name=task_type]:checked')?.value || (isChecklist ? 'checklist' : 'tarefa')) === 'checklist';
       const globalName = () => team.find(u => String(u.id) === assigneeSel.value)?.name || '';
       const draft = root.querySelector('#cl-draft');
@@ -163,31 +163,45 @@ export async function view({ params, query, state, navigate }) {
         f.title.placeholder = cl ? 'Ex.: Check-list final de obra — Bloco A' : 'Ex.: Conferir armação das vigas do 4º pavimento';
       };
       f.querySelectorAll('[name=task_type]').forEach(r => r.addEventListener('change', syncType));
+      // Formulário do item (texto, grupo, responsável, descrição, início + dias, fotos de entrada)
+      const itemEl = root.querySelector('#cl-new-form [data-cl-form]');
+      const ruleRequired = () => f.querySelector('[name=photo_rule]:checked')?.value === 'obrigatoria';
+      const syncRule = () => {
+        if (!itemEl) return;
+        const req = ruleRequired();
+        const lb = itemEl.querySelector('[data-photo-label]');
+        lb.textContent = `Foto de entrada ${req ? '(obrigatória)' : '(opcional)'}`;
+        lb.classList.toggle('req', req);
+        itemEl.querySelector('[data-photo-hint]').hidden = !req;
+        const quick = itemEl.querySelector('.cl-quick');
+        if (quick) quick.hidden = req;
+      };
+      const syncTeam = () => {
+        if (!itemEl) return;
+        const sel = itemEl.querySelector('[data-f="assignee_id"]');
+        const cur = sel.value;
+        sel.innerHTML = html`<option value="">${globalName() ? `Responsável global (${globalName()})` : 'Responsável global'}</option>${team.map(u => html`<option value="${u.id}" ${String(u.id) === cur ? 'selected' : ''}>${u.name}${u.is_external ? ' · Terceirizado' : ''}</option>`)}`.toString();
+        const dl = itemEl.querySelector('#cl-groups-dl');
+        dl.innerHTML = html`${[...new Set(items.map(i => i.group).filter(Boolean))].map(g => html`<option value="${g}"></option>`)}`.toString();
+      };
       if (draft) {
-        bindComposer(root.querySelector('#cl-new'), {
-          users: () => team, state: clState,
-          onAdd: list => {
+        bindItemForm(itemEl, {
+          users: () => team, keep: {}, photoRequired: ruleRequired,
+          onAdd: async list => {
             items.push(...list);
             drawItems();
-            draft.lastElementChild?.scrollIntoView({ block: 'nearest' });
+            syncTeam();
           },
         });
-        draft.addEventListener('input', e => {
-          const row = e.target.closest('[data-i]');
-          if (row && e.target.classList.contains('cl-draft-text')) items[Number(row.dataset.i)].text = e.target.value;
-        });
-        draft.addEventListener('change', e => {
-          const row = e.target.closest('[data-i]');
-          if (row && e.target.classList.contains('cl-draft-who')) items[Number(row.dataset.i)].assignee_id = e.target.value ? Number(e.target.value) : null;
-        });
+        f.querySelectorAll('[name=photo_rule]').forEach(r => r.addEventListener('change', syncRule));
         draft.addEventListener('click', e => {
           const rm = e.target.closest('.cl-draft-rm');
           if (!rm) return;
           items.splice(Number(rm.closest('[data-i]').dataset.i), 1);
           drawItems();
         });
-        root.querySelector('#cl-clear').addEventListener('click', () => { items.length = 0; clState.group = null; clState.groupAssignee = null; drawItems(); });
-        assigneeSel.addEventListener('change', drawItems);
+        root.querySelector('#cl-clear').addEventListener('click', () => { items.length = 0; drawItems(); });
+        assigneeSel.addEventListener('change', () => { drawItems(); syncTeam(); });
         drawItems();
       }
 
@@ -197,6 +211,7 @@ export async function view({ params, query, state, navigate }) {
           const users = await api(`/projects/${pid}/assignees`);
           team = users;
           drawItems();
+          syncTeam();
           const cur = assigneeSel.value || v.assignee_id || (editing ? '' : state.user.id);
           assigneeSel.innerHTML = html`<option value="">Sem responsável (definir depois)</option>${users.map(u => opt(u.id, `${u.name}${u.is_external ? ` · Terceirizado${u.company ? ` (${u.company})` : ''}` : u.job_title ? ` · ${u.job_title}` : ''}`, cur))}`.toString();
         } catch (e) { toast(e.message, 'err'); }
@@ -257,11 +272,17 @@ export async function view({ params, query, state, navigate }) {
             if (pending.reduce((n, p) => n + p.data.length, 0) > 10_000_000) throw new Error('As referências somam mais de 10 MB. Crie a tarefa com menos arquivos e anexe os demais depois, na própria tarefa.');
             data.images = pending.map(p => ({ data: p.data, name: p.name }));
             if (parent) { data.parent_id = parent.id; data.project_id = parent.project_id; }
+            let rest = [];
             if (typeIs()) {
               const list = items.map(i => ({ ...i, text: i.text.trim() })).filter(i => i.text);
-              if (!list.length) throw new Error('Inclua ao menos um item no check-list (digite o item e tecle Enter).');
+              if (!list.length) throw new Error('Inclua ao menos um item no check-list (preencha o item e toque em “Adicionar”).');
+              const noPhoto = ruleRequired() ? list.filter(i => !i.images?.length).length : 0;
+              if (noPhoto) throw new Error(`Foto obrigatória: ${noPhoto} item(ns) sem foto de entrada. Remova e inclua novamente com a foto, ou escolha “Livre escolha”.`);
+              // Fotos de entrada: o 1º lote vai na criação e os demais logo em seguida (limite por envio)
+              const batches = batchBySize(list.map(i => ({ ...i, data: JSON.stringify(i) })), 8_000_000).map(b => b.map(({ data: _, ...i }) => i));
               data.task_type = 'checklist';
-              data.items = list;
+              data.items = batches[0];
+              rest = batches.slice(1);
               delete data.proof_type;
             }
             if (!typeIs() && rec?.enabled()) {
@@ -271,7 +292,8 @@ export async function view({ params, query, state, navigate }) {
               return;
             }
             const r = await api('/tasks', { method: 'POST', body: data });
-            toast('Tarefa criada.');
+            for (const batch of rest) await api(`/tasks/${r.id}/items`, { method: 'POST', body: { items: batch } });
+            toast(data.task_type === 'checklist' ? 'Check-list criado.' : 'Tarefa criada.');
             navigate(`/tarefas/${r.id}`);
           }
         } catch (ex) {

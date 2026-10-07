@@ -22,7 +22,7 @@ export async function view({ params, query }) {
   }
   // Itens que tiveram não conformidade (em aberto ou já corrigidos) e itens com fotos sem histórico de não conformidade
   const nc = c.items.filter(i => i.nc_count > 0);
-  const withFiles = c.items.filter(i => i.files.length && !i.nc_count);
+  const withFiles = c.items.filter(i => (i.files.length || i.refs.length) && !i.nc_count);
   const ncPhoto = f => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${fmtDateTime(f.created_at)}</figcaption></figure>`;
   const title = 'Check-list';
 
@@ -65,7 +65,9 @@ export async function view({ params, query }) {
           <tbody>${groups.map(g => html`
             ${g.name ? html`<tr class="r-grouprow"><td colspan="6"><span class="r-stage">${g.name}</span><span class="small muted">${g.items.filter(i => i.resolved).length}/${g.items.length}</span></td></tr>` : ''}
             ${g.items.map(i => html`<tr>
-              <td class="num">${i.seq}</td><td>${i.text}${i.files.length ? html` <span class="small muted">· ${i.files.length} foto(s)</span>` : ''}</td>
+              <td class="num">${i.seq}</td><td>${i.text}${i.files.length ? html` <span class="small muted">· ${i.files.length} foto(s)</span>` : ''}
+                ${i.description ? html`<div class="small muted">${i.description}</div>` : ''}
+                ${i.due_date ? html`<div class="small ${i.overdue ? 'late' : 'muted'}">Prazo: ${fmtDate(i.due_date)}${i.overdue ? ' · atrasado' : ''}</div>` : ''}</td>
               <td class="small">${i.responsible_name}</td><td>${resTag(i.result)}${i.nc_count ? html`<div class="small" style="color:#C0392B;margin-top:2px">${i.result === 'conforme' ? 'corrigido · ' : ''}NC ${i.nc_count}x</div>` : ''}</td>
               <td class="small">${i.note || ''}</td>
               <td class="small">${i.result ? html`${i.answered_by_name || '—'}<div class="muted">${fmtDateTime(i.answered_at)}</div>` : '—'}</td></tr>`)}`)}</tbody></table>
@@ -86,8 +88,11 @@ export async function view({ params, query }) {
 
       ${withPhotos && withFiles.length ? html`<section class="r-section">
         <h3 class="r-h">Registro fotográfico</h3>
-        <div class="r-photos">${withFiles.flatMap(i => i.files.map(f => html`<figure class="avoid"><img src="/api/checklist-files/${f.id}" alt="">
-          <figcaption>Item ${i.seq} · ${i.text} · ${i.result ? RESULT[i.result].label : 'Pendente'}</figcaption></figure>`))}</div>
+        <div class="r-photos">${withFiles.flatMap(i => i.before && i.after
+          ? [html`<figure class="avoid"><img src="/api/checklist-files/${i.before.id}" alt=""><figcaption><b>ANTES</b> · item ${i.seq} · ${i.text}</figcaption></figure>`,
+             html`<figure class="avoid"><img src="/api/checklist-files/${i.after.id}" alt=""><figcaption><b style="color:#2E8B57">DEPOIS</b> · item ${i.seq} · ${i.result ? RESULT[i.result].label : 'Pendente'}</figcaption></figure>`]
+          : [...i.refs, ...i.files].map(f => html`<figure class="avoid"><img src="/api/checklist-files/${f.id}" alt="">
+            <figcaption>Item ${i.seq} · ${i.text} · ${f.kind === 'referencia' ? 'entrada' : i.result ? RESULT[i.result].label : 'Pendente'}</figcaption></figure>`))}</div>
       </section>` : ''}
 
       <section class="r-section avoid">

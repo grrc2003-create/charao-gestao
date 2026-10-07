@@ -233,7 +233,7 @@ export function createTask(ctx, body) {
     proof_type: isChecklist ? 'nenhuma' : oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação', 'nenhuma'),
     assignee_id: validateAssignee(intOrNull(body.assignee_id), projectId),
   };
-  if (isChecklist) data.items = readItems(body.items, projectId, { required: true });
+  if (isChecklist) data.items = readItems(body.items, projectId, { required: true, requirePhoto: data.photo_rule === 'obrigatoria' });
   assertDateOrder(data.start_date, data.due_date);
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
   return tx(() => insertTask({ project, parent, data, stageInput: body.stage_id, creatorId: ctx.user.id, images, ctx }));
@@ -271,7 +271,7 @@ export function insertTask({ project, parent = null, data, stageInput, creatorId
     const created = recurrence ? `Tarefa criada automaticamente pela recorrência (${recurrence.seq}ª ocorrência)` : parent ? `Subtarefa criada em ${parent.code}` : isChecklist ? 'Check-list criado' : 'Tarefa criada';
     taskHistory(id, creatorId, created,
       `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável${isChecklist ? ' global' : ''}: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · ${isChecklist ? `${data.items.length} item(ns) · ${PHOTO_RULE_LABEL[data.photo_rule]}` : `Comprovação: ${PROOF_LABEL[data.proof_type]}`}`);
-    if (isChecklist) insertItems(id, data.items);
+    if (isChecklist) insertItems(id, data.items, creatorId);
     if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption, img.name);
     for (const f of copyFiles) {

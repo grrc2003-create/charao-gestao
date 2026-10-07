@@ -41,7 +41,8 @@ function groupBy(items, dim) {
 }
 
 const RES_COLOR = { conforme: '#2E8B57', nao_conforme: '#C0392B', na: '#6E7A86' };
-const resTag = r => (r ? html`<span class="r-st" style="--c:${RES_COLOR[r]}">${RESULT[r].label}</span>` : html`<span class="r-st" style="--c:#A86F0E">Pendente</span>`);
+const resTag = i => (i.open_nc ? html`<span class="r-st" style="--c:${RES_COLOR.nao_conforme}">Não conforme</span>`
+  : i.result ? html`<span class="r-st" style="--c:${RES_COLOR[i.result]}">${RESULT[i.result].label}</span>` : html`<span class="r-st" style="--c:#A86F0E">Pendente</span>`);
 const kpi = (label, value, sub, color) => html`<div class="r-kpi" style="--c:${color}"><div class="r-kpi-l">${label}</div><div class="r-kpi-v">${value}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
 
 export async function view({ params, query }) {
@@ -52,13 +53,13 @@ export async function view({ params, query }) {
   const withPhotos = query.get('fotos') !== '0';
   const judged = s.conforme + s.nao_conforme;
   const levels = readLevels(query);
-  // Itens que tiveram não conformidade (em aberto ou já corrigidos)
+  // Não conformidades: itens cadastrados com foto e itens marcados Não conforme (em aberto, corrigidos ou encerrados)
   const nc = c.items.filter(i => i.nc_count > 0);
   const itemRow = i => html`<tr>
       <td class="num">${i.seq}</td><td>${i.text}${i.files.length ? html` <span class="small muted">· ${i.files.length} foto(s)</span>` : ''}
         ${i.description ? html`<div class="small muted">${i.description}</div>` : ''}
         ${i.due_date ? html`<div class="small ${i.overdue ? 'late' : 'muted'}">Prazo: ${fmtDate(i.due_date)}${i.overdue ? ' · atrasado' : ''}</div>` : ''}</td>
-      <td class="small">${i.responsible_name}</td><td>${resTag(i.result)}${i.nc_count ? html`<div class="small" style="color:#C0392B;margin-top:2px">${i.result === 'conforme' ? 'corrigido · ' : ''}NC ${i.nc_count}x</div>` : ''}</td>
+      <td class="small">${i.responsible_name}</td><td>${resTag(i)}${i.nc_count ? html`<div class="small" style="color:#C0392B;margin-top:2px">${i.result === 'conforme' ? 'corrigido · ' : i.result === 'na' ? 'encerrado · ' : ''}NC ${i.nc_count}x</div>` : ''}</td>
       <td class="small">${i.note || ''}</td>
       <td class="small">${i.result ? html`${i.answered_by_name || '—'}<div class="muted">${fmtDateTime(i.answered_at)}</div>` : '—'}</td></tr>`;
   // Linhas da tabela com cabeçalho de cada nível de agrupamento (recuado conforme o nível)
@@ -117,11 +118,13 @@ export async function view({ params, query }) {
       ${nc.length ? html`<section class="r-section">
         <h3 class="r-h">Não conformidades (${nc.length} item(ns) · ${s.nc_total} registro(s))</h3>
         ${nc.map(i => html`<article class="r-evidence avoid">
-          <header><span class="mono">Item ${i.seq}</span><b>${i.text}</b>${i.result === 'nao_conforme' ? html`<span class="r-st" style="--c:#C0392B">Em aberto · ${i.nc_count}x</span>` : html`<span class="r-st" style="--c:#2E8B57">Corrigido · ${i.nc_count}x NC</span>`}</header>
+          <header><span class="mono">Item ${i.seq}</span><b>${i.text}</b>${i.open_nc ? html`<span class="r-st" style="--c:#C0392B">Em aberto · ${i.nc_count}x</span>`
+            : i.result === 'na' ? html`<span class="r-st" style="--c:#6E7A86">Encerrado (N/A) · ${i.nc_count}x NC</span>` : html`<span class="r-st" style="--c:#2E8B57">Corrigido · ${i.nc_count}x NC</span>`}</header>
           <div class="small">${i.group ? html`<span class="r-stage">${i.group}</span>` : ''}Responsável: ${i.responsible_name}</div>
-          <ol class="small" style="margin:4px 0 0;padding-left:16px">${i.history.map(h => html`<li><b>${RESULT[h.result].label}</b> · ${h.user_name || '—'} · ${fmtDateTime(h.created_at)}${h.reason ? ` · Justificativa: ${h.reason}` : ''}${h.note ? ` · ${h.note}` : ''}</li>`)}</ol>
+          ${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}
+          <ol class="small" style="margin:4px 0 0;padding-left:16px">${i.history.map(h => html`<li><b>${h.registration ? 'Registrada no cadastro' : RESULT[h.result].label}</b> · ${h.user_name || '—'} · ${fmtDateTime(h.created_at)}${h.reason ? ` · Justificativa: ${h.reason}` : ''}${h.note ? ` · ${h.note}` : ''}</li>`)}</ol>
           ${withPhotos && i.before && i.after ? html`<div class="r-photos" style="grid-template-columns:repeat(2,1fr)">
-              <figure><img src="/api/checklist-files/${i.before.id}" alt=""><figcaption><b style="color:#C0392B">ANTES</b> · não conforme · ${fmtDateTime(i.before.created_at)}</figcaption></figure>
+              <figure><img src="/api/checklist-files/${i.before.id}" alt=""><figcaption><b style="color:#C0392B">ANTES</b> · ${i.before.kind === 'referencia' ? 'cadastro' : 'não conforme'} · ${fmtDateTime(i.before.created_at)}</figcaption></figure>
               <figure><img src="/api/checklist-files/${i.after.id}" alt=""><figcaption><b style="color:#2E8B57">DEPOIS</b> · conforme · ${fmtDateTime(i.after.created_at)}</figcaption></figure></div>`
             : withPhotos && i.cover ? html`<div class="r-photos" style="grid-template-columns:repeat(2,1fr)">${ncPhoto(i.cover)}</div>` : ''}
         </article>`)}

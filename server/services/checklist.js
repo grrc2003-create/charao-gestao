@@ -116,8 +116,8 @@ function historyByItem(taskId) {
   const m = new Map();
   const of = id => { if (!m.has(id)) m.set(id, { answers: [], loose: [], refs: [] }); return m.get(id); };
   for (const a of answers) of(a.item_id).answers.push(a);
-  for (const f of all(`SELECT f.id, f.item_id, f.answer_id, f.kind, f.mime, f.created_at FROM checklist_files f
-      JOIN checklist_items ci ON ci.id = f.item_id WHERE ci.task_id = ? ORDER BY f.id`, taskId)) {
+  for (const f of all(`SELECT f.id, f.item_id, f.answer_id, f.kind, f.mime, f.created_at, u.name AS user_name FROM checklist_files f
+      JOIN checklist_items ci ON ci.id = f.item_id LEFT JOIN users u ON u.id = f.uploaded_by WHERE ci.task_id = ? ORDER BY f.id`, taskId)) {
     const ans = f.answer_id && byAnswer.get(f.answer_id);
     if (f.kind === 'referencia') of(f.item_id).refs.push(f);
     else if (ans) ans.files.push(f); else of(f.item_id).loose.push(f);
@@ -126,16 +126,20 @@ function historyByItem(taskId) {
 }
 
 // Estado do item: resposta atual, fotos atuais, quantas vezes ficou não conforme e o par antes × depois.
-// "Antes" = foto da não conformidade mais recente ou, se nunca houve, a foto de entrada do item.
+// Item cadastrado com foto JÁ É uma não conformidade (a foto do cadastro registra o problema): fica em aberto até
+// ser corrigido (Conforme) ou encerrado (N/A). "Antes" = foto da não conformidade mais recente (ou a do cadastro).
 function itemState(item, h = { answers: [], loose: [], refs: [] }) {
   const current = item.result ? h.answers.at(-1) || null : null;
   const ncs = h.answers.filter(a => a.result === 'nao_conforme');
+  const registered = h.refs.length > 0;
   const lastNcPhoto = [...ncs].reverse().map(a => a.files.at(-1)).find(Boolean) || null;
   const currentFiles = current ? current.files : [];
   const beforePhoto = lastNcPhoto || h.refs[0] || null;
   const afterPhoto = item.result === 'conforme' ? currentFiles[0] || null : null;
   return {
-    current, currentFiles, loose: h.loose, refs: h.refs, answers: h.answers, nc_count: ncs.length,
+    current, currentFiles, loose: h.loose, refs: h.refs, answers: h.answers, registered,
+    nc_count: ncs.length + (registered ? 1 : 0),
+    open_nc: !isResolved(item.result) && (item.result === 'nao_conforme' || (!item.result && registered)),
     before: beforePhoto && afterPhoto ? beforePhoto : null,
     after: beforePhoto && afterPhoto ? afterPhoto : null,
     // Capa: Não conforme → foto mais recente da não conformidade; ainda sem resposta → foto de entrada
@@ -144,8 +148,9 @@ function itemState(item, h = { answers: [], loose: [], refs: [] }) {
 }
 
 function check(t, rows, hist) {
-  const unanswered = rows.filter(i => !i.result).length;
-  const ncOpen = rows.filter(i => i.result === 'nao_conforme').length;
+  const reg = i => (hist.get(i.id)?.refs.length || 0) > 0;
+  const unanswered = rows.filter(i => !i.result && !reg(i)).length;
+  const ncOpen = rows.filter(i => i.result === 'nao_conforme' || (!i.result && reg(i))).length;
   const noPhoto = rows.filter(i => isResolved(i.result) && needsPhoto(t, i.result) && !itemState(i, hist.get(i.id)).currentFiles.length).length;
   const missing = [];
   if (unanswered) missing.push(`${unanswered} ${unanswered === 1 ? 'item sem resposta' : 'itens sem resposta'}`);
@@ -175,8 +180,12 @@ export function checklistView(ctx, t) {
       overdue: !isResolved(i.result) && !!i.due_date && i.due_date < ref,
       refs: st.refs,
       files: [...st.currentFiles, ...st.loose], loose_count: st.loose.length,
-      nc_count: st.nc_count, before: st.before, after: st.after, cover: st.cover,
-      history: st.answers.map(a => ({ id: a.id, result: a.result, note: a.note, reason: a.reason, user_name: a.user_name, created_at: a.created_at, files: a.files })),
+      nc_count: st.nc_count, open_nc: st.open_nc, registered: st.registered, before: st.before, after: st.after, cover: st.cover,
+      // Histórico: o cadastro com foto é o 1º registro de não conformidade
+      history: [
+        ...(st.registered ? [{ id: 'cadastro', registration: true, result: 'nao_conforme', note: null, reason: null, user_name: st.refs[0].user_name, created_at: st.refs[0].created_at, files: st.refs }] : []),
+        ...st.answers.map(a => ({ id: a.id, result: a.result, note: a.note, reason: a.reason, user_name: a.user_name, created_at: a.created_at, files: a.files })),
+      ],
       can_answer: canAnswerItem(ctx, t, i),
       mine: isMine(ctx, t, i),
     };
@@ -188,7 +197,7 @@ export function checklistView(ctx, t) {
     items,
     summary: {
       total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0,
-      conforme: count('conforme'), nao_conforme: count('nao_conforme'), na: count('na'), pending: items.filter(i => !i.result).length,
+      conforme: count('conforme'), nao_conforme: items.filter(i => i.open_nc).length, na: count('na'), pending: items.filter(i => !i.result && !i.registered).length,
       nc_total: items.reduce((n, i) => n + i.nc_count, 0),
       overdue: items.filter(i => i.overdue).length,
       mine_pending: items.filter(i => i.mine && !i.resolved).length,
@@ -468,12 +477,13 @@ export function checklistItemsAsSubtasks(tasks) {
   const ref = today();
   const ids = lists.map(t => t.id);
   const rows = all(`SELECT ci.id, ci.task_id, ci.seq, ci.text, ci.group_name, ci.assignee_id, ci.result, ci.answered_at, ci.due_date, ci.created_at,
-      u.name AS assignee_name, (SELECT COUNT(*) FROM checklist_answers a WHERE a.item_id = ci.id) AS answers
+      u.name AS assignee_name, (SELECT COUNT(*) FROM checklist_answers a WHERE a.item_id = ci.id) AS answers,
+      (SELECT COUNT(*) FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia') AS refs
     FROM checklist_items ci LEFT JOIN users u ON u.id = ci.assignee_id WHERE ci.task_id IN (${ids.map(() => '?').join(',')})`, ...ids);
   return rows.map(i => {
     const t = byId.get(i.task_id);
     const resolved = isResolved(i.result);
-    const status = resolved ? 'concluida' : i.result === 'nao_conforme' || i.answers ? 'em_andamento' : 'aberta';
+    const status = resolved ? 'concluida' : i.result === 'nao_conforme' || i.answers || i.refs ? 'em_andamento' : 'aberta';
     return decorate({
       id: `cl-${i.id}`, checklist_item: true, task_type: 'checklist_item', parent_id: t.id, parent_code: t.code,
       code: `${t.code}·${i.seq}`, title: i.text, stage_name: i.group_name,

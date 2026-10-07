@@ -78,7 +78,7 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
   reset();
   const STEPS = () => [
     { k: 'group', title: 'Grupo', optional: false },
-    { k: 'photo', title: 'Foto de entrada', optional: !photoRequired() },
+    { k: 'photo', title: 'Foto da não conformidade', optional: !photoRequired() },
     { k: 'text', title: 'Descrição do item', optional: false },
     { k: 'who', title: 'Responsável', optional: true },
     { k: 'start', title: 'Data de início', optional: true },
@@ -103,13 +103,13 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
             <button type="button" class="btn btn-ghost btn-sm" data-quick-add>${icon('plus')}Adicionar lista</button></details>` : ''}`;
       }
       case 'photo':
-        return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto de entrada do item (obrigatória).' : 'Quer registrar uma foto de entrada? (opcional)'}</p>
+        return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto da não conformidade (obrigatória).' : 'Há uma não conformidade? Tire a foto (opcional — sem foto, o item fica só para verificação).'}</p>
           <div class="wiz-photo">
             <label class="wiz-cam">${fileInput({ camera: true, data: 'data-new-photo' })}${icon('camera')}<span>${item.images.length ? 'Tirar outra foto' : 'Tirar foto'}</span></label>
             <label class="wiz-gal">${fileInput({ multiple: true, data: 'data-new-photo' })}${icon('image')}<span>Galeria</span></label>
           </div>
           <div class="cli-photos" data-photos>${item.images.map((p, i) => html`<figure class="cli-ph"><img src="${p.data}" alt="Foto de entrada ${i + 1}"><button type="button" class="rm" data-rm-photo="${i}" aria-label="Remover foto">✕</button></figure>`)}</div>
-          <span class="hint">A foto de entrada é o “antes” do item.</span>`;
+          <span class="hint">Item cadastrado com foto já é uma <b>não conformidade em aberto</b>; a foto é o “antes”.</span>`;
       case 'text':
         return html`<p class="wiz-q">O que deve ser verificado?</p>
           <input type="text" class="wiz-input" data-f="text" maxlength="300" value="${item.text}" placeholder="Ex.: Tomadas e interruptores funcionando" autocomplete="off" enterkeyhint="next">`;
@@ -163,7 +163,7 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
   const validate = () => {
     const s = STEPS()[step];
     if (s.k === 'group' && item.group === undefined) return 'Escolha o grupo do item (ou “Sem grupo”).';
-    if (s.k === 'photo' && photoRequired() && !item.images.length) return 'Foto obrigatória: tire ou escolha a foto de entrada para continuar.';
+    if (s.k === 'photo' && photoRequired() && !item.images.length) return 'Foto obrigatória: tire ou escolha a foto da não conformidade para continuar.';
     if (s.k === 'text' && !item.text) return 'Descreva o item a verificar.';
     if (s.k === 'end' && item.due_date && item.start_date && item.due_date < item.start_date) return 'A data de término não pode ser anterior à data de início.';
     return '';
@@ -308,7 +308,7 @@ function itemCard(t, it, c) {
   // Foto obrigatória: cada resposta Conforme/Não conforme leva a sua própria foto (fotos avulsas já anexadas valem)
   const needPhoto = c.photo_rule === 'obrigatoria' && !it.loose_count;
   const ncTimes = it.nc_count > 1 ? ` · ${it.nc_count}x` : '';
-  const state = it.result === 'nao_conforme'
+  const state = it.open_nc
     ? html`<span class="cli-state st-nao_conforme">✗ Não conforme${ncTimes}</span>`
     : it.result
       ? html`<span class="cli-state st-${it.result}">${RESULT[it.result].short} ${RESULT[it.result].label}</span>${it.nc_count ? html`<span class="cli-fixed" title="Ficou não conforme ${it.nc_count} vez(es) antes de ser corrigido">corrigido · ${it.nc_count}x não conforme</span>` : ''}`
@@ -334,29 +334,29 @@ function itemCard(t, it, c) {
   };
   // Capa: antes × depois (corrigido) ou a foto mais recente da não conformidade
   const shown = new Set([it.before?.id, it.after?.id, it.cover?.id].filter(Boolean));
-  const beforeLabel = it.before?.kind === 'referencia' ? 'Antes · entrada' : 'Antes · não conforme';
+  const beforeLabel = it.before?.kind === 'referencia' ? 'Antes · cadastro' : 'Antes · não conforme';
   const visual = it.before && it.after
     ? html`<div class="cli-ba">
         <figure class="cli-ba-f is-before ${it.before.kind === 'referencia' ? 'is-ref' : ''}" data-src="/api/checklist-files/${it.before.id}" data-caption="${beforeLabel} · item ${it.seq}"><img src="/api/checklist-files/${it.before.id}" alt="Antes" loading="lazy"><figcaption>${beforeLabel} · ${shortDate(it.before.created_at)}</figcaption></figure>
         <span class="cli-ba-arrow" aria-hidden="true">→</span>
         <figure class="cli-ba-f is-after" data-src="/api/checklist-files/${it.after.id}" data-caption="Depois · conforme · item ${it.seq}"><img src="/api/checklist-files/${it.after.id}" alt="Depois" loading="lazy"><figcaption>Depois · ${shortDate(it.after.created_at)}</figcaption></figure>
       </div>`
-    : it.cover ? (it.result === 'nao_conforme'
+    : it.cover ? (it.open_nc
       ? html`<figure class="cli-cover" data-src="/api/checklist-files/${it.cover.id}" data-caption="Não conformidade · item ${it.seq}">
         <img src="/api/checklist-files/${it.cover.id}" alt="Foto da não conformidade" loading="lazy">
         <figcaption>${icon('alert')} Não conformidade mais recente${ncTimes} · ${shortDate(it.cover.created_at)}</figcaption></figure>`
       : html`<figure class="cli-cover is-ref" data-src="/api/checklist-files/${it.cover.id}" data-caption="Foto de entrada · item ${it.seq}">
         <img src="/api/checklist-files/${it.cover.id}" alt="Foto de entrada" loading="lazy">
-        <figcaption>${icon('image')} Foto de entrada${it.refs.length > 1 ? ` (+${it.refs.length - 1})` : ''}</figcaption></figure>`) : '';
+        <figcaption>${icon('image')} Foto do cadastro${it.refs.length > 1 ? ` (+${it.refs.length - 1})` : ''}</figcaption></figure>`) : '';
   const others = it.files.filter(f => !shown.has(f.id));
-  const history = it.history.length > 1 || it.history.some(h => h.reason) ? html`<details class="cli-hist"><summary>${icon('history')} Histórico do item (${it.history.length})</summary>
-    <ol>${[...it.history].reverse().map(h => html`<li class="h-${h.result}"><b>${RESULT[h.result].label}</b> · ${h.user_name || '—'} · ${shortDate(h.created_at)}
+  const history = it.history.length > 1 || it.history.some(h => h.reason || h.registration) ? html`<details class="cli-hist"><summary>${icon('history')} Histórico do item (${it.history.length})</summary>
+    <ol>${[...it.history].reverse().map(h => html`<li class="h-${h.result}"><b>${h.registration ? 'Não conformidade registrada (cadastro)' : RESULT[h.result].label}</b> · ${h.user_name || '—'} · ${shortDate(h.created_at)}
       ${h.reason ? html`<div class="h-why">Justificativa: ${h.reason}</div>` : ''}${h.note ? html`<div class="h-note">${h.note}</div>` : ''}
       ${h.files.length ? html`<div class="h-ph">${h.files.map(f => photo(f, `Item ${it.seq} · ${RESULT[h.result].label} · ${shortDate(h.created_at)}`, 'is-mini'))}</div>` : ''}</li>`)}</ol></details>` : '';
   const body = html`
     ${visual}
     ${it.can_answer ? html`<div class="cli-answer" role="group" aria-label="Resposta do item ${it.seq}">${ansBtn('conforme')}${ansBtn('nao_conforme')}${ansBtn('na')}</div>
-      ${it.result === 'nao_conforme' ? html`<div class="cli-hint">${icon('info')} Continua pendente: depois de corrigir, marque Conforme${c.photo_rule === 'obrigatoria' ? ' com a foto do depois' : ''}.</div>`
+      ${it.open_nc ? html`<div class="cli-hint">${icon('info')} Não conformidade em aberto: depois de corrigir, marque Conforme${c.photo_rule === 'obrigatoria' ? ' com a foto do depois' : ''}.</div>`
         : needPhoto && !it.result ? html`<div class="cli-hint">${icon('camera')} Foto obrigatória: ao tocar em Conforme ou Não conforme a câmera abre.</div>` : ''}`
       : !it.resolved ? html`<div class="cli-hint">${icon('clock')} ${c.locked ? 'Check-list fechado para alterações.' : `Aguardando ${it.responsible_name} (ou o responsável global).`}</div>` : ''}
     ${others.length || it.can_answer ? html`<div class="cli-photos">
@@ -370,8 +370,8 @@ function itemCard(t, it, c) {
       : it.note ? html`<div class="cli-note-text"><b>${it.result === 'nao_conforme' ? 'Problema:' : 'Obs.:'}</b> ${it.note}</div>` : ''}
     ${history}`;
   const nothing = !it.can_answer && !it.files.length && !it.note && !it.history.length;
-  const attrs = `id="cli-${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.result === 'nao_conforme' ? 1 : 0}"`;
-  const cls = `cli ${it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''}`;
+  const attrs = `id="cli-${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"`;
+  const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''}`;
   // Resolvidos (Conforme/N/A) ficam recolhidos numa linha — com a miniatura do antes × depois quando houve correção
   const mini = it.before && it.after ? html`<span class="cli-mini-ba ${it.before.kind === 'referencia' ? 'is-ref' : ''}"><img src="/api/checklist-files/${it.before.id}" alt="Antes" loading="lazy"><img src="/api/checklist-files/${it.after.id}" alt="Depois" loading="lazy"></span>` : '';
   return it.resolved
@@ -582,7 +582,7 @@ export function bindChecklist(root, t, ctx, refresh) {
         <div class="form-row"><div class="field"><label for="ei-start">Data de início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
           <div class="field"><label for="ei-end">Data de término</label><input id="ei-end" name="due_date" type="date" value="${it.due_date || ''}"></div></div>
         <div class="field"><label for="ei-desc">Observação</label><textarea id="ei-desc" name="description" rows="3" maxlength="2000">${it.description || ''}</textarea></div>
-        <div class="field"><span class="label">Fotos de entrada (${it.refs.length})</span>
+        <div class="field"><span class="label">Fotos da não conformidade · cadastro (${it.refs.length})</span>
           <div class="cli-photos">${it.refs.map(f => html`<figure class="cli-ph"><img src="/api/checklist-files/${f.id}" alt="Foto de entrada"><button type="button" class="rm" data-rm-ref="${f.id}" aria-label="Remover foto de entrada">✕</button></figure>`)}
             <label class="cli-ph-add">${fileInput({ camera: true, data: 'data-ref-photo' })}${icon('camera')}<span>Foto</span></label>
             <label class="cli-ph-add">${fileInput({ multiple: true, data: 'data-ref-photo' })}${icon('image')}<span>Galeria</span></label></div></div>

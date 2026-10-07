@@ -31,7 +31,8 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     (SELECT rc.active FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_active,
     (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id) AS cl_total,
     (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND ci.result IN ('conforme','na')) AS cl_done,
-    (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND ci.result = 'nao_conforme') AS cl_nc
+    (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND (ci.result = 'nao_conforme'
+      OR (ci.result IS NULL AND EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia')))) AS cl_nc
   FROM tasks t
   JOIN projects p ON p.id = t.project_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id

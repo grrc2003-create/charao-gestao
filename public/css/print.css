@@ -224,3 +224,15 @@
 .r-ph-2 { grid-template-columns: repeat(4, 1fr); margin-top: 4px; }
 .r-nc-table td, .r-nc-table th { padding: 4px 6px; }
 .r-total td { border-top: 1.5px solid #CFC3AE; background: #FAF8F4; }
+
+/* Check-list: responsável e prazo em destaque no relatório */
+.r-facts { display: flex; flex-wrap: wrap; gap: 5px; }
+.r-fact { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 8px; border: 1px solid #DCE3EA; border-radius: 4px; background: #F1F4F7; }
+.r-fact small { font-size: 6.8pt; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6E7A86; }
+.r-fact b { font-size: 9.5pt; color: #1C2A38; }
+.r-fact em { font-style: normal; font-size: 8pt; font-weight: 700; }
+.r-fact.is-ok { background: #E7F0FA; border-color: #BCD3EC; } .r-fact.is-ok em { color: #2F6FB3; }
+.r-fact.is-soon { background: #FBF1DC; border-color: #E8CF98; } .r-fact.is-soon b, .r-fact.is-soon em { color: #8A5A0A; }
+.r-fact.is-late { background: #C0392B; border-color: #C0392B; } .r-fact.is-late small, .r-fact.is-late b, .r-fact.is-late em { color: #fff; }
+.r-fact.is-done { background: #F7F6F3; border-color: #E4E1DA; }
+.r-fact.is-none b { color: #6E7A86; font-weight: 500; }

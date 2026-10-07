@@ -63,15 +63,26 @@ export async function view({ params, query }) {
     const list = i.cover ? [i.cover] : i.files.length ? i.files : i.refs;
     return list.length ? html`<div class="r-photos r-ph-2">${list.slice(0, 4).map(f => fig(f, i.open_nc ? 'NÃO CONFORMIDADE' : '', '#C0392B'))}</div>` : '';
   };
+  // Prazo em destaque, com a cor pela urgência (vencido, vence em até 2 dias, no prazo, resolvido, sem prazo)
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const dueFact = i => {
+    if (!i.due_date) return html`<span class="r-fact is-none"><small>Prazo</small><b>Sem prazo</b></span>`;
+    const days = Math.round((Date.parse(i.due_date) - Date.parse(today)) / 86400e3);
+    const [cls, rel] = i.resolved ? ['is-done', ''] : days < 0 ? ['is-late', `atrasado há ${-days} ${days === -1 ? 'dia' : 'dias'}`]
+      : days === 0 ? ['is-soon', 'vence hoje'] : days <= 2 ? ['is-soon', `falta${days > 1 ? 'm' : ''} ${days} ${days === 1 ? 'dia' : 'dias'}`] : ['is-ok', `faltam ${days} dias`];
+    return html`<span class="r-fact ${cls}"><small>Prazo</small><b>${fmtDate(i.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span>`;
+  };
   const itemBlock = i => {
     const st = situation(i);
     const hist = i.history.length > 1 || i.history.some(h => h.reason || h.registration) ? i.history : [];
     return html`<article class="r-item avoid">
       <header><span class="r-item-n">${i.seq}</span><b>${i.text}</b><span class="r-st" style="--c:${st.c}">${st.t}</span></header>
+      <div class="r-facts">
+        <span class="r-fact"><small>Responsável${i.assignee_id ? '' : ' (global)'}</small><b>${i.responsible_name}</b></span>
+        ${dueFact(i)}
+      </div>
       <div class="r-item-meta small">
         ${!levels.includes('grupo') && i.group ? html`<span class="r-stage">${i.group}</span>` : ''}
-        <span>Responsável: <b>${i.responsible_name}</b></span>
-        ${i.due_date ? html`<span class="${i.overdue ? 'late' : ''}">Prazo: <b>${fmtDate(i.due_date)}</b>${i.overdue ? ' · atrasado' : ''}</span>` : ''}
         ${i.result ? html`<span>Respondido por ${i.answered_by_name || '—'} em ${fmtDateTime(i.answered_at)}</span>` : ''}
       </div>
       ${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}

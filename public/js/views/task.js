@@ -2,7 +2,7 @@
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
-import { checklistSection, bindChecklist, PHOTO_RULE } from './checklist-ui.js';
+import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink } from './checklist-ui.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
   : t.days_to_due === 0 ? 'Vence hoje' : t.days_to_due === 1 ? 'Vence amanhã' : `Faltam ${t.days_to_due} dias`;
@@ -128,7 +128,7 @@ function build(t, ctx) {
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
         ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          ${t.checklist ? html`<a class="btn btn-ghost btn-sm" href="#/imprimir/checklist/${t.id}">${icon('print')}Relatório PDF</a>` : ''}
+          ${t.checklist ? html`<a class="btn btn-ghost btn-sm" data-cl-report href="${checklistReportLink(t)}">${icon('print')}Relatório PDF</a>` : ''}
           ${can.edit ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
           ${can.reassign ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
           ${can.reschedule ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}

@@ -3,7 +3,7 @@
 // ao final, o cronograma semanal (Gantt) dos itens.
 import { html, api, STATUS, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
-import { RESULT, PHOTO_RULE } from './checklist-ui.js';
+import { RESULT, PHOTO_RULE, matchItem, filterOptions, optLabel } from './checklist-ui.js';
 import { periodKey, periodInfo } from './periods.js';
 import { ganttChart } from './gantt.js';
 
@@ -49,7 +49,19 @@ export async function view({ params, query }) {
   const t = await api(`/tasks/${params.id}`);
   if (!t.checklist) throw new Error('Esta tarefa não é um check-list.');
   const c = t.checklist;
-  const s = c.summary;
+  // Filtro por grupo e/ou responsável (?grupo=&resp=): o relatório inteiro (resumo, itens e Gantt) considera só esses itens
+  const opts = filterOptions(c.items);
+  const fGroup = opts.groups.includes(query.get('grupo')) ? query.get('grupo') : '';
+  const fResp = opts.resps.includes(query.get('resp')) ? query.get('resp') : '';
+  const items = c.items.filter(i => matchItem(i, fGroup, fResp));
+  const filterText = [fGroup ? `Grupo: ${optLabel(fGroup, 'group')}` : '', fResp ? `Responsável: ${optLabel(fResp, 'resp')}` : ''].filter(Boolean).join(' · ');
+  const s = (() => {
+    const done = items.filter(i => i.resolved).length;
+    const cnt = r => items.filter(i => i.result === r).length;
+    return { total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0, conforme: cnt('conforme'),
+      nao_conforme: items.filter(i => i.open_nc).length, na: cnt('na'), pending: items.filter(i => !i.result && !i.registered).length,
+      nc_total: items.reduce((n, i) => n + i.nc_count, 0) };
+  })();
   const withPhotos = query.get('fotos') !== '0';
   const withGantt = query.get('gantt') !== '0';
   const judged = s.conforme + s.nao_conforme;
@@ -121,8 +133,8 @@ export async function view({ params, query }) {
     })}`;
   };
   // Resumo: não conformidades por ambiente (grupo)
-  const byGroup = [...new Map(c.items.map(i => [i.group || '', null])).keys()].map(g => {
-    const its = c.items.filter(i => (i.group || '') === g);
+  const byGroup = [...new Map(items.map(i => [i.group || '', null])).keys()].map(g => {
+    const its = items.filter(i => (i.group || '') === g);
     const ncs = its.filter(i => i.nc_count > 0);
     const pend = ncs.filter(i => i.open_nc).length;
     return { name: g || 'Sem grupo', items: its.length, nc: ncs.length, pend, res: ncs.length - pend };
@@ -134,7 +146,7 @@ export async function view({ params, query }) {
   // Gantt semanal dos itens: barra do início ao término (sem início, começa no término). Itens resolvidos vão até a
   // data da resposta; pendentes vencidos ganham a extensão hachurada até hoje. Itens sem nenhuma data ficam de fora.
   const ITEM_COLOR = i => (i.open_nc ? RES_COLOR.nao_conforme : i.result === 'conforme' ? RES_COLOR.conforme : i.result === 'na' ? RES_COLOR.na : '#A86F0E');
-  const dated = c.items.filter(i => i.start_date || i.due_date);
+  const dated = items.filter(i => i.start_date || i.due_date);
   const ganttRows = dated.map(i => ({
     code: String(i.seq), title: i.text, assignee_name: i.responsible_name, group: i.group || 'Sem grupo', item: i,
     start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
@@ -156,7 +168,7 @@ export async function view({ params, query }) {
     <article class="doc a4" id="doc">
       <header class="r-header">
         <img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="r-logo">
-        <div class="r-doctype"><div class="r-kicker">Check-list de vistoria</div><div class="r-level">${t.code}</div></div>
+        <div class="r-doctype"><div class="r-kicker">Check-list de vistoria${filterText ? ' · filtrado' : ''}</div><div class="r-level">${t.code}</div></div>
       </header>
       <div class="r-rule"></div>
       <section class="r-scope">
@@ -170,6 +182,7 @@ export async function view({ params, query }) {
           ${t.delivered_at ? html`<dt>Entregue em</dt><dd>${fmtDateTime(t.delivered_at)}</dd>` : ''}
           ${t.reviewed_at ? html`<dt>Conferido por</dt><dd>${t.reviewer_name || '—'} · ${fmtDateTime(t.reviewed_at)}</dd>` : ''}
           <dt>Fotos</dt><dd>${PHOTO_RULE[c.photo_rule]}</dd>
+          ${filterText ? html`<dt>Filtro</dt><dd><b>${filterText}</b> · ${items.length} de ${c.items.length} itens</dd>` : ''}
           <dt>Agrupamento</dt><dd>${levels.length ? levels.map(l => DIMS[l].label).join(' › ') : 'Sem agrupamento'}</dd>
           <dt>Emissão</dt><dd>${fmtDateTime(new Date().toISOString())}</dd>
         </dl>
@@ -197,8 +210,8 @@ export async function view({ params, query }) {
       </section>
 
       <section class="r-section">
-        <h3 class="r-h">Itens (${c.items.length})</h3>
-        ${blocks(c.items)}
+        <h3 class="r-h">Itens (${items.length})</h3>
+        ${blocks(items)}
       </section>
 
       <section class="r-section avoid">
@@ -209,10 +222,10 @@ export async function view({ params, query }) {
         </div>
       </section>
       ${withGantt ? html`<section class="r-section r-gantt">
-        <h3 class="r-h">Cronograma semanal dos itens (Gantt) <span class="muted small">(${dated.length} de ${c.items.length})</span></h3>
+        <h3 class="r-h">Cronograma semanal dos itens (Gantt) <span class="muted small">(${dated.length} de ${items.length})</span></h3>
         ${ganttChart(ganttRows, { ref: today, weekly: true, groupLabel: ganttBy, color: r => ITEM_COLOR(r.item), statusOf: r => situation(r.item).t,
           noun: ['item(ns)', 'concluído(s)'], head: 'Item', legend: ganttLegend,
-          note: `Barra = data de início até a data de término do item (sem início, aparece só a semana do término).${c.items.length > dated.length ? ` ${c.items.length - dated.length} item(ns) sem datas não aparecem no cronograma.` : ''}` })}
+          note: `Barra = data de início até a data de término do item (sem início, aparece só a semana do término).${items.length > dated.length ? ` ${items.length - dated.length} item(ns) sem datas não aparecem no cronograma.` : ''}` })}
       </section>` : ''}
       <footer class="r-footer">
         <span>Charão Engenharia & Construção · ${title} ${t.code}</span>
@@ -226,6 +239,8 @@ export async function view({ params, query }) {
       back: `#/tarefas/${t.id}`, title: `Check-list — ${t.code} · ${t.title}`,
       extra: html`${[0, 1, 2].map(n => html`<label class="pt-opt">${n === 0 ? 'Agrupar por' : n === 1 ? 'depois' : 'e'}
           <select data-level="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`)}
+        ${opts.groups.length > 1 ? html`<label class="pt-opt">Grupo <select data-flt="grupo"><option value="">Todos</option>${opts.groups.map(k => html`<option value="${k}" ${k === fGroup ? 'selected' : ''}>${optLabel(k, 'group')}</option>`)}</select></label>` : ''}
+        ${opts.resps.length > 1 ? html`<label class="pt-opt">Responsável <select data-flt="resp"><option value="">Todos</option>${opts.resps.map(k => html`<option value="${k}" ${k === fResp ? 'selected' : ''}>${optLabel(k, 'resp')}</option>`)}</select></label>` : ''}
         <label class="pt-opt"><input type="checkbox" id="fotos" ${withPhotos ? 'checked' : ''}>Incluir fotos</label>
         <label class="pt-opt"><input type="checkbox" id="gnt" ${withGantt ? 'checked' : ''}>Gantt semanal</label>`,
     })}<div class="doc-stage">${doc}</div>`,
@@ -234,6 +249,7 @@ export async function view({ params, query }) {
       bindPrintToolbar(root);
       const q = () => Object.fromEntries(new URLSearchParams(location.hash.split('?')[1] || ''));
       root.querySelector('#fotos').addEventListener('change', e => { ctx.setQuery({ ...q(), fotos: e.target.checked ? '' : '0' }); ctx.render(); });
+      root.querySelectorAll('[data-flt]').forEach(sel => sel.addEventListener('change', () => { ctx.setQuery({ ...q(), [sel.dataset.flt]: sel.value }); ctx.render(); }));
       root.querySelector('#gnt').addEventListener('change', e => { ctx.setQuery({ ...q(), gantt: e.target.checked ? '' : '0' }); ctx.render(); });
       // Agrupamento: até 3 níveis (o nível vazio encerra a sequência)
       root.querySelectorAll('[data-level]').forEach(sel => sel.addEventListener('change', () => {

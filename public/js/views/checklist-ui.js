@@ -295,7 +295,25 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false });
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '' });
+
+// Filtro por grupo e/ou responsável (tela e relatório). '' = todos; '~' = sem grupo / sem responsável.
+export const NONE = '~';
+const keyOf = v => v || NONE;
+export const matchItem = (it, group, resp) => (!group || keyOf(it.group) === group) && (!resp || keyOf(it.responsible_name) === resp);
+export const filterOptions = items => ({
+  groups: [...new Set(items.map(i => keyOf(i.group)))],
+  resps: [...new Set(items.map(i => keyOf(i.responsible_name)))].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+});
+export const optLabel = (k, kind) => (k === NONE ? (kind === 'group' ? 'Sem grupo' : 'Sem responsável') : k);
+// Link do relatório levando os filtros em uso
+export const checklistReportHref = (id, group, resp) => {
+  const q = new URLSearchParams();
+  if (group) q.set('grupo', group);
+  if (resp) q.set('resp', resp);
+  return `#/imprimir/checklist/${id}${q.size ? `?${q}` : ''}`;
+};
+export const checklistReportLink = t => checklistReportHref(t.id, uiOf(t.id).fGroup, uiOf(t.id).fResp);
 let scrollTo = null;
 
 const initials = n => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
@@ -408,6 +426,18 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
   const f = st.filter || (s.mine_pending && s.mine_pending < s.total - s.done ? 'mine' : 'all');
   const groups = groupsOf(c.items);
   const chip = (k, label, n) => html`<button type="button" class="chip" data-clf="${k}" aria-pressed="${f === k}">${label}${n !== undefined ? html`<span class="n">${n}</span>` : ''}</button>`;
+  const opts = filterOptions(c.items);
+  // Filtro guardado que não existe mais (grupo renomeado, responsável trocado) volta para "todos"
+  if (st.fGroup && !opts.groups.includes(st.fGroup)) st.fGroup = '';
+  if (st.fResp && !opts.resps.includes(st.fResp)) st.fResp = '';
+  const sel = (kind, cur, list, all) => html`<label class="cl-sel ${cur ? 'is-on' : ''}"><span>${kind === 'group' ? 'Grupo' : 'Responsável'}</span>
+    <select data-clsel="${kind}"><option value="">${all}</option>${list.map(k => html`<option value="${k}" ${k === cur ? 'selected' : ''}>${optLabel(k, kind)}</option>`)}</select></label>`;
+  const selects = opts.groups.length > 1 || opts.resps.length > 1 ? html`<div class="cl-selects">
+      ${opts.groups.length > 1 ? sel('group', st.fGroup, opts.groups, 'Todos os grupos') : ''}
+      ${opts.resps.length > 1 ? sel('resp', st.fResp, opts.resps, 'Todos os responsáveis') : ''}
+      <span class="cl-sel-info" data-clsel-info></span>
+      <button type="button" class="btn btn-ghost btn-sm" data-clsel-clear ${st.fGroup || st.fResp ? '' : 'hidden'}>Limpar filtro</button>
+    </div>` : '';
   return html`<section class="card block block-exec" id="checklist" aria-labelledby="blk-cl">
     <header class="block-head"><span class="step">2</span><h2 id="blk-cl">Check-list</h2>
       <span class="right muted" style="font-size:12px">${s.done} de ${s.total} concluídos${s.nc_total ? ` · ${s.nc_total} NC no histórico` : ''}</span></header>
@@ -428,6 +458,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           ${chip('all', 'Todos', s.total)}${s.mine_pending || c.items.some(i => i.mine) ? chip('mine', 'Meus itens', s.mine_pending ? `${s.mine_pending} pend.` : undefined) : ''}
           ${chip('pending', 'Pendentes', s.total - s.done)}${s.nao_conforme ? chip('nc', 'Não conformes', s.nao_conforme) : ''}
         </div>
+        ${selects}
         ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
       </div>
       ${c.can_manage_items ? html`<div class="cl-add-panel" id="cl-add-panel" ${st.adding ? '' : 'hidden'}>
@@ -478,7 +509,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   // Próximo item pendente que este usuário pode responder, dentro do filtro em uso
   const nextAfter = id => {
     const f = list.dataset.filter;
-    const inFilter = x => (f === 'mine' ? x.mine : f === 'nc' ? x.result === 'nao_conforme' : true);
+    const inFilter = x => (f === 'mine' ? x.mine : f === 'nc' ? x.result === 'nao_conforme' : true) && matchItem(x, st.fGroup, st.fResp);
     const items = c.items;
     const i = items.findIndex(x => x.id === id);
     const nxt = [...items.slice(i + 1), ...items.slice(0, i)].find(x => !x.result && x.can_answer && inFilter(x));
@@ -506,10 +537,47 @@ export function bindChecklist(root, t, ctx, refresh) {
     return updated;
   }, msg);
 
+  // Grupo / responsável: esconde itens e grupos fora do filtro (os chips continuam valendo por cima)
+  const byId = new Map(c.items.map(i => [i.id, i]));
+  const applySel = () => {
+    const f = list.dataset.filter;
+    const chipOk = it => (f === 'mine' ? it.mine : f === 'pending' ? !it.resolved : f === 'nc' ? it.open_nc : true);
+    let shown = 0, inSel = 0;
+    list.querySelectorAll('.clg').forEach(sec => {
+      let any = false;
+      sec.querySelectorAll('.cli').forEach(el => {
+        const it = byId.get(Number(el.id.slice(4)));
+        const ok = !!it && matchItem(it, st.fGroup, st.fResp);
+        el.classList.toggle('is-filtered', !ok);
+        if (ok) { inSel++; if (chipOk(it)) { any = true; shown++; } }
+      });
+      sec.classList.toggle('is-filtered', !any);
+    });
+    const none = list.querySelector('.cl-none');
+    if (none) none.style.display = shown ? 'none' : 'block';
+    const active = !!(st.fGroup || st.fResp);
+    const info = root.querySelector('[data-clsel-info]');
+    if (info) info.textContent = active ? `${inSel} de ${c.items.length} itens` : '';
+    root.querySelector('[data-clsel-clear]')?.toggleAttribute('hidden', !active);
+    root.querySelectorAll('[data-clsel]').forEach(s => s.closest('.cl-sel').classList.toggle('is-on', !!s.value));
+    // O relatório sai com o mesmo filtro
+    root.querySelectorAll('a[data-cl-report]').forEach(a => (a.href = checklistReportLink(t)));
+  };
+  root.querySelectorAll('[data-clsel]').forEach(s => s.addEventListener('change', () => {
+    if (s.dataset.clsel === 'group') st.fGroup = s.value; else st.fResp = s.value;
+    applySel();
+  }));
+  root.querySelector('[data-clsel-clear]')?.addEventListener('click', () => {
+    st.fGroup = st.fResp = '';
+    root.querySelectorAll('[data-clsel]').forEach(s => (s.value = ''));
+    applySel();
+  });
+  applySel();
   root.querySelectorAll('.cl-filters [data-clf]').forEach(b => b.addEventListener('click', () => {
     st.filter = b.dataset.clf;
     list.dataset.filter = b.dataset.clf;
     root.querySelectorAll('.cl-filters [data-clf]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    applySel();
   }));
   root.querySelectorAll('button[data-answer]').forEach(b => b.addEventListener('click', async () => {
     const it = c.items.find(x => x.id === Number(b.dataset.item));

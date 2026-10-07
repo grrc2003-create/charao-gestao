@@ -316,18 +316,24 @@ export function seedDemo() {
     const clId = insertTask({ project: p1, data: { task_type: 'checklist', photo_rule: 'obrigatoria', items, title: 'Check-list final — Unidade 501',
       description: 'Vistoria final antes da entrega ao cliente. Registrar foto em todos os itens avaliados.', field_summary: null, notes: null,
       priority: 'alta', proof_type: 'nenhuma', assignee_id: 4, due_date: addDays(T, 5), start_date: null }, stageInput: null, creatorId: 2 });
-    const answer = (seq, result, by, note) => {
+    // Cada resposta entra no histórico do item com a própria foto (antes × depois)
+    const answer = (seq, result, by, note, daysAgo = 0) => {
       const it = one('SELECT id, text FROM checklist_items WHERE task_id = ? AND seq = ?', clId, seq);
-      run('UPDATE checklist_items SET result = ?, note = ?, answered_by = ?, answered_at = ? WHERE id = ?', result, note, by, new Date().toISOString(), it.id);
+      const at = new Date(Date.now() - daysAgo * 86400e3).toISOString();
+      const ans = Number(run('INSERT INTO checklist_answers (item_id, result, note, user_id, created_at) VALUES (?,?,?,?,?)', it.id, result, note, by, at).lastInsertRowid);
+      run('UPDATE checklist_items SET result = ?, note = ?, answered_by = ?, answered_at = ? WHERE id = ?', result, note, by, at, it.id);
       if (result !== 'na') {
-        const f = saveDemoSvg(svgRef(it.text, result === 'conforme' ? 'execucao' : 'referencia'));
-        run('INSERT INTO checklist_files (item_id, stored_name, mime, size, uploaded_by) VALUES (?,?,?,?,?)', it.id, f.stored_name, f.mime, f.size, by);
+        const f = saveDemoSvg(svgRef(`${it.text}${result === 'nao_conforme' ? ' (problema)' : ''}`, result === 'conforme' ? 'execucao' : 'referencia'));
+        run('INSERT INTO checklist_files (item_id, answer_id, stored_name, mime, size, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?)', it.id, ans, f.stored_name, f.mime, f.size, by, at);
       }
     };
     answer(1, 'conforme', 7, null);
     answer(2, 'conforme', 7, null);
     answer(3, 'nao_conforme', 4, 'Sifão da pia gotejando; acionar hidráulica.');
-    answer(5, 'conforme', 5, null);
+    // Caimento do piso: não conforme duas vezes, depois corrigido (mostra antes × depois)
+    answer(5, 'nao_conforme', 5, 'Água empoçando perto da porta.', 3);
+    answer(5, 'nao_conforme', 5, 'Ainda empoça após o primeiro ajuste.', 2);
+    answer(5, 'conforme', 5, null, 1);
     run(`UPDATE tasks SET status = 'em_andamento', started_at = ? WHERE id = ?`, new Date().toISOString(), clId);
   }
 

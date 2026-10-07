@@ -615,6 +615,16 @@ async function main() {
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { images: [{ data: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 x %%EOF').toString('base64') }] })).status === 400, 'item do check-list aceita só fotos');
   const clFileId = cl.checklist.items[0].files[0].id;
   ok((await brunoC('DELETE', `/tasks/${clId}/items/${iTom}/files/${clFileId}`)).status === 400, 'não remove a única foto obrigatória de item respondido');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'nao_conforme', images: [{ data: tinyPng() }] })).status === 400, 'alterar item que estava Conforme exige justificativa');
+  cl = (await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'nao_conforme', reason: 'Tomada da bancada sem energia', note: 'Tomada da bancada sem energia', images: [{ data: tinyPng() }] })).data;
+  let itTom = cl.checklist.items.find(i => i.id === iTom);
+  ok(itTom.result === 'nao_conforme' && !itTom.resolved && itTom.nc_count === 1 && itTom.cover && cl.history.some(h => h.action === 'Resposta de item alterada' && h.details.includes('Justificativa: Tomada')),
+    'Conforme → Não conforme com justificativa: item volta a ficar pendente, conta 1x e a capa é a foto do problema');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme' })).status === 400, 'a correção (depois) também exige foto nova');
+  cl = (await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).data;
+  itTom = cl.checklist.items.find(i => i.id === iTom);
+  ok(itTom.resolved && itTom.before && itTom.after && itTom.before.id !== itTom.after.id && itTom.history.length === 3 && itTom.nc_count === 1,
+    'corrigido: antes (não conformidade) × depois (conforme) e histórico do item com 3 respostas');
   ok((await felipeC('POST', `/tasks/${clId}/items/${iPint}/answer`, { result: 'na' })).status === 200, 'N/A não exige foto');
   cl = (await marcos('POST', `/tasks/${clId}/items/${iPia}/answer`, { result: 'nao_conforme', note: 'Sifão gotejando', images: [{ data: tinyPng() }] })).data;
   ok(cl.checklist.items[1].result === 'nao_conforme' && cl.checklist.items[1].note === 'Sifão gotejando', 'responsável global responde item sem responsável, com observação');
@@ -643,8 +653,10 @@ async function main() {
   const byType = (await ricardo('GET', '/tasks?tipo=checklist')).data;
   ok(byType.every(t => t.task_type === 'checklist') && byType.some(t => t.id === clId), 'filtro por tipo Check-list');
   ok((await ana('GET', `/tasks/${clId}`)).data.can.delete === false, 'check-list com itens respondidos não pode ser excluído definitivamente');
+  ok((await marcos('POST', `/tasks/${clId}/actions/submit`)).status === 400 && (await marcos('GET', `/tasks/${clId}`)).data.checklist.check.missing.some(m => m.includes('não conformidade')), 'não conformidade em aberto bloqueia o envio');
+  await marcos('POST', `/tasks/${clId}/items/${iPia}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] });
   cl = (await marcos('POST', `/tasks/${clId}/actions/submit`)).data;
-  ok(cl.status === 'aguardando_conferencia' && cl.cl_total === 5 && cl.cl_done === 5 && cl.cl_nc === 1, 'com todos os itens respondidos o check-list vai para conferência');
+  ok(cl.status === 'aguardando_conferencia' && cl.cl_total === 5 && cl.cl_done === 5 && cl.cl_nc === 0 && cl.checklist.summary.nc_total === 2, 'tudo Conforme/N/A: vai para conferência, guardando 2 não conformidades no histórico');
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'na' })).status === 400, 'depois de entregue os itens não mudam');
   ok((await ricardo('POST', `/tasks/${clId}/actions/approve`, {})).data.status === 'concluida', 'gestor confere e conclui o check-list');
   const clLivre = (await ricardo('POST', '/tasks', { ...clBase, photo_rule: 'livre', items: [{ text: 'Item livre' }] })).data.id;

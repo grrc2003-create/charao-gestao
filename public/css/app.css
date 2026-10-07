@@ -890,3 +890,32 @@ details.cli .cli-body { padding-top: 0; }
 .cl-draft-rm { grid-area: rm; }
 @media (min-width: 640px) { .cl-draft-item { grid-template-columns: auto minmax(0, 1fr) 200px auto; grid-template-areas: "n text who rm"; } .cl-draft-item .cl-n { margin-top: 0; align-self: center; } }
 .cl-empty { font-size: 13px; padding: 8px 2px; }
+
+/* Check-list: não conformidade, antes × depois e histórico do item */
+.cli-fixed { font-size: 11px; font-weight: 700; color: var(--st-concluida); background: var(--st-concluida-bg); border: 1px dashed color-mix(in srgb, var(--st-concluida) 45%, transparent); border-radius: 999px; padding: 1px 8px; }
+.cli-cover { position: relative; margin: 0; border-radius: 12px; overflow: hidden; border: 2px solid var(--st-atrasada); cursor: zoom-in; background: var(--sand); }
+.cli-cover img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+.cli-cover figcaption { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; font-weight: 650; color: #fff; background: linear-gradient(transparent, rgba(120, 20, 10, .85)); }
+.cli-cover figcaption svg { width: 14px; height: 14px; }
+.cli-ba { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; }
+.cli-ba-f { position: relative; margin: 0; border-radius: 12px; overflow: hidden; cursor: zoom-in; background: var(--sand); border: 2px solid var(--c); }
+.cli-ba-f.is-before { --c: var(--st-atrasada); } .cli-ba-f.is-after { --c: var(--st-concluida); }
+.cli-ba-f img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.cli-ba-f figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); }
+.cli-ba-arrow { font-size: 20px; font-weight: 800; color: var(--muted); }
+.cli-mini-ba { display: inline-flex; gap: 3px; margin: 8px 0 0 38px; }
+.cli-mini-ba img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 2px solid var(--st-atrasada); }
+.cli-mini-ba img + img { border-color: var(--st-concluida); }
+.cli-hist { border-top: 1px dashed var(--line-strong); padding-top: 8px; font-size: 12.5px; }
+.cli-hist summary { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-weight: 650; color: var(--navy-700); }
+.cli-hist summary svg { width: 14px; height: 14px; }
+.cli-hist ol { list-style: none; margin: 8px 0 0; padding: 0 0 0 10px; display: grid; gap: 8px; border-left: 2px solid var(--line); }
+.cli-hist li { position: relative; padding-left: 10px; color: var(--ink-2); }
+.cli-hist li::before { content: ""; position: absolute; left: -16px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--steel)); border: 2px solid var(--surface); }
+.cli-hist li.h-conforme { --c: var(--st-concluida); } .cli-hist li.h-nao_conforme { --c: var(--st-atrasada); } .cli-hist li.h-na { --c: var(--steel); }
+.cli-hist li b { color: var(--c); }
+.h-why { color: var(--orange-700); font-weight: 600; }
+.h-note { color: var(--ink-2); }
+.h-ph { display: flex; gap: 4px; margin-top: 4px; }
+.cli-ph.is-mini { width: 44px; height: 44px; border-radius: 6px; }
+.cli[open] .cli-mini-ba { display: none; }

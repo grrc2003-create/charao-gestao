@@ -81,7 +81,8 @@ async function main() {
   ok(julProjects.join() === 'PRJ-002,PRJ-004,INT-001', `gestora restrita vê só PRJ-002, PRJ-004 e a área interna (${julProjects})`);
   ok((await juliana('GET', '/projects/1')).status === 404, 'gestora restrita não abre PRJ-001');
   const brunoTasks = (await bruno('GET', '/tasks')).data;
-  ok(brunoTasks.every(t => t.assignee_name === 'Bruno Costa' || t.creator_name === 'Bruno Costa'), 'escopo "somente próprias" vê apenas as próprias tarefas');
+  ok(brunoTasks.every(t => t.assignee_name === 'Bruno Costa' || t.creator_name === 'Bruno Costa' || t.task_type === 'checklist'), 'escopo "somente próprias" vê apenas as próprias tarefas (e check-lists com itens dele)');
+  ok(brunoTasks.filter(t => t.task_type === 'checklist').every(t => t.title.includes('Unidade 501')), 'check-list visível ao Bruno é o que tem itens atribuídos a ele');
   const camilaUsers = (await camila('GET', '/users')).data;
   ok(camilaUsers.length === 1 && camilaUsers[0].name === 'Camila Rocha', 'colaborador vê apenas o próprio perfil');
   ok((await camila('GET', '/users/1')).status === 404, 'colaborador não abre perfil de terceiros');

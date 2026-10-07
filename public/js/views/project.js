@@ -3,6 +3,7 @@ import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATU
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
+import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 
 export async function view({ params, query, setQuery, render }) {
   const p = await api(`/projects/${params.id}`);
@@ -34,6 +35,7 @@ export async function view({ params, query, setQuery, render }) {
       })}
 
       ${kpiBlock(p.summary)}
+      ${checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` })}
 
       <div class="grid grid-dash section">
         <section class="card">
@@ -103,6 +105,7 @@ export async function view({ params, query, setQuery, render }) {
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
+      bindChecklistCards(root);
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {
         saveOrg(b.dataset.org);

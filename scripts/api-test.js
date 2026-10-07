@@ -697,6 +697,11 @@ async function main() {
   ok(cd && cd.total === 3 && cd.resolved === 1 && cd.pending === 2 && cd.overdue === 1 && cd.pct === 33, 'Dashboard: situação de cada check-list (itens, concluídos, sem resposta, atrasados)');
   const cdNc = d1.checklists.find(c => c.id === clId);
   ok(cdNc && cdNc.nc_resolved === 5 && cdNc.nc_open === 0 && cdNc.eff_status === 'concluida', 'Dashboard: não conformidades resolvidas do check-list concluído');
+  ok((await ricardo('GET', '/projects/1')).data.checklists.some(c => c.id === clK), 'página do projeto traz a seção de check-lists');
+  const felipeCl = (await ricardo('GET', '/users/5')).data.checklists;
+  const fk = felipeCl.find(c => c.id === clK);
+  ok(fk && fk.user_global && fk.user_items === 3 && fk.user_open === 2 && felipeCl.some(c => c.id === clId && !c.user_global && c.user_items >= 1),
+    'página do usuário: check-lists como responsável global e com itens próprios (itens da pessoa e pendentes)');
 
   console.log('Perfil Coordenador (gestor que também aprova as próprias tarefas)');
   const coordId = (await ana('POST', '/users', { name: 'Carla Coordenadora', email: 'carla@charao.eng.br', role: 'coordenador', access_scope: 'projetos', project_ids: [1], password: 'coord1234' })).data.id;

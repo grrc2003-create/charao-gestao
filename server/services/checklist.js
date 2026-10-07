@@ -498,8 +498,19 @@ export function checklistItemsAsSubtasks(tasks) {
 }
 
 // ---------- Dashboard: situação de cada check-list ----------
-export function checklistDashboard(tasks) {
-  const lists = tasks.filter(t => t.task_type === 'checklist' && !t.cancelled_at);
+// userId: inclui os itens daquela pessoa (atribuídos a ela ou, sem responsável próprio, quando ela é a responsável global)
+export function checklistDashboard(tasks, { userId = null } = {}) {
+  let lists = tasks.filter(t => t.task_type === 'checklist' && !t.cancelled_at);
+  const mine = new Map();
+  if (userId && lists.length) {
+    const ids0 = lists.map(t => t.id);
+    for (const r of all(`SELECT ci.task_id, COUNT(*) AS total, SUM(ci.result IS NULL OR ci.result = 'nao_conforme') AS open
+        FROM checklist_items ci JOIN tasks t ON t.id = ci.task_id
+        WHERE ci.task_id IN (${ids0.map(() => '?').join(',')}) AND (ci.assignee_id = ? OR (ci.assignee_id IS NULL AND t.assignee_id = ?))
+        GROUP BY ci.task_id`, ...ids0, userId, userId)) mine.set(r.task_id, r);
+    // Check-lists em que a pessoa é a responsável global ou tem itens
+    lists = lists.filter(t => t.assignee_id === userId || mine.has(t.id));
+  }
   if (!lists.length) return [];
   const ids = lists.map(t => t.id);
   const ref = today();
@@ -520,6 +531,7 @@ export function checklistDashboard(tasks) {
       assignee_name: t.assignee_name, due_date: t.due_date, eff_status: t.eff_status, status: t.status, days_late: t.days_late, days_to_due: t.days_to_due, photo_rule: t.photo_rule,
       total: s.total, resolved: s.resolved || 0, nc_open: s.nc_open || 0, nc_resolved: s.nc_resolved || 0, pending: s.pending || 0, overdue: s.overdue || 0,
       pct: s.total ? Math.round(((s.resolved || 0) / s.total) * 100) : 0,
+      ...(userId ? { user_items: mine.get(t.id)?.total || 0, user_open: mine.get(t.id)?.open || 0, user_global: t.assignee_id === userId } : {}),
     };
   }).sort((a, b) => RANK[a.eff_status] - RANK[b.eff_status] || b.nc_open + b.overdue - (a.nc_open + a.overdue) || (a.due_date || '9999').localeCompare(b.due_date || '9999'));
 }

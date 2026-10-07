@@ -8,6 +8,7 @@ import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
 import { getSetting } from './settings.js';
 import { listRecurrences } from './recurrences.js';
+import { checklistDashboard } from './checklist.js';
 
 export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'];
 
@@ -70,6 +71,7 @@ export function getProject(ctx, id) {
     chronic_min: getSetting('chronic_reschedule_threshold'),
     members: members(id),
     summary: summarize(tasks),
+    checklists: checklistDashboard(tasks),
     tasks,
     people,
     can_edit: canManageProject(ctx, id),

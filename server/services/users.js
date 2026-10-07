@@ -7,6 +7,7 @@ import { userStats, summarize, monthlyTrend } from './metrics.js';
 import { listVisible } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
+import { checklistDashboard } from './checklist.js';
 
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
@@ -58,6 +59,7 @@ export function getUser(ctx, id) {
     stats: userStats(u, tasks, map),
     trend: monthlyTrend(own),
     chronic_min: getSetting('chronic_reschedule_threshold'),
+    checklists: checklistDashboard(tasks, { userId: id }),
     tasks: own,
     created_tasks: tasks.filter(t => t.creator_id === id && t.assignee_id !== id),
     team: teamMembers,

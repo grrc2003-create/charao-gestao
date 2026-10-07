@@ -3,6 +3,7 @@ import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct, rol
 import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
+import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 
 export async function view({ params, query, setQuery, render, state }) {
   const d = await api(`/users/${params.id}`);
@@ -89,6 +90,8 @@ export async function view({ params, query, setQuery, render, state }) {
         ${kpi({ label: 'Origem das tarefas', value: s.self_created, unit: ` próprias`, color: '#707E8B', foot: `${s.assigned_by_manager} atribuídas por gestor · ${s.created_by_user} criadas no total` })}
       </div>
 
+      ${checklistSection(d.checklists || [], { title: `Check-lists de ${u.name.split(' ')[0]}`, linkAll: '' })}
+
       <div class="grid grid-dash section">
         <section class="card"><div class="card-head"><h2>Distribuição das tarefas</h2></div>
           <div class="card-body">${donut(s.by_status, { linkBase: `#/usuarios/${u.id}`, size: 150 })}</div></section>
@@ -115,6 +118,7 @@ export async function view({ params, query, setQuery, render, state }) {
       </section>`,
     mount(root) {
       bindCommon(root);
+      bindChecklistCards(root);
       root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab }); render(); }));
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st, org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => { saveOrg(b.dataset.org); setQuery({ tab, status: st, org: b.dataset.org }); render(); }));

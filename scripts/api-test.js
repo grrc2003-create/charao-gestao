@@ -693,6 +693,10 @@ async function main() {
   ok(d1.summary.total === d0.summary.total + 4 && d1.checklist_items >= 3, `dashboard soma o check-list e os 3 itens como subtarefas (${d0.summary.total} → ${d1.summary.total})`);
   ok(d1.summary.late === d0.summary.late + 1 && d1.summary.done === d0.summary.done + 1, 'item vencido conta como atrasado e item Conforme como concluído');
   ok(d1.users.find(u => u.id === 5)?.stats.assigned > (d0.users.find(u => u.id === 5)?.stats.assigned || 0), 'itens entram no desempenho do responsável');
+  const cd = d1.checklists.find(c => c.id === clK);
+  ok(cd && cd.total === 3 && cd.resolved === 1 && cd.pending === 2 && cd.overdue === 1 && cd.pct === 33, 'Dashboard: situação de cada check-list (itens, concluídos, sem resposta, atrasados)');
+  const cdNc = d1.checklists.find(c => c.id === clId);
+  ok(cdNc && cdNc.nc_resolved === 5 && cdNc.nc_open === 0 && cdNc.eff_status === 'concluida', 'Dashboard: não conformidades resolvidas do check-list concluído');
 
   console.log('Perfil Coordenador (gestor que também aprova as próprias tarefas)');
   const coordId = (await ana('POST', '/users', { name: 'Carla Coordenadora', email: 'carla@charao.eng.br', role: 'coordenador', access_scope: 'projetos', project_ids: [1], password: 'coord1234' })).data.id;

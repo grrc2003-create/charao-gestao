@@ -496,3 +496,30 @@ export function checklistItemsAsSubtasks(tasks) {
     }, ref, [], 3);
   });
 }
+
+// ---------- Dashboard: situação de cada check-list ----------
+export function checklistDashboard(tasks) {
+  const lists = tasks.filter(t => t.task_type === 'checklist' && !t.cancelled_at);
+  if (!lists.length) return [];
+  const ids = lists.map(t => t.id);
+  const ref = today();
+  const stats = new Map(all(`SELECT ci.task_id,
+      COUNT(*) AS total,
+      SUM(ci.result IN ('conforme','na')) AS resolved,
+      SUM(ci.result = 'nao_conforme' OR (ci.result IS NULL AND EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia'))) AS nc_open,
+      SUM(ci.result IN ('conforme','na') AND (EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia')
+        OR EXISTS (SELECT 1 FROM checklist_answers a WHERE a.item_id = ci.id AND a.result = 'nao_conforme'))) AS nc_resolved,
+      SUM(ci.result IS NULL AND NOT EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia')) AS pending,
+      SUM(ci.result IS NOT 'conforme' AND ci.result IS NOT 'na' AND ci.due_date IS NOT NULL AND ci.due_date < ?) AS overdue
+    FROM checklist_items ci WHERE ci.task_id IN (${ids.map(() => '?').join(',')}) GROUP BY ci.task_id`, ref, ...ids).map(r => [r.task_id, r]));
+  const RANK = { atrasada: 0, em_andamento: 1, aberta: 1, aguardando_conferencia: 2, concluida: 3 };
+  return lists.map(t => {
+    const s = stats.get(t.id) || { total: 0, resolved: 0, nc_open: 0, nc_resolved: 0, pending: 0, overdue: 0 };
+    return {
+      id: t.id, code: t.code, title: t.title, project_code: t.project_code, project_name: t.project_name,
+      assignee_name: t.assignee_name, due_date: t.due_date, eff_status: t.eff_status, status: t.status, days_late: t.days_late, days_to_due: t.days_to_due, photo_rule: t.photo_rule,
+      total: s.total, resolved: s.resolved || 0, nc_open: s.nc_open || 0, nc_resolved: s.nc_resolved || 0, pending: s.pending || 0, overdue: s.overdue || 0,
+      pct: s.total ? Math.round(((s.resolved || 0) / s.total) * 100) : 0,
+    };
+  }).sort((a, b) => RANK[a.eff_status] - RANK[b.eff_status] || b.nc_open + b.overdue - (a.nc_open + a.overdue) || (a.due_date || '9999').localeCompare(b.due_date || '9999'));
+}

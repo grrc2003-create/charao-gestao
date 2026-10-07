@@ -159,6 +159,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     team_summary: team.length ? summarize(units.filter(t => ctx.team.has(t.assignee_id))) : null,
     team_size: team.length,
     my_checklist: Checklist.myPendingItems(ctx),
+    checklists: Checklist.checklistDashboard(tasks),
   });
 });
 

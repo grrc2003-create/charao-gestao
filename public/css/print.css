@@ -248,3 +248,8 @@
 .r-pb-grid figure { margin: 0; }
 .r-pb-grid img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid #E4E1DA; border-radius: 2px; }
 .r-pb-grid figcaption { font-size: 6.8pt; color: #6E7A86; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Gantt semanal (check-list): colunas alternadas por semana */
+.g-week { position: absolute; top: 0; bottom: 0; background: #F7F5F0; }
+.g-axis.is-weekly span { bottom: 5px; }
+.g-label .g-meta { text-transform: none; letter-spacing: 0; font-weight: 400; }

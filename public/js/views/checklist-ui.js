@@ -3,6 +3,15 @@
 import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 
+// Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
+export const PHOTO_LIMIT = 3;
+const limitNote = n => html`<span class="hint">${n ? `${n} de ${PHOTO_LIMIT} fotos` : `Até ${PHOTO_LIMIT} fotos`}${n >= PHOTO_LIMIT ? ' · limite atingido (remova uma para trocar)' : ''}</span>`;
+// Mantém só as fotos que cabem no limite e avisa quando alguma ficou de fora
+const fitPhotos = (imgs, room) => {
+  if (imgs.length > room) toast(room ? `Limite de ${PHOTO_LIMIT} fotos: só ${room === 1 ? 'a 1ª foto foi incluída' : `as ${room} primeiras foram incluídas`}.` : `Limite de ${PHOTO_LIMIT} fotos atingido.`, 'warn');
+  return imgs.slice(0, Math.max(room, 0));
+};
+
 export const RESULT = {
   conforme: { label: 'Conforme', short: '✓', cls: 'ok' },
   nao_conforme: { label: 'Não conforme', short: '✗', cls: 'nc' },
@@ -104,11 +113,12 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
       }
       case 'photo':
         return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto da não conformidade (obrigatória).' : 'Há uma não conformidade? Tire a foto (opcional — sem foto, o item fica só para verificação).'}</p>
-          <div class="wiz-photo">
+          ${item.images.length < PHOTO_LIMIT ? html`<div class="wiz-photo">
             <label class="wiz-cam">${fileInput({ camera: true, data: 'data-new-photo' })}${icon('camera')}<span>${item.images.length ? 'Tirar outra foto' : 'Tirar foto'}</span></label>
             <label class="wiz-gal">${fileInput({ multiple: true, data: 'data-new-photo' })}${icon('image')}<span>Galeria</span></label>
-          </div>
+          </div>` : ''}
           <div class="cli-photos" data-photos>${item.images.map((p, i) => html`<figure class="cli-ph"><img src="${p.data}" alt="Foto de entrada ${i + 1}"><button type="button" class="rm" data-rm-photo="${i}" aria-label="Remover foto">✕</button></figure>`)}</div>
+          ${limitNote(item.images.length)}
           <span class="hint">Item cadastrado com foto já é uma <b>não conformidade em aberto</b>; a foto é o “antes”.</span>`;
       case 'text':
         return html`<p class="wiz-q">O que deve ser verificado?</p>
@@ -224,7 +234,7 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
       if (!files.length) return;
       try {
         const first = !item.images.length;
-        item.images.push(...(await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data })));
+        item.images.push(...fitPhotos((await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data })), PHOTO_LIMIT - item.images.length));
         // Primeira foto tirada: segue direto para o próximo passo
         if (first && item.images.length) go(step + 1); else render();
       } catch (e) { toast(e.message, 'err'); }
@@ -373,8 +383,9 @@ function itemCard(t, it, c) {
       ${others.map(fl => html`<figure class="cli-ph" data-src="/api/checklist-files/${fl.id}" data-caption="Item ${it.seq} · ${it.text}">
         <img src="/api/checklist-files/${fl.id}" alt="Foto do item ${it.seq}" loading="lazy">
         ${it.can_answer ? html`<button type="button" class="rm" data-rm-photo="${fl.id}" data-item="${it.id}" aria-label="Remover foto">✕</button>` : ''}</figure>`)}
-      ${it.can_answer ? html`<label class="cli-ph-add">${fileInput({ camera: true, data: `data-photo-item="${it.id}"` })}${icon('camera')}<span>${it.files.length ? 'Mais foto' : 'Foto'}</span></label>
-        <label class="cli-ph-add">${fileInput({ multiple: true, data: `data-photo-item="${it.id}"` })}${icon('image')}<span>Galeria</span></label>` : ''}</div>` : ''}
+      ${it.can_answer && it.files.length < PHOTO_LIMIT ? html`<label class="cli-ph-add">${fileInput({ camera: true, data: `data-photo-item="${it.id}"` })}${icon('camera')}<span>${it.files.length ? 'Mais foto' : 'Foto'}</span></label>
+        <label class="cli-ph-add">${fileInput({ multiple: true, data: `data-photo-item="${it.id}"` })}${icon('image')}<span>Galeria</span></label>` : ''}</div>
+      ${it.can_answer && it.files.length ? limitNote(it.files.length) : ''}` : ''}
     ${it.can_answer && (it.result === 'nao_conforme' || it.note) ? html`<label class="cli-note"><span>${it.result === 'nao_conforme' ? 'O que está errado?' : 'Observação'}</span>
         <input type="text" data-note-item="${it.id}" maxlength="1000" value="${it.note || ''}" placeholder="${it.result === 'nao_conforme' ? 'Descreva o problema encontrado' : 'Observação'}"></label>`
       : it.note ? html`<div class="cli-note-text"><b>${it.result === 'nao_conforme' ? 'Problema:' : 'Obs.:'}</b> ${it.note}</div>` : ''}
@@ -515,7 +526,10 @@ export function bindChecklist(root, t, ctx, refresh) {
     const itemId = Number(inp.dataset.item || inp.dataset.photoItem);
     try {
       toast(files.length > 1 ? `Enviando ${files.length} fotos…` : 'Enviando foto…', 'warn');
-      const imgs = (await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data }));
+      const got = (await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data }));
+      // Nova resposta começa do zero; foto avulsa entra na resposta atual
+      const imgs = fitPhotos(got,PHOTO_LIMIT - (inp.dataset.answer ? 0 : c.items.find(x => x.id === itemId).files.length));
+      if (!imgs.length) return;
       if (inp.dataset.answer) {
         const why = await askReason(c.items.find(x => x.id === itemId), inp.dataset.answer);
         if (!why) return toast('Alteração cancelada: a foto não foi enviada.', 'warn');
@@ -523,8 +537,8 @@ export function bindChecklist(root, t, ctx, refresh) {
       }
       run(async () => {
         let updated;
-        for (let i = 0; i < imgs.length; i += 5) {
-          updated = await api(`/tasks/${t.id}/items/${itemId}/answer`, { method: 'POST', body: { images: imgs.slice(i, i + 5) } });
+        for (const img of imgs) {
+          updated = await api(`/tasks/${t.id}/items/${itemId}/answer`, { method: 'POST', body: { images: [img] } });
         }
         scrollTo = itemId;
         return updated;
@@ -592,10 +606,11 @@ export function bindChecklist(root, t, ctx, refresh) {
         <div class="form-row"><div class="field"><label for="ei-start">Data de início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
           <div class="field"><label for="ei-end">Data de término</label><input id="ei-end" name="due_date" type="date" value="${it.due_date || ''}"></div></div>
         <div class="field"><label for="ei-desc">Observação</label><textarea id="ei-desc" name="description" rows="3" maxlength="2000">${it.description || ''}</textarea></div>
-        <div class="field"><span class="label">Fotos da não conformidade · cadastro (${it.refs.length})</span>
+        <div class="field"><span class="label">Fotos da não conformidade · cadastro (${it.refs.length} de ${PHOTO_LIMIT})</span>
           <div class="cli-photos">${it.refs.map(f => html`<figure class="cli-ph"><img src="/api/checklist-files/${f.id}" alt="Foto de entrada"><button type="button" class="rm" data-rm-ref="${f.id}" aria-label="Remover foto de entrada">✕</button></figure>`)}
-            <label class="cli-ph-add">${fileInput({ camera: true, data: 'data-ref-photo' })}${icon('camera')}<span>Foto</span></label>
-            <label class="cli-ph-add">${fileInput({ multiple: true, data: 'data-ref-photo' })}${icon('image')}<span>Galeria</span></label></div></div>
+            ${it.refs.length < PHOTO_LIMIT ? html`<label class="cli-ph-add">${fileInput({ camera: true, data: 'data-ref-photo' })}${icon('camera')}<span>Foto</span></label>
+            <label class="cli-ph-add">${fileInput({ multiple: true, data: 'data-ref-photo' })}${icon('image')}<span>Galeria</span></label>` : ''}</div>
+          ${it.refs.length >= PHOTO_LIMIT ? html`<span class="hint">Limite de ${PHOTO_LIMIT} fotos atingido: remova uma para trocar.</span>` : ''}</div>
         ${!it.result ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-del-in-sheet>${icon('trash')}Excluir este item</button>`
           : html`<span class="hint">Item já respondido: pode ser editado, mas não excluído.</span>`}`,
       onSubmit: d => api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, assignee_id: d.assignee_id || null,
@@ -608,8 +623,8 @@ export function bindChecklist(root, t, ctx, refresh) {
       document.querySelector('.sheet [data-close]')?.click();
       try {
         toast('Enviando foto de entrada…', 'warn');
-        const imgs = (await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data }));
-        run(() => api(`/tasks/${t.id}/items/${it.id}/reference`, { method: 'POST', body: { images: imgs.slice(0, 5) } }), 'Foto de entrada incluída.');
+        const imgs = fitPhotos((await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data })), PHOTO_LIMIT - it.refs.length);
+        if (imgs.length) run(() => api(`/tasks/${t.id}/items/${it.id}/reference`, { method: 'POST', body: { images: imgs } }), 'Foto de entrada incluída.');
       } catch (e) { toast(e.message, 'err'); }
     }));
     document.querySelectorAll('.sheet [data-rm-ref]').forEach(b => b.addEventListener('click', () => {

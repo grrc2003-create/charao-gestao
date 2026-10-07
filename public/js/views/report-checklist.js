@@ -67,12 +67,14 @@ export async function view({ params, query }) {
     for (const h of i.history.filter(h => !h.registration)) h.files.forEach(f => add(h.result === 'nao_conforme' ? nc : fix, f));
     i.files.forEach(f => add(i.resolved ? fix : nc, f));
     if (!nc.length && !fix.length) return '';
-    const thumbs = list => html`<div class="r-pb-grid">${list.map(f => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${fmtDateTime(f.created_at).replace(/\/\d{4},/, ',')}</figcaption></figure>`)}</div>`;
+    // Até 3 fotos de cada lado: as mais recentes (a não conformidade atual e a correção final)
+    const thumbs = list => html`<div class="r-pb-grid">${list.slice(-3).map(f => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${fmtDateTime(f.created_at).replace(/\/\d{4},/, ',')}</figcaption></figure>`)}</div>`;
     // Com os dois lados, cada um ocupa espaço proporcional à quantidade de fotos (até 4 por linha no total)
     const cols = nc.length && fix.length ? `grid-template-columns:minmax(0,${Math.min(nc.length, 3)}fr) minmax(0,${Math.min(fix.length, 3)}fr)` : '';
+    const more = list => (list.length > 3 ? ` · mostrando as 3 mais recentes de ${list.length}` : ` · ${list.length} foto(s)`);
     return html`<div class="r-pbox ${nc.length && fix.length ? 'is-two' : ''}" style="${cols}">
-      ${nc.length ? html`<div class="r-pb-col"><div class="r-pb-h is-nc">Não conformidade · ${nc.length} foto(s)</div>${thumbs(nc)}</div>` : ''}
-      ${fix.length ? html`<div class="r-pb-col"><div class="r-pb-h is-ok">${i.result === 'na' ? 'Encerramento (N/A)' : 'Correção'} · ${fix.length} foto(s)</div>${thumbs(fix)}</div>` : ''}
+      ${nc.length ? html`<div class="r-pb-col"><div class="r-pb-h is-nc">Não conformidade${more(nc)}</div>${thumbs(nc)}</div>` : ''}
+      ${fix.length ? html`<div class="r-pb-col"><div class="r-pb-h is-ok">${i.result === 'na' ? 'Encerramento (N/A)' : 'Correção'}${more(fix)}</div>${thumbs(fix)}</div>` : ''}
     </div>`;
   };
   // Prazo em destaque, com a cor pela urgência (vencido, vence em até 2 dias, no prazo, resolvido, sem prazo)

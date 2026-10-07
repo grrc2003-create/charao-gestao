@@ -14,7 +14,15 @@ export const PHOTO_RULE_LABEL = { obrigatoria: 'Foto obrigatória em todos os it
 export const RESULTS = ['conforme', 'nao_conforme', 'na'];
 export const RESULT_LABEL = { conforme: 'Conforme', nao_conforme: 'Não conforme', na: 'N/A' };
 const MAX_ITEMS = 500;
-const MAX_PHOTOS_PER_SEND = 5;
+// Fotos por registro: no máximo 3 no cadastro (não conformidade de entrada) e 3 em cada resposta (não conformidade ou correção)
+export const PHOTO_LIMIT = 3;
+const readImages = list => (Array.isArray(list) ? list : []);
+const assertPhotoLimit = (current, adding, what) => {
+  if (current + adding > PHOTO_LIMIT) {
+    const left = Math.max(PHOTO_LIMIT - current, 0);
+    throw badRequest(`Limite de ${PHOTO_LIMIT} fotos por ${what}. ${left ? `Ainda é possível incluir ${left}.` : 'Remova uma foto para incluir outra.'}`);
+  }
+};
 
 const nowIso = () => new Date().toISOString();
 const isOpen = t => !t.cancelled_at && ['aberta', 'em_andamento'].includes(t.status);
@@ -43,7 +51,8 @@ export function readItems(list, projectId, { required = false, requirePhoto = fa
   if (arr.length > MAX_ITEMS) throw badRequest(`O check-list aceita no máximo ${MAX_ITEMS} itens.`);
   const items = arr.map((it, i) => {
     const text = str(it?.text, { max: 300, required: true, label: `Texto do item ${i + 1}` });
-    const images = Array.isArray(it?.images) ? it.images.slice(0, MAX_PHOTOS_PER_SEND) : [];
+    const images = readImages(it?.images);
+    if (images.length > PHOTO_LIMIT) throw badRequest(`Limite de ${PHOTO_LIMIT} fotos por não conformidade (item "${text}").`);
     if (requirePhoto && !images.length) throw badRequest(`Foto obrigatória: o item "${text}" precisa de uma foto de entrada.`);
     return {
       group: str(it?.group, { max: 80, label: 'Grupo' }) || null,
@@ -268,8 +277,14 @@ export function answerItem(ctx, taskId, itemId, body = {}) {
     if (!reason || reason.length < 5) throw badRequest(`O item estava "${RESULT_LABEL[item.result]}". Informe a justificativa para alterar a resposta.`);
   }
   const note = 'note' in body ? str(body.note, { max: 1000, label: 'Observação' }) : undefined;
-  const images = Array.isArray(body.images) ? body.images.slice(0, MAX_PHOTOS_PER_SEND) : [];
+  const images = readImages(body.images);
   const loose = one(`SELECT COUNT(*) AS n FROM checklist_files WHERE item_id = ? AND answer_id IS NULL AND kind = 'resposta'`, item.id).n;
+  // Limite por resposta: nova resposta = fotos avulsas + enviadas; mesma resposta = fotos que ela já tem + enviadas
+  if (images.length) {
+    const target = changing ? result : item.result;
+    const cur = changing || !item.result ? loose : one('SELECT COUNT(*) AS n FROM checklist_files WHERE answer_id = ?', currentAnswerId(item)).n;
+    assertPhotoLimit(cur, images.length, target === 'nao_conforme' ? 'não conformidade' : target ? 'correção' : 'resposta');
+  }
   // Foto obrigatória: cada resposta Conforme/Não conforme precisa da sua própria foto (a do "depois" não é a do "antes")
   if (changing && needsPhoto(t, result) && images.length + loose === 0) {
     throw badRequest('Foto obrigatória: tire uma foto do item para responder.');
@@ -403,8 +418,10 @@ export function addReferencePhotos(ctx, taskId, itemId, body) {
   const t = loadChecklistTask(ctx, taskId);
   assertManage(ctx, t);
   const item = loadItem(t, itemId);
-  const images = Array.isArray(body.images) ? body.images.slice(0, MAX_PHOTOS_PER_SEND) : [];
+  const images = readImages(body.images);
   if (!images.length) throw badRequest('Nenhuma foto enviada.');
+  const refs = one(`SELECT COUNT(*) AS n FROM checklist_files WHERE item_id = ? AND kind = 'referencia'`, item.id).n;
+  assertPhotoLimit(refs, images.length, 'não conformidade');
   tx(() => {
     const n = saveItemPhotos(ctx, item.id, images, null, 'referencia');
     taskHistory(t.id, ctx.user.id, 'Foto de entrada incluída no item', `${item.seq}. ${item.text} · ${n} foto(s)`);

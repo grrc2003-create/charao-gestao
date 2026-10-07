@@ -626,6 +626,13 @@ async function main() {
   const refId = cl.checklist.items[0].refs[0].id;
   ok((await ricardo('DELETE', `/tasks/${clId}/items/${iTom}/files/${refId}`)).status === 400, 'não remove a única foto de entrada obrigatória');
   ok((await ricardo('POST', `/tasks/${clId}/items/${iTom}/reference`, { images: ph() })).data.checklist.items[0].refs.length === 2, 'inclui outra foto de entrada no item');
+  // Limite de 3 fotos por não conformidade (cadastro) e por resposta
+  const four = () => [1, 2, 3, 4].map(() => ({ data: tinyPng() }));
+  ok((await ricardo('POST', `/tasks/${clId}/items`, { items: [{ text: 'Muitas fotos', images: four() }] })).status === 400, 'cadastro aceita no máximo 3 fotos por item');
+  ok((await ricardo('POST', `/tasks/${clId}/items/${iTom}/reference`, { images: [{ data: tinyPng() }, { data: tinyPng() }] })).status === 400, 'fotos de entrada: 2 + 2 passa do limite de 3');
+  ok((await ricardo('POST', `/tasks/${clId}/items/${iTom}/reference`, { images: ph() })).data.checklist.items[0].refs.length === 3, 'fotos de entrada: completa as 3');
+  ok((await ricardo('POST', `/tasks/${clId}/items/${iTom}/reference`, { images: ph() })).status === 400, 'fotos de entrada: a 4ª é recusada');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { images: [{ data: tinyPng() }, { data: tinyPng() }, { data: tinyPng() }] })).status === 400, 'correção já com 1 foto não aceita mais 3');
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { images: [{ data: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 x %%EOF').toString('base64') }] })).status === 400, 'item do check-list aceita só fotos');
   const clFileId = cl.checklist.items[0].files[0].id;
   ok((await brunoC('DELETE', `/tasks/${clId}/items/${iTom}/files/${clFileId}`)).status === 400, 'não remove a única foto obrigatória de item respondido');
@@ -634,6 +641,9 @@ async function main() {
   let itTom = cl.checklist.items.find(i => i.id === iTom);
   ok(itTom.result === 'nao_conforme' && !itTom.resolved && itTom.open_nc && itTom.nc_count === 2 && itTom.cover && cl.history.some(h => h.action === 'Resposta de item alterada' && h.details.includes('Justificativa: Tomada')),
     'Conforme → Não conforme com justificativa: item volta a ficar pendente, conta 2x (cadastro + nova) e a capa é a foto do problema');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { images: [{ data: tinyPng() }, { data: tinyPng() }] })).data.checklist.items.find(i => i.id === iTom).files.length === 3, 'não conformidade completa 3 fotos');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { images: [{ data: tinyPng() }] })).status === 400, 'não conformidade: a 4ª foto é recusada');
+  ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme', images: four() })).status === 400, 'correção com 4 fotos é recusada');
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme' })).status === 400, 'a correção (depois) também exige foto nova');
   cl = (await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).data;
   itTom = cl.checklist.items.find(i => i.id === iTom);

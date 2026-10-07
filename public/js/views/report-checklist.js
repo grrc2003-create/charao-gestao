@@ -68,7 +68,9 @@ export async function view({ params, query }) {
     i.files.forEach(f => add(i.resolved ? fix : nc, f));
     if (!nc.length && !fix.length) return '';
     const thumbs = list => html`<div class="r-pb-grid">${list.map(f => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${fmtDateTime(f.created_at).replace(/\/\d{4},/, ',')}</figcaption></figure>`)}</div>`;
-    return html`<div class="r-pbox ${nc.length && fix.length ? 'is-two' : ''}">
+    // Com os dois lados, cada um ocupa espaço proporcional à quantidade de fotos (até 4 por linha no total)
+    const cols = nc.length && fix.length ? `grid-template-columns:minmax(0,${Math.min(nc.length, 3)}fr) minmax(0,${Math.min(fix.length, 3)}fr)` : '';
+    return html`<div class="r-pbox ${nc.length && fix.length ? 'is-two' : ''}" style="${cols}">
       ${nc.length ? html`<div class="r-pb-col"><div class="r-pb-h is-nc">Não conformidade · ${nc.length} foto(s)</div>${thumbs(nc)}</div>` : ''}
       ${fix.length ? html`<div class="r-pb-col"><div class="r-pb-h is-ok">${i.result === 'na' ? 'Encerramento (N/A)' : 'Correção'} · ${fix.length} foto(s)</div>${thumbs(fix)}</div>` : ''}
     </div>`;

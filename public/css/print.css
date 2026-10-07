@@ -243,8 +243,8 @@
 .r-pb-h { font-size: 7pt; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 5px; border-radius: 2px; margin-bottom: 3px; display: inline-block; }
 .r-pb-h.is-nc { color: #fff; background: #C0392B; }
 .r-pb-h.is-ok { color: #fff; background: #2E8B57; }
-.r-pb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(21mm, 1fr)); gap: 4px; }
-.r-pbox:not(.is-two) .r-pb-grid { grid-template-columns: repeat(auto-fill, minmax(21mm, 26mm)); }
+.r-pb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(32mm, 38mm)); gap: 5px; }
+.r-pbox:not(.is-two) .r-pb-grid { grid-template-columns: repeat(auto-fill, minmax(32mm, 38mm)); }
 .r-pb-grid figure { margin: 0; }
 .r-pb-grid img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid #E4E1DA; border-radius: 2px; }
-.r-pb-grid figcaption { font-size: 6pt; color: #6E7A86; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-pb-grid figcaption { font-size: 6.8pt; color: #6E7A86; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

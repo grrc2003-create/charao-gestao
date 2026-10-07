@@ -1,7 +1,7 @@
 // Check-list: cadastro rápido dos itens (Enter, colar lista, "# Grupo", "@Nome") e preenchimento item a item
 // numa tela só (Conforme / Não conforme / N/A, observação e fotos), com avanço automático para o próximo item.
 import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
-import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, batchBySize } from '../ui.js';
+import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 
 export const RESULT = {
   conforme: { label: 'Conforme', short: '✓', cls: 'ok' },
@@ -529,7 +529,8 @@ export function bindChecklist(root, t, ctx, refresh) {
   }));
   root.querySelectorAll('.cli-ph[data-src], .cli-ba-f[data-src], .cli-cover[data-src]').forEach(fg => fg.addEventListener('click', e => {
     if (e.target.closest('[data-rm-photo]')) return;
-    lightbox(fg.dataset.src, fg.dataset.caption);
+    // Todas as fotos do item (antes/depois, atuais e do histórico), passando para o lado
+    lightbox(fg.dataset.src, fg.dataset.caption, galleryFrom(fg.closest('.cli') || root));
   }));
 
   // ---------- Itens: incluir, editar, atribuir, excluir ----------

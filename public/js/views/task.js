@@ -1,6 +1,6 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
-import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, fileInput } from '../ui.js';
+import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
 import { checklistSection, bindChecklist, PHOTO_RULE } from './checklist-ui.js';
 
@@ -148,11 +148,11 @@ function build(t, ctx) {
           <div><div class="sub-label">O que precisa ser feito</div><div class="text-content">${t.description}</div></div>
           ${t.field_summary ? html`<div><div class="sub-label">Resumo para campo</div><div>${t.field_summary}</div></div>` : ''}
           ${t.notes ? html`<div><div class="sub-label">Observações</div><div class="note-box">${t.notes}</div></div>` : ''}
-          <div><div class="sub-label">${icon('image')} Imagens e referências (${refs.length})</div>
+          ${t.checklist && !refs.length ? '' : html`<div><div class="sub-label">${icon('image')} Imagens e referências (${refs.length})</div>
             ${refs.length || can.edit ? html`<div class="thumbs">${thumbs(refs, can.edit)}
               ${can.edit ? html`<button type="button" class="add-thumb" data-act="refs">${icon('image')}Anexar referência</button>` : ''}</div>`
               : html`<div class="muted" style="font-size:13.5px">Nenhuma imagem de referência.</div>`}
-          </div>
+          </div>`}
           <dl class="kv" style="font-size:13px">
             <dt>Criada por</dt><dd>${t.creator_name} · ${fmtDateTime(t.created_at)}</dd>
             ${t.assigned_by_name && t.assigned_by_id !== t.assignee_id ? html`<dt>Atribuída por</dt><dd>${t.assigned_by_name}</dd>` : ''}
@@ -403,7 +403,7 @@ function mount(root, t, ctx) {
   }));
   root.querySelectorAll('.thumb[data-src]').forEach(f => f.addEventListener('click', e => {
     if (e.target.closest('[data-rm]')) return;
-    lightbox(f.dataset.src, f.dataset.caption);
+    lightbox(f.dataset.src, f.dataset.caption, galleryFrom(f.closest('.thumbs') || root, '.thumb[data-src]'));
   }));
   root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', async e => {
     e.stopPropagation();

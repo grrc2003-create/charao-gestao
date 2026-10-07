@@ -165,10 +165,51 @@ export function batchBySize(items, max = 10_000_000) {
   return out;
 }
 
-export function lightbox(src, caption) {
+// Visualizador em tela cheia. Com gallery = [{ src, caption }], passa as fotos arrastando para o lado (ou pelas setas/teclado).
+export function lightbox(src, caption, gallery = null) {
+  const list = gallery?.length ? gallery : [{ src, caption }];
+  let idx = Math.max(0, list.findIndex(g => g.src === src));
+  const many = list.length > 1;
   const wrap = document.createElement('div');
   wrap.className = 'lightbox';
-  wrap.innerHTML = `<figure><img src="${esc(src)}" alt="${esc(caption || 'Imagem')}"><figcaption>${esc(caption || '')}</figcaption></figure><button class="icon-btn" aria-label="Fechar">✕</button>`;
-  wrap.addEventListener('click', () => wrap.remove());
+  wrap.setAttribute('role', 'dialog');
+  wrap.setAttribute('aria-label', 'Fotos');
+  wrap.innerHTML = `<div class="lb-track">${list.map((g, i) => `<figure class="lb-slide"><img src="${esc(g.src)}" alt="${esc(g.caption || `Foto ${i + 1}`)}" loading="${Math.abs(i - idx) <= 1 ? 'eager' : 'lazy'}"><figcaption>${esc(g.caption || '')}</figcaption></figure>`).join('')}</div>
+    ${many ? `<button type="button" class="lb-nav lb-prev" aria-label="Foto anterior">‹</button><button type="button" class="lb-nav lb-next" aria-label="Próxima foto">›</button><div class="lb-count"></div>` : ''}
+    <button type="button" class="icon-btn lb-close" aria-label="Fechar">✕</button>`;
   document.body.appendChild(wrap);
+  document.body.classList.add('no-scroll');
+  const track = wrap.querySelector('.lb-track');
+  const count = wrap.querySelector('.lb-count');
+  const show = (i, smooth = true) => {
+    idx = (i + list.length) % list.length;
+    track.scrollTo({ left: idx * track.clientWidth, behavior: smooth ? 'smooth' : 'auto' });
+    if (count) count.textContent = `${idx + 1} / ${list.length}`;
+  };
+  const close = () => { wrap.remove(); document.body.classList.remove('no-scroll'); document.removeEventListener('keydown', onKey); };
+  const onKey = e => {
+    if (e.key === 'Escape') close();
+    if (many && e.key === 'ArrowRight') show(idx + 1);
+    if (many && e.key === 'ArrowLeft') show(idx - 1);
+  };
+  document.addEventListener('keydown', onKey);
+  // Arrastar (rolagem com encaixe) atualiza o contador
+  track.addEventListener('scroll', () => {
+    const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+    if (i !== idx && count) { idx = i; count.textContent = `${idx + 1} / ${list.length}`; }
+  }, { passive: true });
+  wrap.querySelector('.lb-prev')?.addEventListener('click', e => { e.stopPropagation(); show(idx - 1); });
+  wrap.querySelector('.lb-next')?.addEventListener('click', e => { e.stopPropagation(); show(idx + 1); });
+  wrap.querySelector('.lb-close').addEventListener('click', close);
+  // Toque fora da foto fecha
+  wrap.addEventListener('click', e => { if (!e.target.closest('img, .lb-nav')) close(); });
+  requestAnimationFrame(() => show(idx, false));
+  setTimeout(() => show(idx, false), 60);
+}
+
+// Monta a galeria a partir dos elementos com data-src de um contêiner (sem repetir a mesma foto)
+export function galleryFrom(container, selector = '[data-src]') {
+  const seen = new Set();
+  return [...container.querySelectorAll(selector)].map(e => ({ src: e.dataset.src, caption: e.dataset.caption || '' }))
+    .filter(g => g.src && !seen.has(g.src) && seen.add(g.src));
 }

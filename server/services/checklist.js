@@ -3,7 +3,7 @@
 // A regra de fotos é do check-list inteiro: obrigatória em todos os itens respondidos (exceto N/A) ou livre escolha.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull, date } from '../lib/http.js';
-import { today, addDays, daysBetween } from './metrics.js';
+import { today, addDays, daysBetween, decorate } from './metrics.js';
 import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
@@ -456,4 +456,33 @@ export function myPendingItems(ctx) {
     WHERE t.cancelled_at IS NULL AND t.status IN ('aberta','em_andamento') AND (ci.result IS NULL OR ci.result = 'nao_conforme')
       AND (ci.assignee_id = ? OR (u.is_external = 1 AND u.login_enabled = 0 AND u.manager_id = ?))
     GROUP BY t.id ORDER BY t.due_date IS NULL, t.due_date`, uid, uid);
+}
+
+// ---------- Indicadores: itens do check-list contados como subtarefas ----------
+// Conforme/N/A = concluída (entregue na data da resposta); Não conforme = em andamento; sem resposta = aberta.
+// Prazo do item (ou do check-list); responsável do item (ou o global). Fica atrasada se o prazo passou sem resolver.
+export function checklistItemsAsSubtasks(tasks) {
+  const lists = tasks.filter(t => t.task_type === 'checklist' && !t.cancelled_at);
+  if (!lists.length) return [];
+  const byId = new Map(lists.map(t => [t.id, t]));
+  const ref = today();
+  const ids = lists.map(t => t.id);
+  const rows = all(`SELECT ci.id, ci.task_id, ci.seq, ci.text, ci.group_name, ci.assignee_id, ci.result, ci.answered_at, ci.due_date, ci.created_at,
+      u.name AS assignee_name, (SELECT COUNT(*) FROM checklist_answers a WHERE a.item_id = ci.id) AS answers
+    FROM checklist_items ci LEFT JOIN users u ON u.id = ci.assignee_id WHERE ci.task_id IN (${ids.map(() => '?').join(',')})`, ...ids);
+  return rows.map(i => {
+    const t = byId.get(i.task_id);
+    const resolved = isResolved(i.result);
+    const status = resolved ? 'concluida' : i.result === 'nao_conforme' || i.answers ? 'em_andamento' : 'aberta';
+    return decorate({
+      id: `cl-${i.id}`, checklist_item: true, task_type: 'checklist_item', parent_id: t.id, parent_code: t.code,
+      code: `${t.code}·${i.seq}`, title: i.text, stage_name: i.group_name,
+      project_id: t.project_id, project_code: t.project_code, project_name: t.project_name, project_kind: t.project_kind,
+      assignee_id: i.assignee_id || t.assignee_id, assignee_name: i.assignee_name || t.assignee_name,
+      creator_id: null, assigned_by_id: t.creator_id,
+      status, due_date: i.due_date || t.due_date, original_due: null, reschedule_count: 0,
+      delivered_at: resolved ? i.answered_at : null, completed_at: resolved ? i.answered_at : null,
+      created_at: i.created_at, cancelled_at: null,
+    }, ref, [], 3);
+  });
 }

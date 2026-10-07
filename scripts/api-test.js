@@ -680,6 +680,16 @@ async function main() {
   const clLivre = (await ricardo('POST', '/tasks', { ...clBase, photo_rule: 'livre', items: [{ text: 'Item livre' }] })).data.id;
   const il = (await ricardo('GET', `/tasks/${clLivre}`)).data.checklist.items[0].id;
   ok((await marcos('POST', `/tasks/${clLivre}/items/${il}/answer`, { result: 'conforme' })).status === 200, 'foto livre: responde sem foto');
+  // Dashboard: cada item do check-list conta como subtarefa nos indicadores
+  const d0 = (await ricardo('GET', '/dashboard')).data;
+  const clK = (await ricardo('POST', '/tasks', { ...clBase, photo_rule: 'livre', assignee_id: 5, items: [
+    { text: 'Item atrasado', start_date: '2020-01-01', due_date: '2020-01-05' }, { text: 'Item em dia' }, { text: 'Item resolvido' }] })).data.id;
+  const iRes = (await ricardo('GET', `/tasks/${clK}`)).data.checklist.items[2].id;
+  await ricardo('POST', `/tasks/${clK}/items/${iRes}/answer`, { result: 'conforme' });
+  const d1 = (await ricardo('GET', '/dashboard')).data;
+  ok(d1.summary.total === d0.summary.total + 4 && d1.checklist_items >= 3, `dashboard soma o check-list e os 3 itens como subtarefas (${d0.summary.total} → ${d1.summary.total})`);
+  ok(d1.summary.late === d0.summary.late + 1 && d1.summary.done === d0.summary.done + 1, 'item vencido conta como atrasado e item Conforme como concluído');
+  ok(d1.users.find(u => u.id === 5)?.stats.assigned > (d0.users.find(u => u.id === 5)?.stats.assigned || 0), 'itens entram no desempenho do responsável');
 
   console.log('Perfil Coordenador (gestor que também aprova as próprias tarefas)');
   const coordId = (await ana('POST', '/users', { name: 'Carla Coordenadora', email: 'carla@charao.eng.br', role: 'coordenador', access_scope: 'projetos', project_ids: [1], password: 'coord1234' })).data.id;

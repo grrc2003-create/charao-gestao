@@ -569,10 +569,18 @@ label.action-tile, label.add-thumb, label.attach-opt { cursor: pointer; -webkit-
 }
 @keyframes fade { from { opacity: 0; } }
 @keyframes up { from { transform: translateY(30px); opacity: .6; } }
-.lightbox { position: fixed; inset: 0; z-index: 95; background: rgba(15, 22, 30, .92); display: grid; place-items: center; padding: 16px; cursor: zoom-out; }
-.lightbox img { max-height: 82vh; max-width: 94vw; border-radius: 6px; }
-.lightbox figcaption { color: #fff; text-align: center; margin-top: 8px; font-size: 14px; }
-.lightbox .icon-btn { position: absolute; top: 14px; right: 14px; }
+.lightbox { position: fixed; inset: 0; z-index: 95; background: rgba(15, 22, 30, .94); cursor: zoom-out; }
+.lb-track { position: absolute; inset: 0; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: contain; }
+.lb-track::-webkit-scrollbar { display: none; }
+.lb-slide { flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 12px 40px; }
+.lb-slide img { max-height: calc(100% - 40px); max-width: 100%; object-fit: contain; border-radius: 6px; cursor: default; }
+.lightbox figcaption { color: #fff; text-align: center; margin-top: 8px; font-size: 14px; max-width: 640px; }
+.lightbox .lb-close { position: absolute; top: 14px; right: 14px; z-index: 2; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 46px; height: 46px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .16); color: #fff; font-size: 30px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+.lb-nav:hover { background: rgba(255, 255, 255, .28); }
+.lb-prev { left: 12px; } .lb-next { right: 12px; }
+@media (pointer: coarse) { .lb-nav { display: none; } }
+.lb-count { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 2; color: #fff; font-size: 14px; font-weight: 700; background: rgba(0, 0, 0, .35); border-radius: 999px; padding: 3px 12px; }
 
 /* ---------- Login ---------- */
 .login-mode { background: var(--navy-900); }

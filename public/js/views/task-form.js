@@ -105,7 +105,7 @@ export async function view({ params, query, state, navigate }) {
 
         ${!editing && !parent ? html`<div class="task-only" ${isChecklist ? 'hidden' : ''}>${recurrenceFieldset()}</div>` : ''}
 
-        ${!editing ? html`<fieldset class="fieldset form"><legend>Referências (imagens ou PDF)</legend>
+        ${!editing ? html`<fieldset class="fieldset form task-only" ${isChecklist ? 'hidden' : ''}><legend>Referências (imagens ou PDF)</legend>
           <div class="thumbs" id="ref-thumbs"><button type="button" class="add-thumb" id="add-ref">${icon('image')}Foto, imagem ou PDF</button></div>
           <span class="hint">Fotos do local, croquis, trechos de projeto ou PDFs (até 8 MB cada). Fotos são reduzidas automaticamente para envio.</span>
         </fieldset>` : ''}
@@ -258,7 +258,8 @@ export async function view({ params, query, state, navigate }) {
             navigate(`/tarefas/${t.id}`);
           } else {
             if (pending.reduce((n, p) => n + p.data.length, 0) > 10_000_000) throw new Error('As referências somam mais de 10 MB. Crie a tarefa com menos arquivos e anexe os demais depois, na própria tarefa.');
-            data.images = pending.map(p => ({ data: p.data, name: p.name }));
+            // Check-list não usa referências da tarefa (cada item tem a própria foto de entrada)
+            data.images = typeIs() ? [] : pending.map(p => ({ data: p.data, name: p.name }));
             if (parent) { data.parent_id = parent.id; data.project_id = parent.project_id; }
             let rest = [];
             if (typeIs()) {

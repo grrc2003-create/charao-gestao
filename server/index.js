@@ -127,8 +127,11 @@ api.post('/api/auth/password', (req, res, { user, body }) => {
 // ---------- Dashboard e metadados ----------
 api.get('/api/dashboard', (req, res, { ctx }) => {
   const tasks = Tasks.listVisible(ctx);
-  const projects = Projects.listProjects(ctx, tasks);
-  const users = Users.listUsers(ctx, tasks).filter(u => u.active && u.stats.assigned > 0);
+  // Indicadores: cada item de check-list conta como uma subtarefa
+  const clItems = Checklist.checklistItemsAsSubtasks(tasks);
+  const units = [...tasks, ...clItems];
+  const projects = Projects.listProjects(ctx, units);
+  const users = Users.listUsers(ctx, units).filter(u => u.active && u.stats.assigned > 0);
   const ref = today();
   const upcoming = tasks.filter(t => !t.delivered && t.due_date && t.due_date >= ref && daysBetween(ref, t.due_date) <= 7).slice(0, 8);
   const late = tasks.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 8);
@@ -139,8 +142,9 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
   const map = new Map(all('SELECT id, name, role, manager_id FROM users').map(u => [u.id, u]));
   const team = [...ctx.team];
   send(res, 200, {
-    summary: summarize(tasks),
-    trend: monthlyTrend(tasks),
+    summary: summarize(units),
+    checklist_items: clItems.length,
+    trend: monthlyTrend(units),
     chronic_min: Settings.getSetting('chronic_reschedule_threshold'),
     // Tarefas com mais atrasos/repactuações (atenção)
     deadline_watch: tasks.filter(t => t.late_episodes > 1 || t.chronic)
@@ -151,8 +155,8 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     upcoming,
     late,
     activity,
-    me: userStats(ctx.user, tasks, map),
-    team_summary: team.length ? summarize(tasks.filter(t => ctx.team.has(t.assignee_id))) : null,
+    me: userStats(ctx.user, units, map),
+    team_summary: team.length ? summarize(units.filter(t => ctx.team.has(t.assignee_id))) : null,
     team_size: team.length,
     my_checklist: Checklist.myPendingItems(ctx),
   });

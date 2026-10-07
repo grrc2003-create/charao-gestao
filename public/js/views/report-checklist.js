@@ -8,8 +8,12 @@ import { periodKey, periodInfo } from './periods.js';
 import { ganttChart } from './gantt.js';
 
 // Dimensões de agrupamento (combináveis em até 3 níveis). Data = prazo do item.
+// Especialidades na ordem do modelo da obra (definida a cada relatório); fora do modelo depois e "Sem especialidade" por último
+let SPEC_ORDER = [];
+const specRank = k => (!k ? 1e6 : SPEC_ORDER.includes(k) ? SPEC_ORDER.indexOf(k) : 1e5);
 const DIMS = {
   grupo: { label: 'Grupo', key: i => i.group || '', name: k => k || 'Sem grupo' },
+  especialidade: { label: 'Especialidade', key: i => i.specialty || '', name: k => k || 'Sem especialidade', sort: (a, b) => specRank(a) - specRank(b) || a.localeCompare(b, 'pt-BR') },
   responsavel: { label: 'Responsável', key: i => i.responsible_name || '', name: k => k || 'Sem responsável', sort: (a, b) => a.localeCompare(b, 'pt-BR') },
   dia: { label: 'Data (dia)', key: i => periodKey(i.due_date, 'dia'), name: k => periodInfo(k, 'dia').label, sort: (a, b) => a.localeCompare(b) },
   semana: { label: 'Data (semana)', key: i => periodKey(i.due_date, 'semana'), name: k => periodInfo(k, 'semana').label, sort: (a, b) => a.localeCompare(b) },
@@ -45,16 +49,20 @@ function groupBy(items, dim) {
 const RES_COLOR = { conforme: '#2E8B57', nao_conforme: '#C0392B', na: '#6E7A86' };
 const kpi = (label, value, sub, color) => html`<div class="r-kpi" style="--c:${color}"><div class="r-kpi-l">${label}</div><div class="r-kpi-v">${value}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
 
-export async function view({ params, query }) {
+export async function view({ params, query, state }) {
   const t = await api(`/tasks/${params.id}`);
   if (!t.checklist) throw new Error('Esta tarefa não é um check-list.');
   const c = t.checklist;
   // Filtro por grupo e/ou responsável (?grupo=&resp=): o relatório inteiro (resumo, itens e Gantt) considera só esses itens
-  const opts = filterOptions(c.items);
+  SPEC_ORDER = state?.meta?.projects?.find(p => p.id === t.project_id)?.specialties || [];
+  const opts = filterOptions(c.items, SPEC_ORDER);
   const fGroup = opts.groups.includes(query.get('grupo')) ? query.get('grupo') : '';
+  const fSpec = opts.specs.includes(query.get('esp')) ? query.get('esp') : '';
   const fResp = opts.resps.includes(query.get('resp')) ? query.get('resp') : '';
-  const items = c.items.filter(i => matchItem(i, fGroup, fResp));
-  const filterText = [fGroup ? `Grupo: ${optLabel(fGroup, 'group')}` : '', fResp ? `Responsável: ${optLabel(fResp, 'resp')}` : ''].filter(Boolean).join(' · ');
+  const items = c.items.filter(i => matchItem(i, { group: fGroup, spec: fSpec, resp: fResp }));
+  const filterText = [fGroup ? `Grupo: ${optLabel(fGroup, 'group')}` : '', fSpec ? `Especialidade: ${optLabel(fSpec, 'spec')}` : '',
+    fResp ? `Responsável: ${optLabel(fResp, 'resp')}` : ''].filter(Boolean).join(' · ');
+  const hasSpecs = c.items.some(i => i.specialty);
   const s = (() => {
     const done = items.filter(i => i.resolved).length;
     const cnt = r => items.filter(i => i.result === r).length;
@@ -112,6 +120,7 @@ export async function view({ params, query }) {
       </div>
       <div class="r-item-meta small">
         ${!levels.includes('grupo') && i.group ? html`<span class="r-stage">${i.group}</span>` : ''}
+        ${!levels.includes('especialidade') && i.specialty ? html`<span class="r-stage r-spec">${i.specialty}</span>` : ''}
         ${i.result ? html`<span>Respondido por ${i.answered_by_name || '—'} em ${fmtDateTime(i.answered_at)}</span>` : ''}
       </div>
       ${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}
@@ -132,15 +141,22 @@ export async function view({ params, query }) {
         <div style="margin-left:${depth * 14}px">${blocks(g.items, depth + 1)}</div>`;
     })}`;
   };
-  // Resumo: não conformidades por ambiente (grupo)
-  const byGroup = [...new Map(items.map(i => [i.group || '', null])).keys()].map(g => {
-    const its = items.filter(i => (i.group || '') === g);
-    const ncs = its.filter(i => i.nc_count > 0);
-    const pend = ncs.filter(i => i.open_nc).length;
-    return { name: g || 'Sem grupo', items: its.length, nc: ncs.length, pend, res: ncs.length - pend };
-  });
-  const tot = byGroup.reduce((a, g) => ({ items: a.items + g.items, nc: a.nc + g.nc, pend: a.pend + g.pend, res: a.res + g.res }), { items: 0, nc: 0, pend: 0, res: 0 });
+  // Resumo: não conformidades por ambiente (grupo) e por especialidade
   const pctRes = g => (g.nc ? fmtPct(Math.round((g.res / g.nc) * 100)) : '—');
+  const ncRows = dim => groupBy(items, dim).map(g => {
+    const ncs = g.items.filter(i => i.nc_count > 0);
+    const pend = ncs.filter(i => i.open_nc).length;
+    return { name: g.name, items: g.items.length, nc: ncs.length, pend, res: ncs.length - pend };
+  });
+  const ncTable = (heading, first, rows) => {
+    const tot = rows.reduce((a, g) => ({ items: a.items + g.items, nc: a.nc + g.nc, pend: a.pend + g.pend, res: a.res + g.res }), { items: 0, nc: 0, pend: 0, res: 0 });
+    return html`<h3 class="r-h">${heading}</h3>
+      <table class="r-table r-nc-table"><thead><tr><th>${first}</th><th class="num">Itens</th><th class="num">Não conformidades</th><th class="num">Pendentes</th><th class="num">Resolvidas</th><th class="num">% resolvidas</th></tr></thead>
+        <tbody>${rows.map(g => html`<tr><td>${g.name}</td><td class="num">${g.items}</td><td class="num">${g.nc}</td>
+          <td class="num ${g.pend ? 'late' : ''}">${g.pend}</td><td class="num">${g.res}</td><td class="num">${pctRes(g)}</td></tr>`)}
+          <tr class="r-total"><td><b>Total</b></td><td class="num"><b>${tot.items}</b></td><td class="num"><b>${tot.nc}</b></td>
+            <td class="num ${tot.pend ? 'late' : ''}"><b>${tot.pend}</b></td><td class="num"><b>${tot.res}</b></td><td class="num"><b>${pctRes(tot)}</b></td></tr></tbody></table>`;
+  };
   const title = 'Check-list';
 
   // Gantt semanal dos itens: barra do início ao término (sem início, começa no término). Itens resolvidos vão até a
@@ -152,9 +168,10 @@ export async function view({ params, query }) {
     start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
     eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento',
     days_late: i.overdue ? Math.round((Date.parse(today) - Date.parse(i.due_date)) / 86400e3) : 0,
-  })).sort((a, b) => a.item.seq - b.item.seq);
+  })).sort((a, b) => (levels[0] === 'especialidade' ? specRank(a.item.specialty || '') - specRank(b.item.specialty || '') : 0) || a.item.seq - b.item.seq);
   // Agrupa como a lista quando o 1º nível é grupo ou responsável; senão, por grupo
-  const ganttBy = levels[0] === 'responsavel' ? r => r.assignee_name || 'Sem responsável' : r => r.group;
+  const ganttBy = levels[0] === 'responsavel' ? r => r.assignee_name || 'Sem responsável'
+    : levels[0] === 'especialidade' ? r => r.item.specialty || 'Sem especialidade' : r => r.group;
   const ganttLegend = html`<div class="g-legend">
     <span><i class="g-sw" style="--c:#A86F0E"></i>Pendente (início → término)</span>
     <span><i class="g-sw" style="--c:${RES_COLOR.nao_conforme}"></i>Não conforme em aberto</span>
@@ -200,12 +217,8 @@ export async function view({ params, query }) {
       </section>
 
       <section class="r-section avoid">
-        <h3 class="r-h">Não conformidades por ambiente</h3>
-        <table class="r-table r-nc-table"><thead><tr><th>Ambiente / grupo</th><th class="num">Itens</th><th class="num">Não conformidades</th><th class="num">Pendentes</th><th class="num">Resolvidas</th><th class="num">% resolvidas</th></tr></thead>
-          <tbody>${byGroup.map(g => html`<tr><td>${g.name}</td><td class="num">${g.items}</td><td class="num">${g.nc}</td>
-            <td class="num ${g.pend ? 'late' : ''}">${g.pend}</td><td class="num">${g.res}</td><td class="num">${pctRes(g)}</td></tr>`)}
-            <tr class="r-total"><td><b>Total</b></td><td class="num"><b>${tot.items}</b></td><td class="num"><b>${tot.nc}</b></td>
-              <td class="num ${tot.pend ? 'late' : ''}"><b>${tot.pend}</b></td><td class="num"><b>${tot.res}</b></td><td class="num"><b>${pctRes(tot)}</b></td></tr></tbody></table>
+        ${ncTable('Não conformidades por ambiente', 'Ambiente / grupo', ncRows('grupo'))}
+        ${hasSpecs ? html`<div style="height:8px"></div>${ncTable('Não conformidades por especialidade', 'Especialidade', ncRows('especialidade'))}` : ''}
         <p class="small muted" style="margin-top:4px">Item cadastrado com foto conta como não conformidade. Pendente = ainda em aberto; resolvida = corrigida (Conforme) ou encerrada (N/A).</p>
       </section>
 
@@ -240,6 +253,7 @@ export async function view({ params, query }) {
       extra: html`${[0, 1, 2].map(n => html`<label class="pt-opt">${n === 0 ? 'Agrupar por' : n === 1 ? 'depois' : 'e'}
           <select data-level="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`)}
         ${opts.groups.length > 1 ? html`<label class="pt-opt">Grupo <select data-flt="grupo"><option value="">Todos</option>${opts.groups.map(k => html`<option value="${k}" ${k === fGroup ? 'selected' : ''}>${optLabel(k, 'group')}</option>`)}</select></label>` : ''}
+        ${opts.specs.length > 1 ? html`<label class="pt-opt">Especialidade <select data-flt="esp"><option value="">Todas</option>${opts.specs.map(k => html`<option value="${k}" ${k === fSpec ? 'selected' : ''}>${optLabel(k, 'spec')}</option>`)}</select></label>` : ''}
         ${opts.resps.length > 1 ? html`<label class="pt-opt">Responsável <select data-flt="resp"><option value="">Todos</option>${opts.resps.map(k => html`<option value="${k}" ${k === fResp ? 'selected' : ''}>${optLabel(k, 'resp')}</option>`)}</select></label>` : ''}
         <label class="pt-opt"><input type="checkbox" id="fotos" ${withPhotos ? 'checked' : ''}>Incluir fotos</label>
         <label class="pt-opt"><input type="checkbox" id="gnt" ${withGantt ? 'checked' : ''}>Gantt semanal</label>`,

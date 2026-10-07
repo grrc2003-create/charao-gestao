@@ -14,6 +14,8 @@ export async function view(ctx) {
     t._team = await api(`/projects/${t.project_id}/assignees`).catch(() => []);
     t._groups = (ctx.state.meta.projects.find(p => p.id === t.project_id)?.stages || []).map(s => s.name);
   }
+  // Especialidades do modelo escolhido na obra (ordem da lista e passo "Especialidade" do novo item)
+  if (t.checklist) t._specs = ctx.state.meta.projects.find(p => p.id === t.project_id)?.specialties || [];
   return build(t, ctx);
 }
 
@@ -219,6 +221,7 @@ function build(t, ctx) {
 function mount(root, t, ctx) {
   const refresh = updated => {
     if (t._team && !updated._team) { updated._team = t._team; updated._groups = t._groups; }
+    if (t._specs && !updated._specs) updated._specs = t._specs;
     const v = build(updated, ctx);
     root.innerHTML = v.html.toString();
     v.mount(root);

@@ -1074,3 +1074,18 @@ textarea.wiz-input { min-height: 90px; }
 .cl-sel-info:empty { display: none; }
 .cli.is-filtered, .clg.is-filtered { display: none !important; }
 @media (min-width: 560px) { .cl-sel { flex: 1 1 200px; max-width: 300px; } }
+
+/* Check-list: especialidade */
+.cl-by { display: flex; align-items: center; gap: 6px; flex: 1 1 100%; flex-wrap: wrap; }
+.cl-by > span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted, #6E7A86); }
+.cli-tags { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: -2px 0 6px 40px; }
+.cli-spec, .cli-grp { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 1px 8px; }
+.cli-spec { color: #2A3D50; background: #E7EEF5; border: 1px solid #CFDCE8; }
+.cli-grp { color: #6B5A3E; background: #F3EEE5; border: 1px solid #E9E1D3; }
+
+/* Configurações: modelos de especialidades */
+.spec-tpl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.spec-tpl { border: 1px solid var(--line, #E4E1DA); border-radius: 10px; padding: 10px; display: grid; gap: 8px; min-width: 0; }
+.spec-tpl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.spec-tpl-head [data-name] { flex: 1 1 220px; min-width: 0; font-weight: 600; }
+.spec-tpl textarea { width: 100%; min-width: 0; resize: vertical; }

@@ -69,9 +69,10 @@ const stageItem = s => html`<li class="stage-item" data-id="${s.id || ''}">
 export async function form({ params, query, state, navigate, reloadMeta }) {
   const editing = !!params.id;
   if (!state.meta.can.manage_projects) throw new Error('Seu perfil não pode cadastrar ou editar projetos.');
-  const [p, users] = await Promise.all([
+  const [p, users, templates] = await Promise.all([
     editing ? api(`/projects/${params.id}`) : Promise.resolve(null),
     api('/users/directory'),
+    api('/settings/specialties').catch(() => []),
   ]);
   const kind = p ? p.kind : query.get('tipo') === 'interno' ? 'interno' : 'obra';
   const v = p || (kind === 'interno'
@@ -129,6 +130,13 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <button type="button" class="btn btn-ghost" id="stage-add-btn">${icon('plus')}Adicionar</button>
           </div>
         </fieldset>
+        <fieldset class="fieldset form"><legend>Especialidades do check-list</legend>
+          <div class="field"><label for="specialty_template_id">Modelo de especialidades</label>
+            <select id="specialty_template_id" name="specialty_template_id"><option value="">Nenhum (itens sem especialidade)</option>
+              ${templates.map(tp => opt(tp.id, tp.name, v.specialty_template_id))}</select>
+            <span class="hint" id="spec-preview"></span>
+            <span class="hint">Os modelos são cadastrados em <b>Configurações → Especialidades do check-list</b>. Trocar o modelo não altera os itens já cadastrados.</span></div>
+        </fieldset>
         <fieldset class="fieldset form"><legend>Equipe do projeto (acesso)</legend>
           <span class="hint">Quem estiver marcado <b>vê este projeto e pode ser responsável pelas tarefas dele</b>. É a mesma liberação de <b>Usuários → Permissões</b>: marcar libera, desmarcar retira.</span>
           <div class="checks">${active.map(u => {
@@ -152,6 +160,14 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         root.querySelector('#name-label').textContent = interno ? 'Nome da área' : 'Nome do projeto';
         if (interno && !f.client.value) f.client.value = 'Charão Engenharia e Construção';
       }));
+      // Prévia das especialidades do modelo escolhido
+      const tplSel = root.querySelector('#specialty_template_id');
+      const showSpecs = () => {
+        const tp = templates.find(x => String(x.id) === tplSel.value);
+        root.querySelector('#spec-preview').textContent = tp ? tp.items.join(' · ') : '';
+      };
+      tplSel.addEventListener('change', showSpecs);
+      showSpecs();
       const list = root.querySelector('#stage-list');
       const newInput = root.querySelector('#stage-new');
       const addStage = () => {

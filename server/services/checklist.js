@@ -56,6 +56,7 @@ export function readItems(list, projectId, { required = false, requirePhoto = fa
     if (requirePhoto && !images.length) throw badRequest(`Foto obrigatória: o item "${text}" precisa de uma foto de entrada.`);
     return {
       group: str(it?.group, { max: 80, label: 'Grupo' }) || null,
+      specialty: str(it?.specialty, { max: 80, label: 'Especialidade' }) || null,
       text,
       description: str(it?.description, { max: 2000, label: `Descrição do item ${i + 1}` }) || null,
       assignee_id: validateAssignee(intOrNull(it?.assignee_id), projectId),
@@ -80,8 +81,8 @@ function slotFor(taskId, group) {
 // Grava os itens (e as fotos de entrada). userId = quem está criando.
 export function insertItems(taskId, items, userId) {
   for (const it of items) {
-    const id = Number(run(`INSERT INTO checklist_items (task_id, seq, group_name, text, description, assignee_id, start_date, duration_days, due_date, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`, taskId, slotFor(taskId, it.group), it.group, it.text, it.description || null, it.assignee_id,
+    const id = Number(run(`INSERT INTO checklist_items (task_id, seq, group_name, specialty, text, description, assignee_id, start_date, duration_days, due_date, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`, taskId, slotFor(taskId, it.group), it.group, it.specialty || null, it.text, it.description || null, it.assignee_id,
       it.start_date || null, it.duration_days ?? null, it.due_date || null, nowIso()).lastInsertRowid);
     if (it.images?.length) saveItemPhotos({ user: { id: userId } }, id, it.images, null, 'referencia');
   }
@@ -181,7 +182,7 @@ export function checklistView(ctx, t) {
   const items = rows.map(i => {
     const st = itemState(i, hist.get(i.id));
     return {
-      id: i.id, seq: i.seq, group: i.group_name, text: i.text,
+      id: i.id, seq: i.seq, group: i.group_name, specialty: i.specialty || null, text: i.text,
       assignee_id: i.assignee_id, assignee_name: i.assignee_name, assignee_external: !!i.a_external,
       responsible_name: i.assignee_name || t.assignee_name || 'Sem responsável',
       result: i.result, resolved: isResolved(i.result), note: i.note, answered_by_name: i.answered_by_name, answered_at: i.answered_at,
@@ -376,6 +377,10 @@ export function updateItem(ctx, taskId, itemId, body) {
   if ('group' in body) {
     const v = str(body.group, { max: 80, label: 'Grupo' }) || null;
     if (v !== item.group_name) { next.group_name = v; changes.push(`grupo: ${v || 'sem grupo'}`); }
+  }
+  if ('specialty' in body) {
+    const v = str(body.specialty, { max: 80, label: 'Especialidade' }) || null;
+    if (v !== (item.specialty || null)) { next.specialty = v; changes.push(`especialidade: ${v || 'sem especialidade'}`); }
   }
   if ('description' in body) {
     const v = str(body.description, { max: 2000, label: 'Descrição' }) || null;

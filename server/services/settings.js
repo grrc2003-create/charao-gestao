@@ -97,3 +97,75 @@ export function saveGeneral(ctx, body, ip) {
   if (Object.keys(changes).length) audit(ctx.user.id, 'settings', null, 'Configurações gerais alteradas', changes, ip);
   return getGeneral();
 }
+
+// ---------- Especialidades do check-list (modelos escolhidos por obra) ----------
+const parseList = s => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch { return []; } };
+
+export function listSpecialtyTemplates() {
+  return all(`SELECT t.id, t.name, t.items, (SELECT COUNT(*) FROM projects p WHERE p.specialty_template_id = t.id) AS project_count
+    FROM specialty_templates t ORDER BY t.sort_order, t.id`).map(t => ({ ...t, items: parseList(t.items) }));
+}
+
+// Especialidades da obra (do modelo escolhido no projeto)
+export function specialtiesOf(templateId) {
+  if (!templateId) return [];
+  const r = one('SELECT items FROM specialty_templates WHERE id = ?', templateId);
+  return r ? parseList(r.items) : [];
+}
+
+export function validTemplateId(v) {
+  const id = intOrNull(v);
+  if (id && !one('SELECT id FROM specialty_templates WHERE id = ?', id)) throw badRequest('Modelo de especialidades inválido.');
+  return id;
+}
+
+// Sincroniza os modelos editados em Configurações (cria, renomeia, altera a lista, ordena e exclui os que nenhuma obra usa)
+export function saveSpecialtyTemplates(ctx, input, ip) {
+  requireSettingsManager(ctx.user);
+  if (!Array.isArray(input)) throw badRequest('Lista de modelos inválida.');
+  if (input.length > 50) throw badRequest('No máximo 50 modelos.');
+  const current = listSpecialtyTemplates();
+  const byId = new Map(current.map(t => [t.id, t]));
+  const seen = new Set();
+  const items = input.map((x, i) => {
+    const name = String(x?.name ?? '').replace(/\s+/g, ' ').trim();
+    if (!name) throw badRequest('Informe o nome de todos os modelos.');
+    if (name.length > 80) throw badRequest(`Nome do modelo "${name.slice(0, 30)}…" excede 80 caracteres.`);
+    if (seen.has(name.toLowerCase())) throw badRequest(`Modelo repetido: ${name}.`);
+    seen.add(name.toLowerCase());
+    const id = intOrNull(x?.id);
+    if (id && !byId.has(id)) throw badRequest('Modelo inválido.');
+    const names = [];
+    for (const raw of Array.isArray(x?.items) ? x.items : []) {
+      const n = String(raw ?? '').replace(/\s+/g, ' ').trim();
+      if (!n) continue;
+      if (n.length > 60) throw badRequest(`Especialidade "${n.slice(0, 30)}…" excede 60 caracteres.`);
+      if (!names.some(o => o.toLowerCase() === n.toLowerCase())) names.push(n);
+    }
+    if (!names.length) throw badRequest(`O modelo "${name}" precisa de ao menos uma especialidade.`);
+    if (names.length > 60) throw badRequest(`O modelo "${name}" aceita no máximo 60 especialidades.`);
+    return { id, name, items: names, order: i + 1 };
+  });
+  const keep = new Set(items.filter(x => x.id).map(x => x.id));
+  const removed = current.filter(t => !keep.has(t.id));
+  for (const t of removed) {
+    if (t.project_count) throw badRequest(`O modelo "${t.name}" está em uso em ${t.project_count} obra(s). Troque o modelo nessas obras antes de excluir.`);
+  }
+  const log = { criados: [], alterados: [], excluidos: removed.map(t => t.name) };
+  tx(() => {
+    for (const t of removed) run('DELETE FROM specialty_templates WHERE id = ?', t.id);
+    for (const x of items.filter(x => x.id)) run('UPDATE specialty_templates SET name = ? WHERE id = ?', `~tmp~${x.id}`, x.id);
+    for (const x of items) {
+      if (x.id) {
+        const old = byId.get(x.id);
+        if (old.name !== x.name || JSON.stringify(old.items) !== JSON.stringify(x.items)) log.alterados.push(x.name);
+        run(`UPDATE specialty_templates SET name = ?, items = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, JSON.stringify(x.items), x.order, x.id);
+      } else {
+        run('INSERT INTO specialty_templates (name, items, sort_order) VALUES (?, ?, ?)', x.name, JSON.stringify(x.items), x.order);
+        log.criados.push(x.name);
+      }
+    }
+    audit(ctx.user.id, 'settings', null, 'Modelos de especialidades atualizados', log, ip);
+  });
+  return listSpecialtyTemplates();
+}

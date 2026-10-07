@@ -174,6 +174,7 @@ export async function view({ params, query, state, navigate }) {
         wizard = bindItemForm(itemEl, {
           users: () => team, keep: {}, photoRequired: ruleRequired, quickList: () => !ruleRequired(),
           groups: () => [...new Set([...projectGroups(), ...items.map(i => i.group).filter(Boolean)])], globalName,
+          specialties: () => state.meta.projects.find(p => String(p.id) === String(f.project_id.value))?.specialties || [],
           onAdd: async list => {
             items.push(...list);
             drawItems();

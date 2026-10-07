@@ -6,7 +6,7 @@ import { summarize, monthlyTrend } from './metrics.js';
 import { listVisible, listCancelled } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
-import { getSetting } from './settings.js';
+import { getSetting, validTemplateId } from './settings.js';
 import { listRecurrences } from './recurrences.js';
 import { checklistDashboard } from './checklist.js';
 
@@ -92,6 +92,8 @@ function readProjectBody(body) {
     end_date: date(body.end_date, 'Previsão de término'),
     actual_end_date: date(body.actual_end_date, 'Término real'),
     lead_id: intOrNull(body.lead_id),
+    // Modelo de especialidades do check-list (Configurações)
+    specialty_template_id: validTemplateId(body.specialty_template_id),
   };
   if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('A previsão de término deve ser posterior ao início.');
   if (d.lead_id && !one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', d.lead_id)) throw badRequest('Responsável técnico deve ser um usuário interno ativo.');
@@ -136,8 +138,8 @@ export function createProject(ctx, body, ip) {
     const code = nextCode(kind);
     const now = new Date().toISOString();
     const r = run(`INSERT INTO projects (code, name, client, location, description, status, start_date, end_date, actual_end_date,
-      lead_id, kind, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, kind, ctx.user.id, now, now);
+      lead_id, specialty_template_id, kind, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id, kind, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
     const teamLog = syncTeam(id, memberIds);
     defaultStageId(id);
@@ -158,8 +160,8 @@ export function updateProject(ctx, id, body, ip) {
   const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) });
   tx(() => {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
-      lead_id=?, updated_at=? WHERE id=?`,
-      d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, new Date().toISOString(), id);
+      lead_id=?, specialty_template_id=?, updated_at=? WHERE id=?`,
+      d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id, new Date().toISOString(), id);
     const teamLog = body.member_ids !== undefined ? syncTeam(id, memberIds, members(id).map(m => m.id)) : null;
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));
     const stagesLog = syncStages(id, body.stages);

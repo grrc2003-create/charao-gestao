@@ -11,9 +11,20 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
   <button type="button" class="icon-btn" data-rm ${r.use_count ? 'disabled' : ''} aria-label="Excluir justificativa"
     title="${r.use_count ? 'Já usada: inative em vez de excluir' : 'Excluir'}">✕</button></li>`;
 
-export async function view({ state }) {
+// Modelo de especialidades do check-list: nome + uma especialidade por linha
+const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
+  <div class="spec-tpl-head">
+    <input type="text" maxlength="80" value="${t.name}" data-name aria-label="Nome do modelo" placeholder="Nome do modelo (ex.: Acabamentos — padrão)" required>
+    <span class="stage-count">${t.project_count ? `usado em ${t.project_count} obra(s)` : 'nenhuma obra'}</span>
+    <button type="button" class="icon-btn" data-rm-tpl ${t.project_count ? 'disabled' : ''} aria-label="Excluir modelo"
+      title="${t.project_count ? 'Em uso: troque o modelo nessas obras antes de excluir' : 'Excluir modelo'}">✕</button>
+  </div>
+  <textarea rows="${Math.min(Math.max((t.items || []).length, 4), 12)}" data-items aria-label="Especialidades do modelo (uma por linha)" placeholder="Uma especialidade por linha&#10;Pintura&#10;Revestimento&#10;Elétrica">${(t.items || []).join('\n')}</textarea>
+</li>`;
+
+export async function view({ state, reloadMeta }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
-  const [reasons, general] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general')]);
+  const [reasons, general, templates] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'), api('/settings/specialties')]);
 
   return {
     title: 'Configurações',
@@ -28,6 +39,18 @@ export async function view({ state }) {
             <span class="hint">Tarefas reagendadas este número de vezes ou mais são destacadas como <b>crônicas</b> no Dashboard, nas listas e nos relatórios. Entre 2 e 10.</span></div>
           <div class="form-error" hidden></div>
           <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
+        </form>
+      </section>
+      <section class="card" id="specs-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('checklist')}Especialidades do check-list</h2><span class="sub">${templates.length} modelo(s)</span></div>
+        <form class="card-body form" id="specs-form" novalidate>
+          <p class="muted" style="margin:0">Cadastre modelos com as especialidades (ex.: Pintura, Revestimento, Bancadas, Louças e Metais, Forro, Hidráulica, Elétrica).
+            Em cada obra, escolha o modelo em <b>Projetos → Editar</b>: as especialidades aparecem ao criar itens do check-list e servem para filtrar e agrupar a tela e o relatório.
+            A ordem das linhas é a ordem de exibição. Modelos em uso não podem ser excluídos.</p>
+          <ul class="spec-tpl-list" id="spec-list">${templates.map(tplItem)}</ul>
+          <div><button type="button" class="btn btn-ghost" id="spec-add">${icon('plus')}Novo modelo</button></div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar modelos</button></div>
         </form>
       </section>
       <section class="card" id="reasons-card" style="max-width:900px">
@@ -45,6 +68,30 @@ export async function view({ state }) {
         </form>
       </section>`,
     mount(root, ctx) {
+      // Modelos de especialidades
+      const sf = root.querySelector('#specs-form');
+      const sl = root.querySelector('#spec-list');
+      root.querySelector('#spec-add').addEventListener('click', () => {
+        sl.insertAdjacentHTML('beforeend', tplItem({ name: '', items: [], project_count: 0 }).toString());
+        sl.lastElementChild.querySelector('[data-name]').focus();
+      });
+      sl.addEventListener('click', e => { if (e.target.closest('[data-rm-tpl]')) e.target.closest('.spec-tpl').remove(); });
+      sf.addEventListener('submit', async e => {
+        e.preventDefault();
+        const serr = sf.querySelector('.form-error');
+        serr.hidden = true;
+        const payload = [...sl.querySelectorAll('.spec-tpl')].map(li => ({
+          id: li.dataset.id ? Number(li.dataset.id) : null,
+          name: li.querySelector('[data-name]').value,
+          items: li.querySelector('[data-items]').value.split(/\r?\n/),
+        }));
+        try {
+          await api('/settings/specialties', { method: 'PUT', body: { templates: payload } });
+          await reloadMeta?.();
+          toast('Modelos de especialidades salvos.');
+          ctx.render();
+        } catch (ex) { serr.textContent = ex.message; serr.hidden = false; }
+      });
       const gf = root.querySelector('#general-form');
       gf.addEventListener('submit', async e => {
         e.preventDefault();

@@ -253,3 +253,6 @@
 .g-week { position: absolute; top: 0; bottom: 0; background: #F7F5F0; }
 .g-axis.is-weekly span { bottom: 5px; }
 .g-label .g-meta { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* Check-list: especialidade do item */
+.r-spec { background: #E7EEF5; border-color: #CFDCE8; color: #2A3D50; }

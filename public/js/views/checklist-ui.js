@@ -75,18 +75,20 @@ export function itemForm() {
 }
 
 // users(), groups(), globalName(), photoRequired(), quickList() são funções (a lista pode mudar com o projeto/regra)
-export function bindItemForm(el, { users, groups, globalName = () => '', photoRequired, quickList = () => false, keep = {}, onAdd, onClose }) {
+export function bindItemForm(el, { users, groups, specialties = () => [], globalName = () => '', photoRequired, quickList = () => false, keep = {}, onAdd, onClose }) {
   const q = s => el.querySelector(s);
   const err = q('[data-err]');
   let item, step = 0;
   const reset = () => {
-    item = { group: keep.group ?? undefined, images: [], text: '', assignee_id: keep.assignee_id ?? undefined,
+    item = { group: keep.group ?? undefined, specialty: keep.specialty ?? undefined, images: [], text: '', assignee_id: keep.assignee_id ?? undefined,
       start_date: keep.start_date || '', due_date: keep.due_date || '', description: '' };
     step = 0;
   };
   reset();
   const STEPS = () => [
     { k: 'group', title: 'Grupo', optional: false },
+    // Especialidade só quando a obra tem um modelo de especialidades (Configurações → escolhido no projeto)
+    ...(specialties().length ? [{ k: 'spec', title: 'Especialidade', optional: true }] : []),
     { k: 'photo', title: 'Foto da não conformidade', optional: !photoRequired() },
     { k: 'text', title: 'Descrição do item', optional: false },
     { k: 'who', title: 'Responsável', optional: true },
@@ -111,6 +113,10 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
             ${composerHint}
             <button type="button" class="btn btn-ghost btn-sm" data-quick-add>${icon('plus')}Adicionar lista</button></details>` : ''}`;
       }
+      case 'spec':
+        return html`<p class="wiz-q">Qual a especialidade deste item?</p>
+          <div class="wiz-opts">${specialties().map(s => pick('data-spec', s, s, item.specialty === s))}${pick('data-spec', '', 'Sem especialidade', item.specialty === null)}</div>
+          <span class="hint">Lista do modelo de especialidades escolhido para a obra.</span>`;
       case 'photo':
         return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto da não conformidade (obrigatória).' : 'Há uma não conformidade? Tire a foto (opcional — sem foto, o item fica só para verificação).'}</p>
           ${item.images.length < PHOTO_LIMIT ? html`<div class="wiz-photo">
@@ -141,17 +147,18 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
         return html`<p class="wiz-q">Alguma observação? (opcional)</p>
           <textarea class="wiz-input" data-f="description" rows="3" maxlength="2000" placeholder="Como verificar, critério de aceite, referência de projeto…">${item.description}</textarea>
           <div class="wiz-sum">
-            ${summaryRow(0, 'Grupo', item.group || 'Sem grupo')}
-            ${summaryRow(1, 'Foto', item.images.length ? `${item.images.length} foto(s)` : 'sem foto')}
-            ${summaryRow(2, 'Item', item.text)}
-            ${summaryRow(3, 'Responsável', whoName(item.assignee_id))}
-            ${summaryRow(4, 'Início', fmtD(item.start_date) || '—')}
-            ${summaryRow(5, 'Término', fmtD(item.due_date) || '—')}
+            ${summaryRow('group', 'Grupo', item.group || 'Sem grupo')}
+            ${specialties().length ? summaryRow('spec', 'Especialidade', item.specialty || 'Sem especialidade') : ''}
+            ${summaryRow('photo', 'Foto', item.images.length ? `${item.images.length} foto(s)` : 'sem foto')}
+            ${summaryRow('text', 'Item', item.text)}
+            ${summaryRow('who', 'Responsável', whoName(item.assignee_id))}
+            ${summaryRow('start', 'Início', fmtD(item.start_date) || '—')}
+            ${summaryRow('end', 'Término', fmtD(item.due_date) || '—')}
           </div>`;
     }
     return '';
   };
-  const summaryRow = (i, label, value) => html`<button type="button" class="wiz-sum-row" data-goto="${i}"><span>${label}</span><b>${value}</b><em>alterar</em></button>`;
+  const summaryRow = (k, label, value) => html`<button type="button" class="wiz-sum-row" data-goto="${STEPS().findIndex(s => s.k === k)}"><span>${label}</span><b>${value}</b><em>alterar</em></button>`;
 
   const navFor = (s, last) => html`
     ${step > 0 ? html`<button type="button" class="btn btn-ghost" data-back>${icon('back')}Voltar</button>` : html`<span></span>`}
@@ -206,11 +213,11 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
       if (e) { render(); return fail(e); }
     }
     step = STEPS().length - 1;
-    const out = { text: item.text, group: item.group || null, images: item.images.slice(), description: item.description || null,
+    const out = { text: item.text, group: item.group || null, specialty: item.specialty || null, images: item.images.slice(), description: item.description || null,
       assignee_id: item.assignee_id || null, start_date: item.start_date || null, due_date: item.due_date || null };
     el.querySelectorAll('[data-add-again],[data-add-close]').forEach(b => (b.disabled = true));
     try {
-      Object.assign(keep, { group: out.group, assignee_id: out.assignee_id, start_date: out.start_date, due_date: out.due_date });
+      Object.assign(keep, { group: out.group, specialty: out.specialty, assignee_id: out.assignee_id, start_date: out.start_date, due_date: out.due_date });
       await onAdd([out], again);
       reset();
       render();
@@ -223,6 +230,7 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
 
   const bindStep = () => {
     el.querySelectorAll('[data-group]').forEach(b => b.addEventListener('click', () => { item.group = b.dataset.group || null; next(); }));
+    el.querySelectorAll('[data-spec]').forEach(b => b.addEventListener('click', () => { item.specialty = b.dataset.spec || null; next(); }));
     el.querySelectorAll('[data-who]').forEach(b => b.addEventListener('click', () => { item.assignee_id = b.dataset.who ? Number(b.dataset.who) : null; next(); }));
     el.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => { q('[data-f="start_date"]').value = b.dataset.start; next(); }));
     el.querySelectorAll('[data-end]').forEach(b => b.addEventListener('click', () => { q('[data-f="due_date"]').value = b.dataset.end; next(); }));
@@ -243,6 +251,7 @@ export function bindItemForm(el, { users, groups, globalName = () => '', photoRe
     q('[data-skip]')?.addEventListener('click', () => {
       const s = STEPS()[step];
       if (s.k === 'who') item.assignee_id = null;
+      if (s.k === 'spec') item.specialty = null;
       if (s.k === 'start') item.start_date = '';
       if (s.k === 'end') item.due_date = '';
       if (s.k === 'photo') item.images = [];
@@ -286,7 +295,7 @@ export function renderDraft(items, users, globalName) {
     return html`${head}<div class="cl-draft-card" data-i="${i}">
       ${it.images?.length ? html`<img class="cl-draft-ph" src="${it.images[0].data}" alt="">` : html`<span class="cl-draft-ph is-empty">${icon('camera')}</span>`}
       <div class="cl-draft-txt"><b>${i + 1}. ${it.text}</b>
-        <span>${icon('user')} ${who(it.assignee_id)}${due ? html` · ${icon('calendar')} ${fmtD(due)}` : ''}${it.images?.length ? ` · ${it.images.length} foto(s)` : ''}</span>
+        <span>${it.specialty ? `${it.specialty} · ` : ''}${icon('user')} ${who(it.assignee_id)}${due ? html` · ${icon('calendar')} ${fmtD(due)}` : ''}${it.images?.length ? ` · ${it.images.length} foto(s)` : ''}</span>
         ${it.description ? html`<em>${it.description}</em>` : ''}</div>
       <button type="button" class="icon-btn cl-draft-rm" aria-label="Remover item ${i + 1}">✕</button></div>`;
   })}`;
@@ -295,29 +304,51 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '' });
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', by: 'group' });
 
 // Filtro por grupo e/ou responsável (tela e relatório). '' = todos; '~' = sem grupo / sem responsável.
 export const NONE = '~';
 const keyOf = v => v || NONE;
-export const matchItem = (it, group, resp) => (!group || keyOf(it.group) === group) && (!resp || keyOf(it.responsible_name) === resp);
-export const filterOptions = items => ({
+// f = { group, spec, resp } (valores '' = todos)
+export const matchItem = (it, f) => (!f.group || keyOf(it.group) === f.group) && (!f.spec || keyOf(it.specialty) === f.spec)
+  && (!f.resp || keyOf(it.responsible_name) === f.resp);
+// specOrder = especialidades do modelo da obra (ordem de exibição); fora do modelo depois e "sem" por último
+export const filterOptions = (items, specOrder = []) => ({
   groups: [...new Set(items.map(i => keyOf(i.group)))],
+  specs: [...new Set(items.map(i => keyOf(i.specialty)))].sort((a, b) => {
+    const r = k => (k === NONE ? 1e6 : specOrder.includes(k) ? specOrder.indexOf(k) : 1e5);
+    return r(a) - r(b) || a.localeCompare(b, 'pt-BR');
+  }),
   resps: [...new Set(items.map(i => keyOf(i.responsible_name)))].sort((a, b) => a.localeCompare(b, 'pt-BR')),
 });
-export const optLabel = (k, kind) => (k === NONE ? (kind === 'group' ? 'Sem grupo' : 'Sem responsável') : k);
-// Link do relatório levando os filtros em uso
-export const checklistReportHref = (id, group, resp) => {
+export const optLabel = (k, kind) => (k === NONE ? ({ group: 'Sem grupo', spec: 'Sem especialidade', resp: 'Sem responsável' })[kind] : k);
+const filterOf = st => ({ group: st.fGroup, spec: st.fSpec, resp: st.fResp });
+// Link do relatório levando os filtros (e o agrupamento por especialidade) em uso
+export const checklistReportLink = t => {
+  const st = uiOf(t.id);
   const q = new URLSearchParams();
-  if (group) q.set('grupo', group);
-  if (resp) q.set('resp', resp);
-  return `#/imprimir/checklist/${id}${q.size ? `?${q}` : ''}`;
+  if (st.fGroup) q.set('grupo', st.fGroup);
+  if (st.fSpec) q.set('esp', st.fSpec);
+  if (st.fResp) q.set('resp', st.fResp);
+  if (st.by === 'spec') q.set('g1', 'especialidade');
+  return `#/imprimir/checklist/${t.id}${q.size ? `?${q}` : ''}`;
 };
-export const checklistReportLink = t => checklistReportHref(t.id, uiOf(t.id).fGroup, uiOf(t.id).fResp);
 let scrollTo = null;
 
 const initials = n => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
 const shortDate = iso => fmtDateTime(iso).replace(/\/\d{4},/, ',');
+
+// Por especialidade: na ordem do modelo da obra (as fora do modelo depois, "Sem especialidade" por último)
+function specGroupsOf(items, order = []) {
+  const m = new Map();
+  for (const it of items) {
+    const k = it.specialty || '';
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(it);
+  }
+  const rank = k => (!k ? 1e6 : order.includes(k) ? order.indexOf(k) : 1e5);
+  return [...m.keys()].sort((a, b) => rank(a) - rank(b)).map(k => ({ name: k, items: m.get(k) }));
+}
 
 function groupsOf(items) {
   const groups = [];
@@ -353,6 +384,7 @@ function itemCard(t, it, c) {
     return html`<span class="fact-due ${cls}">${icon('calendar')}<span><small>Prazo</small><b>${fmtD(it.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span></span>`;
   })();
   const head = html`<div class="cli-top"><span class="cli-num">${it.seq}</span><span class="cli-title">${it.text}</span>${menu}</div>
+    ${it.specialty || (it.group && uiOf(t.id).by === 'spec') ? html`<div class="cli-tags">${it.specialty ? html`<span class="cli-spec">${it.specialty}</span>` : ''}${it.group && uiOf(t.id).by === 'spec' ? html`<span class="cli-grp">${it.group}</span>` : ''}</div>` : ''}
     <div class="cli-facts">
       <span class="fact-who ${it.mine ? 'is-mine' : ''}"><i>${initials(it.responsible_name)}</i><span><small>Responsável${it.assignee_id ? '' : ' (global)'}${it.mine ? ' · seu item' : ''}</small><b>${it.responsible_name}</b></span></span>
       ${dueBox}
@@ -424,20 +456,31 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
   const s = c.summary;
   const st = uiOf(t.id);
   const f = st.filter || (s.mine_pending && s.mine_pending < s.total - s.done ? 'mine' : 'all');
-  const groups = groupsOf(c.items);
   const chip = (k, label, n) => html`<button type="button" class="chip" data-clf="${k}" aria-pressed="${f === k}">${label}${n !== undefined ? html`<span class="n">${n}</span>` : ''}</button>`;
-  const opts = filterOptions(c.items);
+  const opts = filterOptions(c.items, t._specs || []);
   // Filtro guardado que não existe mais (grupo renomeado, responsável trocado) volta para "todos"
   if (st.fGroup && !opts.groups.includes(st.fGroup)) st.fGroup = '';
+  if (st.fSpec && !opts.specs.includes(st.fSpec)) st.fSpec = '';
   if (st.fResp && !opts.resps.includes(st.fResp)) st.fResp = '';
-  const sel = (kind, cur, list, all) => html`<label class="cl-sel ${cur ? 'is-on' : ''}"><span>${kind === 'group' ? 'Grupo' : 'Responsável'}</span>
+  const hasSpecs = c.items.some(i => i.specialty);
+  if (!hasSpecs) st.by = 'group';
+  const LBL = { group: 'Grupo', spec: 'Especialidade', resp: 'Responsável' };
+  const sel = (kind, cur, list, all) => html`<label class="cl-sel ${cur ? 'is-on' : ''}"><span>${LBL[kind]}</span>
     <select data-clsel="${kind}"><option value="">${all}</option>${list.map(k => html`<option value="${k}" ${k === cur ? 'selected' : ''}>${optLabel(k, kind)}</option>`)}</select></label>`;
-  const selects = opts.groups.length > 1 || opts.resps.length > 1 ? html`<div class="cl-selects">
+  const selects = opts.groups.length > 1 || opts.specs.length > 1 || opts.resps.length > 1 ? html`<div class="cl-selects">
       ${opts.groups.length > 1 ? sel('group', st.fGroup, opts.groups, 'Todos os grupos') : ''}
+      ${opts.specs.length > 1 ? sel('spec', st.fSpec, opts.specs, 'Todas as especialidades') : ''}
       ${opts.resps.length > 1 ? sel('resp', st.fResp, opts.resps, 'Todos os responsáveis') : ''}
       <span class="cl-sel-info" data-clsel-info></span>
-      <button type="button" class="btn btn-ghost btn-sm" data-clsel-clear ${st.fGroup || st.fResp ? '' : 'hidden'}>Limpar filtro</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-clsel-clear ${st.fGroup || st.fSpec || st.fResp ? '' : 'hidden'}>Limpar filtro</button>
     </div>` : '';
+  // Agrupar a lista por grupo (ambiente) ou por especialidade
+  const bySpec = st.by === 'spec';
+  const groups = bySpec ? specGroupsOf(c.items, t._specs || []) : groupsOf(c.items);
+  const byToggle = hasSpecs ? html`<div class="cl-by" role="group" aria-label="Agrupar itens por">
+      <span>Agrupar por</span>
+      <button type="button" class="chip" data-clby="group" aria-pressed="${!bySpec}">Grupo</button>
+      <button type="button" class="chip" data-clby="spec" aria-pressed="${bySpec}">Especialidade</button></div>` : '';
   return html`<section class="card block block-exec" id="checklist" aria-labelledby="blk-cl">
     <header class="block-head"><span class="step">2</span><h2 id="blk-cl">Check-list</h2>
       <span class="right muted" style="font-size:12px">${s.done} de ${s.total} concluídos${s.nc_total ? ` · ${s.nc_total} NC no histórico` : ''}</span></header>
@@ -458,6 +501,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           ${chip('all', 'Todos', s.total)}${s.mine_pending || c.items.some(i => i.mine) ? chip('mine', 'Meus itens', s.mine_pending ? `${s.mine_pending} pend.` : undefined) : ''}
           ${chip('pending', 'Pendentes', s.total - s.done)}${s.nao_conforme ? chip('nc', 'Não conformes', s.nao_conforme) : ''}
         </div>
+        ${byToggle}
         ${selects}
         ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
       </div>
@@ -471,9 +515,9 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           const pct = Math.round((done / g.items.length) * 100);
           return html`<section class="clg">
             <header class="clg-head">
-              <div class="clg-name"><h3>${g.name || 'Itens'}</h3><div class="clg-bar"><span style="width:${pct}%"></span></div></div>
+              <div class="clg-name"><h3>${g.name || (bySpec ? 'Sem especialidade' : 'Itens')}</h3><div class="clg-bar"><span style="width:${pct}%"></span></div></div>
               <span class="clg-count">${done}/${g.items.length}</span>
-              ${c.can_manage_items ? html`<button type="button" class="clg-btn" data-add-group="${g.name}" title="Adicionar item neste grupo">${icon('plus')}<span>Item</span></button>
+              ${c.can_manage_items && !bySpec ? html`<button type="button" class="clg-btn" data-add-group="${g.name}" title="Adicionar item neste grupo">${icon('plus')}<span>Item</span></button>
                 ${g.items.length > 1 ? html`<button type="button" class="clg-btn" data-assign-group="${g.items.map(i => i.id).join(',')}" data-group-name="${g.name || 'Itens'}" title="Definir o responsável do grupo">${icon('user')}<span>Grupo</span></button>` : ''}` : ''}
             </header>
             <div class="clg-items">${g.items.map(it => itemCard(t, it, c))}</div>
@@ -495,6 +539,8 @@ const personOptions = (users, cur, globalName) => html`<option value="">Respons�
 
 // Grupos possíveis: classificações cadastradas na obra + grupos já usados no check-list
 const groupOptions = t => [...new Set([...(t._groups || []), ...t.checklist.items.map(i => i.group).filter(Boolean)])];
+// Especialidades: modelo escolhido na obra + as já usadas nos itens
+const specOptions = t => [...new Set([...(t._specs || []), ...t.checklist.items.map(i => i.specialty).filter(Boolean)])];
 
 export function bindChecklist(root, t, ctx, refresh) {
   const c = t.checklist;
@@ -509,7 +555,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   // Próximo item pendente que este usuário pode responder, dentro do filtro em uso
   const nextAfter = id => {
     const f = list.dataset.filter;
-    const inFilter = x => (f === 'mine' ? x.mine : f === 'nc' ? x.result === 'nao_conforme' : true) && matchItem(x, st.fGroup, st.fResp);
+    const inFilter = x => (f === 'mine' ? x.mine : f === 'nc' ? x.result === 'nao_conforme' : true) && matchItem(x, filterOf(st));
     const items = c.items;
     const i = items.findIndex(x => x.id === id);
     const nxt = [...items.slice(i + 1), ...items.slice(0, i)].find(x => !x.result && x.can_answer && inFilter(x));
@@ -547,7 +593,7 @@ export function bindChecklist(root, t, ctx, refresh) {
       let any = false;
       sec.querySelectorAll('.cli').forEach(el => {
         const it = byId.get(Number(el.id.slice(4)));
-        const ok = !!it && matchItem(it, st.fGroup, st.fResp);
+        const ok = !!it && matchItem(it, filterOf(st));
         el.classList.toggle('is-filtered', !ok);
         if (ok) { inSel++; if (chipOk(it)) { any = true; shown++; } }
       });
@@ -555,7 +601,7 @@ export function bindChecklist(root, t, ctx, refresh) {
     });
     const none = list.querySelector('.cl-none');
     if (none) none.style.display = shown ? 'none' : 'block';
-    const active = !!(st.fGroup || st.fResp);
+    const active = !!(st.fGroup || st.fSpec || st.fResp);
     const info = root.querySelector('[data-clsel-info]');
     if (info) info.textContent = active ? `${inSel} de ${c.items.length} itens` : '';
     root.querySelector('[data-clsel-clear]')?.toggleAttribute('hidden', !active);
@@ -564,15 +610,20 @@ export function bindChecklist(root, t, ctx, refresh) {
     root.querySelectorAll('a[data-cl-report]').forEach(a => (a.href = checklistReportLink(t)));
   };
   root.querySelectorAll('[data-clsel]').forEach(s => s.addEventListener('change', () => {
-    if (s.dataset.clsel === 'group') st.fGroup = s.value; else st.fResp = s.value;
+    st[{ group: 'fGroup', spec: 'fSpec', resp: 'fResp' }[s.dataset.clsel]] = s.value;
     applySel();
   }));
   root.querySelector('[data-clsel-clear]')?.addEventListener('click', () => {
-    st.fGroup = st.fResp = '';
+    st.fGroup = st.fSpec = st.fResp = '';
     root.querySelectorAll('[data-clsel]').forEach(s => (s.value = ''));
     applySel();
   });
   applySel();
+  root.querySelectorAll('[data-clby]').forEach(b => b.addEventListener('click', () => {
+    if (st.by === b.dataset.clby) return;
+    st.by = b.dataset.clby;
+    refresh(t);
+  }));
   root.querySelectorAll('.cl-filters [data-clf]').forEach(b => b.addEventListener('click', () => {
     st.filter = b.dataset.clf;
     list.dataset.filter = b.dataset.clf;
@@ -643,7 +694,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   if (panel) {
     if (!st.keep) st.keep = {};
     form = bindItemForm(panel.querySelector('[data-cl-form]'), {
-      users: team, keep: st.keep, groups: () => groupOptions(t), globalName: () => t.assignee_name || '',
+      users: team, keep: st.keep, groups: () => groupOptions(t), specialties: () => specOptions(t), globalName: () => t.assignee_name || '',
       photoRequired: () => c.photo_rule === 'obrigatoria', quickList: () => c.photo_rule !== 'obrigatoria',
       onAdd: async (items, again) => {
         // Envia em lotes que cabem numa requisição (fotos de entrada)
@@ -669,6 +720,9 @@ export function bindChecklist(root, t, ctx, refresh) {
       body: html`<div class="field"><label for="ei-group">Grupo</label><select id="ei-group" name="group">
           ${[...new Set([...groupOptions(t), ...(it.group ? [it.group] : [])])].map(g => html`<option value="${g}" ${g === it.group ? 'selected' : ''}>${g}</option>`)}
           <option value="" ${!it.group ? 'selected' : ''}>Sem grupo</option></select></div>
+        ${specOptions(t).length || it.specialty ? html`<div class="field"><label for="ei-spec">Especialidade</label><select id="ei-spec" name="specialty">
+          ${[...new Set([...specOptions(t), ...(it.specialty ? [it.specialty] : [])])].map(s => html`<option value="${s}" ${s === it.specialty ? 'selected' : ''}>${s}</option>`)}
+          <option value="" ${!it.specialty ? 'selected' : ''}>Sem especialidade</option></select></div>` : ''}
         <div class="field"><label class="req" for="ei-text">Descrição do item</label><input id="ei-text" name="text" type="text" maxlength="300" required value="${it.text}"></div>
         <div class="field"><label for="ei-who">Responsável</label><select id="ei-who" name="assignee_id">${personOptions(team(), it.assignee_id, t.assignee_name)}</select></div>
         <div class="form-row"><div class="field"><label for="ei-start">Data de início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
@@ -681,7 +735,7 @@ export function bindChecklist(root, t, ctx, refresh) {
           ${it.refs.length >= PHOTO_LIMIT ? html`<span class="hint">Limite de ${PHOTO_LIMIT} fotos atingido: remova uma para trocar.</span>` : ''}</div>
         ${!it.result ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-del-in-sheet>${icon('trash')}Excluir este item</button>`
           : html`<span class="hint">Item já respondido: pode ser editado, mas não excluído.</span>`}`,
-      onSubmit: d => api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, assignee_id: d.assignee_id || null,
+      onSubmit: d => api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, ...('specialty' in d ? { specialty: d.specialty || null } : {}), assignee_id: d.assignee_id || null,
         description: d.description, start_date: d.start_date || null, due_date: d.due_date || null } }),
     });
     // Fotos de entrada: incluir/remover direto pela janela (fecha e atualiza a tela)

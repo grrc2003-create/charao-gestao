@@ -240,6 +240,7 @@ export function seedDemo() {
       });
     }
     run(`UPDATE tasks SET stage_id = (SELECT id FROM project_stages s WHERE s.project_id = tasks.project_id AND s.is_default = 1) WHERE stage_id IS NULL`);
+    run(`UPDATE projects SET specialty_template_id = (SELECT MIN(id) FROM specialty_templates) WHERE code = 'PRJ-001'`);
     // Início previsto: alguns dias antes do prazo (alimenta o Gantt)
     run(`UPDATE tasks SET start_date = date(due_date, '-' || (4 + (id % 7)) || ' days') WHERE due_date IS NOT NULL`);
 

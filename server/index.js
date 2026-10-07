@@ -164,9 +164,10 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
 });
 
 api.get('/api/meta', (req, res, { ctx }) => {
-  const projects = all(`SELECT id, code, name, status, kind FROM projects ORDER BY kind = 'interno', code`)
+  const projects = all(`SELECT id, code, name, status, kind, specialty_template_id FROM projects ORDER BY kind = 'interno', code`)
     .filter(p => ctx.projects === null || ctx.projects.has(p.id))
-    .map(p => ({ ...p, stages: all('SELECT id, name, is_default FROM project_stages WHERE project_id = ? ORDER BY is_default DESC, sort_order, id', p.id) }));
+    .map(p => ({ ...p, stages: all('SELECT id, name, is_default FROM project_stages WHERE project_id = ? ORDER BY is_default DESC, sort_order, id', p.id),
+      specialties: Settings.specialtiesOf(p.specialty_template_id) }));
   const users = all(`SELECT id, name, role, job_title, active, manager_id, is_external, company, login_enabled FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
   // Para filtros de tarefas também listamos responsáveis visíveis nas tarefas (sem dados pessoais)
   const assignees = new Map();
@@ -326,6 +327,8 @@ api.get('/api/settings/reasons', (req, res, { ctx, query }) =>
 api.get('/api/settings/general', (req, res) => send(res, 200, Settings.getGeneral()));
 api.put('/api/settings/general', (req, res, { ctx, body }) => send(res, 200, Settings.saveGeneral(ctx, body, clientIp(req))));
 api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
+api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listSpecialtyTemplates()));
+api.put('/api/settings/specialties', (req, res, { ctx, body }) => send(res, 200, Settings.saveSpecialtyTemplates(ctx, body.templates, clientIp(req))));
 
 // ---------- Relatórios ----------
 api.get('/api/reports', (req, res, { ctx, query }) => send(res, 200, Reports.buildReport(ctx, Object.fromEntries(query))));

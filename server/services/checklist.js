@@ -68,8 +68,9 @@ const ITEM_SQL = `SELECT ci.*, u.name AS assignee_name, u.is_external AS a_exter
 const isItemOwner = (ctx, item) => !!item.assignee_id
   && (item.assignee_id === ctx.user.id || (!!item.a_external && !item.a_login && item.a_leader === ctx.user.id));
 
-// Responde: o responsável global responde qualquer item; os demais, só os itens deles
-export const canAnswerItem = (ctx, t, item) => isOpen(t) && (canExecuteTask(ctx, t) || isItemOwner(ctx, item));
+// Responde: o responsável global e quem gerencia a tarefa (criador, gestor/coordenador, administrador) respondem
+// qualquer item; os demais responsáveis, só os itens deles
+export const canAnswerItem = (ctx, t, item) => isOpen(t) && (canExecuteTask(ctx, t) || canManageTask(ctx, t) || isItemOwner(ctx, item));
 // Itens (incluir, editar, atribuir, excluir): quem gerencia a tarefa e o responsável global, com o check-list aberto
 export const canManageItems = (ctx, t) => isOpen(t) && (canManageTask(ctx, t) || canExecuteTask(ctx, t));
 const isMine = (ctx, t, item) => isItemOwner(ctx, item) || (!item.assignee_id && t.assignee_id === ctx.user.id);
@@ -123,6 +124,7 @@ export function checklistView(ctx, t) {
     },
     check: check(t, rows, files),
     can_manage_items: canManageItems(ctx, t),
+    locked: !isOpen(t),
   };
 }
 

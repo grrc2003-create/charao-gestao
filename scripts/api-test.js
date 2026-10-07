@@ -606,6 +606,9 @@ async function main() {
   ok((await brunoC('GET', '/dashboard')).data.my_checklist.some(c => c.id === clId && c.pending === 1), 'Dashboard avisa os itens pendentes do usuário');
   const [iTom, iPia, iPint, iRej] = cl.checklist.items.map(i => i.id);
   ok((await brunoC('POST', `/tasks/${clId}/items/${iPint}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).status === 403, 'não responde item de outro responsável');
+  const viewRic = (await ricardo('GET', `/tasks/${clId}`)).data.checklist.items;
+  ok(viewRic.every(i => i.can_answer), 'quem gerencia o check-list (gestor que criou) pode responder e incluir fotos em qualquer item');
+  ok((await ricardo('POST', `/tasks/${clId}/items/${iPint}/answer`, { images: [{ data: tinyPng() }] })).data.checklist.items.find(i => i.id === iPint).files.length === 1, 'foto incluída no item antes de responder');
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme' })).status === 400, 'foto obrigatória bloqueia resposta sem foto');
   cl = (await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).data;
   ok(cl.checklist.items[0].result === 'conforme' && cl.checklist.items[0].files.length === 1 && cl.checklist.items[0].answered_by_name === 'Bruno Costa' && cl.status === 'em_andamento', 'responsável do item responde com foto (tarefa entra em andamento)');

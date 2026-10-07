@@ -136,20 +136,23 @@ function itemCard(t, it, c) {
   const body = html`
     ${it.can_answer ? html`<div class="cli-answer" role="group" aria-label="Resposta do item ${it.seq}">${ansBtn('conforme')}${ansBtn('nao_conforme')}${ansBtn('na')}</div>
       ${needPhoto && !it.result ? html`<div class="cli-hint">${icon('camera')} Foto obrigatória: ao tocar em Conforme ou Não conforme a câmera abre.</div>` : ''}`
-      : !it.result ? html`<div class="cli-hint">Aguardando ${it.responsible_name}.</div>` : ''}
-    ${it.files.length || (it.can_answer && it.result) ? html`<div class="cli-photos">
+      : !it.result ? html`<div class="cli-hint">${icon('clock')} ${c.locked ? 'Check-list fechado para alterações.' : `Aguardando ${it.responsible_name} (ou o responsável global).`}</div>` : ''}
+    ${it.files.length || it.can_answer ? html`<div class="cli-photos">
       ${it.files.map(fl => html`<figure class="cli-ph" data-src="/api/checklist-files/${fl.id}" data-caption="Item ${it.seq} · ${it.text}">
         <img src="/api/checklist-files/${fl.id}" alt="Foto do item ${it.seq}" loading="lazy">
         ${it.can_answer ? html`<button type="button" class="rm" data-rm-photo="${fl.id}" data-item="${it.id}" aria-label="Remover foto">✕</button>` : ''}</figure>`)}
-      ${it.can_answer ? html`<label class="cli-ph-add">${fileInput({ camera: true, data: `data-photo-item="${it.id}"` })}${icon('camera')}<span>Foto</span></label>` : ''}</div>` : ''}
+      ${it.can_answer ? html`<label class="cli-ph-add">${fileInput({ camera: true, data: `data-photo-item="${it.id}"` })}${icon('camera')}<span>${it.files.length ? 'Mais foto' : 'Foto'}</span></label>
+        <label class="cli-ph-add">${fileInput({ multiple: true, data: `data-photo-item="${it.id}"` })}${icon('image')}<span>Galeria</span></label>` : ''}</div>` : ''}
     ${it.can_answer && (it.result === 'nao_conforme' || it.note) ? html`<label class="cli-note"><span>${it.result === 'nao_conforme' ? 'O que está errado?' : 'Observação'}</span>
         <input type="text" data-note-item="${it.id}" maxlength="1000" value="${it.note || ''}" placeholder="${it.result === 'nao_conforme' ? 'Descreva o problema encontrado' : 'Observação'}"></label>`
       : it.note ? html`<div class="cli-note-text"><b>${it.result === 'nao_conforme' ? 'Problema:' : 'Obs.:'}</b> ${it.note}</div>` : ''}`;
+  const nothing = !it.can_answer && !it.files.length && !it.note;
   const attrs = `id="cli-${it.id}" data-pending="${it.result ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.result === 'nao_conforme' ? 1 : 0}"`;
   const cls = `cli ${it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''}`;
   // Respondidos (exceto não conforme) ficam recolhidos numa linha; toque para ver/alterar
   return it.result && it.result !== 'nao_conforme'
-    ? html`<details class="${cls}" ${raw(attrs)}><summary>${head}<span class="cli-more">ver detalhes</span></summary><div class="cli-body">${body}</div></details>`
+    ? (nothing ? html`<article class="${cls}" ${raw(attrs)}>${head}<div class="cli-body"></div></article>`
+      : html`<details class="${cls}" ${raw(attrs)}><summary>${head}<span class="cli-more">${it.can_answer ? 'tocar para alterar ou incluir fotos' : 'ver fotos e observação'}</span></summary><div class="cli-body">${body}</div></details>`)
     : html`<article class="${cls}" ${raw(attrs)}>${head}<div class="cli-body">${body}</div></article>`;
 }
 
@@ -172,6 +175,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           <span class="cnt na"><b>${s.na}</b>N/A</span><span class="cnt pend"><b>${s.total - s.done}</b>Pendente</span>
         </div>
       </div>
+      ${c.locked && !t.cancelled_at ? html`<div class="notice">${icon('info')}<span>${t.status === 'concluida' ? 'Check-list concluído' : 'Check-list enviado para conferência'}: as respostas ficam bloqueadas.${t.status === 'aguardando_conferencia' ? ' Se precisar corrigir algo, quem confere pode devolver para ajustes.' : ''}</span></div>` : ''}
       <div class="cl-rule ${c.photo_rule === 'obrigatoria' ? 'is-req' : ''}">${icon('camera')} ${PHOTO_RULE[c.photo_rule]}</div>
       <div class="cl-toolbar">
         <div class="chips cl-filters" role="group" aria-label="Filtrar itens">
@@ -255,9 +259,17 @@ export function bindChecklist(root, t, ctx, refresh) {
     if (!files.length) return;
     const itemId = Number(inp.dataset.item || inp.dataset.photoItem);
     try {
-      toast('Enviando foto…', 'warn');
+      toast(files.length > 1 ? `Enviando ${files.length} fotos…` : 'Enviando foto…', 'warn');
       const imgs = (await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data }));
-      answer(itemId, inp.dataset.answer ? { result: inp.dataset.answer, images: imgs } : { images: imgs }, inp.dataset.answer ? null : 'Foto anexada.');
+      if (inp.dataset.answer) return answer(itemId, { result: inp.dataset.answer, images: imgs });
+      run(async () => {
+        let updated;
+        for (let i = 0; i < imgs.length; i += 5) {
+          updated = await api(`/tasks/${t.id}/items/${itemId}/answer`, { method: 'POST', body: { images: imgs.slice(i, i + 5) } });
+        }
+        scrollTo = itemId;
+        return updated;
+      }, imgs.length > 1 ? `${imgs.length} fotos anexadas.` : 'Foto anexada.');
     } catch (e) { toast(e.message, 'err'); }
   }));
   root.querySelectorAll('[data-note-item]').forEach(inp => inp.addEventListener('change', () => answer(Number(inp.dataset.noteItem), { note: inp.value }, 'Observação salva.')));

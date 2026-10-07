@@ -329,6 +329,8 @@ api.put('/api/settings/general', (req, res, { ctx, body }) => send(res, 200, Set
 api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
 api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listSpecialtyTemplates()));
 api.put('/api/settings/specialties', (req, res, { ctx, body }) => send(res, 200, Settings.saveSpecialtyTemplates(ctx, body.templates, clientIp(req))));
+api.get('/api/settings/stage-templates', (req, res) => send(res, 200, Settings.listStageTemplates()));
+api.put('/api/settings/stage-templates', (req, res, { ctx, body }) => send(res, 200, Settings.saveStageTemplates(ctx, body.templates, clientIp(req))));
 
 // ---------- Relatórios ----------
 api.get('/api/reports', (req, res, { ctx, query }) => send(res, 200, Reports.buildReport(ctx, Object.fromEntries(query))));

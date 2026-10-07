@@ -69,10 +69,11 @@ const stageItem = s => html`<li class="stage-item" data-id="${s.id || ''}">
 export async function form({ params, query, state, navigate, reloadMeta }) {
   const editing = !!params.id;
   if (!state.meta.can.manage_projects) throw new Error('Seu perfil não pode cadastrar ou editar projetos.');
-  const [p, users, templates] = await Promise.all([
+  const [p, users, templates, stageTpls] = await Promise.all([
     editing ? api(`/projects/${params.id}`) : Promise.resolve(null),
     api('/users/directory'),
     api('/settings/specialties').catch(() => []),
+    api('/settings/stage-templates').catch(() => []),
   ]);
   const kind = p ? p.kind : query.get('tipo') === 'interno' ? 'interno' : 'obra';
   const v = p || (kind === 'interno'
@@ -129,6 +130,14 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <input type="text" id="stage-new" maxlength="60" placeholder="Nova classificação (ex.: Fundação)" aria-label="Nova classificação">
             <button type="button" class="btn btn-ghost" id="stage-add-btn">${icon('plus')}Adicionar</button>
           </div>
+          ${stageTpls.length ? html`<div class="stage-tpl-apply">
+            <label for="stage-tpl">Usar um modelo</label>
+            <div class="stage-add">
+              <select id="stage-tpl"><option value="">Escolha um modelo…</option>${stageTpls.map(tp => html`<option value="${tp.id}">${tp.name} (${tp.items.length})</option>`)}</select>
+              <button type="button" class="btn btn-ghost" id="stage-tpl-apply">${icon('check')}Aplicar modelo</button>
+            </div>
+            <span class="hint" id="stage-tpl-preview">Os modelos são cadastrados em <b>Configurações → Modelos de classificação</b>. Aplicar inclui as classificações que faltam; nada é removido.</span>
+          </div>` : ''}
         </fieldset>
         <fieldset class="fieldset form"><legend>Especialidades do check-list</legend>
           <div class="field"><label for="specialty_template_id">Modelo de especialidades</label>
@@ -180,6 +189,20 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         newInput.focus();
       };
       root.querySelector('#stage-add-btn').addEventListener('click', addStage);
+      // Aplicar modelo: inclui as classificações do modelo que o projeto ainda não tem (na ordem do modelo)
+      const tplPick = root.querySelector('#stage-tpl');
+      tplPick?.addEventListener('change', () => {
+        const tp = stageTpls.find(x => String(x.id) === tplPick.value);
+        if (tp) root.querySelector('#stage-tpl-preview').textContent = tp.items.join(' · ');
+      });
+      root.querySelector('#stage-tpl-apply')?.addEventListener('click', () => {
+        const tp = stageTpls.find(x => String(x.id) === tplPick.value);
+        if (!tp) { toast('Escolha um modelo.', 'warn'); return tplPick.focus(); }
+        const have = new Set([...list.querySelectorAll('input')].map(i => i.value.trim().toLowerCase()));
+        const add = tp.items.filter(n => !have.has(n.toLowerCase()));
+        for (const name of add) list.insertAdjacentHTML('beforeend', stageItem({ name, task_count: 0 }).toString());
+        toast(add.length ? `${add.length} classificação(ões) do modelo “${tp.name}” incluída(s). Salve o projeto para gravar.` : 'O projeto já tem todas as classificações deste modelo.', add.length ? undefined : 'warn');
+      });
       newInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addStage(); } });
       list.addEventListener('click', e => {
         const li = e.target.closest('.stage-item');

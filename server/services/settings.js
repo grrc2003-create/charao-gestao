@@ -98,33 +98,30 @@ export function saveGeneral(ctx, body, ip) {
   return getGeneral();
 }
 
-// ---------- Especialidades do check-list (modelos escolhidos por obra) ----------
+// ---------- Modelos de listas (especialidades do check-list e classificações Grupo/Local/Etapa) ----------
 const parseList = s => { try { const a = JSON.parse(s); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch { return []; } };
 
-export function listSpecialtyTemplates() {
-  return all(`SELECT t.id, t.name, t.items, (SELECT COUNT(*) FROM projects p WHERE p.specialty_template_id = t.id) AS project_count
-    FROM specialty_templates t ORDER BY t.sort_order, t.id`).map(t => ({ ...t, items: parseList(t.items) }));
-}
+// table: tabela do modelo · usage: SQL que conta as obras que usam o modelo (ou null) · what: textos das mensagens
+const TEMPLATE_KINDS = {
+  specialty: { table: 'specialty_templates', usage: 'SELECT COUNT(*) FROM projects p WHERE p.specialty_template_id = t.id',
+    item: 'especialidade', items: 'especialidades', maxLen: 60, audit: 'Modelos de especialidades atualizados' },
+  stage: { table: 'stage_templates', usage: null,
+    item: 'classificação', items: 'classificações', maxLen: 60, audit: 'Modelos de classificação (Grupo/Local/Etapa) atualizados' },
+};
 
-// Especialidades da obra (do modelo escolhido no projeto)
-export function specialtiesOf(templateId) {
-  if (!templateId) return [];
-  const r = one('SELECT items FROM specialty_templates WHERE id = ?', templateId);
-  return r ? parseList(r.items) : [];
-}
-
-export function validTemplateId(v) {
-  const id = intOrNull(v);
-  if (id && !one('SELECT id FROM specialty_templates WHERE id = ?', id)) throw badRequest('Modelo de especialidades inválido.');
-  return id;
+function listTemplates(kind) {
+  const k = TEMPLATE_KINDS[kind];
+  return all(`SELECT t.id, t.name, t.items, ${k.usage ? `(${k.usage})` : '0'} AS project_count
+    FROM ${k.table} t ORDER BY t.sort_order, t.id`).map(t => ({ ...t, items: parseList(t.items) }));
 }
 
 // Sincroniza os modelos editados em Configurações (cria, renomeia, altera a lista, ordena e exclui os que nenhuma obra usa)
-export function saveSpecialtyTemplates(ctx, input, ip) {
+function saveTemplates(ctx, kind, input, ip) {
   requireSettingsManager(ctx.user);
+  const k = TEMPLATE_KINDS[kind];
   if (!Array.isArray(input)) throw badRequest('Lista de modelos inválida.');
   if (input.length > 50) throw badRequest('No máximo 50 modelos.');
-  const current = listSpecialtyTemplates();
+  const current = listTemplates(kind);
   const byId = new Map(current.map(t => [t.id, t]));
   const seen = new Set();
   const items = input.map((x, i) => {
@@ -139,11 +136,11 @@ export function saveSpecialtyTemplates(ctx, input, ip) {
     for (const raw of Array.isArray(x?.items) ? x.items : []) {
       const n = String(raw ?? '').replace(/\s+/g, ' ').trim();
       if (!n) continue;
-      if (n.length > 60) throw badRequest(`Especialidade "${n.slice(0, 30)}…" excede 60 caracteres.`);
+      if (n.length > k.maxLen) throw badRequest(`"${n.slice(0, 30)}…" excede ${k.maxLen} caracteres.`);
       if (!names.some(o => o.toLowerCase() === n.toLowerCase())) names.push(n);
     }
-    if (!names.length) throw badRequest(`O modelo "${name}" precisa de ao menos uma especialidade.`);
-    if (names.length > 60) throw badRequest(`O modelo "${name}" aceita no máximo 60 especialidades.`);
+    if (!names.length) throw badRequest(`O modelo "${name}" precisa de ao menos uma ${k.item}.`);
+    if (names.length > 60) throw badRequest(`O modelo "${name}" aceita no máximo 60 ${k.items}.`);
     return { id, name, items: names, order: i + 1 };
   });
   const keep = new Set(items.filter(x => x.id).map(x => x.id));
@@ -153,19 +150,40 @@ export function saveSpecialtyTemplates(ctx, input, ip) {
   }
   const log = { criados: [], alterados: [], excluidos: removed.map(t => t.name) };
   tx(() => {
-    for (const t of removed) run('DELETE FROM specialty_templates WHERE id = ?', t.id);
-    for (const x of items.filter(x => x.id)) run('UPDATE specialty_templates SET name = ? WHERE id = ?', `~tmp~${x.id}`, x.id);
+    for (const t of removed) run(`DELETE FROM ${k.table} WHERE id = ?`, t.id);
+    for (const x of items.filter(x => x.id)) run(`UPDATE ${k.table} SET name = ? WHERE id = ?`, `~tmp~${x.id}`, x.id);
     for (const x of items) {
       if (x.id) {
         const old = byId.get(x.id);
         if (old.name !== x.name || JSON.stringify(old.items) !== JSON.stringify(x.items)) log.alterados.push(x.name);
-        run(`UPDATE specialty_templates SET name = ?, items = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, JSON.stringify(x.items), x.order, x.id);
+        run(`UPDATE ${k.table} SET name = ?, items = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, JSON.stringify(x.items), x.order, x.id);
       } else {
-        run('INSERT INTO specialty_templates (name, items, sort_order) VALUES (?, ?, ?)', x.name, JSON.stringify(x.items), x.order);
+        run(`INSERT INTO ${k.table} (name, items, sort_order) VALUES (?, ?, ?)`, x.name, JSON.stringify(x.items), x.order);
         log.criados.push(x.name);
       }
     }
-    audit(ctx.user.id, 'settings', null, 'Modelos de especialidades atualizados', log, ip);
+    audit(ctx.user.id, 'settings', null, k.audit, log, ip);
   });
-  return listSpecialtyTemplates();
+  return listTemplates(kind);
+}
+
+// Especialidades do check-list: modelo escolhido em cada obra
+export const listSpecialtyTemplates = () => listTemplates('specialty');
+export const saveSpecialtyTemplates = (ctx, input, ip) => saveTemplates(ctx, 'specialty', input, ip);
+
+// Classificações (Grupo/Local/Etapa): modelo aplicado (copiado) no cadastro do projeto
+export const listStageTemplates = () => listTemplates('stage');
+export const saveStageTemplates = (ctx, input, ip) => saveTemplates(ctx, 'stage', input, ip);
+
+// Especialidades da obra (do modelo escolhido no projeto)
+export function specialtiesOf(templateId) {
+  if (!templateId) return [];
+  const r = one('SELECT items FROM specialty_templates WHERE id = ?', templateId);
+  return r ? parseList(r.items) : [];
+}
+
+export function validTemplateId(v) {
+  const id = intOrNull(v);
+  if (id && !one('SELECT id FROM specialty_templates WHERE id = ?', id)) throw badRequest('Modelo de especialidades inválido.');
+  return id;
 }

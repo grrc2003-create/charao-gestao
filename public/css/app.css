@@ -1099,3 +1099,8 @@ textarea.wiz-input { min-height: 90px; }
 .cli-phcount svg { width: 14px; height: 14px; }
 .cl-phtoggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .cl-phtoggle svg { width: 15px; height: 15px; }
+
+/* Projeto: aplicar modelo de classificação */
+.stage-tpl-apply { display: grid; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line, #E4E1DA); min-width: 0; }
+.stage-tpl-apply > label { font-weight: 600; font-size: 13px; }
+.stage-tpl-apply select { flex: 1 1 200px; min-width: 0; }

@@ -690,6 +690,16 @@ async function main() {
   await ricardo('PUT', `/projects/${clProj}`, { specialty_template_id: tpls[0].id });
   spSaved = (await ricardo('PUT', '/settings/specialties', { templates: keepTpls })).data;
   ok(spSaved.length === tpls.length, 'modelo sem uso pode ser excluído');
+  // Modelos de classificação (Grupo/Local/Etapa): cadastrados em Configurações e copiados no projeto
+  const stTpls = (await ricardo('GET', '/settings/stage-templates')).data;
+  ok(stTpls.length >= 2 && stTpls[0].items.includes('Fundação'), 'modelos de classificação padrão cadastrados');
+  ok((await marcos('PUT', '/settings/stage-templates', { templates: [] })).status === 403, 'colaborador não altera os modelos de classificação');
+  const stKeep = stTpls.map(x => ({ id: x.id, name: x.name, items: x.items }));
+  let stSaved = (await ricardo('PUT', '/settings/stage-templates', { templates: [...stKeep, { name: 'Torres', items: ['Torre A', 'Torre B', 'torre a'] }] })).data;
+  ok(stSaved.find(x => x.name === 'Torres')?.items.join('|') === 'Torre A|Torre B', 'novo modelo de classificação (sem repetidos)');
+  ok((await ricardo('PUT', '/settings/stage-templates', { templates: [...stKeep, { name: 'Etapas de obra — PADRÃO', items: ['X'] }] })).status === 400, 'nome de modelo repetido é recusado');
+  stSaved = (await ricardo('PUT', '/settings/stage-templates', { templates: stKeep })).data;
+  ok(stSaved.length === stTpls.length, 'modelo de classificação pode ser excluído (projetos guardam a própria lista)');
   ok((await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Área externa', text: 'Calçada limpa' }] })).status === 400, 'item incluído depois também exige foto de entrada');
   cl = (await ricardo('POST', `/tasks/${clId}/items`, { items: [{ group: 'Área externa', text: 'Calçada limpa', images: ph(), start_date: '2099-07-01', due_date: '2099-07-04' }] })).data;
   ok(cl.checklist.items.find(i => i.text === 'Calçada limpa').due_date === '2099-07-04', 'item novo com data de início e de término');

@@ -11,26 +11,27 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
   <button type="button" class="icon-btn" data-rm ${r.use_count ? 'disabled' : ''} aria-label="Excluir justificativa"
     title="${r.use_count ? 'Já usada: inative em vez de excluir' : 'Excluir'}">✕</button></li>`;
 
-// Modelo de especialidades do check-list: nome + uma especialidade por linha
+// Modelo (especialidades ou classificações): nome + um item por linha
 const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
   <div class="spec-tpl-head">
     <input type="text" maxlength="80" value="${t.name}" data-name aria-label="Nome do modelo" placeholder="Nome do modelo (ex.: Acabamentos — padrão)" required>
-    <span class="stage-count">${t.project_count ? `usado em ${t.project_count} obra(s)` : 'nenhuma obra'}</span>
+    <span class="stage-count">${t.kind === 'stage' ? `${(t.items || []).length} classificação(ões)` : t.project_count ? `usado em ${t.project_count} obra(s)` : 'nenhuma obra'}</span>
     <button type="button" class="icon-btn" data-rm-tpl ${t.project_count ? 'disabled' : ''} aria-label="Excluir modelo"
       title="${t.project_count ? 'Em uso: troque o modelo nessas obras antes de excluir' : 'Excluir modelo'}">✕</button>
   </div>
-  <textarea rows="${Math.min(Math.max((t.items || []).length, 4), 12)}" data-items aria-label="Especialidades do modelo (uma por linha)" placeholder="Uma especialidade por linha&#10;Pintura&#10;Revestimento&#10;Elétrica">${(t.items || []).join('\n')}</textarea>
+  <textarea rows="${Math.min(Math.max((t.items || []).length, 4), 12)}" data-items aria-label="Itens do modelo (um por linha)" placeholder="${t.kind === 'stage' ? 'Uma classificação por linha&#10;Fundação&#10;Estrutura&#10;Bloco A' : 'Uma especialidade por linha&#10;Pintura&#10;Revestimento&#10;Elétrica'}">${(t.items || []).join('\n')}</textarea>
 </li>`;
 
 export async function view({ state, reloadMeta }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
-  const [reasons, general, templates] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'), api('/settings/specialties')]);
+  const [reasons, general, templates, stageTpls] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
+    api('/settings/specialties'), api('/settings/stage-templates')]);
 
   return {
     title: 'Configurações',
     html: html`
       ${pageHead({ eyebrow: 'Cadastros gerais do sistema', title: 'Configurações',
-        sub: 'Cadastros válidos para todos os projetos. As classificações (Grupo/Local/Etapa) continuam no cadastro de cada projeto.' })}
+        sub: 'Cadastros válidos para todos os projetos. As classificações (Grupo/Local/Etapa) de cada projeto ficam no cadastro dele — aqui você mantém modelos para aplicar.' })}
       <section class="card" style="max-width:900px;margin-bottom:16px">
         <div class="card-head"><h2>${icon('alert')}Indicadores de prazo</h2></div>
         <form class="card-body form" id="general-form" novalidate>
@@ -53,6 +54,18 @@ export async function view({ state, reloadMeta }) {
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar modelos</button></div>
         </form>
       </section>
+      <section class="card" id="stage-tpl-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('projects')}Modelos de classificação (Grupo/Local/Etapa)</h2><span class="sub">${stageTpls.length} modelo(s)</span></div>
+        <form class="card-body form" id="stage-tpl-form" novalidate>
+          <p class="muted" style="margin:0">Listas prontas de classificações (etapas, blocos, pavimentos ou ambientes). No cadastro do projeto, em
+            <b>Classificação das tarefas</b>, escolha um modelo e toque em <b>Aplicar modelo</b>: as classificações são copiadas para o projeto
+            (as que já existem não se repetem) e podem ser ajustadas lá. Alterar ou excluir um modelo não muda os projetos já cadastrados.</p>
+          <ul class="spec-tpl-list" id="stage-tpl-list">${stageTpls.map(x => tplItem({ ...x, kind: 'stage' }))}</ul>
+          <div><button type="button" class="btn btn-ghost" id="stage-tpl-add">${icon('plus')}Novo modelo</button></div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar modelos</button></div>
+        </form>
+      </section>
       <section class="card" id="reasons-card" style="max-width:900px">
         <div class="card-head"><h2>${icon('reschedule')}Justificativas de reagendamento</h2><span class="sub">${reasons.filter(r => r.active).length} ativa(s)</span></div>
         <form class="card-body form" id="reasons-form" novalidate>
@@ -68,30 +81,34 @@ export async function view({ state, reloadMeta }) {
         </form>
       </section>`,
     mount(root, ctx) {
-      // Modelos de especialidades
-      const sf = root.querySelector('#specs-form');
-      const sl = root.querySelector('#spec-list');
-      root.querySelector('#spec-add').addEventListener('click', () => {
-        sl.insertAdjacentHTML('beforeend', tplItem({ name: '', items: [], project_count: 0 }).toString());
-        sl.lastElementChild.querySelector('[data-name]').focus();
-      });
-      sl.addEventListener('click', e => { if (e.target.closest('[data-rm-tpl]')) e.target.closest('.spec-tpl').remove(); });
-      sf.addEventListener('submit', async e => {
-        e.preventDefault();
-        const serr = sf.querySelector('.form-error');
-        serr.hidden = true;
-        const payload = [...sl.querySelectorAll('.spec-tpl')].map(li => ({
-          id: li.dataset.id ? Number(li.dataset.id) : null,
-          name: li.querySelector('[data-name]').value,
-          items: li.querySelector('[data-items]').value.split(/\r?\n/),
-        }));
-        try {
-          await api('/settings/specialties', { method: 'PUT', body: { templates: payload } });
-          await reloadMeta?.();
-          toast('Modelos de especialidades salvos.');
-          ctx.render();
-        } catch (ex) { serr.textContent = ex.message; serr.hidden = false; }
-      });
+      // Modelos (especialidades do check-list e classificações): mesma edição, endpoints diferentes
+      const bindTemplates = (formSel, listSel, addSel, kind, endpoint, okMsg) => {
+        const sf = root.querySelector(formSel);
+        const sl = root.querySelector(listSel);
+        root.querySelector(addSel).addEventListener('click', () => {
+          sl.insertAdjacentHTML('beforeend', tplItem({ name: '', items: [], project_count: 0, kind }).toString());
+          sl.lastElementChild.querySelector('[data-name]').focus();
+        });
+        sl.addEventListener('click', e => { if (e.target.closest('[data-rm-tpl]')) e.target.closest('.spec-tpl').remove(); });
+        sf.addEventListener('submit', async e => {
+          e.preventDefault();
+          const serr = sf.querySelector('.form-error');
+          serr.hidden = true;
+          const payload = [...sl.querySelectorAll('.spec-tpl')].map(li => ({
+            id: li.dataset.id ? Number(li.dataset.id) : null,
+            name: li.querySelector('[data-name]').value,
+            items: li.querySelector('[data-items]').value.split(/\r?\n/),
+          }));
+          try {
+            await api(endpoint, { method: 'PUT', body: { templates: payload } });
+            await reloadMeta?.();
+            toast(okMsg);
+            ctx.render();
+          } catch (ex) { serr.textContent = ex.message; serr.hidden = false; }
+        });
+      };
+      bindTemplates('#specs-form', '#spec-list', '#spec-add', 'specialty', '/settings/specialties', 'Modelos de especialidades salvos.');
+      bindTemplates('#stage-tpl-form', '#stage-tpl-list', '#stage-tpl-add', 'stage', '/settings/stage-templates', 'Modelos de classificação salvos.');
       const gf = root.querySelector('#general-form');
       gf.addEventListener('submit', async e => {
         e.preventDefault();

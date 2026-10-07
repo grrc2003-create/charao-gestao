@@ -210,3 +210,17 @@
 .r-grouprow.r-lvl-2 td { background: #fff; border-top: 1px dashed #E4E1DA; }
 .r-grouprow.r-lvl-1 .r-stage { background: #EEF2F6; border-color: #DCE3EA; color: #2A3D50; }
 .r-grouprow.r-lvl-2 .r-stage { background: #fff; border-color: #E4E1DA; color: #46535F; }
+
+/* Check-list: lista única de itens */
+.r-grouphead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; padding: 3px 6px; background: #FAF8F4; border-top: 1.5px solid #CFC3AE; break-after: avoid; }
+.r-grouphead.r-lvl-1 { background: #FCFBF8; border-top: 1px solid #E4E1DA; }
+.r-grouphead.r-lvl-2 { background: #fff; border-top: 1px dashed #E4E1DA; }
+.r-item { border: 1px solid #E4E1DA; border-radius: 4px; padding: 6px 8px; margin-bottom: 5px; display: grid; gap: 3px; }
+.r-item header { display: flex; align-items: baseline; gap: 8px; }
+.r-item header b { flex: 1; font-size: 9.5pt; }
+.r-item-n { min-width: 18px; font-weight: 700; color: #6E7A86; text-align: right; }
+.r-item-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; color: #46535F; }
+.r-item-hist { margin: 2px 0 0; padding-left: 16px; color: #46535F; }
+.r-ph-2 { grid-template-columns: repeat(4, 1fr); margin-top: 4px; }
+.r-nc-table td, .r-nc-table th { padding: 4px 6px; }
+.r-total td { border-top: 1.5px solid #CFC3AE; background: #FAF8F4; }

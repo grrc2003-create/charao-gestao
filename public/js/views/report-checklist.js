@@ -1,5 +1,5 @@
-// Relatório A4 do check-list (termo de vistoria): resumo, itens agrupados (grupo, responsável e data, em até 3 níveis),
-// não conformidades com fotos e assinaturas.
+// Relatório A4 do check-list (termo de vistoria): resumo com as não conformidades por ambiente e lista única de itens
+// (agrupada por grupo, responsável e data em até 3 níveis), com histórico e fotos quando houver, e assinaturas.
 import { html, api, STATUS, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { RESULT, PHOTO_RULE } from './checklist-ui.js';
@@ -41,8 +41,6 @@ function groupBy(items, dim) {
 }
 
 const RES_COLOR = { conforme: '#2E8B57', nao_conforme: '#C0392B', na: '#6E7A86' };
-const resTag = i => (i.open_nc ? html`<span class="r-st" style="--c:${RES_COLOR.nao_conforme}">Não conforme</span>`
-  : i.result ? html`<span class="r-st" style="--c:${RES_COLOR[i.result]}">${RESULT[i.result].label}</span>` : html`<span class="r-st" style="--c:#A86F0E">Pendente</span>`);
 const kpi = (label, value, sub, color) => html`<div class="r-kpi" style="--c:${color}"><div class="r-kpi-l">${label}</div><div class="r-kpi-v">${value}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
 
 export async function view({ params, query }) {
@@ -53,26 +51,56 @@ export async function view({ params, query }) {
   const withPhotos = query.get('fotos') !== '0';
   const judged = s.conforme + s.nao_conforme;
   const levels = readLevels(query);
-  // Não conformidades: itens cadastrados com foto e itens marcados Não conforme (em aberto, corrigidos ou encerrados)
-  const nc = c.items.filter(i => i.nc_count > 0);
-  const itemRow = i => html`<tr>
-      <td class="num">${i.seq}</td><td>${i.text}${i.files.length ? html` <span class="small muted">· ${i.files.length} foto(s)</span>` : ''}
-        ${i.description ? html`<div class="small muted">${i.description}</div>` : ''}
-        ${i.due_date ? html`<div class="small ${i.overdue ? 'late' : 'muted'}">Prazo: ${fmtDate(i.due_date)}${i.overdue ? ' · atrasado' : ''}</div>` : ''}</td>
-      <td class="small">${i.responsible_name}</td><td>${resTag(i)}${i.nc_count ? html`<div class="small" style="color:#C0392B;margin-top:2px">${i.result === 'conforme' ? 'corrigido · ' : i.result === 'na' ? 'encerrado · ' : ''}NC ${i.nc_count}x</div>` : ''}</td>
-      <td class="small">${i.note || ''}</td>
-      <td class="small">${i.result ? html`${i.answered_by_name || '—'}<div class="muted">${fmtDateTime(i.answered_at)}</div>` : '—'}</td></tr>`;
-  // Linhas da tabela com cabeçalho de cada nível de agrupamento (recuado conforme o nível)
-  const rows = (items, depth = 0) => {
-    const list = [...items].sort((a, b) => a.seq - b.seq);
-    if (depth >= levels.length) return html`${list.map(itemRow)}`;
-    return html`${groupBy(list, levels[depth]).map(g => html`
-      <tr class="r-grouprow r-lvl-${depth}"><td colspan="6" style="padding-left:${6 + depth * 16}px">
-        <span class="r-stage">${DIMS[levels[depth]].label}: ${g.name}</span>
-        <span class="small muted">${g.items.filter(i => i.resolved).length}/${g.items.length} concluído(s)${g.items.some(i => i.result === 'nao_conforme') ? ` · ${g.items.filter(i => i.result === 'nao_conforme').length} NC em aberto` : ''}</span></td></tr>
-      ${rows(g.items, depth + 1)}`)}`;
+  // Situação do item no relatório
+  const situation = i => i.open_nc ? { t: `Não conforme em aberto${i.nc_count > 1 ? ` · ${i.nc_count}x` : ''}`, c: RES_COLOR.nao_conforme }
+    : i.result === 'conforme' ? { t: i.nc_count ? `Corrigido · ${i.nc_count}x NC` : 'Conforme', c: RES_COLOR.conforme }
+      : i.result === 'na' ? { t: i.nc_count ? 'Encerrado (N/A)' : 'N/A', c: RES_COLOR.na } : { t: 'Pendente', c: '#A86F0E' };
+  const fig = (f, label, color) => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${label ? html`<b style="color:${color}">${label}</b> · ` : ''}${fmtDateTime(f.created_at)}</figcaption></figure>`;
+  // Fotos do item: antes × depois (corrigido), a da não conformidade em aberto ou as da resposta — nada quando não há fotos
+  const photosOf = i => {
+    if (!withPhotos) return '';
+    if (i.before && i.after) return html`<div class="r-photos r-ph-2">${fig(i.before, 'ANTES', '#C0392B')}${fig(i.after, 'DEPOIS', '#2E8B57')}</div>`;
+    const list = i.cover ? [i.cover] : i.files.length ? i.files : i.refs;
+    return list.length ? html`<div class="r-photos r-ph-2">${list.slice(0, 4).map(f => fig(f, i.open_nc ? 'NÃO CONFORMIDADE' : '', '#C0392B'))}</div>` : '';
   };
-  const ncPhoto = f => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${fmtDateTime(f.created_at)}</figcaption></figure>`;
+  const itemBlock = i => {
+    const st = situation(i);
+    const hist = i.history.length > 1 || i.history.some(h => h.reason || h.registration) ? i.history : [];
+    return html`<article class="r-item avoid">
+      <header><span class="r-item-n">${i.seq}</span><b>${i.text}</b><span class="r-st" style="--c:${st.c}">${st.t}</span></header>
+      <div class="r-item-meta small">
+        ${!levels.includes('grupo') && i.group ? html`<span class="r-stage">${i.group}</span>` : ''}
+        <span>Responsável: <b>${i.responsible_name}</b></span>
+        ${i.due_date ? html`<span class="${i.overdue ? 'late' : ''}">Prazo: ${fmtDate(i.due_date)}${i.overdue ? ' · atrasado' : ''}</span>` : ''}
+        ${i.result ? html`<span>Respondido por ${i.answered_by_name || '—'} em ${fmtDateTime(i.answered_at)}</span>` : ''}
+      </div>
+      ${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}
+      ${i.note ? html`<div class="small"><b>${i.open_nc ? 'Problema:' : 'Anotação:'}</b> ${i.note}</div>` : ''}
+      ${hist.length ? html`<ol class="r-item-hist small">${hist.map(h => html`<li><b>${h.registration ? 'Registrada no cadastro' : RESULT[h.result].label}</b> · ${h.user_name || '—'} · ${fmtDateTime(h.created_at)}${h.reason ? ` · Justificativa: ${h.reason}` : ''}${h.note ? ` · ${h.note}` : ''}</li>`)}</ol>` : ''}
+      ${photosOf(i)}
+    </article>`;
+  };
+  // Lista única, com cabeçalho de cada nível de agrupamento
+  const blocks = (items, depth = 0) => {
+    const list = [...items].sort((a, b) => a.seq - b.seq);
+    if (depth >= levels.length) return html`${list.map(itemBlock)}`;
+    return html`${groupBy(list, levels[depth]).map(g => {
+      const open = g.items.filter(i => i.open_nc).length;
+      return html`<div class="r-grouphead r-lvl-${depth}" style="margin-left:${depth * 14}px">
+          <span class="r-stage">${DIMS[levels[depth]].label}: ${g.name}</span>
+          <span class="small muted">${g.items.filter(i => i.resolved).length}/${g.items.length} concluído(s)${open ? ` · ${open} NC em aberto` : ''}</span></div>
+        <div style="margin-left:${depth * 14}px">${blocks(g.items, depth + 1)}</div>`;
+    })}`;
+  };
+  // Resumo: não conformidades por ambiente (grupo)
+  const byGroup = [...new Map(c.items.map(i => [i.group || '', null])).keys()].map(g => {
+    const its = c.items.filter(i => (i.group || '') === g);
+    const ncs = its.filter(i => i.nc_count > 0);
+    const pend = ncs.filter(i => i.open_nc).length;
+    return { name: g || 'Sem grupo', items: its.length, nc: ncs.length, pend, res: ncs.length - pend };
+  });
+  const tot = byGroup.reduce((a, g) => ({ items: a.items + g.items, nc: a.nc + g.nc, pend: a.pend + g.pend, res: a.res + g.res }), { items: 0, nc: 0, pend: 0, res: 0 });
+  const pctRes = g => (g.nc ? fmtPct(Math.round((g.res / g.nc) * 100)) : '—');
   const title = 'Check-list';
 
   const doc = html`
@@ -109,26 +137,20 @@ export async function view({ params, query }) {
         ${s.pending ? html`<p class="r-p" style="margin-top:6px"><b>${s.pending} item(ns) ainda sem resposta.</b></p>` : ''}
       </section>
 
-      <section class="r-section">
-        <h3 class="r-h">Itens verificados</h3>
-        <table class="r-table"><thead><tr><th style="width:5%">Nº</th><th>Item</th><th style="width:16%">Responsável</th><th style="width:13%">Resultado</th><th style="width:22%">Observação</th><th style="width:15%">Respondido</th></tr></thead>
-          <tbody>${rows(c.items)}</tbody></table>
+      <section class="r-section avoid">
+        <h3 class="r-h">Não conformidades por ambiente</h3>
+        <table class="r-table r-nc-table"><thead><tr><th>Ambiente / grupo</th><th class="num">Itens</th><th class="num">Não conformidades</th><th class="num">Pendentes</th><th class="num">Resolvidas</th><th class="num">% resolvidas</th></tr></thead>
+          <tbody>${byGroup.map(g => html`<tr><td>${g.name}</td><td class="num">${g.items}</td><td class="num">${g.nc}</td>
+            <td class="num ${g.pend ? 'late' : ''}">${g.pend}</td><td class="num">${g.res}</td><td class="num">${pctRes(g)}</td></tr>`)}
+            <tr class="r-total"><td><b>Total</b></td><td class="num"><b>${tot.items}</b></td><td class="num"><b>${tot.nc}</b></td>
+              <td class="num ${tot.pend ? 'late' : ''}"><b>${tot.pend}</b></td><td class="num"><b>${tot.res}</b></td><td class="num"><b>${pctRes(tot)}</b></td></tr></tbody></table>
+        <p class="small muted" style="margin-top:4px">Item cadastrado com foto conta como não conformidade. Pendente = ainda em aberto; resolvida = corrigida (Conforme) ou encerrada (N/A).</p>
       </section>
 
-      ${nc.length ? html`<section class="r-section">
-        <h3 class="r-h">Não conformidades (${nc.length} item(ns) · ${s.nc_total} registro(s))</h3>
-        ${nc.map(i => html`<article class="r-evidence avoid">
-          <header><span class="mono">Item ${i.seq}</span><b>${i.text}</b>${i.open_nc ? html`<span class="r-st" style="--c:#C0392B">Em aberto · ${i.nc_count}x</span>`
-            : i.result === 'na' ? html`<span class="r-st" style="--c:#6E7A86">Encerrado (N/A) · ${i.nc_count}x NC</span>` : html`<span class="r-st" style="--c:#2E8B57">Corrigido · ${i.nc_count}x NC</span>`}</header>
-          <div class="small">${i.group ? html`<span class="r-stage">${i.group}</span>` : ''}Responsável: ${i.responsible_name}</div>
-          ${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}
-          <ol class="small" style="margin:4px 0 0;padding-left:16px">${i.history.map(h => html`<li><b>${h.registration ? 'Registrada no cadastro' : RESULT[h.result].label}</b> · ${h.user_name || '—'} · ${fmtDateTime(h.created_at)}${h.reason ? ` · Justificativa: ${h.reason}` : ''}${h.note ? ` · ${h.note}` : ''}</li>`)}</ol>
-          ${withPhotos && i.before && i.after ? html`<div class="r-photos" style="grid-template-columns:repeat(2,1fr)">
-              <figure><img src="/api/checklist-files/${i.before.id}" alt=""><figcaption><b style="color:#C0392B">ANTES</b> · ${i.before.kind === 'referencia' ? 'cadastro' : 'não conforme'} · ${fmtDateTime(i.before.created_at)}</figcaption></figure>
-              <figure><img src="/api/checklist-files/${i.after.id}" alt=""><figcaption><b style="color:#2E8B57">DEPOIS</b> · conforme · ${fmtDateTime(i.after.created_at)}</figcaption></figure></div>`
-            : withPhotos && i.cover ? html`<div class="r-photos" style="grid-template-columns:repeat(2,1fr)">${ncPhoto(i.cover)}</div>` : ''}
-        </article>`)}
-      </section>` : ''}
+      <section class="r-section">
+        <h3 class="r-h">Itens (${c.items.length})</h3>
+        ${blocks(c.items)}
+      </section>
 
       <section class="r-section avoid">
         <div class="r-sign" style="grid-template-columns:repeat(3,1fr)">
@@ -149,7 +171,7 @@ export async function view({ params, query }) {
       back: `#/tarefas/${t.id}`, title: `Check-list — ${t.code} · ${t.title}`,
       extra: html`${[0, 1, 2].map(n => html`<label class="pt-opt">${n === 0 ? 'Agrupar por' : n === 1 ? 'depois' : 'e'}
           <select data-level="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`)}
-        <label class="pt-opt"><input type="checkbox" id="fotos" ${withPhotos ? 'checked' : ''}>Fotos das não conformidades</label>`,
+        <label class="pt-opt"><input type="checkbox" id="fotos" ${withPhotos ? 'checked' : ''}>Incluir fotos</label>`,
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
       setPageFooter(`Charão · Check-list ${t.code} · ${t.project_code}`);

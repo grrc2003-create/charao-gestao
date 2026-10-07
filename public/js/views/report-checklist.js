@@ -56,12 +56,19 @@ export async function view({ params, query }) {
     : i.result === 'conforme' ? { t: i.nc_count ? `Corrigido · ${i.nc_count}x NC` : 'Conforme', c: RES_COLOR.conforme }
       : i.result === 'na' ? { t: i.nc_count ? 'Encerrado (N/A)' : 'N/A', c: RES_COLOR.na } : { t: 'Pendente', c: '#A86F0E' };
   const fig = (f, label, color) => html`<figure><img src="/api/checklist-files/${f.id}" alt=""><figcaption>${label ? html`<b style="color:${color}">${label}</b> · ` : ''}${fmtDateTime(f.created_at)}</figcaption></figure>`;
-  // Fotos do item: antes × depois (corrigido), a da não conformidade em aberto ou as da resposta — nada quando não há fotos
+  // Fotos do item, em ordem: todas as do cadastro e as de cada resposta do histórico (nada quando não há fotos)
   const photosOf = i => {
     if (!withPhotos) return '';
-    if (i.before && i.after) return html`<div class="r-photos r-ph-2">${fig(i.before, 'ANTES', '#C0392B')}${fig(i.after, 'DEPOIS', '#2E8B57')}</div>`;
-    const list = i.cover ? [i.cover] : i.files.length ? i.files : i.refs;
-    return list.length ? html`<div class="r-photos r-ph-2">${list.slice(0, 4).map(f => fig(f, i.open_nc ? 'NÃO CONFORMIDADE' : '', '#C0392B'))}</div>` : '';
+    const seen = new Set();
+    const out = [];
+    const add = (f, label, color) => { if (f && !seen.has(f.id)) { seen.add(f.id); out.push(fig(f, label, color)); } };
+    i.refs.forEach(f => add(f, 'CADASTRO', '#C0392B'));
+    for (const h of i.history.filter(h => !h.registration)) {
+      const [label, color] = h.result === 'nao_conforme' ? ['NÃO CONFORME', '#C0392B'] : h.result === 'conforme' ? ['DEPOIS', '#2E8B57'] : ['N/A', '#6E7A86'];
+      h.files.forEach(f => add(f, label, color));
+    }
+    i.files.forEach(f => add(f, i.open_nc ? 'NÃO CONFORME' : 'FOTO', '#46535F'));
+    return out.length ? html`<div class="r-photos r-ph-2">${out}</div>` : '';
   };
   // Prazo em destaque, com a cor pela urgência (vencido, vence em até 2 dias, no prazo, resolvido, sem prazo)
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);

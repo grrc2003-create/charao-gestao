@@ -1089,3 +1089,13 @@ textarea.wiz-input { min-height: 90px; }
 .spec-tpl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .spec-tpl-head [data-name] { flex: 1 1 220px; min-width: 0; font-weight: 600; }
 .spec-tpl textarea { width: 100%; min-width: 0; resize: vertical; }
+
+/* Check-list: fotos ocultas (visualização compacta) */
+.cl-list.no-photos .cli-ba, .cl-list.no-photos .cli-cover, .cl-list.no-photos .cli-photos .cli-ph,
+.cl-list.no-photos .cli-mini-ba, .cl-list.no-photos .h-ph { display: none !important; }
+.cl-list:not(.no-photos) .cli-phcount { display: none; }
+.cli-phcount { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 12px; font-weight: 700; color: #2A3D50;
+  background: #EEF2F6; border: 1px solid #DCE3EA; border-radius: 999px; padding: 3px 10px; min-height: 28px; cursor: pointer; }
+.cli-phcount svg { width: 14px; height: 14px; }
+.cl-phtoggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.cl-phtoggle svg { width: 15px; height: 15px; }

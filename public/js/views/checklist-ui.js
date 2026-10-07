@@ -308,6 +308,9 @@ const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp:
 
 // Filtro por grupo e/ou responsável (tela e relatório). '' = todos; '~' = sem grupo / sem responsável.
 export const NONE = '~';
+const PHOTOS_KEY = 'cl-show-photos';
+const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) === '1'; } catch { return false; } };
+const saveShowPhotos = v => { try { localStorage.setItem(PHOTOS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
 const keyOf = v => v || NONE;
 // f = { group, spec, resp } (valores '' = todos)
 export const matchItem = (it, f) => (!f.group || keyOf(it.group) === f.group) && (!f.spec || keyOf(it.specialty) === f.spec)
@@ -383,6 +386,7 @@ function itemCard(t, it, c) {
           : ['is-ok', `faltam ${days} dias`];
     return html`<span class="fact-due ${cls}">${icon('calendar')}<span><small>Prazo</small><b>${fmtD(it.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span></span>`;
   })();
+  const nPhotos = new Set([...it.refs, ...it.files, ...it.history.flatMap(h => h.files)].map(f => f.id)).size;
   const head = html`<div class="cli-top"><span class="cli-num">${it.seq}</span><span class="cli-title">${it.text}</span>${menu}</div>
     ${it.specialty || (it.group && uiOf(t.id).by === 'spec') ? html`<div class="cli-tags">${it.specialty ? html`<span class="cli-spec">${it.specialty}</span>` : ''}${it.group && uiOf(t.id).by === 'spec' ? html`<span class="cli-grp">${it.group}</span>` : ''}</div>` : ''}
     <div class="cli-facts">
@@ -391,6 +395,7 @@ function itemCard(t, it, c) {
     </div>
     <div class="cli-meta">
       ${state}
+      ${nPhotos ? html`<button type="button" class="cli-phcount" data-gallery aria-label="Ver as ${nPhotos} foto(s) do item">${icon('image')}${nPhotos} foto${nPhotos > 1 ? 's' : ''}</button>` : ''}
       ${it.result ? html`<span class="cli-when">${icon('check')}${it.answered_by_name || '—'} · ${shortDate(it.answered_at)}</span>` : ''}
     </div>
     ${it.description ? html`<div class="cli-desc"><b>Obs.:</b> ${it.description}</div>` : ''}`;
@@ -467,20 +472,22 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
   const LBL = { group: 'Grupo', spec: 'Especialidade', resp: 'Responsável' };
   const sel = (kind, cur, list, all) => html`<label class="cl-sel ${cur ? 'is-on' : ''}"><span>${LBL[kind]}</span>
     <select data-clsel="${kind}"><option value="">${all}</option>${list.map(k => html`<option value="${k}" ${k === cur ? 'selected' : ''}>${optLabel(k, kind)}</option>`)}</select></label>`;
-  const selects = opts.groups.length > 1 || opts.specs.length > 1 || opts.resps.length > 1 ? html`<div class="cl-selects">
-      ${opts.groups.length > 1 ? sel('group', st.fGroup, opts.groups, 'Todos os grupos') : ''}
-      ${opts.specs.length > 1 ? sel('spec', st.fSpec, opts.specs, 'Todas as especialidades') : ''}
-      ${opts.resps.length > 1 ? sel('resp', st.fResp, opts.resps, 'Todos os responsáveis') : ''}
+  const selects = c.items.length ? html`<div class="cl-selects">
+      ${sel('group', st.fGroup, opts.groups, 'Todos os grupos')}
+      ${hasSpecs ? sel('spec', st.fSpec, opts.specs, 'Todas as especialidades') : ''}
+      ${sel('resp', st.fResp, opts.resps, 'Todos os responsáveis')}
       <span class="cl-sel-info" data-clsel-info></span>
       <button type="button" class="btn btn-ghost btn-sm" data-clsel-clear ${st.fGroup || st.fSpec || st.fResp ? '' : 'hidden'}>Limpar filtro</button>
     </div>` : '';
   // Agrupar a lista por grupo (ambiente) ou por especialidade
   const bySpec = st.by === 'spec';
   const groups = bySpec ? specGroupsOf(c.items, t._specs || []) : groupsOf(c.items);
-  const byToggle = hasSpecs ? html`<div class="cl-by" role="group" aria-label="Agrupar itens por">
-      <span>Agrupar por</span>
+  const photosOn = showPhotos();
+  const byToggle = html`<div class="cl-by">
+      ${hasSpecs ? html`<span>Agrupar por</span>
       <button type="button" class="chip" data-clby="group" aria-pressed="${!bySpec}">Grupo</button>
-      <button type="button" class="chip" data-clby="spec" aria-pressed="${bySpec}">Especialidade</button></div>` : '';
+      <button type="button" class="chip" data-clby="spec" aria-pressed="${bySpec}">Especialidade</button>` : ''}
+      <button type="button" class="chip cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button></div>`;
   return html`<section class="card block block-exec" id="checklist" aria-labelledby="blk-cl">
     <header class="block-head"><span class="step">2</span><h2 id="blk-cl">Check-list</h2>
       <span class="right muted" style="font-size:12px">${s.done} de ${s.total} concluídos${s.nc_total ? ` · ${s.nc_total} NC no histórico` : ''}</span></header>
@@ -509,7 +516,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         <div class="cl-add-head"><b>${icon('plus')} Novo item</b><button type="button" class="icon-btn" id="cl-add-close" aria-label="Fechar">✕</button></div>
         ${itemForm()}
       </div>` : ''}
-      <div class="cl-list" data-filter="${f}">
+      <div class="cl-list ${photosOn ? '' : 'no-photos'}" data-filter="${f}">
         ${groups.map(g => {
           const done = g.items.filter(i => i.result).length;
           const pct = Math.round((done / g.items.length) * 100);
@@ -619,6 +626,20 @@ export function bindChecklist(root, t, ctx, refresh) {
     applySel();
   });
   applySel();
+  // Fotos ocultas (lista mais compacta): o botão "N fotos" do card abre a galeria do item
+  root.querySelector('[data-clphotos]')?.addEventListener('click', e => {
+    const on = list.classList.toggle('no-photos') === false;
+    saveShowPhotos(on);
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+    e.currentTarget.querySelector('span').textContent = on ? 'Ocultar fotos' : 'Mostrar fotos';
+  });
+  list.querySelectorAll('[data-gallery]').forEach(b => b.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const card = b.closest('.cli');
+    const g = galleryFrom(card);
+    if (g.length) lightbox(g[0].src, g[0].caption, g);
+  }));
   root.querySelectorAll('[data-clby]').forEach(b => b.addEventListener('click', () => {
     if (st.by === b.dataset.clby) return;
     st.by = b.dataset.clby;

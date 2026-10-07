@@ -32,13 +32,33 @@ export function readItems(list, projectId, { required = false } = {}) {
   return items;
 }
 
+// Posição do item: no fim do grupo já existente (os seguintes são renumerados) ou no fim da lista
+function slotFor(taskId, group) {
+  const last = group ? one('SELECT MAX(seq) AS n FROM checklist_items WHERE task_id = ? AND group_name = ?', taskId, group).n : null;
+  if (last) {
+    run('UPDATE checklist_items SET seq = seq + 1 WHERE task_id = ? AND seq > ?', taskId, last);
+    return last + 1;
+  }
+  return one('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM checklist_items WHERE task_id = ?', taskId).n;
+}
+
 export function insertItems(taskId, items) {
-  let seq = one('SELECT COALESCE(MAX(seq), 0) AS n FROM checklist_items WHERE task_id = ?', taskId).n;
   for (const it of items) {
     run('INSERT INTO checklist_items (task_id, seq, group_name, text, assignee_id, created_at) VALUES (?,?,?,?,?,?)',
-      taskId, ++seq, it.group, it.text, it.assignee_id, nowIso());
+      taskId, slotFor(taskId, it.group), it.group, it.text, it.assignee_id, nowIso());
   }
 }
+
+// Ao trocar o grupo de um item, ele passa para o fim do novo grupo e a numeração é refeita
+function moveToGroup(taskId, itemId, group) {
+  run('UPDATE checklist_items SET seq = -1 WHERE id = ?', itemId);
+  const seq = slotFor(taskId, group);
+  run('UPDATE checklist_items SET seq = ?, group_name = ? WHERE id = ?', seq, group, itemId);
+  renumber(taskId);
+}
+
+const renumber = taskId => all('SELECT id FROM checklist_items WHERE task_id = ? ORDER BY seq', taskId)
+  .forEach((r, i) => run('UPDATE checklist_items SET seq = ? WHERE id = ?', i + 1, r.id));
 
 const ITEM_SQL = `SELECT ci.*, u.name AS assignee_name, u.is_external AS a_external, u.login_enabled AS a_login, u.manager_id AS a_leader,
     ab.name AS answered_by_name
@@ -50,6 +70,8 @@ const isItemOwner = (ctx, item) => !!item.assignee_id
 
 // Responde: o responsável global responde qualquer item; os demais, só os itens deles
 export const canAnswerItem = (ctx, t, item) => isOpen(t) && (canExecuteTask(ctx, t) || isItemOwner(ctx, item));
+// Itens (incluir, editar, atribuir, excluir): quem gerencia a tarefa e o responsável global, com o check-list aberto
+export const canManageItems = (ctx, t) => isOpen(t) && (canManageTask(ctx, t) || canExecuteTask(ctx, t));
 const isMine = (ctx, t, item) => isItemOwner(ctx, item) || (!item.assignee_id && t.assignee_id === ctx.user.id);
 
 function filesByItem(taskId) {
@@ -100,7 +122,7 @@ export function checklistView(ctx, t) {
       mine_pending: items.filter(i => i.mine && !i.result).length,
     },
     check: check(t, rows, files),
-    can_manage_items: canManageTask(ctx, t) && isOpen(t),
+    can_manage_items: canManageItems(ctx, t),
   };
 }
 
@@ -201,10 +223,10 @@ export function removeItemFile(ctx, taskId, itemId, fileId) {
   deleteStored(f.stored_name);
 }
 
-// ---------- Manutenção dos itens (quem gerencia a tarefa, enquanto aberta/em andamento) ----------
+// ---------- Manutenção dos itens (quem gerencia a tarefa e o responsável global, enquanto aberta/em andamento) ----------
 function assertManage(ctx, t) {
   if (!isOpen(t)) throw badRequest('Os itens só podem ser alterados com o check-list aberto ou em andamento.');
-  if (!canManageTask(ctx, t)) throw forbidden('Apenas quem criou o check-list, o gestor/coordenador ou o administrador alteram os itens.');
+  if (!canManageItems(ctx, t)) throw forbidden('Apenas o responsável global, quem criou o check-list, o gestor/coordenador ou o administrador alteram os itens.');
 }
 
 export function addItems(ctx, taskId, body) {
@@ -244,7 +266,12 @@ export function updateItem(ctx, taskId, itemId, body) {
   const fields = Object.keys(next);
   if (!fields.length) return;
   tx(() => {
-    run(`UPDATE checklist_items SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`, ...fields.map(f => next[f]), item.id);
+    const groupChanged = 'group_name' in next;
+    const group = next.group_name;
+    delete next.group_name;
+    const rest = Object.keys(next);
+    if (rest.length) run(`UPDATE checklist_items SET ${rest.map(f => `${f} = ?`).join(', ')} WHERE id = ?`, ...rest.map(f => next[f]), item.id);
+    if (groupChanged) moveToGroup(t.id, item.id, group);
     taskHistory(t.id, ctx.user.id, 'Item do check-list alterado', `${item.seq}. ${item.text} · ${changes.join(' · ')}`);
   });
 }
@@ -274,6 +301,7 @@ export function deleteItem(ctx, taskId, itemId) {
   const files = all('SELECT stored_name FROM checklist_files WHERE item_id = ?', item.id);
   tx(() => {
     run('DELETE FROM checklist_items WHERE id = ?', item.id);
+    renumber(t.id);
     taskHistory(t.id, ctx.user.id, 'Item excluído do check-list', `${item.seq}. ${item.text}`);
   });
   for (const f of files) deleteStored(f.stored_name);

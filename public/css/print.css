@@ -204,3 +204,9 @@
   .r-footer { display: none; } /* substituído pelo rodapé de página */
   a { color: inherit; text-decoration: none; }
 }
+
+/* Check-list: níveis de agrupamento */
+.r-grouprow.r-lvl-1 td { background: #FCFBF8; border-top: 1px solid #E4E1DA; }
+.r-grouprow.r-lvl-2 td { background: #fff; border-top: 1px dashed #E4E1DA; }
+.r-grouprow.r-lvl-1 .r-stage { background: #EEF2F6; border-color: #DCE3EA; color: #2A3D50; }
+.r-grouprow.r-lvl-2 .r-stage { background: #fff; border-color: #E4E1DA; color: #46535F; }

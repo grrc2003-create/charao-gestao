@@ -105,6 +105,24 @@ function build(t, ctx) {
         ${activeSubs.length && subDone < activeSubs.length ? html`<div class="block-body" style="padding-top:0"><div class="notice">${icon('info')}<span>A tarefa principal só pode ser enviada para conferência ou concluída depois que todas as subtarefas estiverem concluídas.</span></div></div>` : ''}
       </section>` : '';
 
+  // Solicitação: em check-list fica recolhida (abre ao tocar no título)
+  const reqBody = html`<div class="block-body">
+          ${t.description || !t.checklist ? html`<div><div class="sub-label">O que precisa ser feito</div><div class="text-content">${t.description}</div></div>` : ''}
+          ${t.field_summary ? html`<div><div class="sub-label">Resumo para campo</div><div>${t.field_summary}</div></div>` : ''}
+          ${t.notes ? html`<div><div class="sub-label">Observações</div><div class="note-box">${t.notes}</div></div>` : ''}
+          ${t.checklist && !refs.length ? '' : html`<div><div class="sub-label">${icon('image')} Imagens e referências (${refs.length})</div>
+            ${refs.length || can.edit ? html`<div class="thumbs">${thumbs(refs, can.edit)}
+              ${can.edit ? html`<button type="button" class="add-thumb" data-act="refs">${icon('image')}Anexar referência</button>` : ''}</div>`
+              : html`<div class="muted" style="font-size:13.5px">Nenhuma imagem de referência.</div>`}
+          </div>`}
+          <dl class="kv" style="font-size:13px">
+            <dt>Criada por</dt><dd>${t.creator_name} · ${fmtDateTime(t.created_at)}</dd>
+            ${t.assigned_by_name && t.assigned_by_id !== t.assignee_id ? html`<dt>Atribuída por</dt><dd>${t.assigned_by_name}</dd>` : ''}
+            <dt>Prioridade</dt><dd>${PRIORITY[t.priority]}</dd>
+            <dt>Classificação</dt><dd>${t.stage_name || 'Geral'}</dd>
+            ${t.start_date ? html`<dt>Início previsto</dt><dd>${fmtDate(t.start_date)}</dd>` : ''}
+          </dl>
+        </div>`;
   return {
     title: `${t.code} · ${t.title}`,
     html: html`
@@ -143,27 +161,15 @@ function build(t, ctx) {
         </div>` : ''}
       </article>
 
-      <section class="card block block-req" aria-labelledby="blk-req">
+      ${t.checklist
+        ? html`<details class="card block block-req block-fold">
+        <summary class="block-head"><span class="step">1</span><h2 id="blk-req">Solicitação</h2>
+          <span class="right muted" style="font-size:12px">por ${t.creator_name} · <span class="fold-hint">ver detalhes</span></span><span class="fold-chev" aria-hidden="true">${icon('chevron')}</span></summary>
+        ${reqBody}</details>`
+        : html`<section class="card block block-req" aria-labelledby="blk-req">
         <header class="block-head"><span class="step">1</span><h2 id="blk-req">Solicitação</h2>
           <span class="right muted" style="font-size:12px">por ${t.creator_name}</span></header>
-        <div class="block-body">
-          <div><div class="sub-label">O que precisa ser feito</div><div class="text-content">${t.description}</div></div>
-          ${t.field_summary ? html`<div><div class="sub-label">Resumo para campo</div><div>${t.field_summary}</div></div>` : ''}
-          ${t.notes ? html`<div><div class="sub-label">Observações</div><div class="note-box">${t.notes}</div></div>` : ''}
-          ${t.checklist && !refs.length ? '' : html`<div><div class="sub-label">${icon('image')} Imagens e referências (${refs.length})</div>
-            ${refs.length || can.edit ? html`<div class="thumbs">${thumbs(refs, can.edit)}
-              ${can.edit ? html`<button type="button" class="add-thumb" data-act="refs">${icon('image')}Anexar referência</button>` : ''}</div>`
-              : html`<div class="muted" style="font-size:13.5px">Nenhuma imagem de referência.</div>`}
-          </div>`}
-          <dl class="kv" style="font-size:13px">
-            <dt>Criada por</dt><dd>${t.creator_name} · ${fmtDateTime(t.created_at)}</dd>
-            ${t.assigned_by_name && t.assigned_by_id !== t.assignee_id ? html`<dt>Atribuída por</dt><dd>${t.assigned_by_name}</dd>` : ''}
-            <dt>Prioridade</dt><dd>${PRIORITY[t.priority]}</dd>
-            <dt>Classificação</dt><dd>${t.stage_name || 'Geral'}</dd>
-            ${t.start_date ? html`<dt>Início previsto</dt><dd>${fmtDate(t.start_date)}</dd>` : ''}
-          </dl>
-        </div>
-      </section>
+        ${reqBody}</section>`}
 
       ${t.checklist ? checklistSection(t, { reviewBox: reviewBox(), reviewActions, can }) : html`<section class="card block block-exec" aria-labelledby="blk-exec">
         <header class="block-head"><span class="step">2</span><h2 id="blk-exec">Execução</h2>

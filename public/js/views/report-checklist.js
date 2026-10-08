@@ -69,7 +69,7 @@ export async function view({ params, query, state }) {
     const done = items.filter(i => i.resolved).length;
     const cnt = r => items.filter(i => i.result === r).length;
     return { total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0, conforme: cnt('conforme'),
-      nao_conforme: items.filter(i => i.open_nc).length, na: cnt('na'), pending: items.filter(i => !i.result && !i.registered).length,
+      nao_conforme: items.filter(i => i.open_nc).length, na: cnt('na'), pending: items.filter(i => !i.result).length,
       nc_total: items.reduce((n, i) => n + i.nc_count, 0) };
   })();
   const withPhotos = query.get('fotos') !== '0';
@@ -221,7 +221,7 @@ export async function view({ params, query, state }) {
       <section class="r-section avoid">
         ${ncTable('Não conformidades por ambiente', 'Ambiente / grupo', ncRows('grupo'))}
         ${hasSpecs ? html`<div style="height:8px"></div>${ncTable('Não conformidades por especialidade', 'Especialidade', ncRows('especialidade'))}` : ''}
-        <p class="small muted" style="margin-top:4px">Item cadastrado com foto conta como não conformidade. Pendente = ainda em aberto; resolvida = corrigida (Conforme) ou encerrada (N/A).</p>
+        <p class="small muted" style="margin-top:4px">Todo item cadastrado conta como não conformidade (com ou sem foto). Pendente = ainda em aberto; resolvida = corrigida (Conforme) ou encerrada (N/A).</p>
       </section>
 
       <section class="r-section">

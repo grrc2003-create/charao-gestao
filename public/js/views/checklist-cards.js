@@ -11,12 +11,12 @@ function checklistCard(c) {
     <div class="cl-dash-sub">${c.project_code} · ${c.project_name} · ${c.assignee_name || 'sem responsável'}</div>
     <div class="cl-dash-bar" title="${c.resolved} de ${c.total} itens concluídos">
       <span class="b-ok" style="width:${w(resolvedClean)}"></span><span class="b-fix" style="width:${w(c.nc_resolved)}"></span>
-      <span class="b-nc" style="width:${w(c.nc_open)}"></span><span class="b-pend" style="width:${w(c.pending)}"></span></div>
+      <span class="b-nc" style="width:${w(c.nc_open - c.pending)}"></span><span class="b-pend" style="width:${w(c.pending)}"></span></div>
     <div class="cl-dash-pct"><b>${c.pct}%</b> concluído · ${c.resolved}/${c.total} itens</div>
     <div class="cl-dash-nums">
       <span class="${c.nc_open ? 'is-nc' : ''}"><b>${c.nc_open}</b>NC em aberto</span>
       <span><b>${c.nc_resolved}</b>NC resolvidas</span>
-      <span><b>${c.pending}</b>sem resposta</span>
+      <span><b>${c.pending}</b>ainda não verificados</span>
       <span class="${c.overdue ? 'is-late' : ''}"><b>${c.overdue}</b>itens atrasados</span>
     </div>
     ${c.user_items !== undefined ? html`<div class="cl-dash-user ${c.user_open ? 'has-open' : ''}">${icon('user')}
@@ -36,7 +36,7 @@ export function checklistSection(list, { title = 'Check-lists', linkAll = '#/tar
     ${list.length ? html`<div class="cl-dash-head">
       <span><b>${open.length}</b> em andamento</span><span class="${ncOpen ? 'is-nc' : ''}"><b>${ncOpen}</b> NC em aberto</span>
       <span><b>${done.length}</b> concluído(s)</span>
-      <span class="cl-dash-legend"><i class="b-ok"></i>Conforme <i class="b-fix"></i>Corrigida <i class="b-nc"></i>NC em aberto <i class="b-pend"></i>Sem resposta</span>
+      <span class="cl-dash-legend"><i class="b-fix"></i>Corrigida / encerrada <i class="b-nc"></i>NC verificada, em aberto <i class="b-pend"></i>NC ainda não verificada</span>
     </div>` : ''}
     ${open.length ? html`<div class="cl-dash-grid">${open.map(checklistCard)}</div>` : html`<p class="muted" style="padding:0 16px 14px">${list.length ? 'Nenhum check-list em andamento.' : empty}</p>`}
     ${done.length ? html`<div style="padding:0 16px 14px"><button type="button" class="btn btn-ghost btn-sm" data-cl-more data-show="Mostrar concluídos (${done.length})">Mostrar concluídos (${done.length})</button></div>

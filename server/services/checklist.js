@@ -146,12 +146,12 @@ function historyByItem(taskId) {
 }
 
 // Estado do item: resposta atual, fotos atuais, quantas vezes ficou não conforme e o par antes × depois.
-// Item cadastrado com foto JÁ É uma não conformidade (a foto do cadastro registra o problema): fica em aberto até
-// ser corrigido (Conforme) ou encerrado (N/A). "Antes" = foto da não conformidade mais recente (ou a do cadastro).
+// Todo item cadastrado JÁ É uma não conformidade (com ou sem foto; a foto do cadastro, quando há, registra o problema):
+// fica em aberto até ser corrigido (Conforme) ou encerrado (N/A). "Antes" = foto da não conformidade mais recente (ou a do cadastro).
 function itemState(item, h = { answers: [], loose: [], refs: [] }) {
   const current = item.result ? h.answers.at(-1) || null : null;
   const ncs = h.answers.filter(a => a.result === 'nao_conforme');
-  const registered = h.refs.length > 0;
+  const registered = true;
   const lastNcPhoto = [...ncs].reverse().map(a => a.files.at(-1)).find(Boolean) || null;
   const currentFiles = current ? current.files : [];
   const beforePhoto = lastNcPhoto || h.refs[0] || null;
@@ -168,9 +168,9 @@ function itemState(item, h = { answers: [], loose: [], refs: [] }) {
 }
 
 function check(t, rows, hist) {
-  const reg = i => (hist.get(i.id)?.refs.length || 0) > 0;
-  const unanswered = rows.filter(i => !i.result && !reg(i)).length;
-  const ncOpen = rows.filter(i => i.result === 'nao_conforme' || (!i.result && reg(i))).length;
+  // Todo item cadastrado é não conformidade: em aberto até Conforme ou N/A
+  const unanswered = 0;
+  const ncOpen = rows.filter(i => !isResolved(i.result)).length;
   const noPhoto = rows.filter(i => isResolved(i.result) && needsPhoto(t, i.result) && !itemState(i, hist.get(i.id)).currentFiles.length).length;
   const missing = [];
   if (unanswered) missing.push(`${unanswered} ${unanswered === 1 ? 'item sem resposta' : 'itens sem resposta'}`);
@@ -203,7 +203,7 @@ export function checklistView(ctx, t) {
       nc_count: st.nc_count, open_nc: st.open_nc, registered: st.registered, before: st.before, after: st.after, cover: st.cover,
       // Histórico: o cadastro com foto é o 1º registro de não conformidade
       history: [
-        ...(st.registered ? [{ id: 'cadastro', registration: true, result: 'nao_conforme', note: null, reason: null, user_name: st.refs[0].user_name, created_at: st.refs[0].created_at, files: st.refs }] : []),
+        ...(st.registered ? [{ id: 'cadastro', registration: true, result: 'nao_conforme', note: null, reason: null, user_name: st.refs[0]?.user_name || null, created_at: st.refs[0]?.created_at || i.created_at, files: st.refs }] : []),
         ...st.answers.map(a => ({ id: a.id, result: a.result, note: a.note, reason: a.reason, user_name: a.user_name, created_at: a.created_at, files: a.files })),
       ],
       can_answer: canAnswerItem(ctx, t, i),
@@ -217,7 +217,7 @@ export function checklistView(ctx, t) {
     items,
     summary: {
       total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0,
-      conforme: count('conforme'), nao_conforme: items.filter(i => i.open_nc).length, na: count('na'), pending: items.filter(i => !i.result && !i.registered).length,
+      conforme: count('conforme'), nao_conforme: items.filter(i => i.open_nc).length, na: count('na'), pending: items.filter(i => !i.result).length,
       nc_total: items.reduce((n, i) => n + i.nc_count, 0),
       overdue: items.filter(i => i.overdue).length,
       mine_pending: items.filter(i => i.mine && !i.resolved).length,
@@ -518,7 +518,7 @@ export function checklistItemsAsSubtasks(tasks) {
   return rows.map(i => {
     const t = byId.get(i.task_id);
     const resolved = isResolved(i.result);
-    const status = resolved ? 'concluida' : i.result === 'nao_conforme' || i.answers || i.refs ? 'em_andamento' : 'aberta';
+    const status = resolved ? 'concluida' : 'em_andamento'; // não conformidade em aberto desde o cadastro
     return decorate({
       id: `cl-${i.id}`, checklist_item: true, task_type: 'checklist_item', parent_id: t.id, parent_code: t.code,
       code: `${t.code}·${i.seq}`, title: i.text, stage_name: i.group_name,
@@ -552,10 +552,9 @@ export function checklistDashboard(tasks, { userId = null } = {}) {
   const stats = new Map(all(`SELECT ci.task_id,
       COUNT(*) AS total,
       SUM(ci.result IN ('conforme','na')) AS resolved,
-      SUM(ci.result = 'nao_conforme' OR (ci.result IS NULL AND EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia'))) AS nc_open,
-      SUM(ci.result IN ('conforme','na') AND (EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia')
-        OR EXISTS (SELECT 1 FROM checklist_answers a WHERE a.item_id = ci.id AND a.result = 'nao_conforme'))) AS nc_resolved,
-      SUM(ci.result IS NULL AND NOT EXISTS (SELECT 1 FROM checklist_files f WHERE f.item_id = ci.id AND f.kind = 'referencia')) AS pending,
+      SUM(ci.result IS NULL OR ci.result = 'nao_conforme') AS nc_open,
+      SUM(ci.result IN ('conforme','na')) AS nc_resolved,
+      SUM(ci.result IS NULL) AS pending,
       SUM(ci.result IS NOT 'conforme' AND ci.result IS NOT 'na' AND ci.due_date IS NOT NULL AND ci.due_date < ?) AS overdue
     FROM checklist_items ci WHERE ci.task_id IN (${ids.map(() => '?').join(',')}) GROUP BY ci.task_id`, ref, ...ids).map(r => [r.task_id, r]));
   const RANK = { atrasada: 0, em_andamento: 1, aberta: 1, aguardando_conferencia: 2, concluida: 3 };

@@ -606,8 +606,8 @@ async function main() {
   ok(it0.description === 'Testar todas as tomadas com o testador.' && it0.due_date === '2099-05-23' && it0.refs.length === 1 && it0.cover?.id === it0.refs[0].id && !it0.overdue,
     'item com descrição, prazo (início + 3 dias = 23/05) e foto de entrada como capa');
   ok(cl.checklist.items[3].overdue && cl.checklist.summary.overdue === 1, 'item com prazo vencido aparece como atrasado');
-  ok(it0.open_nc && it0.nc_count === 1 && cl.checklist.summary.nao_conforme === 4 && cl.checklist.summary.pending === 0 && cl.cl_nc === 4,
-    'item cadastrado com foto já é uma não conformidade em aberto');
+  ok(it0.open_nc && it0.nc_count === 1 && cl.checklist.summary.nao_conforme === 4 && cl.checklist.summary.pending === 4 && cl.cl_nc === 4,
+    'item cadastrado já é uma não conformidade em aberto (ainda não verificada)');
   ok(!cl.checklist.check.ok && cl.checklist.check.missing.some(m => m.includes('não conformidades em aberto')), 'não conformidades cadastradas bloqueiam o envio até serem corrigidas');
   ok(cl.history.some(h => h.action === 'Check-list criado' && h.details.includes('4 item(ns)')), 'histórico registra a criação do check-list');
   // Bruno só vê as próprias tarefas, mas tem item no check-list
@@ -728,7 +728,10 @@ async function main() {
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'na' })).status === 400, 'depois de entregue os itens não mudam');
   ok((await ricardo('POST', `/tasks/${clId}/actions/approve`, {})).data.status === 'concluida', 'gestor confere e conclui o check-list');
   const clLivre = (await ricardo('POST', '/tasks', { ...clBase, photo_rule: 'livre', items: [{ text: 'Item livre' }] })).data.id;
-  const il = (await ricardo('GET', `/tasks/${clLivre}`)).data.checklist.items[0].id;
+  const clLivreView = (await ricardo('GET', `/tasks/${clLivre}`)).data;
+  const il = clLivreView.checklist.items[0].id;
+  ok(clLivreView.checklist.items[0].open_nc && clLivreView.checklist.items[0].nc_count === 1 && clLivreView.cl_nc === 1
+    && clLivreView.checklist.items[0].history[0]?.registration, 'item cadastrado sem foto também é não conformidade (registrada no histórico do item)');
   ok((await marcos('POST', `/tasks/${clLivre}/items/${il}/answer`, { result: 'conforme' })).status === 200, 'foto livre: responde sem foto');
   // Dashboard: cada item do check-list conta como subtarefa nos indicadores
   const d0 = (await ricardo('GET', '/dashboard')).data;

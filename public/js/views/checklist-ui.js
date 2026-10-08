@@ -119,14 +119,14 @@ export function bindItemForm(el, { users, groups, specialties = () => [], global
           <div class="wiz-opts">${specialties().map(s => pick('data-spec', s, s, item.specialty === s))}${pick('data-spec', '', 'Sem especialidade', item.specialty === null)}</div>
           <span class="hint">Lista do modelo de especialidades escolhido para a obra.</span>`;
       case 'photo':
-        return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto da não conformidade (obrigatória).' : 'Há uma não conformidade? Tire a foto (opcional — sem foto, o item fica só para verificação).'}</p>
+        return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto da não conformidade (obrigatória).' : 'Tire a foto da não conformidade (opcional).'}</p>
           ${item.images.length < PHOTO_LIMIT ? html`<div class="wiz-photo">
             <label class="wiz-cam">${fileInput({ camera: true, data: 'data-new-photo' })}${icon('camera')}<span>${item.images.length ? 'Tirar outra foto' : 'Tirar foto'}</span></label>
             <label class="wiz-gal">${fileInput({ multiple: true, data: 'data-new-photo' })}${icon('image')}<span>Galeria</span></label>
           </div>` : ''}
           <div class="cli-photos" data-photos>${item.images.map((p, i) => html`<figure class="cli-ph"><img src="${p.data}" alt="Foto de entrada ${i + 1}"><button type="button" class="rm" data-rm-photo="${i}" aria-label="Remover foto">✕</button></figure>`)}</div>
           ${limitNote(item.images.length)}
-          <span class="hint">Item cadastrado com foto já é uma <b>não conformidade em aberto</b>; a foto é o “antes”.</span>`;
+          <span class="hint">Todo item cadastrado já é uma <b>não conformidade em aberto</b> (com ou sem foto); a foto, quando houver, é o “antes”.</span>`;
       case 'text':
         return html`<p class="wiz-q">O que deve ser verificado?</p>
           <input type="text" class="wiz-input" data-f="text" maxlength="300" value="${item.text}" placeholder="Ex.: Tomadas e interruptores funcionando" autocomplete="off" enterkeyhint="next">`;
@@ -556,7 +556,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         <div class="cl-ring" style="--p:${s.pct}"><b>${s.pct}%</b><span>concluído</span></div>
         <div class="cl-counts">
           <span class="cnt ok"><b>${s.conforme}</b>Conforme</span><span class="cnt nc"><b>${s.nao_conforme}</b>Não conforme em aberto</span>
-          <span class="cnt na"><b>${s.na}</b>N/A</span><span class="cnt pend"><b>${s.pending}</b>Sem resposta</span>
+          <span class="cnt na"><b>${s.na}</b>N/A</span><span class="cnt pend"><b>${s.pending}</b>Ainda não verificados</span>
         </div>
       </div>
       ${c.locked && !t.cancelled_at ? html`<div class="notice">${icon('info')}<span>${t.status === 'concluida' ? 'Check-list concluído' : 'Check-list enviado para conferência'}: as respostas ficam bloqueadas.${t.status === 'aguardando_conferencia' ? ' Se precisar corrigir algo, quem confere pode devolver para ajustes.' : ''}</span></div>` : ''}

@@ -1,6 +1,7 @@
 // Aplicação: sessão, layout (shell) e roteamento por hash.
 import { api, html, icon, avatar, ROLE, brandMark } from './core.js';
 import { toast } from './ui.js';
+import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';
 import * as Projects from './views/projects.js';
@@ -96,6 +97,7 @@ export const setQuery = obj => {
   }
   const s = qs.toString();
   history.replaceState(null, '', '#' + path + (s ? '?' + s : ''));
+  updateCurrent('#' + path + (s ? '?' + s : ''));
 };
 
 export async function reloadMeta() {
@@ -154,6 +156,8 @@ export async function render() {
   const m = route.re.exec(path);
   route.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
 
+  // Caminho entre as telas (para o "Voltar" levar à tela anterior)
+  trackRoute(location.hash || '#/');
   const printMode = !!route.opts.print;
   document.body.className = printMode ? 'print-mode' : 'app-mode';
   if (printMode) {
@@ -169,7 +173,7 @@ export async function render() {
     const v = await route.view(ctx);
     if (token !== renderToken) return;
     root.innerHTML = v.html.toString();
-    if (v.title) document.title = `${v.title} · Charão`;
+    if (v.title) { document.title = `${v.title} · Charão`; setCurrentTitle(v.title); }
     if (!printMode) window.scrollTo(0, 0);
     v.mount?.(root, ctx);
   } catch (e) {
@@ -201,6 +205,7 @@ export async function logout() {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
   state.user = null;
   state.meta = null;
+  clearNav();
   location.hash = '#/';
   render();
 }

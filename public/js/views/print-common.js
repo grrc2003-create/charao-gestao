@@ -1,9 +1,10 @@
 // Barra de ferramentas e utilidades comuns aos documentos de impressão.
 import { html, icon } from '../core.js';
 import { toast } from '../ui.js';
+import { previousScreen } from '../navhist.js';
 
 export const printToolbar = ({ back, title, extra }) => html`<div class="print-toolbar no-print">
-  <a class="btn btn-ghost btn-sm" href="${back}">${icon('back')}Voltar</a>
+  <a class="btn btn-ghost btn-sm" href="${previousScreen()?.hash || back}">${icon('back')}Voltar</a>
   <div class="pt-title">${title}</div>
   <div class="pt-actions">${extra || ''}<button type="button" class="btn btn-primary btn-sm" id="do-print">${icon('print')}Imprimir / Salvar PDF</button></div>
 </div>`;

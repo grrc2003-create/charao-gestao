@@ -1,5 +1,6 @@
 // Blocos visuais reutilizados por várias telas (KPIs, gráficos, listas de tarefas, projetos e pessoas).
 import { groupTasks } from './periods.js';
+import { previousScreen } from '../navhist.js';
 import {
   html, raw, STATUS, STATUS_ORDER, PROJECT_STATUS, statusBadge, priorityTag, avatar, progress, icon, fmtPct, dueInfo, fmtDate, esc,
 } from '../core.js';
@@ -8,12 +9,22 @@ export const STATUS_COLOR = {
   aberta: '#6E7A86', em_andamento: '#2F6FB3', aguardando_conferencia: '#A86F0E', atrasada: '#C0392B', concluida: '#2E8B57',
 };
 
-export const pageHead = ({ eyebrow, title, sub, actions, back }) => html`
-  ${back ? html`<a class="back-link" href="${back.href}">${icon('back')}${back.label}</a>` : ''}
+// "Voltar": leva à tela de onde a pessoa veio (com o nome dela); sem caminho anterior, usa o destino padrão da tela
+const shortTitle = t => (t.length > 42 ? `${t.slice(0, 40)}…` : t);
+export const backTarget = back => {
+  const prev = previousScreen();
+  if (prev) return { href: prev.hash, label: prev.title ? `Voltar · ${shortTitle(prev.title)}` : 'Voltar' };
+  return back || null;
+};
+export const pageHead = ({ eyebrow, title, sub, actions, back }) => {
+  const b = backTarget(back);
+  return html`
+  ${b ? html`<a class="back-link" href="${b.href}">${icon('back')}${b.label}</a>` : ''}
   ${title || actions ? html`<div class="page-head">
     <div>${eyebrow ? html`<div class="eyebrow">${eyebrow}</div>` : ''}<h1>${title}</h1>${sub ? html`<p>${sub}</p>` : ''}</div>
     ${actions ? html`<div class="page-actions">${actions}</div>` : ''}
   </div>` : ''}`;
+};
 
 export function kpi({ label, value, unit, foot, color, href, hero, pct }) {
   const inner = html`<div class="kpi-label">${label}</div>

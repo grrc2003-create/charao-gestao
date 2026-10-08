@@ -417,6 +417,7 @@ function itemCard(t, it, c) {
       <span class="cli-num">${it.seq}</span>
       <span class="cli-title">${it.text}</span>
       <span class="cli-sum-r">
+        ${it.specialty && !uiOf(t.id).levels.includes('especialidade') ? html`<span class="cli-spec cli-spec-sm" title="Especialidade">${it.specialty}</span>` : ''}
         <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
         ${mainState}

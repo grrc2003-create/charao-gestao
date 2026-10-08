@@ -391,8 +391,8 @@ function groupItems(items, dim, specOrder = []) {
   else keys.sort((a, b) => (a ? 0 : 1) - (b ? 0 : 1)); // grupo: ordem dos itens, "Sem grupo" por último
   return keys.map(k => ({ key: k, name: d.name(k), items: m.get(k) }));
 }
-// Níveis válidos: sem repetir e só os que existem (especialidade só quando há itens com ela)
-const cleanLevels = (levels, hasSpecs) => levels.filter((d, i) => GROUP_DIMS[d] && levels.indexOf(d) === i && (d !== 'especialidade' || hasSpecs)).slice(0, 3);
+// Níveis válidos: sem repetir (Especialidade sempre disponível; itens sem ela ficam em "Sem especialidade")
+const cleanLevels = levels => levels.filter((d, i) => GROUP_DIMS[d] && levels.indexOf(d) === i).slice(0, 3);
 
 const photo = (f, caption, cls = '') => html`<figure class="cli-ph ${cls}" data-src="/api/checklist-files/${f.id}" data-caption="${caption}">
   <img src="/api/checklist-files/${f.id}" alt="${caption}" loading="lazy"></figure>`;
@@ -507,21 +507,20 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
   if (st.fGroup && !opts.groups.includes(st.fGroup)) st.fGroup = '';
   if (st.fSpec && !opts.specs.includes(st.fSpec)) st.fSpec = '';
   if (st.fResp && !opts.resps.includes(st.fResp)) st.fResp = '';
-  const hasSpecs = c.items.some(i => i.specialty);
-  st.levels = cleanLevels(st.levels, hasSpecs);
+  st.levels = cleanLevels(st.levels);
   const LBL = { group: 'Grupo', spec: 'Especialidade', resp: 'Responsável' };
   const sel = (kind, cur, list, all) => html`<label class="cl-sel ${cur ? 'is-on' : ''}"><span>${LBL[kind]}</span>
     <select data-clsel="${kind}"><option value="">${all}</option>${list.map(k => html`<option value="${k}" ${k === cur ? 'selected' : ''}>${optLabel(k, kind)}</option>`)}</select></label>`;
   const selects = c.items.length ? html`<div class="cl-selects">
       ${sel('group', st.fGroup, opts.groups, 'Todos os grupos')}
-      ${hasSpecs ? sel('spec', st.fSpec, opts.specs, 'Todas as especialidades') : ''}
+      ${sel('spec', st.fSpec, opts.specs, 'Todas as especialidades')}
       ${sel('resp', st.fResp, opts.resps, 'Todos os responsáveis')}
       <span class="cl-sel-info" data-clsel-info></span>
       <button type="button" class="btn btn-ghost btn-sm" data-clsel-clear ${st.fGroup || st.fSpec || st.fResp ? '' : 'hidden'}>Limpar filtro</button>
     </div>` : '';
   // Agrupar em até 3 níveis (ex.: Grupo › Especialidade › Responsável)
   const photosOn = showPhotos();
-  const dimOpts = Object.entries(GROUP_DIMS).filter(([k]) => k !== 'especialidade' || hasSpecs);
+  const dimOpts = Object.entries(GROUP_DIMS);
   const lvlSel = n => html`<label class="cl-lvl"><span>${n === 0 ? 'Agrupar por' : n === 1 ? 'depois por' : 'e por'}</span>
     <select data-cllvl="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${dimOpts.map(([k, d]) => html`<option value="${k}" ${st.levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`;
   const byToggle = html`<div class="cl-by">
@@ -719,7 +718,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   root.querySelectorAll('[data-cllvl]').forEach(sel => sel.addEventListener('change', () => {
     const vals = [...root.querySelectorAll('[data-cllvl]')].map(x => x.value);
     const cut = vals.indexOf('');
-    st.levels = cleanLevels(cut < 0 ? vals : vals.slice(0, cut), true);
+    st.levels = cleanLevels(cut < 0 ? vals : vals.slice(0, cut));
     refresh(t);
   }));
   root.querySelectorAll('.cl-filters [data-clf]').forEach(b => b.addEventListener('click', () => {

@@ -134,9 +134,17 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
       </section>`;
     })}</div>`;
   }
-  const cards = html`<div class="task-cards only-mobile">${tasks.map(t => {
+  // Subtarefas ficam recolhidas embaixo da tarefa principal (quando ela está na lista); "▸ N subtarefas" abre e fecha.
+  // Subtarefa cuja tarefa principal não está na lista (por causa de um filtro) aparece sozinha, como antes.
+  const inList = new Set(tasks.map(t => t.id));
+  const kids = new Map();
+  for (const t of tasks) if (t.parent_id && inList.has(t.parent_id)) { if (!kids.has(t.parent_id)) kids.set(t.parent_id, []); kids.get(t.parent_id).push(t); }
+  const tops = tasks.filter(t => !(t.parent_id && inList.has(t.parent_id)));
+  const toggle = (t, cls) => (kids.has(t.id) ? html`<button type="button" class="sub-toggle ${cls}" data-sub-toggle="${t.id}" aria-expanded="false">
+      <span class="sub-chev">${icon('chevron')}</span>${kids.get(t.id).length} subtarefa${kids.get(t.id).length > 1 ? 's' : ''}</button>` : '');
+  const cardOf = (t, isSub = false) => {
     const due = dueInfo(t);
-    return html`<a class="task-card st-${t.eff_status}" href="#/tarefas/${t.id}">
+    return html`<a class="task-card st-${t.eff_status} ${isSub ? 'is-sub' : ''}" href="#/tarefas/${t.id}">
       <div class="tc-top"><span class="tc-code">${t.code}</span><span class="tc-status">${statusBadge(t.eff_status, { short: true })}${lateDoneTag(t)}</span></div>
       ${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}
       <div class="tc-title">${checklistTag(t)}${t.recurrence_id ? html`<span class="rec-tag" title="Tarefa recorrente">${t.recurrence_seq}ª</span> ` : ''}${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>
@@ -147,25 +155,67 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
         <span class="${due.cls}">${icon('calendar')}<em>${due.text}</em>${t.reschedule_count ? html`<i class="resched-badge ${t.chronic ? 'is-chronic' : ''}" title="Reagendada ${t.reschedule_count}x">↻${t.reschedule_count}</i>` : ''}</span>
         <span>${priorityTag(t.priority)}</span>
       </div></a>`;
-  })}</div>`;
-  const table = html`<div class="card only-desktop"><div class="table-wrap"><table class="data">
-    <thead><tr><th>Tarefa</th><th>Título</th>${showProject ? html`<th>Projeto</th>` : ''}${showAssignee ? html`<th>Responsável</th>` : ''}<th>Prazo</th><th>Prioridade</th><th>Status</th></tr></thead>
-    <tbody>${tasks.map(t => {
+  };
+  const rowOf = (t, isSub = false) => {
       const due = dueInfo(t);
-      return html`<tr class="row-st st-${t.eff_status}" data-href="#/tarefas/${t.id}" tabindex="0">
+      return html`<tr class="row-st st-${t.eff_status} ${isSub ? 'sub-row' : ''}" ${isSub ? raw(`data-sub-of="${t.parent_id}" hidden`) : ''} data-href="#/tarefas/${t.id}" tabindex="0">
         <td class="mono nowrap">${t.code}</td>
-        <td>${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}<div class="t-title">${checklistTag(t)}${t.recurrence_id ? html`<span class="rec-tag" title="Tarefa recorrente">${t.recurrence_seq}ª</span> ` : ''}${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>${t.stage_name && !t.stage_default ? html`<div style="margin-top:3px"><span class="stage-tag">${t.stage_name}</span></div>` : ''}${t.exec_count || t.ref_count ? html`<div class="t-sub">${t.ref_count ? `${t.ref_count} ref.` : ''} ${t.exec_count ? `· ${t.exec_count} foto(s) execução` : ''}</div>` : ''}</td>
+        <td>${t.parent_code ? html`<div class="sub-mark">↳ ${isSub ? 'Subtarefa' : `Subtarefa de ${t.parent_code}`}</div>` : ''}<div class="t-title">${checklistTag(t)}${t.recurrence_id ? html`<span class="rec-tag" title="Tarefa recorrente">${t.recurrence_seq}ª</span> ` : ''}${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}</div>${!isSub ? toggle(t, 'is-row') : ''}${t.stage_name && !t.stage_default ? html`<div style="margin-top:3px"><span class="stage-tag">${t.stage_name}</span></div>` : ''}${t.exec_count || t.ref_count ? html`<div class="t-sub">${t.ref_count ? `${t.ref_count} ref.` : ''} ${t.exec_count ? `· ${t.exec_count} foto(s) execução` : ''}</div>` : ''}</td>
         ${showProject ? html`<td><div>${t.project_name}</div><div class="t-sub mono">${t.project_code}</div></td>` : ''}
         ${showAssignee ? html`<td class="nowrap">${t.assignee_name || html`<span class="muted">—</span>`}${t.assignee_external ? html`<div class="t-sub">Terceirizado${t.assignee_company ? ` · ${t.assignee_company}` : ''}</div>` : ''}</td>` : ''}
         <td class="nowrap ${due.cls}">${due.text}${t.reschedule_count ? html` <i class="resched-badge ${t.chronic ? 'is-chronic' : ''}" title="Reagendada ${t.reschedule_count}x · prazo original ${fmtDate(t.original_due)}${t.chronic ? ' · crônica' : ''}">↻${t.reschedule_count}</i>` : ''}${t.late_episodes > 1 ? html` <i class="late-badge" title="Ficou atrasada ${t.late_episodes} vezes">${t.late_episodes}x</i>` : ''}</td>
         <td>${priorityTag(t.priority)}</td>
         <td>${statusBadge(t.eff_status)}${lateDoneTag(t) ? html`<div style="margin-top:3px">${lateDoneTag(t)}</div>` : ''}</td></tr>`;
-    })}</tbody></table></div></div>`;
-  return html`${cards}${table}`;
+  };
+  const anyKids = kids.size > 0;
+  const bar = anyKids ? html`<div class="sub-bar"><span class="muted">${[...kids.values()].reduce((n, k) => n + k.length, 0)} subtarefa(s) recolhida(s) dentro das tarefas</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-sub-all="1">${icon('chevron')}Mostrar todas</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-sub-all="0" hidden>Ocultar todas</button></div>` : '';
+  const cards = html`<div class="task-cards only-mobile">${tops.map(t => (kids.has(t.id)
+    ? html`<div class="tc-group">${cardOf(t)}${toggle(t, 'is-card')}<div class="tc-subs" data-sub-of="${t.id}" hidden>${kids.get(t.id).map(s => cardOf(s, true))}</div></div>`
+    : cardOf(t)))}</div>`;
+  const table = html`<div class="card only-desktop"><div class="table-wrap"><table class="data">
+    <thead><tr><th>Tarefa</th><th>Título</th>${showProject ? html`<th>Projeto</th>` : ''}${showAssignee ? html`<th>Responsável</th>` : ''}<th>Prazo</th><th>Prioridade</th><th>Status</th></tr></thead>
+    <tbody>${tops.map(t => html`${rowOf(t)}${(kids.get(t.id) || []).map(s => rowOf(s, true))}`)}</tbody></table></div></div>`;
+  return html`${bar}${cards}${table}`;
 }
 
 // Liga cliques nas linhas da tabela e tooltips de gráficos
+const SUB_KEY = 'charao-subs-open';
+const openSubs = () => { try { return new Set(JSON.parse(sessionStorage.getItem(SUB_KEY) || '[]')); } catch { return new Set(); } };
+const saveSubs = s => { try { sessionStorage.setItem(SUB_KEY, JSON.stringify([...s])); } catch { /* sem armazenamento */ } };
+function bindSubtasks(root) {
+  const open = openSubs();
+  const setOpen = (id, on) => {
+    root.querySelectorAll(`[data-sub-of="${id}"]`).forEach(e => (e.hidden = !on));
+    root.querySelectorAll(`[data-sub-toggle="${id}"]`).forEach(b => b.setAttribute('aria-expanded', String(on)));
+    if (on) open.add(id); else open.delete(id);
+  };
+  const syncAll = () => {
+    const ids = [...new Set([...root.querySelectorAll('[data-sub-toggle]')].map(b => b.dataset.subToggle))];
+    const allOpen = ids.length && ids.every(id => open.has(id));
+    root.querySelectorAll('[data-sub-all="1"]').forEach(b => (b.hidden = !!allOpen));
+    root.querySelectorAll('[data-sub-all="0"]').forEach(b => (b.hidden = !allOpen));
+  };
+  root.querySelectorAll('[data-sub-toggle]').forEach(b => {
+    if (open.has(b.dataset.subToggle)) setOpen(b.dataset.subToggle, true);
+    b.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation(); // não abre a tarefa ao clicar no botão
+      setOpen(b.dataset.subToggle, b.getAttribute('aria-expanded') !== 'true');
+      saveSubs(open); syncAll();
+    });
+  });
+  root.querySelectorAll('[data-sub-all]').forEach(b => b.addEventListener('click', () => {
+    const on = b.dataset.subAll === '1';
+    new Set([...root.querySelectorAll('[data-sub-toggle]')].map(x => x.dataset.subToggle)).forEach(id => setOpen(id, on));
+    saveSubs(open); syncAll();
+  }));
+  syncAll();
+}
+
 export function bindCommon(root) {
+  bindSubtasks(root);
   root.querySelectorAll('tr[data-href]').forEach(tr => {
     tr.addEventListener('click', () => (location.hash = tr.dataset.href));
     tr.addEventListener('keydown', e => { if (e.key === 'Enter') location.hash = tr.dataset.href; });

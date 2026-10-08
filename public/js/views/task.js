@@ -147,18 +147,21 @@ function build(t, ctx) {
           ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
-        ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          ${t.checklist ? html`<a class="btn btn-ghost btn-sm" data-cl-report href="${checklistReportLink(t)}">${icon('print')}Relatório PDF</a>` : ''}
-          ${can.edit ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
-          ${can.reassign ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
-          ${can.reschedule ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
-          ${can.conclude_directly ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
-          ${can.reopen ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
-          ${can.reactivate ? html`<button type="button" class="btn btn-primary btn-sm" data-act="reactivate">${icon('history')}Reativar tarefa</button>` : ''}
-          ${can.cancel ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-act="cancel">${icon('x')}Cancelar tarefa</button>` : ''}
-          ${can.delete ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-act="delete">${icon('trash')}Excluir definitivamente</button>` : ''}
-          ${!can.delete && can.delete_blocked ? html`<span class="delete-hint">${icon('info')} Exclusão definitiva indisponível: ${can.delete_blocked.replace(/^Não pode ser excluída: /, '')}</span>` : ''}
-        </div>` : ''}
+        ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<details class="act-menu">
+          <summary class="btn btn-ghost btn-sm">${icon('more')}Ações<span class="act-chev">${icon('chevron')}</span></summary>
+          <div class="act-list" role="menu">
+          ${t.checklist ? html`<a class="act-item" data-cl-report href="${checklistReportLink(t)}">${icon('print')}Relatório PDF</a>` : ''}
+          ${can.edit ? html`<a class="act-item" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
+          ${can.reassign ? html`<button type="button" class="act-item" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
+          ${can.reschedule ? html`<button type="button" class="act-item" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
+          ${can.conclude_directly ? html`<button type="button" class="act-item" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
+          ${can.reopen ? html`<button type="button" class="act-item" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
+          ${can.reactivate ? html`<button type="button" class="act-item is-primary" data-act="reactivate">${icon('history')}Reativar tarefa</button>` : ''}
+          ${can.cancel ? html`<button type="button" class="act-item is-danger" data-act="cancel">${icon('x')}Cancelar tarefa</button>` : ''}
+          ${can.delete ? html`<button type="button" class="act-item is-danger" data-act="delete">${icon('trash')}Excluir definitivamente</button>` : ''}
+          ${!can.delete && can.delete_blocked ? html`<span class="act-note">${icon('info')} Exclusão definitiva indisponível: ${can.delete_blocked.replace(/^Não pode ser excluída: /, '')}</span>` : ''}
+          </div>
+        </details>` : ''}
       </article>
 
       ${t.checklist
@@ -400,6 +403,14 @@ function mount(root, t, ctx) {
   };
 
   if (t.checklist) bindChecklist(root, t, ctx, refresh);
+  // Menu de ações da tarefa: fecha ao escolher, ao clicar fora ou com Esc
+  const actMenu = root.querySelector('.act-menu');
+  if (actMenu) {
+    actMenu.querySelectorAll('.act-item').forEach(i => i.addEventListener('click', () => { actMenu.open = false; }));
+    const outside = e => { if (!actMenu.contains(e.target)) actMenu.open = false; };
+    document.addEventListener('click', outside);
+    actMenu.addEventListener('keydown', e => { if (e.key === 'Escape') { actMenu.open = false; actMenu.querySelector('summary').focus(); } });
+  }
   root.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => {
     e.preventDefault();
     actions[b.dataset.act]?.();

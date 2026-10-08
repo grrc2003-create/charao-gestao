@@ -1200,3 +1200,21 @@ textarea.wiz-input { min-height: 90px; }
 .block-fold[open] .fold-chev svg { transform: rotate(-90deg); }
 .block-fold[open] .fold-hint { display: none; }
 .block-fold:not([open]) > summary.block-head { border-bottom: 0; }
+
+/* Tarefa: ações num menu suspenso */
+.act-menu { position: relative; display: inline-block; margin-top: 12px; }
+.act-menu > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.act-menu > summary::-webkit-details-marker { display: none; }
+.act-chev svg { width: 14px; height: 14px; transform: rotate(90deg); transition: transform .15s; }
+.act-menu[open] .act-chev svg { transform: rotate(-90deg); }
+.act-list { position: absolute; left: 0; top: calc(100% + 6px); z-index: 40; min-width: 250px; max-width: min(340px, calc(100vw - 32px));
+  display: grid; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(28, 42, 56, .18); }
+.act-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent;
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); text-align: left; text-decoration: none; cursor: pointer; }
+.act-item svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.act-item:hover, .act-item:focus-visible { background: var(--navy-50); outline: none; }
+.act-item.is-primary { color: var(--navy); } .act-item.is-primary svg { color: var(--navy); }
+.act-item.is-danger { color: var(--st-atrasada); } .act-item.is-danger svg { color: var(--st-atrasada); }
+.act-item.is-danger:hover { background: var(--st-atrasada-bg, #FBE9E7); }
+.act-list .act-note { display: flex; gap: 6px; font-size: 12px; color: var(--muted); padding: 8px 10px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+.act-list .act-note svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }

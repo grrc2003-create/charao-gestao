@@ -6,6 +6,12 @@ import { periodKey, periodInfo } from './periods.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
+
+// Especialidades oferecidas no cadastro do item: modelo da obra; sem modelo, as de todos os modelos cadastrados
+export function projectSpecialties(meta, projectId) {
+  const own = meta?.projects?.find(p => String(p.id) === String(projectId))?.specialties || [];
+  return own.length ? { list: own, own: true } : { list: meta?.specialties_all || [], own: false };
+}
 const limitNote = n => html`<span class="hint">${n ? `${n} de ${PHOTO_LIMIT} fotos` : `Até ${PHOTO_LIMIT} fotos`}${n >= PHOTO_LIMIT ? ' · limite atingido (remova uma para trocar)' : ''}</span>`;
 // Mantém só as fotos que cabem no limite e avisa quando alguma ficou de fora
 const fitPhotos = (imgs, room) => {
@@ -76,7 +82,7 @@ export function itemForm() {
 }
 
 // users(), groups(), globalName(), photoRequired(), quickList() são funções (a lista pode mudar com o projeto/regra)
-export function bindItemForm(el, { users, groups, specialties = () => [], globalName = () => '', photoRequired, quickList = () => false, keep = {}, onAdd, onClose }) {
+export function bindItemForm(el, { users, groups, specialties = () => [], specialtiesOwn = () => true, globalName = () => '', photoRequired, quickList = () => false, keep = {}, onAdd, onClose }) {
   const q = s => el.querySelector(s);
   const err = q('[data-err]');
   let item, step = 0;
@@ -117,7 +123,8 @@ export function bindItemForm(el, { users, groups, specialties = () => [], global
       case 'spec':
         return html`<p class="wiz-q">Qual a especialidade deste item?</p>
           <div class="wiz-opts">${specialties().map(s => pick('data-spec', s, s, item.specialty === s))}${pick('data-spec', '', 'Sem especialidade', item.specialty === null)}</div>
-          <span class="hint">Lista do modelo de especialidades escolhido para a obra.</span>`;
+          <span class="hint">${specialtiesOwn() ? 'Lista do modelo de especialidades escolhido para a obra.'
+            : html`A obra ainda não tem modelo de especialidades: a lista vem dos modelos cadastrados em Configurações. Para usar só as da obra, escolha o modelo em <b>Projetos → Editar</b>.`}</span>`;
       case 'photo':
         return html`<p class="wiz-q">${photoRequired() ? 'Tire a foto da não conformidade (obrigatória).' : 'Tire a foto da não conformidade (opcional).'}</p>
           ${item.images.length < PHOTO_LIMIT ? html`<div class="wiz-photo">
@@ -785,7 +792,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   if (panel) {
     if (!st.keep) st.keep = {};
     form = bindItemForm(panel.querySelector('[data-cl-form]'), {
-      users: team, keep: st.keep, groups: () => groupOptions(t), specialties: () => specOptions(t), globalName: () => t.assignee_name || '',
+      users: team, keep: st.keep, groups: () => groupOptions(t), specialties: () => specOptions(t), specialtiesOwn: () => !!t._specsOwn, globalName: () => t.assignee_name || '',
       photoRequired: () => c.photo_rule === 'obrigatoria', quickList: () => c.photo_rule !== 'obrigatoria',
       onAdd: async (items, again) => {
         // Envia em lotes que cabem numa requisição (fotos de entrada)

@@ -2,7 +2,7 @@
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
-import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink } from './checklist-ui.js';
+import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
   : t.days_to_due === 0 ? 'Vence hoje' : t.days_to_due === 1 ? 'Vence amanhã' : `Faltam ${t.days_to_due} dias`;
@@ -15,7 +15,11 @@ export async function view(ctx) {
     t._groups = (ctx.state.meta.projects.find(p => p.id === t.project_id)?.stages || []).map(s => s.name);
   }
   // Especialidades do modelo escolhido na obra (ordem da lista e passo "Especialidade" do novo item)
-  if (t.checklist) t._specs = ctx.state.meta.projects.find(p => p.id === t.project_id)?.specialties || [];
+  if (t.checklist) {
+    const sp = projectSpecialties(ctx.state.meta, t.project_id);
+    t._specs = sp.list;
+    t._specsOwn = sp.own;
+  }
   return build(t, ctx);
 }
 
@@ -231,7 +235,7 @@ function build(t, ctx) {
 function mount(root, t, ctx) {
   const refresh = updated => {
     if (t._team && !updated._team) { updated._team = t._team; updated._groups = t._groups; }
-    if (t._specs && !updated._specs) updated._specs = t._specs;
+    if (t._specs && !updated._specs) { updated._specs = t._specs; updated._specsOwn = t._specsOwn; }
     const v = build(updated, ctx);
     root.innerHTML = v.html.toString();
     v.mount(root);

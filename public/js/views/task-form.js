@@ -2,7 +2,7 @@ import { html, api, icon, PRIORITY, PROOF } from '../core.js';
 import { toast, readAttachments, pickAttachments, batchBySize } from '../ui.js';
 import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
-import { renderDraft, itemForm, bindItemForm, PHOTO_RULE } from './checklist-ui.js';
+import { renderDraft, itemForm, bindItemForm, PHOTO_RULE, projectSpecialties } from './checklist-ui.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -179,7 +179,8 @@ export async function view({ params, query, state, navigate }) {
         wizard = bindItemForm(itemEl, {
           users: () => team, keep: {}, photoRequired: ruleRequired, quickList: () => !ruleRequired(),
           groups: () => [...new Set([...projectGroups(), ...items.map(i => i.group).filter(Boolean)])], globalName,
-          specialties: () => state.meta.projects.find(p => String(p.id) === String(f.project_id.value))?.specialties || [],
+          specialties: () => projectSpecialties(state.meta, f.project_id.value).list,
+          specialtiesOwn: () => projectSpecialties(state.meta, f.project_id.value).own,
           onAdd: async list => {
             items.push(...list);
             drawItems();

@@ -174,6 +174,8 @@ api.get('/api/meta', (req, res, { ctx }) => {
   for (const t of Tasks.listVisible(ctx)) if (t.assignee_id) assignees.set(t.assignee_id, { id: t.assignee_id, name: t.assignee_name });
   send(res, 200, {
     projects, users,
+    // Especialidades de todos os modelos (usadas quando a obra ainda não tem modelo escolhido)
+    specialties_all: [...new Set(Settings.listSpecialtyTemplates().flatMap(t => t.items))],
     assignees: [...assignees.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
     managers: users.filter(u => all('SELECT 1 FROM users WHERE manager_id = ? LIMIT 1', u.id).length),
     can: {

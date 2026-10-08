@@ -127,6 +127,8 @@ export function permissionsFor(ctx, t) {
     // Subtarefas: um nível. Quem gerencia a tarefa ou é o responsável por ela pode dividi-la.
     add_subtask: t.task_type !== 'checklist' && !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
     cancel: manage && t.status !== 'concluida',
+    // Duplicar (com as subtarefas): quem pode criar tarefas no projeto; subtarefa duplica dentro da mesma tarefa principal
+    duplicate: !t.parent_id ? canCreateTaskIn(ctx, t.project_id) : manage,
     ...deletePermission(ctx, t),
   };
 }
@@ -375,6 +377,65 @@ export function updateTask(ctx, id, body) {
         `${fmtDate(reschedule.old)} → ${fmtDate(reschedule.new)} · Justificativa: ${reschedule.reason.name}${reschedule.note ? ` · ${reschedule.note}` : ''}`);
     }
     for (const [label, from, to] of changes) taskHistory(id, ctx.user.id, label, from || to ? `${from} → ${to}` : null);
+  });
+}
+
+// Duplicar tarefa com as subtarefas (e o check-list com os itens). Copia título, descrição, observações, prioridade,
+// comprovação, classificação e imagens/PDFs de referência. NÃO copia execução, fotos de execução, respostas do check-list,
+// histórico nem andamento: a cópia nasce aberta. Responsáveis e prazos só são mantidos se pedido (keep_assignees / keep_dates).
+export function duplicateTask(ctx, id, body) {
+  const t = loadVisible(ctx, id);
+  if (!permissionsFor(ctx, t).duplicate) throw forbidden('Você não pode duplicar esta tarefa.');
+  const keepWho = body.keep_assignees === true || body.keep_assignees === 'on' || body.keep_assignees === '1';
+  const keepDates = body.keep_dates === true || body.keep_dates === 'on' || body.keep_dates === '1';
+  const parent = t.parent_id ? one('SELECT * FROM tasks WHERE id = ?', t.parent_id) : null;
+  // Projeto de destino (tarefa principal pode ir para outro projeto; subtarefa fica na mesma tarefa principal)
+  const projectId = parent ? t.project_id : (intOrNull(body.project_id) || t.project_id);
+  const project = one('SELECT * FROM projects WHERE id = ?', projectId);
+  if (!project) throw badRequest('Projeto inválido.');
+  if (!parent && !canCreateTaskIn(ctx, projectId)) throw forbidden('Você não tem acesso ao projeto de destino.');
+  if (['concluido', 'cancelado'].includes(project.status)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
+  const title = str(body.title, { max: 160, label: 'Título' }) || t.title;
+  // Classificação: a mesma (pelo nome) no projeto de destino; senão "Geral"
+  const stageIn = pid => {
+    const name = one('SELECT name, is_default FROM project_stages WHERE id = ?', pid);
+    if (!name || name.is_default) return null;
+    return one('SELECT id FROM project_stages WHERE project_id = ? AND name = ?', projectId, name.name)?.id || null;
+  };
+  const who = uid => {
+    if (!keepWho || !uid) return null;
+    try { return validateAssignee(uid, projectId); } catch { return null; }
+  };
+  const dataOf = (s, overrideTitle) => {
+    const isCl = s.task_type === 'checklist';
+    const items = isCl ? all('SELECT * FROM checklist_items WHERE task_id = ? ORDER BY seq', s.id).map(i => ({
+      group: i.group_name || null, specialty: i.specialty || null, text: i.text, description: i.description || null, assignee_id: who(i.assignee_id),
+      start_date: keepDates ? i.start_date : null, duration_days: keepDates ? i.duration_days : null, due_date: keepDates ? i.due_date : null, images: [] })) : undefined;
+    const maxDue = items?.map(i => i.due_date).filter(Boolean).sort().at(-1);
+    return {
+      task_type: isCl ? 'checklist' : 'tarefa', photo_rule: isCl ? s.photo_rule || 'livre' : null,
+      title: overrideTitle || s.title, description: s.description || '', field_summary: s.field_summary || null, notes: s.notes || null,
+      due_date: keepDates ? (maxDue || s.due_date || null) : null, start_date: keepDates ? s.start_date || null : null,
+      priority: s.priority, proof_type: isCl ? 'nenhuma' : s.proof_type, assignee_id: who(s.assignee_id),
+      ...(isCl ? { items } : {}),
+    };
+  };
+  const refs = s => all(`SELECT stored_name, mime, caption, original_name FROM task_files WHERE task_id = ? AND kind = 'referencia' ORDER BY id`, s.id);
+  return tx(() => {
+    const newId = insertTask({ project, parent, data: dataOf(t, title), stageInput: stageIn(t.stage_id), creatorId: ctx.user.id, copyFiles: refs(t), ctx });
+    let subs = 0;
+    if (!parent) {
+      const np = one('SELECT * FROM tasks WHERE id = ?', newId);
+      for (const s of all('SELECT * FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL ORDER BY seq, id', t.id)) {
+        insertTask({ project, parent: np, data: dataOf(s), stageInput: stageIn(s.stage_id), creatorId: ctx.user.id, copyFiles: refs(s), ctx });
+        subs++;
+      }
+    }
+    const code = one('SELECT code FROM tasks WHERE id = ?', newId).code;
+    const opts = [keepWho ? 'responsáveis mantidos' : 'sem responsáveis', keepDates ? 'prazos mantidos' : 'sem prazos'].join(' · ');
+    taskHistory(newId, ctx.user.id, 'Tarefa duplicada', `Cópia de ${t.code}${subs ? ` com ${subs} subtarefa(s)` : ''} · ${opts}`);
+    taskHistory(t.id, ctx.user.id, 'Tarefa duplicada', `Nova cópia: ${code}${subs ? ` com ${subs} subtarefa(s)` : ''}`);
+    return { id: newId, code, subtasks: subs };
   });
 }
 

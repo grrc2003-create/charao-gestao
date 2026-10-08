@@ -809,6 +809,26 @@ async function main() {
   ok((await ana('PUT', '/users/1', { role: 'gestor' })).status === 400, 'sistema mantém ao menos um administrador');
   const audit = (await ana('GET', '/audit')).data;
   ok(audit.some(a => a.action === 'Permissões alteradas') && audit.some(a => a.action === 'Falha de login'), 'auditoria registra permissões e falhas de login');
+  console.log('Duplicar tarefa');
+  const tasksP1 = (await ricardo('GET', '/tasks?project=1')).data;
+  const mae = tasksP1.find(t => !t.parent_id && tasksP1.some(s => s.parent_id === t.id) && !t.cancelled_at);
+  const maeView = (await ricardo('GET', `/tasks/${mae.id}`)).data;
+  const nSubs = maeView.subtasks.filter(s => !s.cancelled_at).length;
+  ok(maeView.can.duplicate, 'gestor pode duplicar a tarefa');
+  const dup = await ricardo('POST', `/tasks/${mae.id}/duplicate`, { title: 'Cópia da tarefa' });
+  ok(dup.status === 201 && dup.data.subtasks === nSubs, `tarefa duplicada com as ${nSubs} subtarefas`);
+  const dupView = (await ricardo('GET', `/tasks/${dup.data.id}`)).data;
+  ok(dupView.title === 'Cópia da tarefa' && dupView.status === 'aberta' && !dupView.assignee_id && !dupView.due_date && dupView.subtasks.length === nSubs
+    && dupView.subtasks.every(s => !s.assignee_id && !s.due_date && s.status === 'aberta') && dupView.stage_id && dupView.history.some(h => h.action === 'Tarefa duplicada'),
+    'cópia aberta, sem responsáveis e sem prazos, com a mesma classificação e registro no histórico');
+  const dup2 = (await ricardo('POST', `/tasks/${mae.id}/duplicate`, { keep_assignees: '1', keep_dates: '1' })).data;
+  const dup2View = (await ricardo('GET', `/tasks/${dup2.id}`)).data;
+  ok(dup2View.assignee_id === maeView.assignee_id && dup2View.due_date === maeView.due_date && dup2View.title === maeView.title, 'com as opções, mantém responsável e prazo');
+  const dupCl = (await ricardo('POST', `/tasks/${clId}/duplicate`, {})).data;
+  const dupClView = (await ricardo('GET', `/tasks/${dupCl.id}`)).data;
+  const srcCl = (await ricardo('GET', `/tasks/${clId}`)).data;
+  ok(dupClView.checklist.items.length === srcCl.checklist.items.length && dupClView.checklist.items.every(i => !i.result && !i.refs.length && !i.assignee_id),
+    'check-list duplicado com os itens, sem respostas, fotos nem responsáveis');
 }
 
 main()

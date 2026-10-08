@@ -252,6 +252,7 @@ api.post('/api/tasks/:id/reschedule', (req, res, { ctx, params, body }) => {
   Tasks.rescheduleTask(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
+api.post('/api/tasks/:id/duplicate', (req, res, { ctx, params, body }) => send(res, 201, Tasks.duplicateTask(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/actions/:action', (req, res, { ctx, params, body }) => {
   Tasks.transition(ctx, intOrNull(params.id), params.action, body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));

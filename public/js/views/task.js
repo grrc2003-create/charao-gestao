@@ -151,13 +151,14 @@ function build(t, ctx) {
           ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
-        ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked ? html`<details class="act-menu">
+        ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked || can.duplicate ? html`<details class="act-menu">
           <summary class="btn btn-ghost btn-sm">${icon('more')}Ações<span class="act-chev">${icon('chevron')}</span></summary>
           <div class="act-list" role="menu">
           ${t.checklist ? html`<a class="act-item" data-cl-report href="${checklistReportLink(t)}">${icon('print')}Relatório PDF</a>` : ''}
           ${can.edit ? html`<a class="act-item" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
           ${can.reassign ? html`<button type="button" class="act-item" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
           ${can.reschedule ? html`<button type="button" class="act-item" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
+          ${can.duplicate ? html`<button type="button" class="act-item" data-act="duplicate">${icon('file')}Duplicar${t.parent_id ? ' subtarefa' : t.subtasks?.length ? ' com subtarefas' : ' tarefa'}</button>` : ''}
           ${can.conclude_directly ? html`<button type="button" class="act-item" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
           ${can.reopen ? html`<button type="button" class="act-item" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
           ${can.reactivate ? html`<button type="button" class="act-item is-primary" data-act="reactivate">${icon('history')}Reativar tarefa</button>` : ''}
@@ -273,6 +274,29 @@ function mount(root, t, ctx) {
   });
 
   const actions = {
+    // Duplicar a tarefa (com subtarefas / itens do check-list); responsáveis e prazos só se marcados
+    duplicate: async () => {
+      const nSubs = (t.subtasks || []).filter(s => !s.cancelled_at).length;
+      const projects = (ctx.state.meta.projects || []).filter(p => !['concluido', 'cancelado'].includes(p.status));
+      const r = await sheet({
+        title: t.parent_id ? 'Duplicar subtarefa' : 'Duplicar tarefa',
+        submitLabel: 'Duplicar',
+        body: html`<p class="muted" style="margin:0 0 10px">Cria uma cópia ${t.parent_id ? `dentro de <b>${t.parent_code}</b>` : ''} com título, descrição, observações, prioridade, comprovação,
+            classificação e referências${nSubs ? html`, <b>e as ${nSubs} subtarefa(s)</b>` : ''}${t.checklist ? html`, <b>e os ${t.checklist.items.length} itens do check-list</b> (sem respostas e sem fotos)` : ''}.
+            A cópia nasce aberta, sem execução nem histórico.</p>
+          <div class="field"><label class="req" for="dup-t">Título da cópia</label><input id="dup-t" name="title" type="text" maxlength="160" required value="${t.title} (cópia)"></div>
+          ${!t.parent_id ? html`<div class="field"><label for="dup-p">Projeto</label><select id="dup-p" name="project_id">
+            ${projects.map(p => html`<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select>
+            <span class="hint">Em outro projeto, a classificação é mantida se lá existir uma com o mesmo nome.</span></div>` : ''}
+          <label class="switch"><input type="checkbox" name="keep_assignees" value="1">Manter os responsáveis</label>
+          <label class="switch"><input type="checkbox" name="keep_dates" value="1">Manter os prazos</label>
+          <span class="hint">Sem marcar, a cópia fica sem responsável e sem prazo, para definir depois.</span>`,
+        onSubmit: d => api(`/tasks/${t.id}/duplicate`, { method: 'POST', body: d }),
+      });
+      if (!r || !r.id) return;
+      toast(`Cópia criada: ${r.code}${r.subtasks ? ` com ${r.subtasks} subtarefa(s)` : ''}.`);
+      ctx.navigate(`/tarefas/${r.id}`);
+    },
     reassign: async () => {
       let people;
       try { people = await api(`/projects/${t.project_id}/assignees`); } catch (e) { return toast(e.message, 'err'); }

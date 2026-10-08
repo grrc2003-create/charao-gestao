@@ -321,7 +321,8 @@ export function dueLevel(due, resolved, today = todayISO()) {
 // Filtro por grupo e/ou responsável (tela e relatório). '' = todos; '~' = sem grupo / sem responsável.
 export const NONE = '~';
 const PHOTOS_KEY = 'cl-show-photos';
-const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) === '1'; } catch { return false; } };
+// Padrão: fotos visíveis (ocultar fica guardado no aparelho)
+const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) !== '0'; } catch { return true; } };
 const saveShowPhotos = v => { try { localStorage.setItem(PHOTOS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
 const keyOf = v => v || NONE;
 // f = { group, spec, resp } (valores '' = todos)

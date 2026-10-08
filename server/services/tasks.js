@@ -102,6 +102,9 @@ export function loadVisible(ctx, id) {
   return t;
 }
 
+// Check-list: o prazo da tarefa acompanha o maior prazo dos itens (quando algum item tem prazo)
+export const checklistMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM checklist_items WHERE task_id = ?', taskId)?.d || null;
+
 export function permissionsFor(ctx, t) {
   const manage = canManageTask(ctx, t);
   if (t.cancelled_at) {
@@ -114,7 +117,8 @@ export function permissionsFor(ctx, t) {
   return {
     edit: manage && t.status !== 'concluida',
     reassign: canReassignTask(ctx, t),
-    reschedule: manage && t.status !== 'concluida' && !!t.due_date,
+    reschedule: manage && t.status !== 'concluida' && !!t.due_date && !(t.task_type === 'checklist' && checklistMaxDue(t.id)),
+    due_from_items: t.task_type === 'checklist' && !!checklistMaxDue(t.id),
     execute: editableExec,
     start: execute && t.status === 'aberta',
     submit: editableExec,
@@ -234,7 +238,12 @@ export function createTask(ctx, body) {
     proof_type: isChecklist ? 'nenhuma' : oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação', 'nenhuma'),
     assignee_id: validateAssignee(intOrNull(body.assignee_id), projectId),
   };
-  if (isChecklist) data.items = readItems(body.items, projectId, { required: true, requirePhoto: data.photo_rule === 'obrigatoria' });
+  if (isChecklist) {
+    data.items = readItems(body.items, projectId, { required: true, requirePhoto: data.photo_rule === 'obrigatoria' });
+    // Prazo do check-list = maior prazo dos itens (quando algum item tem prazo)
+    const maxDue = data.items.map(i => i.due_date).filter(Boolean).sort().at(-1);
+    if (maxDue) data.due_date = maxDue;
+  }
   assertDateOrder(data.start_date, data.due_date);
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
   return tx(() => insertTask({ project, parent, data, stageInput: body.stage_id, creatorId: ctx.user.id, images, ctx }));
@@ -321,6 +330,8 @@ export function updateTask(ctx, id, body) {
   if ('due_date' in body) {
     const nd = date(body.due_date, 'Prazo');
     if ((nd ?? null) !== (t.due_date ?? null)) {
+      const maxDue = t.task_type === 'checklist' ? checklistMaxDue(t.id) : null;
+      if (maxDue) throw badRequest(`O prazo do check-list acompanha o maior prazo dos itens (${fmtDate(maxDue)}). Para mudar, altere o prazo dos itens.`);
       next.due_date = nd;
       if (t.due_date) {
         const reason = activeReason(body.reschedule_reason_id);

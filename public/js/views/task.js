@@ -139,7 +139,7 @@ function build(t, ctx) {
           <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
           <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}
             ${t.assignee_external ? html`<small>Terceirizado${t.assignee_company ? ` · ${t.assignee_company}` : ''} · líder: ${t.assignee_leader_name || '—'}</small>` : ''}</div></div>
-          <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.cancelled_at ? 'Tarefa cancelada' : t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
+          <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}<small>${t.cancelled_at ? 'Tarefa cancelada' : can.due_from_items && !t.delivered ? `${relDue(t)} · maior prazo dos itens` : t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
             <span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
             ${t.reschedule_count ? html`<button type="button" class="resched-badge ${t.chronic ? 'is-chronic' : ''}" data-act="goresched" style="cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada${t.chronic ? ' · crônica' : ''}</button>` : ''}
             ${t.late_episodes ? html`<i class="late-badge" title="Repactuações após vencer + entrega após o prazo + atraso atual">atrasou ${t.late_episodes}x</i>` : ''}</span></div></div>
@@ -212,12 +212,13 @@ function build(t, ctx) {
           <div class="who">${r.user_name || '—'} · ${fmtDateTime(r.created_at)}</div></li>`)}</ol></div>
       </section>` : ''}
 
-      <section class="card block">
-        <header class="block-head"><span class="step" style="background:var(--steel)">${icon('history')}</span><h2>Histórico</h2></header>
+      <details class="card block block-fold block-hist">
+        <summary class="block-head"><span class="step" style="background:var(--steel)">${icon('history')}</span><h2>Histórico</h2>
+          <span class="right muted" style="font-size:12px">${t.history.length} registro(s) · <span class="fold-hint">ver histórico</span></span><span class="fold-chev" aria-hidden="true">${icon('chevron')}</span></summary>
         <div class="block-body"><ul class="timeline">${t.history.map(h => html`<li>
           <div class="act">${h.action}</div>${h.details ? html`<div class="det">${h.details}</div>` : ''}
           <div class="who">${h.user_name || 'Sistema'} · ${fmtDateTime(h.created_at)}</div></li>`)}</ul></div>
-      </section>
+      </details>
 
       ${can.submit && canSend ? html`<div class="sticky-actions only-mobile" style="display:flex"><button type="button" class="btn btn-success" data-act="submit">${icon('send')}Enviar para conferência</button></div>` : ''}
       ${can.review ? html`<div class="sticky-actions only-mobile" style="display:flex">

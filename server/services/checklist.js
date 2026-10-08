@@ -7,7 +7,7 @@ import { today, addDays, daysBetween, decorate } from './metrics.js';
 import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
-import { loadVisible, validateAssignee, autoStart } from './tasks.js';
+import { loadVisible, validateAssignee, autoStart, checklistMaxDue } from './tasks.js';
 
 export const PHOTO_RULES = ['obrigatoria', 'livre'];
 export const PHOTO_RULE_LABEL = { obrigatoria: 'Foto obrigatória em todos os itens', livre: 'Foto opcional (livre escolha)' };
@@ -76,6 +76,16 @@ function slotFor(taskId, group) {
     return last + 1;
   }
   return one('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM checklist_items WHERE task_id = ?', taskId).n;
+}
+
+// O prazo da tarefa acompanha o maior prazo dos itens (registrado no histórico quando muda)
+function syncTaskDue(t, userId) {
+  const maxDue = checklistMaxDue(t.id);
+  const cur = one('SELECT due_date FROM tasks WHERE id = ?', t.id).due_date;
+  if (!maxDue || maxDue === cur) return;
+  const fmt = d => (d ? d.split('-').reverse().join('/') : 'sem prazo');
+  run('UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?', maxDue, nowIso(), t.id);
+  taskHistory(t.id, userId, 'Prazo do check-list ajustado', `${fmt(cur)} → ${fmt(maxDue)} · acompanha o maior prazo dos itens`);
 }
 
 // Grava os itens (e as fotos de entrada). userId = quem está criando.
@@ -361,6 +371,7 @@ export function addItems(ctx, taskId, body) {
   tx(() => {
     insertItems(t.id, items, ctx.user.id);
     taskHistory(t.id, ctx.user.id, 'Itens adicionados ao check-list', `${items.length} item(ns)`);
+    syncTaskDue(t, ctx.user.id);
   });
 }
 
@@ -415,6 +426,7 @@ export function updateItem(ctx, taskId, itemId, body) {
     if (rest.length) run(`UPDATE checklist_items SET ${rest.map(f => `${f} = ?`).join(', ')} WHERE id = ?`, ...rest.map(f => next[f]), item.id);
     if (groupChanged) moveToGroup(t.id, item.id, group);
     taskHistory(t.id, ctx.user.id, 'Item do check-list alterado', `${item.seq}. ${item.text} · ${changes.join(' · ')}`);
+    syncTaskDue(t, ctx.user.id);
   });
 }
 
@@ -460,6 +472,7 @@ export function deleteItem(ctx, taskId, itemId) {
     run('DELETE FROM checklist_items WHERE id = ?', item.id);
     renumber(t.id);
     taskHistory(t.id, ctx.user.id, 'Item excluído do check-list', `${item.seq}. ${item.text}`);
+    syncTaskDue(t, ctx.user.id);
   });
   for (const f of files) deleteStored(f.stored_name);
 }

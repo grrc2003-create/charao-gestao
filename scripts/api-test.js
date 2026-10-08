@@ -738,7 +738,21 @@ async function main() {
   await ricardo('POST', `/tasks/${clK}/items/${iRes}/answer`, { result: 'conforme' });
   const d1 = (await ricardo('GET', '/dashboard')).data;
   ok(d1.summary.total === d0.summary.total + 4 && d1.checklist_items >= 3, `dashboard soma o check-list e os 3 itens como subtarefas (${d0.summary.total} → ${d1.summary.total})`);
-  ok(d1.summary.late === d0.summary.late + 1 && d1.summary.done === d0.summary.done + 1, 'item vencido conta como atrasado e item Conforme como concluído');
+  ok(d1.summary.late === d0.summary.late + 3 && d1.summary.done === d0.summary.done + 1, `atrasados: o item vencido, o item sem prazo próprio (segue o do check-list) e o próprio check-list; item Conforme concluído (late ${d0.summary.late}→${d1.summary.late}, done ${d0.summary.done}→${d1.summary.done})`);
+  // Prazo do check-list acompanha o maior prazo dos itens
+  let ck = (await ricardo('GET', `/tasks/${clK}`)).data;
+  ok(ck.due_date === '2020-01-05' && ck.can.due_from_items && !ck.can.reschedule, 'check-list criado com o prazo do item mais longo (sem reagendamento manual)');
+  const iEmDia = ck.checklist.items[1].id;
+  ck = (await ricardo('PATCH', `/tasks/${clK}/items/${iEmDia}`, { start_date: '2099-03-01', due_date: '2099-03-20' })).data;
+  ok(ck.due_date === '2099-03-20' && ck.history.some(h => h.action === 'Prazo do check-list ajustado' && h.details.includes('20/03/2099')), 'prazo do item maior: prazo do check-list acompanha e fica no histórico');
+  ok((await ricardo('PATCH', `/tasks/${clK}`, { due_date: '2099-12-31', reschedule_reason_id: 1 })).status === 400, 'prazo do check-list não muda à mão enquanto os itens têm prazo');
+  ck = (await ricardo('PATCH', `/tasks/${clK}/items/${iEmDia}`, { due_date: '2099-02-10', start_date: '2099-02-01' })).data;
+  ok(ck.due_date === '2099-02-10', 'prazo do item reduzido: o check-list acompanha o novo maior prazo');
+  ck = (await ricardo('POST', `/tasks/${clK}/items`, { items: [{ text: 'Item tardio', due_date: '2099-05-05' }] })).data;
+  const iTard = ck.checklist.items.find(i => i.text === 'Item tardio').id;
+  ok(ck.due_date === '2099-05-05', 'item novo com prazo maior estende o prazo do check-list');
+  ck = (await ricardo('DELETE', `/tasks/${clK}/items/${iTard}`)).data;
+  ok(ck.due_date === '2099-02-10', 'item excluído: o prazo volta ao maior dos itens restantes');
   ok(d1.users.find(u => u.id === 5)?.stats.assigned > (d0.users.find(u => u.id === 5)?.stats.assigned || 0), 'itens entram no desempenho do responsável');
   const cd = d1.checklists.find(c => c.id === clK);
   ok(cd && cd.total === 3 && cd.resolved === 1 && cd.pending === 2 && cd.overdue === 1 && cd.pct === 33, 'Dashboard: situação de cada check-list (itens, concluídos, sem resposta, atrasados)');

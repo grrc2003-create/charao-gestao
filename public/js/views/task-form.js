@@ -67,7 +67,8 @@ export async function view({ params, query, state, navigate }) {
               <select id="assignee_id" name="assignee_id"><option value="">Selecione o projeto primeiro</option></select>
               <span class="hint cl-only" ${isChecklist ? '' : 'hidden'}><b>Responsável global</b>: acompanha todos os itens, responde os que não têm responsável próprio e envia o check-list para conferência.</span>
               <span class="hint" id="assignee-hint">Aparecem os usuários e terceirizados da equipe do projeto. Não encontrou alguém? Inclua a pessoa na equipe (Projetos → Editar) ou libere o projeto em Usuários.</span></div>
-            <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}"></div>
+            <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}" ${editing && t.can?.due_from_items ? 'readonly' : ''}>
+              <span class="hint cl-only" id="due-hint" ${isChecklist ? '' : 'hidden'}>No check-list, o prazo acompanha o <b>maior prazo dos itens</b>${editing && t.can?.due_from_items ? ' — altere o prazo dos itens para mudar.' : ' (se algum item tiver data de término).'}</span></div>
           </div>
           <div class="form-row" id="start-row">
             <div class="field"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
@@ -147,6 +148,10 @@ export async function view({ params, query, state, navigate }) {
       const draft = root.querySelector('#cl-draft');
       const drawItems = () => {
         if (!draft) return;
+        // Prazo do check-list = maior prazo dos itens do rascunho
+        const maxDue = items.map(i => i.due_date).filter(Boolean).sort().at(-1);
+        if (maxDue) f.due_date.value = maxDue;
+        f.due_date.readOnly = !!maxDue;
         draft.innerHTML = renderDraft(items, team, globalName()).toString();
         root.querySelector('#cl-count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'itens'}`;
         root.querySelector('#cl-clear').hidden = !items.length;

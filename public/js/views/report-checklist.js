@@ -14,6 +14,8 @@ const specRank = k => (!k ? 1e6 : SPEC_ORDER.includes(k) ? SPEC_ORDER.indexOf(k)
 const DIMS = {
   grupo: { label: 'Grupo', key: i => i.group || '', name: k => k || 'Sem grupo' },
   especialidade: { label: 'Especialidade', key: i => i.specialty || '', name: k => k || 'Sem especialidade', sort: (a, b) => specRank(a) - specRank(b) || a.localeCompare(b, 'pt-BR') },
+  situacao: { label: 'Situação', key: i => (i.open_nc ? '1' : !i.result ? '2' : i.result === 'conforme' ? '3' : '4'),
+    name: k => ({ 1: 'Não conforme em aberto', 2: 'Pendente', 3: 'Conforme', 4: 'N/A' })[k], sort: (a, b) => a.localeCompare(b) },
   responsavel: { label: 'Responsável', key: i => i.responsible_name || '', name: k => k || 'Sem responsável', sort: (a, b) => a.localeCompare(b, 'pt-BR') },
   dia: { label: 'Data (dia)', key: i => periodKey(i.due_date, 'dia'), name: k => periodInfo(k, 'dia').label, sort: (a, b) => a.localeCompare(b) },
   semana: { label: 'Data (semana)', key: i => periodKey(i.due_date, 'semana'), name: k => periodInfo(k, 'semana').label, sort: (a, b) => a.localeCompare(b) },

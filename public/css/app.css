@@ -1174,3 +1174,20 @@ textarea.wiz-input { min-height: 90px; }
   .cli-sum-r { grid-column: 2 / 3; justify-content: flex-start; }
   .cli-chev { grid-row: 1; grid-column: 3; }
 }
+
+/* Check-list: responsável na linha recolhida */
+.cli-who { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; font-weight: 650; color: var(--ink-2);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px 1px 2px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.cli-who i { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 9px; font-weight: 800; background: var(--navy); color: #fff; }
+.cli-who.is-mine { border-color: color-mix(in srgb, var(--orange) 45%, var(--line)); background: var(--orange-50); color: var(--orange-700); }
+.cli-who.is-mine i { background: var(--orange); }
+/* Agrupamento em níveis */
+.cl-by { align-items: center; gap: 6px 8px; }
+.cl-lvl { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 2px 4px 2px 10px; background: var(--surface); }
+.cl-lvl > span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); white-space: nowrap; }
+.cl-lvl select { border: 0; background: transparent; font: inherit; font-size: 14px; padding: 6px 2px; min-height: 34px; color: inherit; min-width: 0; }
+@media (max-width: 559px) { .cl-lvl { flex: 1 1 100%; } .cl-lvl select { flex: 1; } }
+.clg .clg { margin: 4px 0 2px 10px; padding-left: 8px; border-left: 2px solid var(--line); }
+.clg-head h4 { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.clg-head h4 small { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: 2px; }
+.clg .clg .clg-bar { height: 3px; }

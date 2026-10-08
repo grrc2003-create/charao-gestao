@@ -2,6 +2,7 @@
 // numa tela só (Conforme / Não conforme / N/A, observação e fotos), com avanço automático para o próximo item.
 import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
+import { periodKey, periodInfo } from './periods.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
@@ -304,7 +305,7 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', by: 'group', open: new Set() });
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set() });
 
 // Urgência do prazo: atrasado (vermelho) · vence hoje (laranja) · nos próximos 7 dias (amarelo) · depois (azul)
 export function dueLevel(due, resolved, today = todayISO()) {
@@ -344,35 +345,46 @@ export const checklistReportLink = t => {
   if (st.fGroup) q.set('grupo', st.fGroup);
   if (st.fSpec) q.set('esp', st.fSpec);
   if (st.fResp) q.set('resp', st.fResp);
-  if (st.by === 'spec') q.set('g1', 'especialidade');
+  // Mesmo agrupamento da tela (o relatório usa os mesmos nomes de nível)
+  if (st.levels.join() !== 'grupo') st.levels.forEach((d, i) => q.set(`g${i + 1}`, d));
+  if (!st.levels.length) q.set('g1', 'nenhum');
   return `#/imprimir/checklist/${t.id}${q.size ? `?${q}` : ''}`;
 };
 let scrollTo = null;
 
+// "Bruno Costa" → "Bruno C." (cabe na linha recolhida)
+const shortName = n => { const p = String(n || '—').trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p.at(-1)[0]}.` : p[0]; };
 const initials = n => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
 const shortDate = iso => fmtDateTime(iso).replace(/\/\d{4},/, ',');
 
-// Por especialidade: na ordem do modelo da obra (as fora do modelo depois, "Sem especialidade" por último)
-function specGroupsOf(items, order = []) {
+// Agrupamento da lista em até 3 níveis (combináveis). Situação e prazo (semana) seguem ordem fixa/cronológica.
+const SIT = it => (it.open_nc ? '1' : !it.result ? '2' : it.result === 'conforme' ? '3' : '4');
+const SIT_NAME = { 1: 'Não conforme em aberto', 2: 'Pendente', 3: 'Conforme', 4: 'N/A' };
+export const GROUP_DIMS = {
+  grupo: { label: 'Grupo', key: it => it.group || '', name: k => k || 'Sem grupo' },
+  especialidade: { label: 'Especialidade', key: it => it.specialty || '', name: k => k || 'Sem especialidade', rank: true },
+  responsavel: { label: 'Responsável', key: it => it.responsible_name || '', name: k => k || 'Sem responsável', sort: (a, b) => a.localeCompare(b, 'pt-BR') },
+  situacao: { label: 'Situação', key: SIT, name: k => SIT_NAME[k], sort: (a, b) => a.localeCompare(b) },
+  semana: { label: 'Prazo (semana)', key: it => periodKey(it.due_date, 'semana'), name: k => { const p = periodInfo(k, 'semana'); return p.hint ? `${p.label} · ${p.hint}` : p.label; }, sort: (a, b) => a.localeCompare(b) },
+};
+function groupItems(items, dim, specOrder = []) {
+  const d = GROUP_DIMS[dim];
   const m = new Map();
   for (const it of items) {
-    const k = it.specialty || '';
+    const k = d.key(it);
     if (!m.has(k)) m.set(k, []);
     m.get(k).push(it);
   }
-  const rank = k => (!k ? 1e6 : order.includes(k) ? order.indexOf(k) : 1e5);
-  return [...m.keys()].sort((a, b) => rank(a) - rank(b)).map(k => ({ name: k, items: m.get(k) }));
+  const keys = [...m.keys()];
+  if (d.rank) {
+    const r = k => (!k ? 1e6 : specOrder.includes(k) ? specOrder.indexOf(k) : 1e5);
+    keys.sort((a, b) => r(a) - r(b));
+  } else if (d.sort) keys.sort(d.sort);
+  else keys.sort((a, b) => (a ? 0 : 1) - (b ? 0 : 1)); // grupo: ordem dos itens, "Sem grupo" por último
+  return keys.map(k => ({ key: k, name: d.name(k), items: m.get(k) }));
 }
-
-function groupsOf(items) {
-  const groups = [];
-  for (const it of items) {
-    const g = groups.at(-1);
-    if (g && g.name === (it.group || '')) g.items.push(it);
-    else groups.push({ name: it.group || '', items: [it] });
-  }
-  return groups;
-}
+// Níveis válidos: sem repetir e só os que existem (especialidade só quando há itens com ela)
+const cleanLevels = (levels, hasSpecs) => levels.filter((d, i) => GROUP_DIMS[d] && levels.indexOf(d) === i && (d !== 'especialidade' || hasSpecs)).slice(0, 3);
 
 const photo = (f, caption, cls = '') => html`<figure class="cli-ph ${cls}" data-src="/api/checklist-files/${f.id}" data-caption="${caption}">
   <img src="/api/checklist-files/${f.id}" alt="${caption}" loading="lazy"></figure>`;
@@ -404,13 +416,14 @@ function itemCard(t, it, c) {
       <span class="cli-num">${it.seq}</span>
       <span class="cli-title">${it.text}</span>
       <span class="cli-sum-r">
+        <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
         ${mainState}
       </span>
       <span class="cli-chev" aria-hidden="true">${icon('chevron')}</span>
     </summary>`;
   const head = html`<div class="cli-top cli-top-open">${menu}</div>
-    ${it.specialty || (it.group && uiOf(t.id).by === 'spec') ? html`<div class="cli-tags">${it.specialty ? html`<span class="cli-spec">${it.specialty}</span>` : ''}${it.group && uiOf(t.id).by === 'spec' ? html`<span class="cli-grp">${it.group}</span>` : ''}</div>` : ''}
+    ${it.specialty || (it.group && !uiOf(t.id).levels.includes('grupo')) ? html`<div class="cli-tags">${it.specialty ? html`<span class="cli-spec">${it.specialty}</span>` : ''}${it.group && !uiOf(t.id).levels.includes('grupo') ? html`<span class="cli-grp">${it.group}</span>` : ''}</div>` : ''}
     <div class="cli-facts">
       <span class="fact-who ${it.mine ? 'is-mine' : ''}"><i>${initials(it.responsible_name)}</i><span><small>Responsável${it.assignee_id ? '' : ' (global)'}${it.mine ? ' · seu item' : ''}</small><b>${it.responsible_name}</b></span></span>
       ${dueBox}
@@ -486,7 +499,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
   if (st.fSpec && !opts.specs.includes(st.fSpec)) st.fSpec = '';
   if (st.fResp && !opts.resps.includes(st.fResp)) st.fResp = '';
   const hasSpecs = c.items.some(i => i.specialty);
-  if (!hasSpecs) st.by = 'group';
+  st.levels = cleanLevels(st.levels, hasSpecs);
   const LBL = { group: 'Grupo', spec: 'Especialidade', resp: 'Responsável' };
   const sel = (kind, cur, list, all) => html`<label class="cl-sel ${cur ? 'is-on' : ''}"><span>${LBL[kind]}</span>
     <select data-clsel="${kind}"><option value="">${all}</option>${list.map(k => html`<option value="${k}" ${k === cur ? 'selected' : ''}>${optLabel(k, kind)}</option>`)}</select></label>`;
@@ -497,15 +510,33 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
       <span class="cl-sel-info" data-clsel-info></span>
       <button type="button" class="btn btn-ghost btn-sm" data-clsel-clear ${st.fGroup || st.fSpec || st.fResp ? '' : 'hidden'}>Limpar filtro</button>
     </div>` : '';
-  // Agrupar a lista por grupo (ambiente) ou por especialidade
-  const bySpec = st.by === 'spec';
-  const groups = bySpec ? specGroupsOf(c.items, t._specs || []) : groupsOf(c.items);
+  // Agrupar em até 3 níveis (ex.: Grupo › Especialidade › Responsável)
   const photosOn = showPhotos();
+  const dimOpts = Object.entries(GROUP_DIMS).filter(([k]) => k !== 'especialidade' || hasSpecs);
+  const lvlSel = n => html`<label class="cl-lvl"><span>${n === 0 ? 'Agrupar por' : n === 1 ? 'depois por' : 'e por'}</span>
+    <select data-cllvl="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${dimOpts.map(([k, d]) => html`<option value="${k}" ${st.levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`;
   const byToggle = html`<div class="cl-by">
-      ${hasSpecs ? html`<span>Agrupar por</span>
-      <button type="button" class="chip" data-clby="group" aria-pressed="${!bySpec}">Grupo</button>
-      <button type="button" class="chip" data-clby="spec" aria-pressed="${bySpec}">Especialidade</button>` : ''}
+      ${lvlSel(0)}${st.levels.length >= 1 ? lvlSel(1) : ''}${st.levels.length >= 2 ? lvlSel(2) : ''}
       <button type="button" class="chip cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button></div>`;
+  // Seções aninhadas: cabeçalho com progresso; "+ Item" e "Grupo" quando o nível é Grupo
+  const sections = (items, depth = 0) => {
+    if (depth >= st.levels.length) return html`${items.map(it => itemCard(t, it, c))}`;
+    const dim = st.levels[depth];
+    return html`${groupItems(items, dim, t._specs || []).map(g => {
+      const done = g.items.filter(i => i.resolved).length;
+      const pct = Math.round((done / g.items.length) * 100);
+      const isGroup = dim === 'grupo' && c.can_manage_items;
+      return html`<section class="clg clg-l${depth}">
+        <header class="clg-head">
+          <div class="clg-name">${depth === 0 ? html`<h3>${g.name}</h3>` : html`<h4><small>${GROUP_DIMS[dim].label}:</small> ${g.name}</h4>`}<div class="clg-bar"><span style="width:${pct}%"></span></div></div>
+          <span class="clg-count">${done}/${g.items.length}</span>
+          ${isGroup ? html`<button type="button" class="clg-btn" data-add-group="${g.key}" title="Adicionar item neste grupo">${icon('plus')}<span>Item</span></button>
+            ${g.items.length > 1 ? html`<button type="button" class="clg-btn" data-assign-group="${g.items.map(i => i.id).join(',')}" data-group-name="${g.name}" title="Definir o responsável do grupo">${icon('user')}<span>Grupo</span></button>` : ''}` : ''}
+        </header>
+        <div class="clg-items">${sections(g.items, depth + 1)}</div>
+      </section>`;
+    })}`;
+  };
   return html`<section class="card block block-exec" id="checklist" aria-labelledby="blk-cl">
     <header class="block-head"><span class="step">2</span><h2 id="blk-cl">Check-list</h2>
       <span class="right muted" style="font-size:12px">${s.done} de ${s.total} concluídos${s.nc_total ? ` · ${s.nc_total} NC no histórico` : ''}</span></header>
@@ -535,19 +566,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         ${itemForm()}
       </div>` : ''}
       <div class="cl-list ${photosOn ? '' : 'no-photos'}" data-filter="${f}">
-        ${groups.map(g => {
-          const done = g.items.filter(i => i.result).length;
-          const pct = Math.round((done / g.items.length) * 100);
-          return html`<section class="clg">
-            <header class="clg-head">
-              <div class="clg-name"><h3>${g.name || (bySpec ? 'Sem especialidade' : 'Itens')}</h3><div class="clg-bar"><span style="width:${pct}%"></span></div></div>
-              <span class="clg-count">${done}/${g.items.length}</span>
-              ${c.can_manage_items && !bySpec ? html`<button type="button" class="clg-btn" data-add-group="${g.name}" title="Adicionar item neste grupo">${icon('plus')}<span>Item</span></button>
-                ${g.items.length > 1 ? html`<button type="button" class="clg-btn" data-assign-group="${g.items.map(i => i.id).join(',')}" data-group-name="${g.name || 'Itens'}" title="Definir o responsável do grupo">${icon('user')}<span>Grupo</span></button>` : ''}` : ''}
-            </header>
-            <div class="clg-items">${g.items.map(it => itemCard(t, it, c))}</div>
-          </section>`;
-        })}
+        ${st.levels.length ? sections(c.items) : html`<div class="clg-items">${c.items.map(it => itemCard(t, it, c))}</div>`}
         <div class="cl-none muted">Nenhum item neste filtro.</div>
       </div>
       ${can.submit ? html`<div class="submit-bar">
@@ -621,16 +640,15 @@ export function bindChecklist(root, t, ctx, refresh) {
     const f = list.dataset.filter;
     const chipOk = it => (f === 'mine' ? it.mine : f === 'pending' ? !it.resolved : f === 'nc' ? it.open_nc : true);
     let shown = 0, inSel = 0;
-    list.querySelectorAll('.clg').forEach(sec => {
-      let any = false;
-      sec.querySelectorAll('.cli').forEach(el => {
-        const it = byId.get(Number(el.id.slice(4)));
-        const ok = !!it && matchItem(it, filterOf(st));
-        el.classList.toggle('is-filtered', !ok);
-        if (ok) { inSel++; if (chipOk(it)) { any = true; shown++; } }
-      });
-      sec.classList.toggle('is-filtered', !any);
+    // Itens (com ou sem agrupamento) e depois as seções (em qualquer nível) que ficaram sem item visível
+    list.querySelectorAll('.cli').forEach(el => {
+      const it = byId.get(Number(el.dataset.itemId || el.id.slice(4)));
+      const ok = !!it && matchItem(it, filterOf(st));
+      el.classList.toggle('is-filtered', !ok);
+      el.dataset.vis = ok && chipOk(it) ? '1' : '0';
+      if (ok) { inSel++; if (chipOk(it)) shown++; }
     });
+    list.querySelectorAll('.clg').forEach(sec => sec.classList.toggle('is-filtered', !sec.querySelector('.cli[data-vis="1"]')));
     const none = list.querySelector('.cl-none');
     if (none) none.style.display = shown ? 'none' : 'block';
     const active = !!(st.fGroup || st.fSpec || st.fResp);
@@ -665,9 +683,11 @@ export function bindChecklist(root, t, ctx, refresh) {
     const g = galleryFrom(card);
     if (g.length) lightbox(g[0].src, g[0].caption, g);
   }));
-  root.querySelectorAll('[data-clby]').forEach(b => b.addEventListener('click', () => {
-    if (st.by === b.dataset.clby) return;
-    st.by = b.dataset.clby;
+  // Níveis de agrupamento: um nível vazio encerra a sequência
+  root.querySelectorAll('[data-cllvl]').forEach(sel => sel.addEventListener('change', () => {
+    const vals = [...root.querySelectorAll('[data-cllvl]')].map(x => x.value);
+    const cut = vals.indexOf('');
+    st.levels = cleanLevels(cut < 0 ? vals : vals.slice(0, cut), true);
     refresh(t);
   }));
   root.querySelectorAll('.cl-filters [data-clf]').forEach(b => b.addEventListener('click', () => {

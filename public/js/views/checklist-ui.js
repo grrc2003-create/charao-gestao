@@ -517,8 +517,17 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
   const lvlSel = n => html`<label class="cl-lvl"><span>${n === 0 ? 'Agrupar por' : n === 1 ? 'depois por' : 'e por'}</span>
     <select data-cllvl="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${dimOpts.map(([k, d]) => html`<option value="${k}" ${st.levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`;
   const byToggle = html`<div class="cl-by">
-      ${lvlSel(0)}${st.levels.length >= 1 ? lvlSel(1) : ''}${st.levels.length >= 2 ? lvlSel(2) : ''}
-      <button type="button" class="chip cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button></div>`;
+      ${lvlSel(0)}${st.levels.length >= 1 ? lvlSel(1) : ''}${st.levels.length >= 2 ? lvlSel(2) : ''}</div>`;
+  // Filtros e agrupamento ficam num menu; o botão mostra quantos filtros estão ativos e o agrupamento em uso
+  const nFilters = [st.fGroup, st.fSpec, st.fResp].filter(Boolean).length;
+  const filterMenu = c.items.length ? html`<details class="cl-fmenu" ${st.fmenu ? 'open' : ''}>
+      <summary class="btn btn-ghost btn-sm">${icon('filter')}<span>Filtros e agrupamento</span><span class="cl-fcount" data-fcount ${nFilters ? '' : 'hidden'}>${nFilters}</span><span class="cl-fchev">${icon('chevron')}</span></summary>
+      <div class="cl-fpanel">
+        <div class="cl-fsec"><span class="cl-fsec-t">Agrupar</span>${byToggle}</div>
+        <div class="cl-fsec"><span class="cl-fsec-t">Filtrar</span>${selects}</div>
+      </div>
+    </details>` : '';
+  const groupInfo = st.levels.length ? st.levels.map(d => GROUP_DIMS[d].label).join(' › ') : 'sem agrupamento';
   // Seções aninhadas: cabeçalho com progresso; "+ Item" e "Grupo" quando o nível é Grupo
   const sections = (items, depth = 0) => {
     if (depth >= st.levels.length) return html`${items.map(it => itemCard(t, it, c))}`;
@@ -558,9 +567,12 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           ${chip('all', 'Todos', s.total)}${s.mine_pending || c.items.some(i => i.mine) ? chip('mine', 'Meus itens', s.mine_pending ? `${s.mine_pending} pend.` : undefined) : ''}
           ${chip('pending', 'Pendentes', s.total - s.done)}${s.nao_conforme ? chip('nc', 'Não conformes', s.nao_conforme) : ''}
         </div>
-        ${byToggle}
-        ${selects}
-        ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
+        <div class="cl-tools">
+          ${filterMenu}
+          <button type="button" class="btn btn-ghost btn-sm cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button>
+          ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
+          <span class="cl-ginfo muted">Agrupado: ${groupInfo}<span data-clsel-info2></span></span>
+        </div>
       </div>
       ${c.can_manage_items ? html`<div class="cl-add-panel" id="cl-add-panel" ${st.adding ? '' : 'hidden'}>
         <div class="cl-add-head"><b>${icon('plus')} Novo item</b><button type="button" class="icon-btn" id="cl-add-close" aria-label="Fechar">✕</button></div>
@@ -653,6 +665,11 @@ export function bindChecklist(root, t, ctx, refresh) {
     const none = list.querySelector('.cl-none');
     if (none) none.style.display = shown ? 'none' : 'block';
     const active = !!(st.fGroup || st.fSpec || st.fResp);
+    const n = [st.fGroup, st.fSpec, st.fResp].filter(Boolean).length;
+    const fc = root.querySelector('[data-fcount]');
+    if (fc) { fc.textContent = n; fc.hidden = !n; }
+    const i2 = root.querySelector('[data-clsel-info2]');
+    if (i2) i2.textContent = active ? ` · filtro: ${inSel} de ${c.items.length} itens` : '';
     const info = root.querySelector('[data-clsel-info]');
     if (info) info.textContent = active ? `${inSel} de ${c.items.length} itens` : '';
     root.querySelector('[data-clsel-clear]')?.toggleAttribute('hidden', !active);
@@ -684,6 +701,12 @@ export function bindChecklist(root, t, ctx, refresh) {
     const g = galleryFrom(card);
     if (g.length) lightbox(g[0].src, g[0].caption, g);
   }));
+  // Menu de filtros: lembra se está aberto (o agrupamento redesenha a lista) e fecha ao clicar fora
+  const fmenu = root.querySelector('.cl-fmenu');
+  if (fmenu) {
+    fmenu.addEventListener('toggle', () => { st.fmenu = fmenu.open; });
+    document.addEventListener('click', e => { if (fmenu.open && fmenu.isConnected && !fmenu.contains(e.target)) fmenu.open = false; });
+  }
   // Níveis de agrupamento: um nível vazio encerra a sequência
   root.querySelectorAll('[data-cllvl]').forEach(sel => sel.addEventListener('change', () => {
     const vals = [...root.querySelectorAll('[data-cllvl]')].map(x => x.value);

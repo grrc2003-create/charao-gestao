@@ -1257,3 +1257,27 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .sub-toggle.is-card { justify-self: start; margin: -2px 0 0 12px; }
 .tc-subs { display: grid; gap: 6px; margin-left: 16px; padding-left: 10px; border-left: 2px solid var(--line); }
 .task-card.is-sub { background: color-mix(in srgb, var(--navy-50) 40%, var(--surface)); }
+
+/* Dependências */
+.dep-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 900px) { .dep-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .dep-body > .hint { grid-column: 1 / -1; } }
+.dep-col { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.dep-col > .btn { justify-self: start; }
+.dep-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dep-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.dep-type { flex: none; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--navy-50); border-radius: 6px; padding: 2px 6px; }
+.dep-main { flex: 1; min-width: 0; display: grid; font-size: 13.5px; }
+.dep-main a { color: inherit; overflow-wrap: anywhere; }
+.dep-meta { font-size: 12px; color: var(--muted); }
+.dep-st { flex: none; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; }
+.dep-st.is-done { color: var(--st-concluida); background: var(--st-concluida-bg); }
+.dep-st.is-open { color: var(--st-aguardando_conferencia); background: var(--st-aguardando_conferencia-bg); }
+.dep-st.is-cancel { color: var(--muted); background: var(--navy-50); }
+.dep-empty { margin: 0; font-size: 13px; }
+.dep-waiting { margin-top: 10px; }
+.dep-select { width: 100%; min-height: 180px; }
+.dep-wait-tag { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; color: #7A5A00; background: #FFF3C4; border: 1px solid #E9C94A; border-radius: 999px; padding: 0 7px; white-space: nowrap; vertical-align: 1px; }
+.dep-wait-tag svg { width: 11px; height: 11px; }
+.cli-depbox > summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--navy-700); display: inline-flex; align-items: center; gap: 6px; }
+.cli-depbox > summary svg { width: 14px; height: 14px; }
+.cli-deps { display: grid; gap: 10px; margin-top: 8px; }

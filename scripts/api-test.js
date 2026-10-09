@@ -829,6 +829,34 @@ async function main() {
   const srcCl = (await ricardo('GET', `/tasks/${clId}`)).data;
   ok(dupClView.checklist.items.length === srcCl.checklist.items.length && dupClView.checklist.items.every(i => !i.result && !i.refs.length && !i.assignee_id),
     'check-list duplicado com os itens, sem respostas, fotos nem responsáveis');
+
+  console.log('Dependências');
+  const dpNodes = (await ricardo('GET', '/projects/1/nodes')).data;
+  ok(dpNodes.some(n => n.type === 'tarefa') && dpNodes.some(n => n.type === 'subtarefa') && dpNodes.some(n => n.type === 'item'), 'opções: tarefas, subtarefas e itens de check-list do projeto');
+  const [dpA, dpB, dpC] = tasksP1.filter(t => !t.parent_id && t.task_type !== 'checklist' && t.status !== 'concluida').map(t => t.id);
+  const dpAB = await ricardo('POST', '/dependencies', { pred: `t:${dpA}`, succ: `t:${dpB}`, lag_days: 2 });
+  ok(dpAB.status === 201, 'cria dependência entre tarefas (com folga)');
+  let dpVB = (await ricardo('GET', `/tasks/${dpB}`)).data;
+  ok(dpVB.dependencies.predecessors.length === 1 && dpVB.dependencies.predecessors[0].lag_days === 2 && dpVB.dependencies.waiting.length === 1 && dpVB.waiting_on === 1,
+    'sucessora mostra a predecessora e fica "aguardando"');
+  ok((await ricardo('GET', `/tasks/${dpA}`)).data.dependencies.successors.some(s => s.key === `t:${dpB}`), 'predecessora mostra que libera a sucessora');
+  ok((await ricardo('POST', '/dependencies', { pred: `t:${dpA}`, succ: `t:${dpB}` })).status === 400, 'dependência repetida é recusada');
+  await ricardo('POST', '/dependencies', { pred: `t:${dpB}`, succ: `t:${dpC}` });
+  ok((await ricardo('POST', '/dependencies', { pred: `t:${dpC}`, succ: `t:${dpA}` })).status === 400, 'ligação circular (A→B→C→A) é recusada');
+  ok((await ricardo('POST', '/dependencies', { pred: `t:${dpA}`, succ: `t:${dpA}` })).status === 400, 'tarefa não depende dela mesma');
+  const dpOutro = (await ricardo('GET', '/tasks?project=3')).data.find(t => !t.parent_id);
+  ok((await ricardo('POST', '/dependencies', { pred: `t:${dpOutro.id}`, succ: `t:${dpA}` })).status === 400, 'não liga tarefas de projetos diferentes');
+  const dpItem = dpNodes.find(n => n.type === 'item');
+  ok((await ricardo('POST', '/dependencies', { pred: dpItem.key, succ: `t:${dpC}` })).status === 201, 'item de check-list pode ser predecessor de tarefa');
+  const dpClItem = srcCl.checklist.items[0];
+  ok((await ricardo('POST', '/dependencies', { pred: `t:${clId}`, succ: `i:${dpClItem.id}` })).status === 400, 'item não depende do próprio check-list');
+  ok((await ricardo('POST', '/dependencies', { pred: `i:${srcCl.checklist.items[1].id}`, succ: `i:${dpClItem.id}` })).status === 201
+    && (await ricardo('GET', `/tasks/${clId}`)).data.checklist.item_deps[dpClItem.id]?.predecessors.length === 1, 'itens do mesmo check-list podem depender entre si');
+  const dpSub = tasksP1.find(t => t.parent_id === mae.id);
+  ok((await ricardo('POST', '/dependencies', { pred: `t:${mae.id}`, succ: `t:${dpSub.id}` })).status === 400, 'subtarefa não depende da própria tarefa principal');
+  ok((await marcos('POST', '/dependencies', { pred: `t:${dpA}`, succ: `t:${dpC}` })).status === 403, 'colaborador sem gestão das tarefas não cria dependência');
+  ok((await ricardo('DELETE', `/dependencies/${dpAB.data.id}`)).status === 200 && !(await ricardo('GET', `/tasks/${dpB}`)).data.dependencies.predecessors.length, 'dependência removida');
+  ok((await ricardo('GET', `/tasks/${dpB}`)).data.history.some(h => h.action === 'Dependência removida'), 'adição e remoção ficam no histórico');
 }
 
 main()

@@ -16,6 +16,7 @@ import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
+import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
 import * as Checklist from './services/checklist.js';
 import { readStored } from './services/files.js';
@@ -195,6 +196,10 @@ api.put('/api/projects/:id', (req, res, { ctx, params, body }) => {
   Projects.updateProject(ctx, intOrNull(params.id), body, clientIp(req));
   send(res, 200, { ok: true });
 });
+// Dependências (predecessora → sucessora)
+api.get('/api/projects/:id/nodes', (req, res, { ctx, params }) => send(res, 200, Deps.projectNodes(ctx, intOrNull(params.id))));
+api.post('/api/dependencies', (req, res, { ctx, body }) => send(res, 201, { id: Deps.addDependency(ctx, body) }));
+api.delete('/api/dependencies/:id', (req, res, { ctx, params }) => { Deps.removeDependency(ctx, params.id); send(res, 200, { ok: true }); });
 api.get('/api/projects/:id/assignees', (req, res, { ctx, params }) => send(res, 200, Projects.projectAssignees(ctx, intOrNull(params.id))));
 
 // ---------- Tarefas ----------

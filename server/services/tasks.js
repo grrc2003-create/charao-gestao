@@ -8,6 +8,7 @@ import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
+import { taskDependencies, itemDependencies } from './dependencies.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
@@ -29,6 +30,10 @@ const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.
     cb.name AS cancelled_by_name,
     (SELECT rc.title FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_title,
     (SELECT rc.active FROM recurrences rc WHERE rc.id = t.recurrence_id) AS recurrence_active,
+    (SELECT COUNT(*) FROM dependencies d LEFT JOIN tasks pt ON pt.id = d.pred_task_id LEFT JOIN checklist_items pi ON pi.id = d.pred_item_id
+      LEFT JOIN tasks pit ON pit.id = pi.task_id
+      WHERE d.succ_task_id = t.id AND ((d.pred_task_id IS NOT NULL AND pt.status <> 'concluida' AND pt.cancelled_at IS NULL)
+        OR (d.pred_item_id IS NOT NULL AND (pi.result IS NULL OR pi.result = 'nao_conforme') AND pit.cancelled_at IS NULL))) AS waiting_on,
     (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id) AS cl_total,
     (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND ci.result IN ('conforme','na')) AS cl_done,
     (SELECT COUNT(*) FROM checklist_items ci WHERE ci.task_id = t.id AND (ci.result IS NULL OR ci.result = 'nao_conforme')) AS cl_nc
@@ -181,6 +186,7 @@ export function getTask(ctx, id) {
     chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
+    dependencies: taskDependencies(ctx, id),
     ...(t.task_type === 'checklist' ? checklistDetail(ctx, t) : {}),
   };
 }
@@ -188,6 +194,7 @@ export function getTask(ctx, id) {
 // Check-list: itens + conferência do preenchimento no lugar da comprovação
 function checklistDetail(ctx, t) {
   const checklist = checklistView(ctx, t);
+  checklist.item_deps = itemDependencies(ctx, t.id);
   return { checklist, proof_check: { need_photo: false, need_desc: false, has_photo: false, has_desc: false, ok: checklist.check.ok, missing: checklist.check.missing } };
 }
 

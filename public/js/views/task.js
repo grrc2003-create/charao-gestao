@@ -2,6 +2,7 @@
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
+import { depsBlock, waitingNotice, bindDeps } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
@@ -151,6 +152,7 @@ function build(t, ctx) {
           ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
+        ${waitingNotice(t.dependencies)}
         ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked || can.duplicate ? html`<details class="act-menu">
           <summary class="btn btn-ghost btn-sm">${icon('more')}Ações<span class="act-chev">${icon('chevron')}</span></summary>
           <div class="act-list" role="menu">
@@ -178,6 +180,8 @@ function build(t, ctx) {
         <header class="block-head"><span class="step">1</span><h2 id="blk-req">Solicitação</h2>
           <span class="right muted" style="font-size:12px">por ${t.creator_name}</span></header>
         ${reqBody}</section>`}
+
+      ${depsBlock(t, !!can.edit)}
 
       ${t.checklist ? checklistSection(t, { reviewBox: reviewBox(), reviewActions, can }) : html`<section class="card block block-exec" aria-labelledby="blk-exec">
         <header class="block-head"><span class="step">2</span><h2 id="blk-exec">Execução</h2>
@@ -432,6 +436,12 @@ function mount(root, t, ctx) {
   };
 
   if (t.checklist) bindChecklist(root, t, ctx, refresh);
+  // Dependências (da tarefa e dos itens do check-list): não liga com as próprias subtarefas, a tarefa principal ou os próprios itens
+  const exclude = new Set([`t:${t.id}`, ...(t.subtasks || []).map(s => `t:${s.id}`), ...(t.parent_id ? [`t:${t.parent_id}`] : [])]);
+  // A tarefa não liga com os próprios itens (itens entre si podem: a chave do próprio item é excluída na janela)
+  const ownItems = (t.checklist?.items || []).map(i => `i:${i.id}`);
+  root.querySelectorAll('[data-dep-add][data-dep-self^="t:"]').forEach(b => (b.dataset.depExclude = ownItems.join(',')));
+  bindDeps(root, { projectId: t.project_id, exclude, onChange: async () => refresh(await api(`/tasks/${t.id}`)) });
   // Menu de ações da tarefa: fecha ao escolher, ao clicar fora ou com Esc
   const actMenu = root.querySelector('.act-menu');
   if (actMenu) {

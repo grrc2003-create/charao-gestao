@@ -3,6 +3,7 @@
 import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 import { periodKey, periodInfo } from './periods.js';
+import { depLists } from './deps-ui.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
@@ -417,6 +418,7 @@ function itemCard(t, it, c) {
   })();
   const nPhotos = new Set([...it.refs, ...it.files, ...it.history.flatMap(h => h.files)].map(f => f.id)).size;
   const lv = dueLevel(it.due_date, it.resolved);
+  const dep = c.item_deps?.[it.id];
   const mainState = it.open_nc ? html`<span class="cli-state st-nao_conforme">✗ Não conforme${ncTimes}</span>`
     : it.result ? html`<span class="cli-state st-${it.result}">${RESULT[it.result].short} ${RESULT[it.result].label}</span>`
       : html`<span class="cli-state st-pending">Pendente</span>`;
@@ -424,6 +426,7 @@ function itemCard(t, it, c) {
       <span class="cli-num">${it.seq}</span>
       <span class="cli-title">${it.text}</span>
       <span class="cli-sum-r">
+        ${dep?.waiting?.length ? html`<span class="dep-wait-tag" title="Aguardando ${dep.waiting.map(d => d.code).join(', ')}">${icon('clock')}Aguardando</span>` : ''}
         ${it.specialty && !uiOf(t.id).levels.includes('especialidade') ? html`<span class="cli-spec cli-spec-sm" title="Especialidade">${it.specialty}</span>` : ''}
         <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
@@ -488,6 +491,8 @@ function itemCard(t, it, c) {
     ${it.can_answer && (it.result === 'nao_conforme' || it.note) ? html`<label class="cli-note"><span>${it.result === 'nao_conforme' ? 'O que está errado?' : 'Observação'}</span>
         <input type="text" data-note-item="${it.id}" maxlength="1000" value="${it.note || ''}" placeholder="${it.result === 'nao_conforme' ? 'Descreva o problema encontrado' : 'Observação'}"></label>`
       : it.note ? html`<div class="cli-note-text"><b>${it.result === 'nao_conforme' ? 'Problema:' : 'Obs.:'}</b> ${it.note}</div>` : ''}
+    ${dep || c.can_manage_items ? html`<details class="cli-depbox" ${dep ? 'open' : ''}><summary>${icon('history')} Dependências${dep ? ` (${dep.predecessors.length + dep.successors.length})` : ''}</summary>
+      <div class="cli-deps">${depLists(dep || { predecessors: [], successors: [], waiting: [] }, !!c.can_manage_items, `i:${it.id}`)}</div></details>` : ''}
     ${history}`;
   const attrs = `id="cli-${it.id}" data-item-id="${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"`;
   const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''} cli-due-${lv.cls.slice(3)}`;

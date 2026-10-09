@@ -857,6 +857,42 @@ async function main() {
   ok((await marcos('POST', '/dependencies', { pred: `t:${dpA}`, succ: `t:${dpC}` })).status === 403, 'colaborador sem gestão das tarefas não cria dependência');
   ok((await ricardo('DELETE', `/dependencies/${dpAB.data.id}`)).status === 200 && !(await ricardo('GET', `/tasks/${dpB}`)).data.dependencies.predecessors.length, 'dependência removida');
   ok((await ricardo('GET', `/tasks/${dpB}`)).data.history.some(h => h.action === 'Dependência removida'), 'adição e remoção ficam no histórico');
+
+  console.log('Dependências: empurrar sucessoras e impacto');
+  const mkDep = async (title, start, due) => (await ricardo('POST', '/tasks', { project_id: 1, title, description: 'Teste de dependência', assignee_id: 4, start_date: start, due_date: due, priority: 'media', proof_type: 'nenhuma' })).data.id;
+  const xA = await mkDep('Dep A', '2099-01-01', '2099-01-10');
+  const xB = await mkDep('Dep B', '2099-01-12', '2099-01-20');
+  const xC = await mkDep('Dep C', '2099-01-21', '2099-01-25');
+  const xD = await mkDep('Dep D (com folga)', '2099-03-01', '2099-03-05');
+  await ricardo('POST', '/dependencies', { pred: `t:${xA}`, succ: `t:${xB}`, lag_days: 1 });
+  await ricardo('POST', '/dependencies', { pred: `t:${xB}`, succ: `t:${xC}` });
+  await ricardo('POST', '/dependencies', { pred: `t:${xA}`, succ: `t:${xD}` });
+  const dpPrev = (await ricardo('POST', `/tasks/${xA}/impact-preview`, { due_date: '2099-01-15' })).data;
+  ok(dpPrev.impacted.length === 2 && dpPrev.impacted.every(i => i.days === 5), `prévia: reagendar A em +5 dias empurra B e C em +5 (D tem folga) (${JSON.stringify(dpPrev.impacted.map(i => [i.code, i.days]))})`);
+  const dpReason = (await ricardo('GET', '/settings/reasons')).data[0].id;
+  ok((await ricardo('PATCH', `/tasks/${xA}`, { due_date: '2099-01-15', reschedule_reason_id: dpReason })).status === 200, 'reagenda a predecessora (com justificativa)');
+  const dpVA = (await ricardo('GET', `/tasks/${xA}`)).data;
+  const dpVB2 = (await ricardo('GET', `/tasks/${xB}`)).data;
+  const dpVC2 = (await ricardo('GET', `/tasks/${xC}`)).data;
+  const dpVD2 = (await ricardo('GET', `/tasks/${xD}`)).data;
+  ok(dpVB2.start_date === '2099-01-17' && dpVB2.due_date === '2099-01-25' && dpVC2.start_date === '2099-01-26' && dpVC2.due_date === '2099-01-30' && dpVD2.due_date === '2099-03-05',
+    'sucessoras empurradas em cascata mantendo a duração (B 17→25/01, C 26→30/01); D não muda');
+  ok(!dpVB2.reschedule_count && !dpVC2.reschedule_count && dpVA.reschedule_count === 1, 'só a causa conta como reagendada; as empurradas não');
+  ok(dpVB2.history.some(h => h.action === 'Prazo ajustado por dependência' && h.details.includes('Dep A')) && dpVB2.dep_shift?.days === 5, 'sucessora registra o ajuste e a causa');
+  ok(dpVA.impact?.tasks === 2 && dpVA.impact.days === 10 && dpVA.history.some(h => h.action === 'Impacto em outras tarefas'), `impacto na causa: 2 tarefas, 10 dias-tarefa (${JSON.stringify({ t: dpVA.impact?.tasks, d: dpVA.impact?.days, fim: dpVA.impact?.project_end_days })})`);
+  const dpRank = (await ricardo('GET', '/impact-ranking?project=1')).data;
+  ok(dpRank[0]?.id === xA && dpRank[0].days === 10, 'ranking "atrasos com maior impacto" traz a causa');
+  // Antecipar não puxa as sucessoras de volta
+  await ricardo('PATCH', `/tasks/${xA}`, { due_date: '2099-01-11', reschedule_reason_id: dpReason });
+  ok((await ricardo('GET', `/tasks/${xB}`)).data.due_date === '2099-01-25', 'antecipar a predecessora não puxa as sucessoras de volta');
+  // Término com atraso: empurra pelo atraso real
+  const xE = await mkDep('Dep E (atrasada)', '2020-01-01', '2020-01-05');
+  const xF = await mkDep('Dep F', '2020-01-06', '2020-01-08');
+  await ricardo('POST', '/dependencies', { pred: `t:${xE}`, succ: `t:${xF}` });
+  await ricardo('POST', `/tasks/${xE}/actions/conclude`, { comment: 'Concluída com atraso' });
+  const dpVF = (await ricardo('GET', `/tasks/${xF}`)).data;
+  ok(dpVF.start_date > '2020-01-06' && dpVF.due_date > '2020-01-08' && !dpVF.reschedule_count && (await ricardo('GET', `/tasks/${xE}`)).data.impact?.tasks === 1,
+    'predecessora concluída com atraso empurra a sucessora (sem penalizá-la) e registra o impacto');
 }
 
 main()

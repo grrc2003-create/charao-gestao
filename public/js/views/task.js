@@ -2,7 +2,7 @@
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead } from './shared.js';
-import { depsBlock, waitingNotice, bindDeps } from './deps-ui.js';
+import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
@@ -153,6 +153,7 @@ function build(t, ctx) {
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
         ${waitingNotice(t.dependencies)}
+        ${impactBox(t)}
         ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked || can.duplicate ? html`<details class="act-menu">
           <summary class="btn btn-ghost btn-sm">${icon('more')}Ações<span class="act-chev">${icon('chevron')}</span></summary>
           <div class="act-list" role="menu">
@@ -327,6 +328,12 @@ function mount(root, t, ctx) {
     reschedule: async () => {
       let reasons;
       try { reasons = await api('/settings/reasons'); } catch (e) { return toast(e.message, 'err'); }
+      // Prévia das sucessoras empurradas, atualizada a cada data escolhida
+      setTimeout(() => {
+        const nd = document.querySelector('.sheet #nd');
+        const box = document.querySelector('.sheet #impact-prev');
+        nd?.addEventListener('change', () => { if (nd.value > t.due_date) renderImpactPreview(box, t.id, nd.value); else if (box) box.innerHTML = ''; });
+      }, 0);
       const r = await sheet({
         title: 'Reagendar prazo',
         body: html`<div class="notice">${icon('info')}<span>Prazo atual: <b>${fmtDate(t.due_date)}</b>${t.reschedule_count ? ` · já reagendada ${t.reschedule_count}x (original ${fmtDate(t.original_due)})` : ''}.</span></div>
@@ -334,11 +341,12 @@ function mount(root, t, ctx) {
           <div class="field"><label class="req" for="rs">Justificativa</label>
             <select id="rs" name="reason_id" required><option value="">Selecione a justificativa</option>${reasons.map(x => html`<option value="${x.id}">${x.name}</option>`)}</select>
             <span class="hint">Lista cadastrada em Configurações, comum a todos os projetos.</span></div>
-          <div class="field"><label for="rn">Observação</label><textarea id="rn" name="note" rows="3" maxlength="1000" placeholder="Detalhe o motivo (obrigatório para “Outro motivo”)"></textarea></div>`,
+          <div class="field"><label for="rn">Observação</label><textarea id="rn" name="note" rows="3" maxlength="1000" placeholder="Detalhe o motivo (obrigatório para “Outro motivo”)"></textarea></div>
+          <div id="impact-prev"></div>`,
         submitLabel: 'Reagendar',
         onSubmit: d => api(`/tasks/${t.id}/reschedule`, { method: 'POST', body: d }),
       });
-      if (r) { toast('Prazo reagendado.'); refresh(r); }
+      if (r) { toast('Prazo reagendado.'); refresh(await api(`/tasks/${t.id}`).catch(() => r)); }
     },
     desc: async () => {
       const r = await textSheet('exec_description', 'Descrição da execução', 'O que foi executado', t.exec_description, 'Descreva o serviço realizado, materiais e conferências feitas.');

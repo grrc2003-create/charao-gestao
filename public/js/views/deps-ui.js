@@ -95,3 +95,40 @@ export function bindDeps(root, { projectId, exclude = new Set(), onChange }) {
     try { await api(`/dependencies/${b.dataset.depRm}`, { method: 'DELETE' }); toast('Dependência removida.'); onChange?.(); } catch (er) { toast(er.message, 'err'); }
   }));
 }
+
+// Prévia do reagendamento: quais sucessoras serão empurradas (mostrada antes de confirmar)
+export async function renderImpactPreview(box, taskId, newDue) {
+  if (!box) return;
+  if (!newDue) { box.innerHTML = ''; return; }
+  try {
+    const r = await api(`/tasks/${taskId}/impact-preview`, { method: 'POST', body: { due_date: newDue } });
+    box.innerHTML = (r.impacted.length ? html`<div class="notice dep-preview">${icon('alert')}<div><b>Esta mudança empurra ${r.impacted.length} tarefa(s)/item(ns)</b>
+      (ajuste por dependência, sem penalizá-las; o impacto fica registrado nesta tarefa):
+      <ul>${r.impacted.map(i => html`<li><b class="mono">${i.code}</b> ${i.title} · ${fmtDate(i.old_due)} → <b>${fmtDate(i.new_due)}</b> (+${i.days}d)</li>`)}</ul></div></div>`
+      : html`<p class="hint" style="margin:0">Nenhuma sucessora precisa ser empurrada.</p>`).toString();
+  } catch { box.innerHTML = ''; }
+}
+
+// Quadro de impacto (tarefa que causou atraso) e ajuste recebido (tarefa empurrada)
+export function impactBox(t) {
+  const im = t.impact;
+  const sh = t.dep_shift;
+  return html`${im ? html`<details class="notice dep-impact"><summary>${icon('alert')}<span><b>Impacto deste atraso:</b> empurrou ${im.tasks} tarefa(s)/item(ns) ·
+      <b>${im.days} dia(s)-tarefa</b>${im.project_end_days ? html` · <b>fim do projeto +${im.project_end_days} dia(s)</b>` : ''} <em>ver detalhes</em></span></summary>
+      <ul>${im.shifts.map(x => html`<li><a href="${x.link}"><b class="mono">${x.code}</b> ${x.title}</a> · ${fmtDate(x.old_due)} → ${fmtDate(x.new_due)} (+${x.days}d)</li>`)}</ul></details>` : ''}
+    ${sh ? html`<div class="notice dep-shifted">${icon('info')}<span>Prazo <b>ajustado por dependência</b> ${sh.times > 1 ? `${sh.times} vezes ` : ''}(+${sh.days} dia(s) no total)${sh.last_cause ? html` · causa mais recente: <a href="#/tarefas/${sh.last_cause_id}">${sh.last_cause}</a>` : ''}.
+      Não conta como reagendamento desta tarefa.</span></div>` : ''}`;
+}
+
+// Ranking "Atrasos com maior impacto"
+export function impactRankingSection(list, { sub = '' } = {}) {
+  if (!list?.length) return '';
+  return html`<section class="card section dep-rank">
+    <div class="card-head"><h2>${icon('alert')}Atrasos com maior impacto</h2><span class="sub">${sub || 'tarefas que, ao atrasar, empurraram outras'}</span></div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Tarefa que causou</th><th>Responsável</th><th class="num">Tarefas impactadas</th><th class="num">Dias-tarefa</th><th class="num">Fim do projeto</th></tr></thead>
+      <tbody>${list.map(r => html`<tr data-href="#/tarefas/${r.id}" tabindex="0"><td><b class="mono">${r.code}</b> ${r.title}</td><td>${r.assignee_name || '—'}</td>
+        <td class="num">${r.tasks}</td><td class="num"><b>${r.days}</b></td><td class="num">${r.project_end_days ? `+${r.project_end_days} dia(s)` : '—'}</td></tr>`)}</tbody></table></div>
+    <p class="hint" style="padding:0 16px 12px;margin:0">Dias-tarefa = soma dos dias que cada tarefa/item foi empurrado. As tarefas empurradas não são penalizadas: o atraso conta só para a causa.</p>
+  </section>`;
+}

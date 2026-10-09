@@ -1,11 +1,13 @@
 // Dependências entre tarefas, subtarefas e itens de check-list do mesmo projeto (Término → Início + folga).
 // Ponta = "t:<id>" (tarefa ou subtarefa) ou "i:<id>" (item de check-list).
-// Etapa 1: cadastro, consulta e situação "Aguardando". (Empurrar prazos e o indicador de impacto vêm na etapa 2.)
+// Cadastro, consulta e situação "Aguardando"; empurrar as sucessoras quando a predecessora atrasa (reagendamento ou
+// término atrasado) sem penalizá-las, e o indicador de impacto do atraso (registrado na causa).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, intOrNull } from '../lib/http.js';
 import { canSeeTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
-import { loadVisible } from './tasks.js';
+import { loadVisible, checklistMaxDue } from './tasks.js';
+import { addDays, daysBetween, today } from './metrics.js';
 
 const fmt = d => (d ? d.split('-').reverse().join('/') : 'sem prazo');
 const parseKey = k => {
@@ -144,3 +146,164 @@ export function removeDependency(ctx, id) {
 }
 
 export { fmt as fmtDepDate };
+
+// ===================== Empurrar as sucessoras =====================
+// Término → Início: a sucessora não pode começar antes de (término da predecessora + 1 + folga).
+// Só empurra para frente; sucessoras concluídas/canceladas ou sem datas ficam como estão. Início e prazo andam juntos
+// (a duração é mantida). Em check-list cujos itens têm prazo, quem anda são os itens em aberto (o prazo do
+// check-list acompanha o maior prazo dos itens).
+const succEdges = key => {
+  const n = parseKey(key);
+  return all(`SELECT succ_task_id, succ_item_id, lag_days FROM dependencies WHERE ${n.kind === 't' ? 'pred_task_id' : 'pred_item_id'} = ?`, n.id)
+    .map(r => ({ key: r.succ_task_id ? `t:${r.succ_task_id}` : `i:${r.succ_item_id}`, lag: r.lag_days }));
+};
+const datesOf = n => {
+  if (n.kind === 'item') {
+    const i = one('SELECT start_date, due_date FROM checklist_items WHERE id = ?', n.id);
+    return { start: i.start_date, due: i.due_date };
+  }
+  const t = n.owner;
+  return { start: t.start_date, due: t.task_type === 'checklist' ? (checklistMaxDue(t.id) || t.due_date) : t.due_date };
+};
+const projectEnd = projectId => one('SELECT MAX(due_date) AS d FROM tasks WHERE project_id = ? AND cancelled_at IS NULL', projectId)?.d || null;
+const fresh = key => {
+  const n = node(key);
+  const d = datesOf(n);
+  return { node: n, oldStart: d.start, oldDue: d.due, newStart: d.start, newDue: d.due };
+};
+
+// Plano: o que muda (sem gravar). sources: [{ key, finish }] — término (novo) de quem atrasou
+export function planShift(sources) {
+  const planned = new Map();
+  const queue = [...sources];
+  let guard = 0;
+  while (queue.length && guard++ < 5000) {
+    const { key, finish } = queue.shift();
+    if (!finish) continue;
+    for (const e of succEdges(key)) {
+      const n = node(e.key);
+      if (n.done || n.cancelled) continue;
+      const cur = planned.get(n.key) || fresh(n.key);
+      const anchor = cur.newStart || cur.newDue;
+      if (!anchor) continue;
+      const req = addDays(finish, 1 + e.lag);
+      if (anchor >= req) continue;
+      const delta = daysBetween(anchor, req);
+      cur.newStart = cur.newStart ? addDays(cur.newStart, delta) : null;
+      cur.newDue = cur.newDue ? addDays(cur.newDue, delta) : null;
+      planned.set(n.key, cur);
+      queue.push({ key: n.key, finish: cur.newDue || cur.newStart });
+      // Item empurrado pode empurrar o próprio check-list (prazo = maior prazo dos itens) e as sucessoras dele
+      if (n.kind === 'item' && cur.newDue) {
+        const ok = `t:${n.task_id}`;
+        const owner = planned.get(ok) || fresh(ok);
+        if (!owner.newDue || cur.newDue > owner.newDue) {
+          owner.newDue = cur.newDue;
+          owner.derived = true;
+          planned.set(ok, owner);
+          queue.push({ key: ok, finish: owner.newDue });
+        }
+      }
+    }
+  }
+  return [...planned.values()].map(p => ({ ...p, days: daysBetween(p.oldDue || p.oldStart, p.newDue || p.newStart) })).filter(p => p.days > 0);
+}
+
+const planView = list => list.map(p => ({ key: p.node.key, type: p.node.type, code: p.node.code, title: p.node.title,
+  old_due: p.oldDue, new_due: p.newDue, old_start: p.oldStart, new_start: p.newStart, days: p.days }));
+
+// Prévia do reagendamento (para mostrar antes de confirmar)
+export function previewReschedule(ctx, taskId, newDue) {
+  const t = loadVisible(ctx, taskId);
+  if (!newDue) return { impacted: [] };
+  return { impacted: planView(planShift([{ key: `t:${t.id}`, finish: newDue }])) };
+}
+
+const WHY = { reagendamento: 'reagendamento', conclusao_atrasada: 'término com atraso', prazo_item: 'prazo do item alterado' };
+
+// Grava o plano: ajusta as sucessoras (sem reagendamento), registra no histórico e o evento de impacto
+export function applyShift({ userId, projectId, cause, kind, causeOldDue, causeNewDue, sources, projectEndBefore }) {
+  const plan = planShift(sources);
+  if (!plan.length) return null;
+  const ev = Number(run(`INSERT INTO dependency_events (project_id, cause_task_id, cause_item_id, kind, cause_old_due, cause_new_due, project_end_old, created_by)
+    VALUES (?,?,?,?,?,?,?,?)`, projectId, cause.taskId, cause.itemId || null, kind, causeOldDue || null, causeNewDue || null, projectEndBefore || null, userId).lastInsertRowid);
+  const causeLabel = `${cause.code} · ${cause.title}`;
+  const dd = n => `${n} dia${n > 1 ? 's' : ''}`;
+  for (const p of plan) {
+    const n = p.node;
+    if (n.kind === 'item') {
+      run('UPDATE checklist_items SET start_date = ?, due_date = ? WHERE id = ?', p.newStart, p.newDue, n.id);
+      run('INSERT INTO dependency_shifts (event_id, target_item_id, old_start, old_due, new_start, new_due, days) VALUES (?,?,?,?,?,?,?)', ev, n.id, p.oldStart, p.oldDue, p.newStart, p.newDue, p.days);
+      taskHistory(n.task_id, userId, 'Prazo ajustado por dependência', `Item ${n.code}: ${fmt(p.oldDue)} → ${fmt(p.newDue)} (+${dd(p.days)}) · causa: ${causeLabel} (${WHY[kind]})`);
+      continue;
+    }
+    const t = one('SELECT * FROM tasks WHERE id = ?', n.id);
+    const datedItems = t.task_type === 'checklist' && checklistMaxDue(t.id);
+    if (datedItems && !p.derived) {
+      // Check-list empurrado como sucessora: os itens em aberto andam juntos
+      for (const i of all(`SELECT id, start_date, due_date FROM checklist_items WHERE task_id = ? AND (result IS NULL OR result = 'nao_conforme') AND (start_date IS NOT NULL OR due_date IS NOT NULL)`, t.id)) {
+        run('UPDATE checklist_items SET start_date = ?, due_date = ? WHERE id = ?', i.start_date ? addDays(i.start_date, p.days) : null, i.due_date ? addDays(i.due_date, p.days) : null, i.id);
+      }
+    }
+    const newDue = datedItems ? checklistMaxDue(t.id) : p.newDue;
+    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', p.newStart, newDue, new Date().toISOString(), t.id);
+    run('INSERT INTO dependency_shifts (event_id, target_task_id, old_start, old_due, new_start, new_due, days) VALUES (?,?,?,?,?,?,?)', ev, t.id, p.oldStart, p.oldDue, p.newStart, newDue, p.days);
+    taskHistory(t.id, userId, 'Prazo ajustado por dependência', `${fmt(p.oldDue)} → ${fmt(newDue)} (+${dd(p.days)}) · causa: ${causeLabel} (${WHY[kind]}) · não conta como reagendamento desta tarefa`);
+  }
+  const endNew = projectEnd(projectId);
+  run('UPDATE dependency_events SET project_end_new = ? WHERE id = ?', endNew, ev);
+  const total = plan.reduce((s, p) => s + p.days, 0);
+  const endDays = projectEndBefore && endNew && endNew > projectEndBefore ? daysBetween(projectEndBefore, endNew) : 0;
+  taskHistory(cause.taskId, userId, 'Impacto em outras tarefas',
+    `${cause.itemId ? `Item ${cause.code}: ` : ''}${plan.length} tarefa(s)/item(ns) empurrado(s) · ${total} dia(s)-tarefa${endDays ? ` · fim do projeto +${dd(endDays)}` : ''}`);
+  return ev;
+}
+
+export const projectEndOf = projectEnd;
+
+// ===================== Indicador de impacto =====================
+const endDaysOf = ev => ev.reduce((n, e) => n + (e.project_end_old && e.project_end_new && e.project_end_new > e.project_end_old ? daysBetween(e.project_end_old, e.project_end_new) : 0), 0);
+
+// Causa: quantas tarefas/itens empurrou, quantos dias-tarefa e quanto mexeu no fim do projeto
+export function impactOfTask(taskId) {
+  const ev = all('SELECT * FROM dependency_events WHERE cause_task_id = ? ORDER BY id', taskId);
+  if (!ev.length) return null;
+  const ids = ev.map(e => e.id);
+  const shifts = all(`SELECT s.*, t.code AS t_code, t.title AS t_title, ci.seq AS i_seq, ci.text AS i_text, it.code AS it_code, it.id AS it_id
+    FROM dependency_shifts s LEFT JOIN tasks t ON t.id = s.target_task_id LEFT JOIN checklist_items ci ON ci.id = s.target_item_id LEFT JOIN tasks it ON it.id = ci.task_id
+    WHERE s.event_id IN (${ids.map(() => '?').join(',')}) ORDER BY s.id`, ...ids);
+  const targets = new Set(shifts.map(s => (s.target_task_id ? `t:${s.target_task_id}` : `i:${s.target_item_id}`)));
+  return {
+    events: ev.length, tasks: targets.size, days: shifts.reduce((n, s) => n + s.days, 0), project_end_days: endDaysOf(ev),
+    shifts: shifts.map(s => ({ code: s.target_task_id ? s.t_code : `${s.it_code}·${s.i_seq}`, title: s.target_task_id ? s.t_title : s.i_text,
+      link: `#/tarefas/${s.target_task_id || s.it_id}`, old_due: s.old_due, new_due: s.new_due, days: s.days })),
+  };
+}
+
+// Sucessora: quanto o prazo foi ajustado por dependências (não conta como reagendamento)
+export function shiftedOfTask(taskId) {
+  const r = one('SELECT COUNT(*) AS n, COALESCE(SUM(days), 0) AS days FROM dependency_shifts WHERE target_task_id = ?', taskId);
+  if (!r.n) return null;
+  const last = one(`SELECT e.cause_task_id, t.code FROM dependency_shifts s JOIN dependency_events e ON e.id = s.event_id JOIN tasks t ON t.id = e.cause_task_id
+    WHERE s.target_task_id = ? ORDER BY s.id DESC LIMIT 1`, taskId);
+  return { times: r.n, days: r.days, last_cause: last?.code || null, last_cause_id: last?.cause_task_id || null };
+}
+
+// Ranking "Atrasos com maior impacto" (tarefas visíveis; opcionalmente de um projeto)
+export function impactRanking(ctx, { projectId = null, limit = 10 } = {}) {
+  const rows = all(`SELECT e.cause_task_id AS id, COUNT(DISTINCT e.id) AS events, SUM(s.days) AS days,
+      COUNT(DISTINCT COALESCE('t' || s.target_task_id, 'i' || s.target_item_id)) AS tasks
+    FROM dependency_events e JOIN dependency_shifts s ON s.event_id = e.id
+    ${projectId ? 'WHERE e.project_id = ?' : ''} GROUP BY e.cause_task_id ORDER BY days DESC, tasks DESC`, ...(projectId ? [projectId] : []));
+  const out = [];
+  for (const r of rows) {
+    const t = one(`SELECT t.*, u.name AS assignee_name, p.code AS project_code FROM tasks t JOIN projects p ON p.id = t.project_id LEFT JOIN users u ON u.id = t.assignee_id WHERE t.id = ?`, r.id);
+    if (!t || !canSeeTask(ctx, t)) continue;
+    out.push({ id: t.id, code: t.code, title: t.title, project_code: t.project_code, assignee_name: t.assignee_name, tasks: r.tasks, days: r.days, events: r.events,
+      project_end_days: endDaysOf(all('SELECT project_end_old, project_end_new FROM dependency_events WHERE cause_task_id = ?', r.id)) });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export const todayISO = today;

@@ -8,6 +8,7 @@ import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
 import { loadVisible, validateAssignee, autoStart, checklistMaxDue } from './tasks.js';
+import { applyShift, projectEndOf } from './dependencies.js';
 
 export const PHOTO_RULES = ['obrigatoria', 'livre'];
 export const PHOTO_RULE_LABEL = { obrigatoria: 'Foto obrigatória em todos os itens', livre: 'Foto opcional (livre escolha)' };
@@ -313,6 +314,12 @@ export function answerItem(ctx, taskId, itemId, body = {}) {
       run(`UPDATE checklist_files SET answer_id = ? WHERE item_id = ? AND answer_id IS NULL AND kind = 'resposta'`, ansId, item.id);
       n = images.length ? saveItemPhotos(ctx, item.id, images, ansId) : 0;
       run('UPDATE checklist_items SET result = ?, note = ?, answered_by = ?, answered_at = ? WHERE id = ?', result, ansNote, ctx.user.id, now, item.id);
+      // Item resolvido depois do prazo: empurra as sucessoras do item pelo atraso real
+      const finishDay = today();
+      if (isResolved(result) && item.due_date && finishDay > item.due_date) {
+        applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: t.id, itemId: item.id, code: `${t.code}·${item.seq}`, title: item.text }, kind: 'conclusao_atrasada',
+          causeOldDue: item.due_date, causeNewDue: finishDay, projectEndBefore: projectEndOf(t.project_id), sources: [{ key: `i:${item.id}`, finish: finishDay }] });
+      }
       const ncs = one(`SELECT COUNT(*) AS n FROM checklist_answers WHERE item_id = ? AND result = 'nao_conforme'`, item.id).n;
       const what = item.result ? `${RESULT_LABEL[item.result]} → ${RESULT_LABEL[result]}` : RESULT_LABEL[result];
       const extra = [result === 'nao_conforme' && ncs > 1 ? `${ncs}ª não conformidade` : '', reason ? `Justificativa: ${reason}` : '',
@@ -418,6 +425,8 @@ export function updateItem(ctx, taskId, itemId, body) {
   }
   const fields = Object.keys(next);
   if (!fields.length) return;
+  const endBefore = projectEndOf(t.project_id);
+  const clDueBefore = checklistMaxDue(t.id) || t.due_date;
   tx(() => {
     const groupChanged = 'group_name' in next;
     const group = next.group_name;
@@ -427,6 +436,13 @@ export function updateItem(ctx, taskId, itemId, body) {
     if (groupChanged) moveToGroup(t.id, item.id, group);
     taskHistory(t.id, ctx.user.id, 'Item do check-list alterado', `${item.seq}. ${item.text} · ${changes.join(' · ')}`);
     syncTaskDue(t, ctx.user.id);
+    // Prazo do item adiado: empurra as sucessoras do item (e as do check-list, se o prazo dele também andou)
+    if (next.due_date && (!item.due_date || next.due_date > item.due_date)) {
+      const clDueAfter = checklistMaxDue(t.id) || t.due_date;
+      applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: t.id, itemId: item.id, code: `${t.code}·${item.seq}`, title: item.text }, kind: 'prazo_item',
+        causeOldDue: item.due_date, causeNewDue: next.due_date, projectEndBefore: endBefore,
+        sources: [{ key: `i:${item.id}`, finish: next.due_date }, ...(clDueAfter && clDueAfter !== clDueBefore ? [{ key: `t:${t.id}`, finish: clDueAfter }] : [])] });
+    }
   });
 }
 

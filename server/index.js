@@ -198,6 +198,8 @@ api.put('/api/projects/:id', (req, res, { ctx, params, body }) => {
 });
 // Dependências (predecessora → sucessora)
 api.get('/api/projects/:id/nodes', (req, res, { ctx, params }) => send(res, 200, Deps.projectNodes(ctx, intOrNull(params.id))));
+api.post('/api/tasks/:id/impact-preview', (req, res, { ctx, params, body }) => send(res, 200, Deps.previewReschedule(ctx, intOrNull(params.id), body.due_date || null)));
+api.get('/api/impact-ranking', (req, res, { ctx, query }) => send(res, 200, Deps.impactRanking(ctx, { projectId: intOrNull(query.get('project')) })));
 api.post('/api/dependencies', (req, res, { ctx, body }) => send(res, 201, { id: Deps.addDependency(ctx, body) }));
 api.delete('/api/dependencies/:id', (req, res, { ctx, params }) => { Deps.removeDependency(ctx, params.id); send(res, 200, { ok: true }); });
 api.get('/api/projects/:id/assignees', (req, res, { ctx, params }) => send(res, 200, Projects.projectAssignees(ctx, intOrNull(params.id))));

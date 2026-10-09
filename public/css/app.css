@@ -1281,3 +1281,16 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .cli-depbox > summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--navy-700); display: inline-flex; align-items: center; gap: 6px; }
 .cli-depbox > summary svg { width: 14px; height: 14px; }
 .cli-deps { display: grid; gap: 10px; margin-top: 8px; }
+
+/* Dependências: prévia, impacto e ajuste */
+.dep-preview ul, .dep-impact ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 2px; }
+.dep-preview { border-color: #E9C94A; background: #FFF8DB; }
+.dep-impact { margin-top: 10px; border-color: color-mix(in srgb, var(--st-atrasada) 35%, var(--line)); background: var(--st-atrasada-bg, #FBE9E7); }
+.dep-impact > summary { list-style: none; cursor: pointer; display: flex; gap: 8px; align-items: flex-start; }
+.dep-impact > summary::-webkit-details-marker { display: none; }
+.dep-impact em { font-style: normal; font-size: 12px; color: var(--navy-700); margin-left: 4px; text-decoration: underline; }
+.dep-impact[open] em { display: none; }
+.dep-shifted { margin-top: 10px; }
+.dep-rank td.num, .dep-rank th.num { text-align: right; }
+.notice.dep-impact { display: block; }
+.dep-impact > summary svg { flex: none; margin-top: 2px; }

@@ -3,6 +3,7 @@ import { toast, readAttachments, pickAttachments, batchBySize } from '../ui.js';
 import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
 import { renderDraft, itemForm, bindItemForm, PHOTO_RULE, projectSpecialties } from './checklist-ui.js';
+import { renderImpactPreview } from './deps-ui.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -135,7 +136,13 @@ export async function view({ params, query, state, navigate }) {
         api('/settings/reasons').then(list => {
           f.reschedule_reason_id.insertAdjacentHTML('beforeend', html`${list.map(x => html`<option value="${x.id}">${x.name}</option>`)}`.toString());
         }).catch(e => toast(e.message, 'err'));
-        const sync = () => { reschedBox.hidden = f.due_date.value === t.due_date; };
+        const sync = () => {
+          reschedBox.hidden = f.due_date.value === t.due_date;
+          // Prévia das sucessoras empurradas (dependências)
+          let box = reschedBox.querySelector('#impact-prev');
+          if (!box) { box = document.createElement('div'); box.id = 'impact-prev'; reschedBox.querySelector('div')?.appendChild(box); }
+          if (f.due_date.value > t.due_date) renderImpactPreview(box, t.id, f.due_date.value); else box.innerHTML = '';
+        };
         f.due_date.addEventListener('input', sync);
         f.due_date.addEventListener('change', sync);
       }

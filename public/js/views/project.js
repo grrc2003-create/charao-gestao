@@ -4,9 +4,10 @@ import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
+import { impactRankingSection } from './deps-ui.js';
 
 export async function view({ params, query, setQuery, render }) {
-  const p = await api(`/projects/${params.id}`);
+  const [p, impactRank] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => [])]);
   const active = query.get('status') || '';
   const org = readOrg(query);
   const stage = Number(query.get('stage')) || 0;
@@ -73,6 +74,7 @@ export async function view({ params, query, setQuery, render }) {
           <div class="proj-pct">${fmtPct(s.summary.completion_pct ?? 0)}</div></button></li>`)}</ul>
       </section>` : ''}
 
+      ${impactRankingSection(impactRank, { sub: 'neste projeto' })}
       ${deadlineSection(p.summary, p.trend, {
         chronicMin: p.chronic_min || 3,
         sub: 'neste projeto',

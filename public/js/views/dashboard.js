@@ -2,9 +2,10 @@ import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } fr
 import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
+import { impactRankingSection } from './deps-ui.js';
 
 export async function view({ state }) {
-  const d = await api('/dashboard');
+  const [d, impactRank] = await Promise.all([api('/dashboard'), api('/impact-ranking').catch(() => [])]);
   const u = state.user;
   const s = d.summary;
   const firstName = u.name.split(' ')[0];
@@ -58,6 +59,7 @@ export async function view({ state }) {
         ${ranking.length ? html`<ul class="rows">${ranking.map(userRankRow)}</ul>` : html`<div class="card-body muted">Sem dados de usuários para o seu perfil.</div>`}
       </section>
 
+      ${impactRankingSection(impactRank.slice(0, 5))}
       ${deadlineSection(s, d.trend, {
         chronicMin: d.chronic_min,
         sub: 'constância de atrasos e de repactuações',

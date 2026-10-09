@@ -8,7 +8,7 @@ import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
-import { taskDependencies, itemDependencies } from './dependencies.js';
+import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask } from './dependencies.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
@@ -187,6 +187,8 @@ export function getTask(ctx, id) {
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
     dependencies: taskDependencies(ctx, id),
+    impact: impactOfTask(id),
+    dep_shift: shiftedOfTask(id),
     ...(t.task_type === 'checklist' ? checklistDetail(ctx, t) : {}),
   };
 }
@@ -373,6 +375,7 @@ export function updateTask(ctx, id, body) {
     }
   }
   if (!changes.length && !reschedule) return;
+  const endBefore = next.due_date !== undefined ? projectEndOf(t.project_id) : null;
   tx(() => {
     const fields = Object.keys(next);
     run(`UPDATE tasks SET ${fields.map(f => `${f} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...fields.map(f => next[f]), nowIso(), id);
@@ -384,6 +387,11 @@ export function updateTask(ctx, id, body) {
         `${fmtDate(reschedule.old)} → ${fmtDate(reschedule.new)} · Justificativa: ${reschedule.reason.name}${reschedule.note ? ` · ${reschedule.note}` : ''}`);
     }
     for (const [label, from, to] of changes) taskHistory(id, ctx.user.id, label, from || to ? `${from} → ${to}` : null);
+    // Prazo adiado: as sucessoras são empurradas (sem penalizá-las); o impacto fica registrado nesta tarefa
+    if (next.due_date && (!t.due_date || next.due_date > t.due_date)) {
+      applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: id, code: t.code, title: t.title }, kind: 'reagendamento',
+        causeOldDue: t.due_date, causeNewDue: next.due_date, sources: [{ key: `t:${id}`, finish: next.due_date }], projectEndBefore: endBefore });
+    }
   });
 }
 
@@ -569,6 +577,15 @@ export function transition(ctx, id, action, body = {}) {
     run(`UPDATE tasks SET status = ?, updated_at = ?${extraSql} WHERE id = ?`, to, now, ...extra, id);
     taskHistory(id, ctx.user.id, 'Status alterado', `${label(t.status)} → ${label(to)}`);
   };
+  const endBefore = projectEndOf(t.project_id);
+  // Terminou depois do prazo: as sucessoras são empurradas pelo atraso real
+  const lateFinish = () => {
+    const finish = today();
+    if (t.due_date && finish > t.due_date) {
+      applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: id, code: t.code, title: t.title }, kind: 'conclusao_atrasada',
+        causeOldDue: t.due_date, causeNewDue: finish, sources: [{ key: `t:${id}`, finish }], projectEndBefore: endBefore });
+    }
+  };
   tx(() => {
     switch (action) {
       case 'start':
@@ -584,6 +601,7 @@ export function transition(ctx, id, action, body = {}) {
         assertSubtasksDone(t);
         change('aguardando_conferencia', ', delivered_at = ?, review_status = \'pendente\', review_comment = NULL, started_at = COALESCE(started_at, ?)', now, now);
         taskHistory(id, ctx.user.id, 'Enviada para conferência', withBehalf(ctx, t, pc.has_photo || pc.has_desc ? 'Comprovação anexada' : null));
+        lateFinish();
         break;
       }
       case 'approve': {
@@ -609,6 +627,7 @@ export function transition(ctx, id, action, body = {}) {
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', delivered_at = COALESCE(delivered_at, ?), completed_at = ?, reviewed_by = ?, reviewed_at = ?, review_status = \'aprovada\', review_comment = ?', now, now, ctx.user.id, now, comment);
         taskHistory(id, ctx.user.id, 'Concluída diretamente pelo gestor', comment);
+        if (!t.delivered_at) lateFinish();
         if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa concluída', `${t.code} · ${t.title}`);
         break;
       }

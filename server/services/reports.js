@@ -268,3 +268,18 @@ function shorten(text, max = 150) {
   const base = first.length >= 40 && first.length <= max ? first : clean;
   return base.length > max ? base.slice(0, max - 1).replace(/\s+\S*$/, '') + '…' : base;
 }
+
+// Gantt das telas (projeto ou pessoa): tarefas visíveis com ligações; caminho crítico só no projeto
+export function ganttFor(ctx, q) {
+  const projectId = intOrNull(q.project);
+  const userId = intOrNull(q.user);
+  let tasks = listVisible(ctx);
+  if (projectId) tasks = tasks.filter(t => t.project_id === projectId);
+  if (userId) tasks = tasks.filter(t => t.assignee_id === userId);
+  const links = ganttLinks(tasks.map(t => t.id));
+  const crit = projectId ? criticalPath(tasks) : new Set();
+  return {
+    ref: today(),
+    tasks: [...tasks].sort(byStage).map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) })),
+  };
+}

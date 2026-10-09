@@ -1294,3 +1294,17 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .dep-rank td.num, .dep-rank th.num { text-align: right; }
 .notice.dep-impact { display: block; }
 .dep-impact > summary svg { flex: none; margin-top: 2px; }
+
+/* Gantt nas telas (projeto, pessoa e check-list) */
+.gantt-sec > summary { list-style: none; cursor: pointer; }
+.gantt-sec > summary::-webkit-details-marker { display: none; }
+.gantt-sec > summary::after { content: '▾'; margin-left: 8px; color: var(--muted); }
+.gantt-sec[open] > summary::after { content: '▴'; }
+.gantt-sec-body { overflow-x: auto; }
+.gantt-sec-body .g-table { min-width: 720px; }
+
+.cl-gantt { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.cl-gantt > summary { cursor: pointer; padding: 10px 12px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; color: var(--navy-700); }
+.cl-gantt > summary svg { width: 16px; height: 16px; }
+.cl-gantt-body { padding: 0 12px 12px; overflow-x: auto; }
+.cl-gantt-body .g-table { min-width: 680px; }

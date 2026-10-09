@@ -5,6 +5,7 @@ import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
+import { ganttSection, bindGanttSections } from './gantt.js';
 
 export async function view({ params, query, setQuery, render }) {
   const [p, impactRank] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => [])]);
@@ -74,6 +75,7 @@ export async function view({ params, query, setQuery, render }) {
           <div class="proj-pct">${fmtPct(s.summary.completion_pct ?? 0)}</div></button></li>`)}</ul>
       </section>` : ''}
 
+      ${ganttSection({ id: `p${p.id}`, url: `/gantt?project=${p.id}`, sub: 'tarefas do projeto por classificação · setas = dependências · vermelho = caminho crítico' })}
       ${impactRankingSection(impactRank, { sub: 'neste projeto' })}
       ${deadlineSection(p.summary, p.trend, {
         chronicMin: p.chronic_min || 3,
@@ -107,6 +109,7 @@ export async function view({ params, query, setQuery, render }) {
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
+      bindGanttSections(root, url => api(url));
       bindChecklistCards(root);
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {

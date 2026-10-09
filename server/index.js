@@ -343,6 +343,7 @@ api.get('/api/settings/stage-templates', (req, res) => send(res, 200, Settings.l
 api.put('/api/settings/stage-templates', (req, res, { ctx, body }) => send(res, 200, Settings.saveStageTemplates(ctx, body.templates, clientIp(req))));
 
 // ---------- Relatórios ----------
+api.get('/api/gantt', (req, res, { ctx, query }) => send(res, 200, Reports.ganttFor(ctx, Object.fromEntries(query))));
 api.get('/api/reports', (req, res, { ctx, query }) => send(res, 200, Reports.buildReport(ctx, Object.fromEntries(query))));
 api.get('/api/field-list', (req, res, { ctx, query }) => send(res, 200, Reports.fieldList(ctx, Object.fromEntries(query))));
 

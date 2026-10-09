@@ -4,6 +4,7 @@ import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 import { periodKey, periodInfo } from './periods.js';
 import { depLists } from './deps-ui.js';
+import { ganttChart, drawGanttLinks } from './gantt.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
@@ -501,6 +502,23 @@ function itemCard(t, it, c) {
   return html`<details class="${cls}" ${raw(attrs)} ${isOpen ? 'open' : ''}>${summary}<div class="cli-detail">${head}<div class="cli-body">${body}</div></div></details>`;
 }
 
+// Cronograma semanal dos itens (início → término), com as setas das dependências entre itens
+const ITEM_COLOR = i => (i.open_nc ? '#C0392B' : i.result === 'conforme' ? '#2E8B57' : i.result === 'na' ? '#6E7A86' : '#A86F0E');
+function itemsGantt(c) {
+  const dated = c.items.filter(i => i.start_date || i.due_date);
+  if (!dated.length) return html`<p class="muted" style="margin:0">Nenhum item com data de início ou término. Defina as datas nos itens (⋯ → Editar) para vê-los no cronograma.</p>`;
+  const rows = dated.map(i => ({
+    id: i.id, code: String(i.seq), title: i.text, assignee_name: i.responsible_name, item: i,
+    start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
+    eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento', days_late: 0,
+    dep_key: `i:${i.id}`, preds: (c.item_deps?.[i.id]?.predecessors || []).filter(p => p.key.startsWith('i:')).map(p => ({ key: p.key, lag: p.lag_days })),
+  }));
+  const legend = html`<div class="g-legend"><span><i class="g-sw" style="--c:#A86F0E"></i>Pendente</span><span><i class="g-sw" style="--c:#C0392B"></i>Não conforme em aberto</span>
+    <span><i class="g-sw is-done" style="--c:#2E8B57"></i>Conforme</span><span><i class="g-sw is-done" style="--c:#6E7A86"></i>N/A</span><span><i class="g-sw g-sw-late"></i>Atraso</span><span><i class="g-today-legend"></i>Hoje</span></div>`;
+  return ganttChart(rows, { ref: todayISO(), weekly: true, groupLabel: r => r.item.group || 'Sem grupo', color: r => ITEM_COLOR(r.item), noun: ['item(ns)', 'concluído(s)'], head: 'Item', legend,
+    note: `Barra = início → término do item.${c.items.length > dated.length ? ` ${c.items.length - dated.length} item(ns) sem datas não aparecem.` : ''}` });
+}
+
 export function checklistSection(t, { reviewBox, reviewActions, can }) {
   const c = t.checklist;
   const s = c.summary;
@@ -594,6 +612,10 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         ${st.levels.length ? sections(c.items) : html`<div class="clg-items">${c.items.map(it => itemCard(t, it, c))}</div>`}
         <div class="cl-none muted">Nenhum item neste filtro.</div>
       </div>
+      <details class="cl-gantt" data-cl-gantt>
+        <summary>${icon('calendar')} Cronograma dos itens (Gantt)</summary>
+        <div class="cl-gantt-body">${itemsGantt(c)}</div>
+      </details>
       ${can.submit ? html`<div class="submit-bar">
         <ul class="proof-check">${c.check.ok ? html`<li class="ok">✓ Todos os itens respondidos${c.photo_rule === 'obrigatoria' ? ' e com foto' : ''}</li>`
           : c.check.missing.map(m => html`<li class="no">○ Falta: ${m}</li>`)}</ul>
@@ -616,6 +638,12 @@ export function bindChecklist(root, t, ctx, refresh) {
   const list = root.querySelector('.cl-list');
   if (!list) return;
   const st = uiOf(t.id);
+  // Gantt dos itens: lembra se estava aberto e desenha as setas ao abrir
+  const gd = root.querySelector('[data-cl-gantt]');
+  if (gd) {
+    if (st.gantt) { gd.open = true; setTimeout(() => drawGanttLinks(gd), 0); }
+    gd.addEventListener('toggle', () => { st.gantt = gd.open; if (gd.open) drawGanttLinks(gd); });
+  }
   const team = () => t._team || [];
   const run = async (fn, okMsg) => {
     try { const updated = await fn(); if (okMsg) toast(okMsg); if (updated) refresh(updated); }

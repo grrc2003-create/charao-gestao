@@ -1,7 +1,7 @@
 // Cronograma (Gantt) das tarefas — HTML/CSS puro, adequado à tela e à impressão A4.
 // Barra: início previsto (ou início da execução / criação) até o prazo. Concluídas vão até a data de conclusão;
 // atrasadas ganham uma extensão hachurada do prazo até hoje. Losango = prazo. Linha laranja = hoje.
-import { html, STATUS, fmtDate } from '../core.js';
+import { html, icon, STATUS, fmtDate } from '../core.js';
 import { STATUS_COLOR } from './shared.js';
 
 const TZ = 'America/Sao_Paulo';
@@ -192,4 +192,35 @@ export function drawGanttLinks(root) {
   window.addEventListener('beforeprint', all);
   window.addEventListener('afterprint', all);
   window.matchMedia?.('print').addEventListener?.('change', all);
+}
+
+// Seção "Cronograma (Gantt)" das telas: recolhida; ao abrir, busca as tarefas e desenha (com as setas de dependência)
+export function ganttSection({ id, url, title = 'Cronograma (Gantt)', sub = '', showProject = false, groupBy = 'stage' }) {
+  return html`<details class="card section gantt-sec" data-gantt-sec="${id}" data-gantt-url="${url}" data-gantt-proj="${showProject ? 1 : 0}" data-gantt-group="${groupBy}">
+    <summary class="card-head"><h2>${icon('calendar')}${title}</h2><span class="sub">${sub || 'toque para abrir'}</span></summary>
+    <div class="card-body gantt-sec-body"><p class="muted">Carregando…</p></div>
+  </details>`;
+}
+export function bindGanttSections(root, fetcher) {
+  root.querySelectorAll('[data-gantt-sec]').forEach(d => {
+    const key = `charao-gantt-${d.dataset.ganttSec}`;
+    let loaded = false;
+    const load = async () => {
+      if (loaded) { drawGanttLinks(d); return; }
+      loaded = true;
+      const body = d.querySelector('.gantt-sec-body');
+      try {
+        const g = await fetcher(d.dataset.ganttUrl);
+        const showProject = d.dataset.ganttProj === '1';
+        const label = d.dataset.ganttGroup === 'project' ? t => `${t.project_code}` : t => t.stage_name || 'Geral';
+        body.innerHTML = ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject }).toString();
+        drawGanttLinks(d);
+      } catch (e) { body.innerHTML = html`<p class="muted">${e.message}</p>`.toString(); loaded = false; }
+    };
+    try { if (sessionStorage.getItem(key) === '1') { d.open = true; load(); } } catch { /* sem armazenamento */ }
+    d.addEventListener('toggle', () => {
+      try { sessionStorage.setItem(key, d.open ? '1' : '0'); } catch { /* sem armazenamento */ }
+      if (d.open) load();
+    });
+  });
 }

@@ -1,5 +1,6 @@
 // Tela individual do usuário: indicadores, comportamento operacional, tarefas próprias e visão da equipe.
 import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct, roleLabel } from '../core.js';
+import { ganttSection, bindGanttSections } from './gantt.js';
 import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
@@ -96,6 +97,7 @@ export async function view({ params, query, setQuery, render, state }) {
           <div class="row-meta"><span>${x.tasks} tarefa(s) empurrada(s)</span></div></div><b>${x.days} d</b></a></li>`)}</ul>
         <div class="card-body muted" style="font-size:12.5px">Quando uma tarefa desta pessoa atrasou, as tarefas que dependiam dela foram empurradas (sem penalizá-las). Dias-tarefa = soma dos dias empurrados.</div></section>` : ''}
       ${checklistSection(d.checklists || [], { title: `Check-lists de ${u.name.split(' ')[0]}`, linkAll: '' })}
+      ${ganttSection({ id: `u${u.id}`, url: `/gantt?user=${u.id}`, showProject: true, groupBy: 'project', sub: `tarefas atribuídas a ${u.name.split(' ')[0]}, por projeto` })}
 
       <div class="grid grid-dash section">
         <section class="card"><div class="card-head"><h2>Distribuição das tarefas</h2></div>
@@ -123,6 +125,7 @@ export async function view({ params, query, setQuery, render, state }) {
       </section>`,
     mount(root) {
       bindCommon(root);
+      bindGanttSections(root, url => api(url));
       bindChecklistCards(root);
       root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab }); render(); }));
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st, org }); render(); }));

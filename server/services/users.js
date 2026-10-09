@@ -1,5 +1,6 @@
 // Regras de negócio de usuários, equipes e permissões.
 import { all, one, run, tx } from '../db.js';
+import { impactOfAssignee } from './dependencies.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
 import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
@@ -60,6 +61,7 @@ export function getUser(ctx, id) {
     trend: monthlyTrend(own),
     chronic_min: getSetting('chronic_reschedule_threshold'),
     checklists: checklistDashboard(tasks, { userId: id }),
+    impact: impactOfAssignee(id),
     tasks: own,
     created_tasks: tasks.filter(t => t.creator_id === id && t.assignee_id !== id),
     team: teamMembers,

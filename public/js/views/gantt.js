@@ -91,7 +91,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
 
   const taskRow = ({ t, s }) => {
     const c = color ? color(t) : STATUS_COLOR[t.eff_status];
-    const bar = html`<span class="g-bar ${t.eff_status === 'concluida' ? 'is-done' : ''}" style="left:${pos(s.start).toFixed(2)}%;width:${width(s.start, s.end).toFixed(2)}%;--c:${c}"
+    const bar = html`<span class="g-bar ${t.eff_status === 'concluida' ? 'is-done' : ''}" data-gbar style="left:${pos(s.start).toFixed(2)}%;width:${width(s.start, s.end).toFixed(2)}%;--c:${c}"
       title="${t.code} · ${fmtDate(s.start)} → ${fmtDate(s.end)} · ${statusOf ? statusOf(t) : STATUS[t.eff_status].label}"></span>`;
     const late = s.lateTo && s.lateTo > s.due
       ? html`<span class="g-late" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%;width:${(pos(addDays(s.lateTo, 1)) - pos(addDays(s.due, 1))).toFixed(2)}%"></span>` : '';
@@ -99,7 +99,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     // Prazo original (antes dos reagendamentos): losango vazado
     const origMark = t.original_due && t.original_due !== s.due
       ? html`<span class="g-due g-orig" style="left:${pos(addDays(t.original_due, 1)).toFixed(2)}%" title="Prazo original ${fmtDate(t.original_due)} · reagendada ${t.reschedule_count}x"></span>` : '';
-    return html`<tr class="g-row">
+    return html`<tr class="g-row ${t.critical ? 'is-critical' : ''}" data-gkey="${t.dep_key || ''}" data-preds="${(t.preds || []).map(x => x.key).join(',')}">
       <td class="g-label"><span class="g-code">${t.code}</span>${showProject ? html`<span class="g-proj">${t.project_code}</span>` : ''}
         <span class="g-title">${t.parent_code ? '↳ ' : ''}${t.title}</span>
         <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}</span></td>
@@ -127,7 +127,11 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     body.push(...spans.map(taskRow));
   }
 
-  return html`<div class="gantt">
+  // Ligações de dependência (setas desenhadas depois de montar) e caminho crítico
+  const hasLinks = rows.some(t => t.preds?.length);
+  const hasCritical = rows.some(t => t.critical);
+  return html`<div class="gantt ${hasLinks ? 'has-links' : ''}">
+    ${hasLinks ? html`<svg class="g-links" aria-hidden="true"></svg>` : ''}
     <table class="g-table">
       <thead><tr><th class="g-label">${head}${weekly ? html`<span class="g-meta">Semanas: segunda a domingo</span>` : ''}</th><th class="g-track g-axis ${weekly ? 'is-weekly' : ''}">${tk.filter(x => x.label).map(x => html`<span style="left:${(weekly ? pos(x.d) + wk / 2 : pos(x.d)).toFixed(2)}%">${x.label}</span>`)}
         <span class="g-today-label" style="left:${todayPct.toFixed(2)}%">hoje</span></th></tr></thead>
@@ -141,6 +145,51 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       <span><i class="g-due g-orig g-due-legend"></i>Prazo original (reagendada)</span>
       <span><i class="g-today-legend"></i>Hoje (${fmtDate(ref)})</span>
     </div>`}
+    ${hasLinks ? html`<div class="g-legend g-legend-dep"><span><i class="g-link-legend"></i>Dependência (término → início)</span>
+      ${hasCritical ? html`<span><i class="g-sw g-sw-crit"></i>Caminho crítico: sequência sem folga que define a data final</span>` : ''}</div>` : ''}
     <p class="g-note">${note || 'Início = início previsto da tarefa; quando não informado, usa-se o início da execução ou a data de criação.'}</p>
   </div>`;
+}
+
+// Desenha as setas das dependências sobre o Gantt (refaz ao redimensionar e ao imprimir)
+function drawOne(g) {
+  const svg = g.querySelector('svg.g-links');
+  if (!svg) return;
+  const box = g.getBoundingClientRect();
+  svg.setAttribute('width', box.width);
+  svg.setAttribute('height', box.height);
+  svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
+  const rowOf = key => g.querySelector(`tr[data-gkey="${key}"]`);
+  const parts = ['<defs><marker id="g-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#46535F"/></marker>',
+    '<marker id="g-arrow-c" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#C0392B"/></marker></defs>'];
+  g.querySelectorAll('tr[data-preds]').forEach(tr => {
+    const keys = (tr.dataset.preds || '').split(',').filter(Boolean);
+    const sb = tr.querySelector('[data-gbar]');
+    if (!keys.length || !sb) return;
+    const s = sb.getBoundingClientRect();
+    for (const k of keys) {
+      const pr = rowOf(k);
+      const pb = pr?.querySelector('[data-gbar]');
+      if (!pb) continue;
+      const p = pb.getBoundingClientRect();
+      const x1 = p.right - box.left, y1 = p.top + p.height / 2 - box.top;
+      const x2 = s.left - box.left - 1, y2 = s.top + s.height / 2 - box.top;
+      const xm = Math.max(x1 + 6, Math.min(x2 - 6, x1 + 10));
+      const crit = tr.classList.contains('is-critical') && pr.classList.contains('is-critical');
+      const d = x2 - 6 >= x1 + 6 ? `M${x1},${y1} H${xm} V${y2} H${x2}` : `M${x1},${y1} h6 V${(y1 + y2) / 2} H${x2 - 8} V${y2} H${x2}`;
+      parts.push(`<path d="${d}" fill="none" stroke="${crit ? '#C0392B' : '#46535F'}" stroke-width="${crit ? 1.8 : 1.1}" ${crit ? '' : 'stroke-dasharray="3 2"'} marker-end="url(#${crit ? 'g-arrow-c' : 'g-arrow'})"/>`);
+    }
+  });
+  svg.innerHTML = parts.join('');
+}
+export function drawGanttLinks(root) {
+  const all = () => root.querySelectorAll('.gantt.has-links').forEach(drawOne);
+  all();
+  if (root.__gLinks) return;
+  root.__gLinks = true;
+  let t;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(all, 120); });
+  window.addEventListener('beforeprint', all);
+  window.addEventListener('afterprint', all);
+  window.matchMedia?.('print').addEventListener?.('change', all);
 }

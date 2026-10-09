@@ -260,3 +260,12 @@
 /* Prazo: vence hoje (laranja) · nos próximos 7 dias (amarelo) */
 .r-fact.is-today { background: #F26B21; border-color: #F26B21; } .r-fact.is-today small, .r-fact.is-today b, .r-fact.is-today em { color: #fff; }
 .r-fact.is-week { background: #FFF3C4; border-color: #E9C94A; } .r-fact.is-week b, .r-fact.is-week em { color: #7A5A00; }
+
+/* Gantt: dependências e caminho crítico */
+.gantt.has-links { position: relative; }
+.g-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 4; overflow: visible; }
+.g-row.is-critical .g-bar { box-shadow: 0 0 0 1.5px #C0392B; }
+.g-row.is-critical .g-label .g-title { color: #9E2B20; }
+.g-link-legend { display: inline-block; width: 22px; height: 0; border-top: 1.5px dashed #46535F; position: relative; }
+.g-sw-crit { border: 1px solid #C0392B; box-shadow: 0 0 0 1.5px #C0392B; background: #fff; }
+.g-legend-dep { margin-top: 4px; }

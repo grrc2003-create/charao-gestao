@@ -5,7 +5,7 @@ import { html, api, STATUS, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { RESULT, PHOTO_RULE, matchItem, filterOptions, optLabel } from './checklist-ui.js';
 import { periodKey, periodInfo } from './periods.js';
-import { ganttChart } from './gantt.js';
+import { ganttChart, drawGanttLinks } from './gantt.js';
 
 // Dimensões de agrupamento (combináveis em até 3 níveis). Data = prazo do item.
 // Especialidades na ordem do modelo da obra (definida a cada relatório); fora do modelo depois e "Sem especialidade" por último
@@ -169,6 +169,7 @@ export async function view({ params, query, state }) {
     code: String(i.seq), title: i.text, assignee_name: i.responsible_name, group: i.group || 'Sem grupo', item: i,
     start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
     eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento',
+    dep_key: `i:${i.id}`, preds: (c.item_deps?.[i.id]?.predecessors || []).filter(p => p.key.startsWith('i:')).map(p => ({ key: p.key, lag: p.lag_days })),
     days_late: i.overdue ? Math.round((Date.parse(today) - Date.parse(i.due_date)) / 86400e3) : 0,
   })).sort((a, b) => (levels[0] === 'especialidade' ? specRank(a.item.specialty || '') - specRank(b.item.specialty || '') : 0) || a.item.seq - b.item.seq);
   // Agrupa como a lista quando o 1º nível é grupo ou responsável; senão, por grupo
@@ -261,6 +262,7 @@ export async function view({ params, query, state }) {
         <label class="pt-opt"><input type="checkbox" id="gnt" ${withGantt ? 'checked' : ''}>Gantt semanal</label>`,
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
+      drawGanttLinks(root);
       setPageFooter(`Charão · Check-list ${t.code} · ${t.project_code}`);
       bindPrintToolbar(root);
       const q = () => Object.fromEntries(new URLSearchParams(location.hash.split('?')[1] || ''));

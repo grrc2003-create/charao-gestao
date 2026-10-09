@@ -2,7 +2,7 @@
 import { html, raw, api, esc, icon, STATUS, STATUS_ORDER, PROOF, PRIORITY, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { STATUS_COLOR } from './shared.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
-import { ganttChart } from './gantt.js';
+import { ganttChart, drawGanttLinks } from './gantt.js';
 import { periodKey, periodInfo } from './periods.js';
 
 const TYPE_TITLE = { projeto: 'Relatório de Projeto', usuario: 'Relatório Individual', equipe: 'Relatório de Gestor e Equipe', geral: 'Relatório Geral da Operação', tarefas: 'Relatório de Tarefas' };
@@ -236,6 +236,12 @@ export async function view({ query }) {
 
       ${reschedSection(r)}
 
+      ${r.impact_rank?.length ? html`<section class="r-section avoid"><h3 class="r-h">Atrasos com maior impacto (dependências)</h3>
+        <table class="r-table"><thead><tr><th>Código</th><th>Tarefa que causou</th><th>Responsável</th><th class="num">Tarefas impactadas</th><th class="num">Dias-tarefa</th><th class="num">Fim do projeto</th></tr></thead>
+        <tbody>${r.impact_rank.map(x => html`<tr><td class="mono nowrap">${x.code}</td><td>${x.title}</td><td class="small">${x.assignee_name || '—'}</td>
+          <td class="num">${x.tasks}</td><td class="num"><b>${x.days}</b></td><td class="num">${x.project_end_days ? `+${x.project_end_days} d` : '—'}</td></tr>`)}</tbody></table>
+        <p class="small muted" style="margin-top:4px">Quando uma tarefa atrasa, as que dependem dela são empurradas sem penalização: o atraso e o impacto contam só para a causa. Dias-tarefa = soma dos dias empurrados.</p></section>` : ''}
+
       ${r.critical.length ? html`<section class="r-section avoid"><h3 class="r-h">Pontos de atenção — tarefas atrasadas</h3>
         <table class="r-table"><thead><tr><th>Código</th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th class="num">Atraso</th></tr></thead>
         <tbody>${r.critical.map(t => html`<tr><td class="mono nowrap">${t.code}</td><td>${t.title}</td><td class="small">${t.assignee_name || '—'}</td><td class="nowrap small">${fmtDate(t.due_date)}</td><td class="num late">${t.days_late} d</td></tr>`)}</tbody></table></section>` : ''}
@@ -288,6 +294,7 @@ export async function view({ query }) {
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
       setPageFooter(`Charão · ${title} · ${r.scope.label}`);
+      drawGanttLinks(root);
       bindPrintToolbar(root);
       root.querySelector('#lvl').addEventListener('change', e => {
         ctx.setQuery({ ...q, level: e.target.value });

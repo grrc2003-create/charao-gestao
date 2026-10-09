@@ -307,3 +307,67 @@ export function impactRanking(ctx, { projectId = null, limit = 10 } = {}) {
 }
 
 export const todayISO = today;
+
+// ===================== Gantt: ligações e caminho crítico =====================
+// Predecessoras (tarefa → tarefa) de cada tarefa do conjunto, só entre tarefas presentes nele
+export function ganttLinks(taskIds) {
+  const ids = new Set(taskIds);
+  const out = new Map();
+  if (!ids.size) return out;
+  const list = [...ids];
+  for (const d of all(`SELECT pred_task_id, succ_task_id, lag_days FROM dependencies WHERE succ_task_id IN (${list.map(() => '?').join(',')}) AND pred_task_id IS NOT NULL`, ...list)) {
+    if (!ids.has(d.pred_task_id)) continue;
+    if (!out.has(d.succ_task_id)) out.set(d.succ_task_id, []);
+    out.get(d.succ_task_id).push({ key: `t:${d.pred_task_id}`, lag: d.lag_days });
+  }
+  return out;
+}
+
+// Caminho crítico: a sequência de tarefas ligadas que define a data final (sem folga entre elas).
+// Parte das tarefas que terminam na última data do conjunto e volta pelas predecessoras "coladas"
+// (início da sucessora = término da predecessora + 1 + folga, ou antes disso).
+export function criticalPath(tasks) {
+  const live = tasks.filter(t => !t.cancelled_at && t.due_date);
+  if (!live.length) return new Set();
+  const byId = new Map(live.map(t => [t.id, t]));
+  const links = ganttLinks(live.map(t => t.id));
+  if (!links.size) return new Set();
+  const end = live.reduce((m, t) => (t.due_date > m ? t.due_date : m), live[0].due_date);
+  // Predecessoras "coladas": a sucessora começa (ou termina) no limite permitido pela predecessora
+  const tight = id => {
+    const t = byId.get(id);
+    const anchor = t.start_date || t.due_date;
+    return (links.get(id) || []).map(p => byId.get(Number(p.key.slice(2))) && { t: byId.get(Number(p.key.slice(2))), lag: p.lag })
+      .filter(p => p && anchor && daysBetween(addDays(p.t.due_date, 1 + p.lag), anchor) <= 0).map(p => p.t.id);
+  };
+  const crit = new Set();
+  const stack = [];
+  for (const t of live.filter(x => x.due_date === end)) {
+    const tp = tight(t.id);
+    if (tp.length) { crit.add(t.id); stack.push(...tp); }
+  }
+  while (stack.length) {
+    const id = stack.pop();
+    if (crit.has(id)) continue;
+    crit.add(id);
+    stack.push(...tight(id));
+  }
+  return crit.size > 1 ? crit : new Set();
+}
+
+// ===================== Impacto por pessoa =====================
+// Soma do impacto das tarefas que a pessoa tinha como responsável quando atrasaram (responsável atual da causa)
+export function impactOfAssignee(userId) {
+  const rows = all(`SELECT e.cause_task_id AS id, SUM(s.days) AS days, COUNT(DISTINCT COALESCE('t' || s.target_task_id, 'i' || s.target_item_id)) AS tasks
+    FROM dependency_events e JOIN dependency_shifts s ON s.event_id = e.id JOIN tasks t ON t.id = e.cause_task_id
+    WHERE t.assignee_id = ? GROUP BY e.cause_task_id ORDER BY days DESC`, userId);
+  if (!rows.length) return null;
+  const list = rows.map(r => ({ ...r, ...one('SELECT code, title FROM tasks WHERE id = ?', r.id) }));
+  return { causes: rows.length, tasks: rows.reduce((n, r) => n + r.tasks, 0), days: rows.reduce((n, r) => n + r.days, 0), list: list.slice(0, 10) };
+}
+
+// Ranking limitado a um conjunto de tarefas (relatórios)
+export function impactRankingIn(ctx, taskIds) {
+  const ids = new Set(taskIds);
+  return impactRanking(ctx, { limit: 1000 }).filter(r => ids.has(r.id)).slice(0, 15);
+}

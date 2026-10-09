@@ -90,6 +90,11 @@ export async function view({ params, query, setQuery, render, state }) {
         ${kpi({ label: 'Origem das tarefas', value: s.self_created, unit: ` próprias`, color: '#707E8B', foot: `${s.assigned_by_manager} atribuídas por gestor · ${s.created_by_user} criadas no total` })}
       </div>
 
+      ${d.impact ? html`<section class="card section dep-user-impact"><div class="card-head"><h2>${icon('alert')}Impacto dos atrasos em outras tarefas</h2>
+          <span class="sub">${d.impact.causes} tarefa(s) que atrasaram · ${d.impact.tasks} impactada(s) · <b>${d.impact.days} dia(s)-tarefa</b></span></div>
+        <ul class="rows">${d.impact.list.map(x => html`<li><a class="row-link" href="#/tarefas/${x.id}"><div class="grow"><div class="row-title"><span class="mono">${x.code}</span> ${x.title}</div>
+          <div class="row-meta"><span>${x.tasks} tarefa(s) empurrada(s)</span></div></div><b>${x.days} d</b></a></li>`)}</ul>
+        <div class="card-body muted" style="font-size:12.5px">Quando uma tarefa desta pessoa atrasou, as tarefas que dependiam dela foram empurradas (sem penalizá-las). Dias-tarefa = soma dos dias empurrados.</div></section>` : ''}
       ${checklistSection(d.checklists || [], { title: `Check-lists de ${u.name.split(' ')[0]}`, linkAll: '' })}
 
       <div class="grid grid-dash section">

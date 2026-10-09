@@ -5,6 +5,7 @@ import { canAccessProject, canSeeUser, teamIds } from '../lib/permissions.js';
 import { summarize, userStats, today, monthlyTrend, localDate, PERIODS, groupByPeriod, periodKey, periodLabel, byDue } from './metrics.js';
 import { listVisible, taskFilters, filterTasks, DUE_FILTERS } from './tasks.js';
 import { getSetting } from './settings.js';
+import { ganttLinks, criticalPath, impactRankingIn } from './dependencies.js';
 
 export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral', 'tarefas'];
 export const LEVELS = ['resumo', 'detalhado', 'completo'];
@@ -160,7 +161,13 @@ export function buildReport(ctx, q) {
     reschedules: rescheduleSummary,
     trend: monthlyTrend(tasks, today(), 6),
     chronic_min: getSetting('chronic_reschedule_threshold'),
-    gantt_tasks: withGantt ? (group === 'classificacao' || byPeriod ? tasks : [...tasks].sort(byStage)).map(ganttRow) : [],
+    gantt_tasks: withGantt ? (() => {
+      // Ligações (predecessoras) entre as tarefas do Gantt e o caminho crítico
+      const links = ganttLinks(tasks.map(t => t.id));
+      const crit = criticalPath(tasks);
+      return (group === 'classificacao' || byPeriod ? tasks : [...tasks].sort(byStage)).map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) }));
+    })() : [],
+    impact_rank: impactRankingIn(ctx, tasks.map(t => t.id)),
     issued_at: new Date().toISOString(),
     issued_by: ctx.user.name,
     reference_date: today(),

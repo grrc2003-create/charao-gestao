@@ -893,6 +893,17 @@ async function main() {
   const dpVF = (await ricardo('GET', `/tasks/${xF}`)).data;
   ok(dpVF.start_date > '2020-01-06' && dpVF.due_date > '2020-01-08' && !dpVF.reschedule_count && (await ricardo('GET', `/tasks/${xE}`)).data.impact?.tasks === 1,
     'predecessora concluída com atraso empurra a sucessora (sem penalizá-la) e registra o impacto');
+  // Etapa 3: Gantt com ligações e caminho crítico; impacto no relatório e na pessoa
+  const dpXG = await mkDep('Dep G (fim)', '2099-12-01', '2099-12-31');
+  await ricardo('POST', '/dependencies', { pred: `t:${xC}`, succ: `t:${dpXG}` });
+  await ricardo('PATCH', `/tasks/${xC}`, { due_date: '2099-12-10', reschedule_reason_id: dpReason });
+  const dpRep = (await ricardo('GET', '/reports?type=projeto&id=1&level=resumo')).data;
+  const dpGG = dpRep.gantt_tasks.find(t => t.id === dpXG), dpGC = dpRep.gantt_tasks.find(t => t.id === xC);
+  ok(dpGG?.preds.some(p => p.key === `t:${xC}`) && dpGG.critical && dpGC.critical && !dpRep.gantt_tasks.find(t => t.id === xD).critical,
+    'Gantt do relatório: ligações e caminho crítico (C → G, sem folga, até a data final)');
+  ok(dpRep.impact_rank.some(r => r.id === xA) && dpRep.impact_rank.some(r => r.id === xC), 'relatório traz os atrasos com maior impacto');
+  const dpUImp = (await ricardo('GET', '/users/4')).data.impact;
+  ok(dpUImp && dpUImp.days >= 10 && dpUImp.list.some(x => x.id === xA), 'página da pessoa soma o impacto dos atrasos das tarefas dela');
 }
 
 main()

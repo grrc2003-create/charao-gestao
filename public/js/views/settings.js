@@ -24,8 +24,8 @@ const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
 
 export async function view({ state, reloadMeta }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
-  const [reasons, general, templates, stageTpls] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
-    api('/settings/specialties'), api('/settings/stage-templates')]);
+  const [reasons, general, templates, stageTpls, cal] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
+    api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar')]);
 
   return {
     title: 'Configurações',
@@ -40,6 +40,24 @@ export async function view({ state, reloadMeta }) {
             <span class="hint">Tarefas reagendadas este número de vezes ou mais são destacadas como <b>crônicas</b> no Dashboard, nas listas e nos relatórios. Entre 2 e 10.</span></div>
           <div class="form-error" hidden></div>
           <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
+        </form>
+      </section>
+      <section class="card" id="cal-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('calendar')}Calendário de trabalho</h2><span class="sub">dias úteis de todas as obras</span></div>
+        <form class="card-body form" id="cal-form" novalidate>
+          <p class="muted" style="margin:0">Os feriados nacionais são calculados pelo sistema; os do estado e do município vêm da internet pelo local de cada obra
+            (Projetos → Editar). Aqui ficam as regras gerais e os <b>dias não trabalhados da empresa</b> (recesso, pontes), que valem para todas as obras.</p>
+          <div class="checks">
+            <label><input type="checkbox" name="work_saturday" ${cal.work_saturday ? 'checked' : ''}>Sábado é dia útil</label>
+            <label><input type="checkbox" name="work_sunday" ${cal.work_sunday ? 'checked' : ''}>Domingo é dia útil</label>
+            <label><input type="checkbox" name="carnaval_off" ${cal.carnaval_off ? 'checked' : ''}>Carnaval (segunda e terça) não é trabalhado</label>
+            <label><input type="checkbox" name="corpus_off" ${cal.corpus_off ? 'checked' : ''}>Corpus Christi não é trabalhado</label>
+          </div>
+          <div class="sub-label">Dias não trabalhados da empresa</div>
+          <ul class="cal-company" id="cal-company">${cal.company_days.map(d => html`<li class="cal-crow"><input type="date" value="${d.date}" data-cd-date required><input type="text" maxlength="120" value="${d.name}" data-cd-name placeholder="Motivo (ex.: Recesso de fim de ano)" required><button type="button" class="icon-btn" data-cd-rm aria-label="Remover">✕</button></li>`)}</ul>
+          <div><button type="button" class="btn btn-ghost btn-sm" id="cal-add">${icon('plus')}Incluir dia</button></div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar calendário</button></div>
         </form>
       </section>
       <section class="card" id="specs-card" style="max-width:900px;margin-bottom:16px">
@@ -107,6 +125,20 @@ export async function view({ state, reloadMeta }) {
           } catch (ex) { serr.textContent = ex.message; serr.hidden = false; }
         });
       };
+      // Calendário de trabalho
+      const cf = root.querySelector('#cal-form');
+      const cl = root.querySelector('#cal-company');
+      const rowHtml = '<li class="cal-crow"><input type="date" data-cd-date required><input type="text" maxlength="120" data-cd-name placeholder="Motivo (ex.: Recesso de fim de ano)" required><button type="button" class="icon-btn" data-cd-rm aria-label="Remover">✕</button></li>';
+      root.querySelector('#cal-add').addEventListener('click', () => { cl.insertAdjacentHTML('beforeend', rowHtml); cl.lastElementChild.querySelector('input').focus(); });
+      cl.addEventListener('click', e => { if (e.target.closest('[data-cd-rm]')) e.target.closest('li').remove(); });
+      cf.addEventListener('submit', async e => {
+        e.preventDefault();
+        const cerr = cf.querySelector('.form-error');
+        cerr.hidden = true;
+        const body = { work_saturday: cf.work_saturday.checked, work_sunday: cf.work_sunday.checked, carnaval_off: cf.carnaval_off.checked, corpus_off: cf.corpus_off.checked,
+          company_days: [...cl.querySelectorAll('li')].map(li => ({ date: li.querySelector('[data-cd-date]').value, name: li.querySelector('[data-cd-name]').value })) };
+        try { await api('/settings/calendar', { method: 'PUT', body }); toast('Calendário de trabalho salvo.'); ctx.render(); } catch (ex) { cerr.textContent = ex.message; cerr.hidden = false; }
+      });
       bindTemplates('#specs-form', '#spec-list', '#spec-add', 'specialty', '/settings/specialties', 'Modelos de especialidades salvos.');
       bindTemplates('#stage-tpl-form', '#stage-tpl-list', '#stage-tpl-add', 'stage', '/settings/stage-templates', 'Modelos de classificação salvos.');
       const gf = root.querySelector('#general-form');

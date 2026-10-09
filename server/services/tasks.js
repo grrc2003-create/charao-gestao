@@ -8,6 +8,7 @@ import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
+import { workingDaysBetween } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask } from './dependencies.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
@@ -188,6 +189,9 @@ export function getTask(ctx, id) {
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
     dependencies: taskDependencies(ctx, id),
     impact: impactOfTask(id),
+    // Prazo: dias úteis (calendário da obra) e corridos entre o início e o término
+    work_days: t.start_date && t.due_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date) : null,
+    calendar_days: t.start_date && t.due_date && t.due_date >= t.start_date ? daysBetween(t.start_date, t.due_date) + 1 : null,
     dep_shift: shiftedOfTask(id),
     ...(t.task_type === 'checklist' ? checklistDetail(ctx, t) : {}),
   };

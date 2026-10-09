@@ -16,6 +16,7 @@ import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
+import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
 import * as Checklist from './services/checklist.js';
@@ -190,12 +191,34 @@ api.get('/api/meta', (req, res, { ctx }) => {
 
 // ---------- Projetos ----------
 api.get('/api/projects', (req, res, { ctx }) => send(res, 200, Projects.listProjects(ctx)));
-api.post('/api/projects', (req, res, { ctx, body }) => send(res, 201, { id: Projects.createProject(ctx, body, clientIp(req)) }));
-api.get('/api/projects/:id', (req, res, { ctx, params }) => send(res, 200, Projects.getProject(ctx, intOrNull(params.id))));
-api.put('/api/projects/:id', (req, res, { ctx, params, body }) => {
-  Projects.updateProject(ctx, intOrNull(params.id), body, clientIp(req));
-  send(res, 200, { ok: true });
+// Ao salvar a obra com estado/município, os feriados estaduais e municipais são buscados na internet
+api.post('/api/projects', async (req, res, { ctx, body }) => {
+  const id = Projects.createProject(ctx, body, clientIp(req));
+  const holidays = body.uf ? await Calendar.syncProjectHolidays(id, ctx.user.id) : null;
+  send(res, 201, { id, holidays });
 });
+api.get('/api/projects/:id', (req, res, { ctx, params }) => send(res, 200, Projects.getProject(ctx, intOrNull(params.id))));
+api.put('/api/projects/:id', async (req, res, { ctx, params, body }) => {
+  const id = intOrNull(params.id);
+  const before = one('SELECT uf, ibge_code, holidays_synced_at FROM projects WHERE id = ?', id);
+  Projects.updateProject(ctx, id, body, clientIp(req));
+  const after = one('SELECT uf, ibge_code FROM projects WHERE id = ?', id);
+  const changed = after?.uf && (after.uf !== before?.uf || after.ibge_code !== before?.ibge_code || !before?.holidays_synced_at);
+  send(res, 200, { ok: true, holidays: changed ? await Calendar.syncProjectHolidays(id, ctx.user.id) : null });
+});
+// Calendário (feriados, dias não trabalhados e dias úteis)
+api.get('/api/ibge/municipios', async (req, res, { query }) => send(res, 200, await Calendar.municipios(String(query.get('uf') || '').toUpperCase())));
+api.get('/api/settings/calendar', (req, res) => send(res, 200, Calendar.calendarSettings()));
+api.put('/api/settings/calendar', (req, res, { ctx, body }) => send(res, 200, Calendar.saveCalendarSettings(ctx, body, clientIp(req))));
+api.get('/api/projects/:id/calendar', (req, res, { ctx, params, query }) => send(res, 200, Calendar.projectCalendar(ctx, intOrNull(params.id), query.get('year'))));
+api.post('/api/projects/:id/calendar/sync', async (req, res, { ctx, params }) => {
+  const id = intOrNull(params.id);
+  Calendar.projectCalendar(ctx, id); // valida o acesso
+  send(res, 200, await Calendar.syncProjectHolidays(id, ctx.user.id));
+});
+api.post('/api/projects/:id/calendar/days', (req, res, { ctx, params, body }) => { Calendar.addProjectDay(ctx, intOrNull(params.id), body); send(res, 201, { ok: true }); });
+api.patch('/api/projects/:id/calendar/days', (req, res, { ctx, params, body }) => { Calendar.setProjectDayWorking(ctx, intOrNull(params.id), body); send(res, 200, { ok: true }); });
+api.delete('/api/projects/:id/calendar/days/:dayId', (req, res, { ctx, params }) => { Calendar.removeProjectDay(ctx, intOrNull(params.id), params.dayId); send(res, 200, { ok: true }); });
 // Dependências (predecessora → sucessora)
 api.get('/api/projects/:id/nodes', (req, res, { ctx, params }) => send(res, 200, Deps.projectNodes(ctx, intOrNull(params.id))));
 api.post('/api/tasks/:id/impact-preview', (req, res, { ctx, params, body }) => send(res, 200, Deps.previewReschedule(ctx, intOrNull(params.id), body.due_date || null)));

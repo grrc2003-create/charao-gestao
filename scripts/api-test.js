@@ -12,7 +12,7 @@ const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'charao-test-'));
 const PORT = 3999;
 const BASE = `http://localhost:${PORT}`;
 const PW = 'charao2026'; // senha das contas de demonstração (server/seed.js)
-const env = { ...process.env, DATA_DIR, PORT: String(PORT) };
+const env = { ...process.env, DATA_DIR, PORT: String(PORT), HOLIDAYS_OFFLINE: '1' };
 const NODE = [process.execPath, '--disable-warning=ExperimentalWarning'];
 
 execFileSync(NODE[0], [NODE[1], path.join(ROOT, 'server/seed.js')], { env, stdio: 'ignore' });
@@ -904,6 +904,45 @@ async function main() {
   ok(dpRep.impact_rank.some(r => r.id === xA) && dpRep.impact_rank.some(r => r.id === xC), 'relatório traz os atrasos com maior impacto');
   const dpUImp = (await ricardo('GET', '/users/4')).data.impact;
   ok(dpUImp && dpUImp.days >= 10 && dpUImp.list.some(x => x.id === xA), 'página da pessoa soma o impacto dos atrasos das tarefas dela');
+
+  console.log('Calendário de trabalho');
+  const muns = (await ricardo('GET', '/ibge/municipios?uf=RS')).data;
+  ok(muns.some(m => m.nome === 'Canoas' && m.id === 4304606), 'lista de municípios do estado (IBGE)');
+  const calProj = await ricardo('POST', '/projects', { name: 'Obra Canoas', client: 'Cliente Teste', status: 'em_andamento', uf: 'RS', municipio: 'Canoas', ibge_code: 4304606 });
+  ok(calProj.status === 201 && calProj.data.holidays?.ok && calProj.data.holidays.count >= 3 && calProj.data.holidays.municipal_found,
+    `ao cadastrar a obra com estado/município, os feriados são buscados (${JSON.stringify(calProj.data.holidays)})`);
+  const cpId = calProj.data.id;
+  const yr = new Date().getFullYear();
+  let cal = (await ricardo('GET', `/projects/${cpId}/calendar?year=${yr}`)).data;
+  ok(cal.days.some(d => d.scope === 'municipal' && d.name === 'Dia do Município' && d.date === `${yr}-06-27`)
+    && cal.days.some(d => d.scope === 'estadual' && d.date === `${yr}-09-20`) && cal.days.some(d => d.scope === 'nacional' && d.name === 'Natal'),
+    'calendário da obra: nacionais (calculados), estadual e municipal');
+  ok(cal.days.find(d => d.name === 'Corpus Christi')?.off && cal.days.find(d => d.name === 'Carnaval (segunda)')?.off, 'Carnaval e Corpus Christi não trabalhados por padrão');
+  // Dias úteis: semana com o feriado municipal de 27/06 (no ano seguinte, para não depender do dia da semana deste ano)
+  const mkCal = async (title, start, due) => (await ricardo('POST', '/tasks', { project_id: cpId, title, description: 'Teste de calendário', start_date: start, due_date: due, priority: 'media', proof_type: 'nenhuma' })).data.id;
+  const tW = await mkCal('Semana comum', '2099-03-09', '2099-03-13');
+  const tWv = (await ricardo('GET', `/tasks/${tW}`)).data;
+  ok(tWv.work_days === 5 && tWv.calendar_days === 5, 'quadro de prazo: 5 dias úteis em uma semana de segunda a sexta');
+  const tWe = await mkCal('Com fim de semana', '2099-03-09', '2099-03-20');
+  ok((await ricardo('GET', `/tasks/${tWe}`)).data.work_days === 10, 'fim de semana não conta como dia útil (12 corridos = 10 úteis)');
+  // Natal de 2098 cai numa quinta: semana de 22 (seg) a 26/12 (sex) tem 4 dias úteis
+  const tNat = await mkCal('Semana do Natal', '2098-12-22', '2098-12-26');
+  ok((await ricardo('GET', `/tasks/${tNat}`)).data.work_days === 4, 'feriado nacional (Natal) não conta como dia útil');
+  // A obra trabalha no Natal → volta a contar
+  ok((await ricardo('PATCH', `/projects/${cpId}/calendar/days`, { date: '2098-12-25', working: true, name: 'Natal' })).status === 200, 'obra marca que trabalha num feriado');
+  ok((await ricardo('GET', `/tasks/${tNat}`)).data.work_days === 5, 'feriado trabalhado volta a contar como dia útil');
+  // Dia não trabalhado só da obra
+  ok((await ricardo('POST', `/projects/${cpId}/calendar/days`, { date: '2099-03-11', name: 'Paralisação' })).status === 201
+    && (await ricardo('GET', `/tasks/${tW}`)).data.work_days === 4, 'dia não trabalhado da obra desconta dos dias úteis');
+  // Dia não trabalhado da empresa (Configurações) e sábado trabalhado
+  ok((await marcos('PUT', '/settings/calendar', { work_saturday: true })).status === 403, 'colaborador não altera o calendário da empresa');
+  await ricardo('PUT', '/settings/calendar', { company_days: [{ date: '2099-03-10', name: 'Recesso' }] });
+  ok((await ricardo('GET', `/tasks/${tW}`)).data.work_days === 3, 'dia não trabalhado da empresa vale para todas as obras');
+  await ricardo('PUT', '/settings/calendar', { work_saturday: true, company_days: [] });
+  ok((await ricardo('GET', `/tasks/${tWe}`)).data.work_days === 9 + 1, 'com sábado trabalhado, o sábado passa a contar (9 úteis com a paralisação + 1 sábado)');
+  await ricardo('PUT', '/settings/calendar', { work_saturday: false });
+  ok((await ricardo('GET', '/settings/calendar')).data.company_days.length === 0, 'configurações do calendário salvas');
+
 }
 
 main()

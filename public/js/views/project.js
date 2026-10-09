@@ -6,6 +6,7 @@ import { recurrenceRows } from './recurrences.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
 import { ganttSection, bindGanttSections } from './gantt.js';
+import { calendarSection, bindCalendar } from './calendar-ui.js';
 
 export async function view({ params, query, setQuery, render }) {
   const [p, impactRank] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => [])]);
@@ -76,6 +77,7 @@ export async function view({ params, query, setQuery, render }) {
       </section>` : ''}
 
       ${ganttSection({ id: `p${p.id}`, url: `/gantt?project=${p.id}`, sub: 'tarefas do projeto por classificação · setas = dependências · vermelho = caminho crítico' })}
+      ${calendarSection(p)}
       ${impactRankingSection(impactRank, { sub: 'neste projeto' })}
       ${deadlineSection(p.summary, p.trend, {
         chronicMin: p.chronic_min || 3,
@@ -110,6 +112,7 @@ export async function view({ params, query, setQuery, render }) {
     mount(root) {
       bindCommon(root);
       bindGanttSections(root, url => api(url));
+      bindCalendar(root, p);
       bindChecklistCards(root);
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {

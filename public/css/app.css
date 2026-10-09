@@ -1308,3 +1308,27 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .cl-gantt > summary svg { width: 16px; height: 16px; }
 .cl-gantt-body { padding: 0 12px 12px; overflow-x: auto; }
 .cl-gantt-body .g-table { min-width: 680px; }
+
+/* Calendário */
+.due-range { display: block; font-size: 12px; font-weight: 500; color: var(--ink-2); margin-top: 2px; }
+.due-range b { color: var(--navy); }
+.cal-company { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cal-crow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.cal-crow input[type=date] { flex: 0 0 160px; }
+.cal-crow input[type=text] { flex: 1 1 200px; min-width: 0; }
+.cal-sec > summary { list-style: none; cursor: pointer; }
+.cal-sec > summary::-webkit-details-marker { display: none; }
+.cal-sec > summary::after { content: '▾'; margin-left: 8px; color: var(--muted); }
+.cal-sec[open] > summary::after { content: '▴'; }
+.cal-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.cal-month { margin: 10px 0 4px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cal-day { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; }
+.cal-day.is-working { opacity: .6; }
+.cal-day.is-working .cal-name { text-decoration: line-through; }
+.cal-date { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 92px; }
+.cal-name { flex: 1 1 180px; min-width: 0; }
+.cal-scope { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; border-radius: 6px; padding: 1px 6px; background: var(--navy-50); color: var(--ink-2); }
+.cal-scope.s-municipal { background: #E7F0FA; color: #2F6FB3; } .cal-scope.s-estadual { background: #EAF5EE; color: #1F6B41; }
+.cal-scope.s-empresa, .cal-scope.s-obra { background: #FFF1E8; color: #8C3D0B; }
+.cal-work { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }

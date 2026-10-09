@@ -103,7 +103,14 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             placeholder="${isInt ? 'Ex.: Charão — Interno, Manutenção de frota' : ''}"></div>
           <div class="form-row obra-only" ${isInt ? 'hidden' : ''}>
             <div class="field"><label class="req" for="client">Cliente</label><input id="client" name="client" type="text" maxlength="160" required value="${v.client || ''}"></div>
-            <div class="field"><label for="location">Local da obra</label><input id="location" name="location" type="text" maxlength="200" value="${v.location || ''}"></div>
+            <div class="field"><label for="location">Endereço da obra</label><input id="location" name="location" type="text" maxlength="200" value="${v.location || ''}"></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label for="uf">Estado (feriados)</label><select id="uf" name="uf"><option value="">—</option>${['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'].map(u => html`<option value="${u}" ${v.uf === u ? 'selected' : ''}>${u}</option>`)}</select></div>
+            <div class="field"><label for="ibge_code">Município (feriados)</label><select id="ibge_code" name="ibge_code" ${v.uf ? '' : 'disabled'}>
+                ${v.ibge_code ? html`<option value="${v.ibge_code}" selected>${v.municipio || v.ibge_code}</option>` : html`<option value="">${v.uf ? 'Carregando…' : 'Escolha o estado'}</option>`}</select>
+              <input type="hidden" name="municipio" value="${v.municipio || ''}">
+              <span class="hint">Os feriados nacionais, do estado e do município são buscados na internet e entram no calendário da obra (dias úteis).</span></div>
           </div>
           <div class="field"><label for="description">Escopo / descrição</label><textarea id="description" name="description" maxlength="3000">${v.description || ''}</textarea></div>
         </fieldset>
@@ -169,6 +176,22 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         root.querySelector('#name-label').textContent = interno ? 'Nome da área' : 'Nome do projeto';
         if (interno && !f.client.value) f.client.value = 'Charão Engenharia e Construção';
       }));
+      // Estado → municípios (lista do IBGE)
+      const ufSel = root.querySelector('#uf');
+      const munSel = root.querySelector('#ibge_code');
+      const loadMun = async keep => {
+        munSel.disabled = true;
+        if (!ufSel.value) { munSel.innerHTML = '<option value="">Escolha o estado</option>'; f.municipio.value = ''; return; }
+        munSel.innerHTML = '<option value="">Carregando…</option>';
+        try {
+          const list = await api('/ibge/municipios', { query: { uf: ufSel.value } });
+          munSel.innerHTML = html`<option value="">Escolha o município</option>${list.map(m => html`<option value="${m.id}" ${String(m.id) === String(keep || '') ? 'selected' : ''}>${m.nome}</option>`)}`.toString();
+          munSel.disabled = false;
+        } catch (e) { munSel.innerHTML = '<option value="">Não foi possível carregar</option>'; toast(e.message, 'err'); }
+      };
+      ufSel?.addEventListener('change', () => loadMun(''));
+      munSel?.addEventListener('change', () => { f.municipio.value = munSel.selectedOptions[0]?.textContent || ''; });
+      if (ufSel?.value) loadMun(munSel.value);
       // Prévia das especialidades do modelo escolhido
       const tplSel = root.querySelector('#specialty_template_id');
       const showSpecs = () => {
@@ -225,9 +248,14 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         err.hidden = true;
         try {
           let id = p?.id;
-          if (editing) await api(`/projects/${id}`, { method: 'PUT', body: data });
-          else id = (await api('/projects', { method: 'POST', body: data })).id;
+          let resp;
+          if (editing) resp = await api(`/projects/${id}`, { method: 'PUT', body: data });
+          else { resp = await api('/projects', { method: 'POST', body: data }); id = resp.id; }
           await reloadMeta();
+          // Resultado da busca de feriados
+          const hol = resp?.holidays;
+          if (hol) setTimeout(() => toast(hol.ok ? (hol.municipal_found ? `Feriados do estado e do município carregados (${hol.count}).` : 'Feriados do estado carregados. Não encontramos feriados municipais desta cidade: confira e inclua no calendário da obra.')
+            : hol.message, hol.ok && hol.municipal_found ? undefined : 'warn'), 600);
           toast(editing ? 'Projeto atualizado.' : 'Projeto cadastrado.');
           navigate(`/projetos/${id}`);
         } catch (ex) {

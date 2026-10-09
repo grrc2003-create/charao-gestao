@@ -867,24 +867,29 @@ async function main() {
   await ricardo('POST', '/dependencies', { pred: `t:${xA}`, succ: `t:${xB}`, lag_days: 1 });
   await ricardo('POST', '/dependencies', { pred: `t:${xB}`, succ: `t:${xC}` });
   await ricardo('POST', '/dependencies', { pred: `t:${xA}`, succ: `t:${xD}` });
+  const dpVB1 = (await ricardo('GET', `/tasks/${xB}`)).data;
+  const dpVC1 = (await ricardo('GET', `/tasks/${xC}`)).data;
+  ok(dpVB1.start_date > '2099-01-10' && dpVC1.start_date > dpVB1.due_date, `ao ligar, a sucessora que começava antes do permitido é alinhada (B ${dpVB1.start_date}→${dpVB1.due_date}, C ${dpVC1.start_date})`);
+  ok(!dpVB1.reschedule_count && !dpVB1.impact && dpVB1.history.some(h => h.action === 'Datas ajustadas pela dependência'), 'alinhamento de planejamento não conta como reagendamento nem impacto');
   const dpPrev = (await ricardo('POST', `/tasks/${xA}/impact-preview`, { due_date: '2099-01-15' })).data;
-  ok(dpPrev.impacted.length === 2 && dpPrev.impacted.every(i => i.days === 5), `prévia: reagendar A em +5 dias empurra B e C em +5 (D tem folga) (${JSON.stringify(dpPrev.impacted.map(i => [i.code, i.days]))})`);
+  ok(dpPrev.impacted.length === 2 && dpPrev.impacted.every(i => i.days > 0) && dpPrev.impacted.every(i => i.code !== dpVB1.code || i.new_due > dpVB1.due_date),
+    `prévia: reagendar A empurra B e C (D tem folga) (${JSON.stringify(dpPrev.impacted.map(i => [i.code, i.days]))})`);
   const dpReason = (await ricardo('GET', '/settings/reasons')).data[0].id;
   ok((await ricardo('PATCH', `/tasks/${xA}`, { due_date: '2099-01-15', reschedule_reason_id: dpReason })).status === 200, 'reagenda a predecessora (com justificativa)');
   const dpVA = (await ricardo('GET', `/tasks/${xA}`)).data;
   const dpVB2 = (await ricardo('GET', `/tasks/${xB}`)).data;
   const dpVC2 = (await ricardo('GET', `/tasks/${xC}`)).data;
   const dpVD2 = (await ricardo('GET', `/tasks/${xD}`)).data;
-  ok(dpVB2.start_date === '2099-01-17' && dpVB2.due_date === '2099-01-25' && dpVC2.start_date === '2099-01-26' && dpVC2.due_date === '2099-01-30' && dpVD2.due_date === '2099-03-05',
-    'sucessoras empurradas em cascata mantendo a duração (B 17→25/01, C 26→30/01); D não muda');
+  ok(dpVB2.start_date > '2099-01-15' && dpVB2.work_days === dpVB1.work_days && dpVC2.start_date > dpVB2.due_date && dpVC2.work_days === dpVC1.work_days && dpVD2.due_date === '2099-03-05',
+    `sucessoras empurradas em cascata mantendo a duração em dias úteis (B ${dpVB2.start_date}→${dpVB2.due_date}, ${dpVB2.work_days} úteis); D não muda`);
   ok(!dpVB2.reschedule_count && !dpVC2.reschedule_count && dpVA.reschedule_count === 1, 'só a causa conta como reagendada; as empurradas não');
-  ok(dpVB2.history.some(h => h.action === 'Prazo ajustado por dependência' && h.details.includes('Dep A')) && dpVB2.dep_shift?.days === 5, 'sucessora registra o ajuste e a causa');
-  ok(dpVA.impact?.tasks === 2 && dpVA.impact.days === 10 && dpVA.history.some(h => h.action === 'Impacto em outras tarefas'), `impacto na causa: 2 tarefas, 10 dias-tarefa (${JSON.stringify({ t: dpVA.impact?.tasks, d: dpVA.impact?.days, fim: dpVA.impact?.project_end_days })})`);
+  ok(dpVB2.history.some(h => h.action === 'Prazo ajustado por dependência' && h.details.includes('Dep A')) && dpVB2.dep_shift?.days > 0, 'sucessora registra o ajuste e a causa');
+  ok(dpVA.impact?.tasks === 2 && dpVA.impact.days > 0 && dpVA.history.some(h => h.action === 'Impacto em outras tarefas'), `impacto na causa: 2 tarefas e os dias-tarefa (${JSON.stringify({ t: dpVA.impact?.tasks, d: dpVA.impact?.days, fim: dpVA.impact?.project_end_days })})`);
   const dpRank = (await ricardo('GET', '/impact-ranking?project=1')).data;
-  ok(dpRank[0]?.id === xA && dpRank[0].days === 10, 'ranking "atrasos com maior impacto" traz a causa');
+  ok(dpRank[0]?.id === xA && dpRank[0].days === dpVA.impact.days, 'ranking "atrasos com maior impacto" traz a causa');
   // Antecipar não puxa as sucessoras de volta
   await ricardo('PATCH', `/tasks/${xA}`, { due_date: '2099-01-11', reschedule_reason_id: dpReason });
-  ok((await ricardo('GET', `/tasks/${xB}`)).data.due_date === '2099-01-25', 'antecipar a predecessora não puxa as sucessoras de volta');
+  ok((await ricardo('GET', `/tasks/${xB}`)).data.due_date === dpVB2.due_date, 'antecipar a predecessora não puxa as sucessoras de volta');
   // Término com atraso: empurra pelo atraso real
   const xE = await mkDep('Dep E (atrasada)', '2020-01-01', '2020-01-05');
   const xF = await mkDep('Dep F', '2020-01-06', '2020-01-08');
@@ -942,6 +947,27 @@ async function main() {
   ok((await ricardo('GET', `/tasks/${tWe}`)).data.work_days === 9 + 1, 'com sábado trabalhado, o sábado passa a contar (9 úteis com a paralisação + 1 sábado)');
   await ricardo('PUT', '/settings/calendar', { work_saturday: false });
   ok((await ricardo('GET', '/settings/calendar')).data.company_days.length === 0, 'configurações do calendário salvas');
+
+
+  console.log('Datas automáticas e datas da tarefa principal');
+  const mkBlank = async title => (await ricardo('POST', '/tasks', { project_id: cpId, title, description: 'Sem datas', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  const pFix = await mkCal('Predecessora com datas', '2099-03-02', '2099-03-06');
+  const sBlank = await mkBlank('Sucessora sem datas');
+  await ricardo('POST', '/dependencies', { pred: `t:${pFix}`, succ: `t:${sBlank}`, lag_days: 2 });
+  let sbv = (await ricardo('GET', `/tasks/${sBlank}`)).data;
+  ok(sbv.start_date === '2099-03-12' && !sbv.due_date && sbv.history.some(h => h.action === 'Datas definidas pelas dependências'),
+    `sem início: começa depois do término da predecessora + folga em dias úteis (sex 06/03 → seg 09, ter 10, qua 11 é paralisação da obra → qui 12/03) → ${sbv.start_date}`);
+  const preBlank = await mkBlank('Predecessora sem término');
+  await ricardo('PATCH', `/tasks/${preBlank}`, { start_date: '2099-02-23' });
+  await ricardo('POST', '/dependencies', { pred: `t:${preBlank}`, succ: `t:${pFix}` });
+  const pbv = (await ricardo('GET', `/tasks/${preBlank}`)).data;
+  ok(pbv.due_date === '2099-02-27', `sem término: termina no dia útil antes da sucessora (sucessora começa seg 02/03 → sex 27/02) → ${pbv.due_date}`);
+  // Subtarefa sem datas: usa as datas da tarefa principal
+  const subNo = (await ricardo('POST', '/tasks', { parent_id: pFix, title: 'Sub sem datas', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  const subV = (await ricardo('POST', `/tasks/${subNo}/parent-dates`, {})).data;
+  ok(subV.start_date === '2099-03-02' && subV.due_date === '2099-03-06' && subV.history.some(h => h.action === 'Datas copiadas da tarefa principal'), 'botão copia início e término da tarefa principal para a subtarefa');
+  ok((await ricardo('POST', `/tasks/${subNo}/parent-dates`, {})).status === 400, 'botão só vale para subtarefa sem datas');
+  ok((await ricardo('POST', `/tasks/${pFix}/parent-dates`, {})).status === 400, 'botão só existe em subtarefas');
 
 }
 

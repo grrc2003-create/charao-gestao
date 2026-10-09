@@ -196,11 +196,19 @@ export function nextWorkingDay(projectId, d) {
   for (let i = 0; i < 400 && !isWork(x); i++) x = addDaysISO(x, 1);
   return x;
 }
+// Dia útil anterior ou igual a d
+export function prevWorkingDay(projectId, d) {
+  const isWork = calendarFor(projectId, addDaysISO(d, -400), d);
+  let x = d;
+  for (let i = 0; i < 400 && !isWork(x); i++) x = addDaysISO(x, -1);
+  return x;
+}
 // Soma n dias úteis a d (n ≥ 0; com n = 0 devolve o próprio d se for útil, senão o próximo útil)
 export function addWorkingDays(projectId, d, n) {
   const isWork = calendarFor(projectId, d, addDaysISO(d, n * 3 + 400));
   let x = d;
-  while (!isWork(x)) x = addDaysISO(x, 1);
+  if (n <= 0) { while (!isWork(x)) x = addDaysISO(x, 1); return x; }
+  // Cada passo vai ao próximo dia útil (término num sábado: segunda já é o 1º dia útil seguinte)
   for (let k = 0; k < n; k++) { x = addDaysISO(x, 1); while (!isWork(x)) x = addDaysISO(x, 1); }
   return x;
 }

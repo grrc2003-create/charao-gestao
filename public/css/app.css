@@ -1332,3 +1332,7 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .cal-scope.s-municipal { background: #E7F0FA; color: #2F6FB3; } .cal-scope.s-estadual { background: #EAF5EE; color: #1F6B41; }
 .cal-scope.s-empresa, .cal-scope.s-obra { background: #FFF1E8; color: #8C3D0B; }
 .cal-work { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+
+.due-parent { margin-top: 6px; font-size: 12px; }
+.due-parent { display: inline-flex; max-width: 100%; white-space: normal; height: auto; min-height: 30px; text-align: left; line-height: 1.2; padding: 4px 8px; }
+.due-parent svg { flex: none; }

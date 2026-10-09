@@ -8,6 +8,7 @@ import { canSeeTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { loadVisible, checklistMaxDue } from './tasks.js';
 import { addDays, daysBetween, today } from './metrics.js';
+import { addWorkingDays, workingDaysBetween, prevWorkingDay } from './calendar.js';
 
 const fmt = d => (d ? d.split('-').reverse().join('/') : 'sem prazo');
 const parseKey = k => {
@@ -127,6 +128,9 @@ export function addDependency(ctx, body) {
     const folga = lag ? ` (folga de ${lag} dia${lag > 1 ? 's' : ''})` : '';
     taskHistory(ownerId(succ), ctx.user.id, 'Dependência adicionada', `${succ.kind === 'item' ? `Item ${succ.code} ` : ''}depende de ${label(pred)}${folga}`);
     if (ownerId(pred) !== ownerId(succ)) taskHistory(ownerId(pred), ctx.user.id, 'Dependência adicionada', `${pred.kind === 'item' ? `Item ${pred.code} ` : ''}libera ${label(succ)}${folga}`);
+    // Sucessora começando antes do permitido é ajustada; datas em branco são preenchidas
+    scheduleAround(succ.key, ctx.user.id);
+    fillBlankDates(pred.key, ctx.user.id);
     return id;
   });
 }
@@ -186,11 +190,16 @@ export function planShift(sources) {
       const cur = planned.get(n.key) || fresh(n.key);
       const anchor = cur.newStart || cur.newDue;
       if (!anchor) continue;
-      const req = addDays(finish, 1 + e.lag);
+      // Início mais cedo: (1 + folga) dias úteis depois do término da predecessora, pelo calendário da obra
+      const req = addWorkingDays(n.project_id, finish, 1 + e.lag);
       if (anchor >= req) continue;
-      const delta = daysBetween(anchor, req);
-      cur.newStart = cur.newStart ? addDays(cur.newStart, delta) : null;
-      cur.newDue = cur.newDue ? addDays(cur.newDue, delta) : null;
+      if (cur.newStart && cur.newDue) {
+        // Mantém a duração em dias úteis
+        const wd = workingDaysBetween(n.project_id, cur.newStart, cur.newDue);
+        cur.newStart = req;
+        cur.newDue = wd ? addWorkingDays(n.project_id, req, wd - 1) : addDays(cur.newDue, daysBetween(anchor, req));
+      } else if (cur.newStart) cur.newStart = req;
+      else cur.newDue = req;
       planned.set(n.key, cur);
       queue.push({ key: n.key, finish: cur.newDue || cur.newStart });
       // Item empurrado pode empurrar o próprio check-list (prazo = maior prazo dos itens) e as sucessoras dele
@@ -222,9 +231,10 @@ export function previewReschedule(ctx, taskId, newDue) {
 const WHY = { reagendamento: 'reagendamento', conclusao_atrasada: 'término com atraso', prazo_item: 'prazo do item alterado' };
 
 // Grava o plano: ajusta as sucessoras (sem reagendamento), registra no histórico e o evento de impacto
-export function applyShift({ userId, projectId, cause, kind, causeOldDue, causeNewDue, sources, projectEndBefore }) {
+export function applyShift({ userId, projectId, cause, kind, causeOldDue, causeNewDue, sources, projectEndBefore, record = true }) {
   const plan = planShift(sources);
   if (!plan.length) return null;
+  if (!record) return alignPlan(plan, userId, cause);
   const ev = Number(run(`INSERT INTO dependency_events (project_id, cause_task_id, cause_item_id, kind, cause_old_due, cause_new_due, project_end_old, created_by)
     VALUES (?,?,?,?,?,?,?,?)`, projectId, cause.taskId, cause.itemId || null, kind, causeOldDue || null, causeNewDue || null, projectEndBefore || null, userId).lastInsertRowid);
   const causeLabel = `${cause.code} · ${cause.title}`;
@@ -370,4 +380,83 @@ export function impactOfAssignee(userId) {
 export function impactRankingIn(ctx, taskIds) {
   const ids = new Set(taskIds);
   return impactRanking(ctx, { limit: 1000 }).filter(r => ids.has(r.id)).slice(0, 15);
+}
+
+
+// ===================== Datas pelo planejamento (sem penalizar nem registrar impacto) =====================
+const fmtD = d => (d ? d.split('-').reverse().join('/') : '—');
+// Grava datas de uma ponta (item: o check-list acompanha o maior prazo dos itens)
+function setDates(n, start, due) {
+  if (n.kind === 'item') {
+    run('UPDATE checklist_items SET start_date = ?, due_date = ? WHERE id = ?', start, due, n.id);
+    const max = checklistMaxDue(n.task_id);
+    if (max) run('UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?', max, new Date().toISOString(), n.task_id);
+  } else run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', start, due, new Date().toISOString(), n.id);
+}
+const ownerOf = n => (n.kind === 'item' ? n.task_id : n.id);
+
+// Ajuste de planejamento (ex.: dependência criada com a sucessora começando antes do permitido): não é atraso de ninguém
+function alignPlan(plan, userId, cause) {
+  for (const p of plan) {
+    if (p.derived) continue; // check-list: acompanha os itens
+    setDates(p.node, p.newStart, p.newDue);
+    taskHistory(ownerOf(p.node), userId, 'Datas ajustadas pela dependência',
+      `${p.node.kind === 'item' ? `Item ${p.node.code}: ` : ''}início ${fmtD(p.oldStart)} → ${fmtD(p.newStart)} · término ${fmtD(p.oldDue)} → ${fmtD(p.newDue)}`
+      + ` · começa depois de ${cause.code} terminar (planejamento, não conta como reagendamento)`);
+  }
+  return null;
+}
+
+// Alinha uma ponta às predecessoras: início não pode ser antes de (término da predecessora + folga)
+export function alignToPredecessors(key, userId) {
+  const n = parseKey(key);
+  const preds = all(`SELECT pred_task_id, pred_item_id FROM dependencies WHERE ${n.kind === 't' ? 'succ_task_id' : 'succ_item_id'} = ?`, n.id);
+  for (const r of preds) {
+    const pk = r.pred_task_id ? `t:${r.pred_task_id}` : `i:${r.pred_item_id}`;
+    const pn = node(pk);
+    const finish = datesOf(pn).due;
+    if (finish) applyShift({ userId, projectId: pn.project_id, cause: { taskId: ownerOf(pn), code: pn.code, title: pn.title }, kind: 'alinhamento', sources: [{ key: pk, finish }], record: false });
+  }
+}
+
+// Preenche datas em branco: início = término da predecessora + folga (dia útil); término = dia útil antes da sucessora
+export function fillBlankDates(key, userId) {
+  const n = node(key);
+  if (n.done || n.cancelled) return;
+  if (n.kind === 'tarefa' && n.owner.task_type === 'checklist' && checklistMaxDue(n.id)) return; // prazo vem dos itens
+  const d = datesOf(n);
+  let start = d.start, due = d.due;
+  const nk = parseKey(n.key);
+  if (!start) {
+    const preds = all(`SELECT pred_task_id, pred_item_id, lag_days FROM dependencies WHERE ${nk.kind === 't' ? 'succ_task_id' : 'succ_item_id'} = ?`, nk.id);
+    const starts = preds.map(r => { const pn = node(r.pred_task_id ? `t:${r.pred_task_id}` : `i:${r.pred_item_id}`); const f = datesOf(pn).due; return f ? addWorkingDays(n.project_id, f, 1 + r.lag_days) : null; }).filter(Boolean);
+    if (starts.length) start = starts.sort().at(-1);
+  }
+  if (!due) {
+    const succs = all(`SELECT succ_task_id, succ_item_id, lag_days FROM dependencies WHERE ${nk.kind === 't' ? 'pred_task_id' : 'pred_item_id'} = ?`, nk.id);
+    const limits = succs.map(r => { const sn = node(r.succ_task_id ? `t:${r.succ_task_id}` : `i:${r.succ_item_id}`); const s = datesOf(sn).start; return s ? prevWorkingDay(n.project_id, addDays(s, -1)) : null; }).filter(Boolean);
+    if (limits.length) {
+      const lim = limits.sort()[0];
+      if (!start || lim >= start) due = lim;
+    }
+  }
+  if (start === d.start && due === d.due) return;
+  setDates(n, start, due);
+  taskHistory(ownerOf(n), userId, 'Datas definidas pelas dependências',
+    `${n.kind === 'item' ? `Item ${n.code}: ` : ''}${start !== d.start ? `início ${fmtD(start)}` : ''}${start !== d.start && due !== d.due ? ' · ' : ''}${due !== d.due ? `término ${fmtD(due)} (antes da sucessora)` : ''}`);
+}
+
+// Depois de criar a dependência ou mudar datas: alinha a sucessora e preenche o que estiver em branco nas duas pontas
+export function scheduleAround(key, userId) {
+  alignToPredecessors(key, userId);
+  fillBlankDates(key, userId);
+  const n = parseKey(key);
+  const col = n.kind === 't' ? 'task_id' : 'item_id';
+  for (const r of all(`SELECT succ_task_id, succ_item_id FROM dependencies WHERE pred_${col} = ?`, n.id)) {
+    const sk = r.succ_task_id ? `t:${r.succ_task_id}` : `i:${r.succ_item_id}`;
+    fillBlankDates(sk, userId);
+  }
+  for (const r of all(`SELECT pred_task_id, pred_item_id FROM dependencies WHERE succ_${col} = ?`, n.id)) {
+    fillBlankDates(r.pred_task_id ? `t:${r.pred_task_id}` : `i:${r.pred_item_id}`, userId);
+  }
 }

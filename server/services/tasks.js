@@ -9,7 +9,7 @@ import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } 
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
 import { workingDaysBetween } from './calendar.js';
-import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask } from './dependencies.js';
+import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
@@ -392,10 +392,12 @@ export function updateTask(ctx, id, body) {
     }
     for (const [label, from, to] of changes) taskHistory(id, ctx.user.id, label, from || to ? `${from} → ${to}` : null);
     // Prazo adiado: as sucessoras são empurradas (sem penalizá-las); o impacto fica registrado nesta tarefa
-    if (next.due_date && (!t.due_date || next.due_date > t.due_date)) {
+    if (next.due_date && t.due_date && next.due_date > t.due_date) {
       applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: id, code: t.code, title: t.title }, kind: 'reagendamento',
         causeOldDue: t.due_date, causeNewDue: next.due_date, sources: [{ key: `t:${id}`, finish: next.due_date }], projectEndBefore: endBefore });
     }
+    // Datas mudaram: alinha com as predecessoras e preenche o que estiver em branco (planejamento)
+    if ('start_date' in next || 'due_date' in next) scheduleAround(`t:${id}`, ctx.user.id);
   });
 }
 
@@ -455,6 +457,21 @@ export function duplicateTask(ctx, id, body) {
     taskHistory(newId, ctx.user.id, 'Tarefa duplicada', `Cópia de ${t.code}${subs ? ` com ${subs} subtarefa(s)` : ''} · ${opts}`);
     taskHistory(t.id, ctx.user.id, 'Tarefa duplicada', `Nova cópia: ${code}${subs ? ` com ${subs} subtarefa(s)` : ''}`);
     return { id: newId, code, subtasks: subs };
+  });
+}
+
+// Subtarefa sem datas: usa o início e o término da tarefa principal
+export function useParentDates(ctx, id) {
+  const t = loadVisible(ctx, id);
+  if (!t.parent_id) throw badRequest('Disponível só em subtarefas.');
+  if (!permissionsFor(ctx, t).edit) throw forbidden('Você não pode editar esta subtarefa.');
+  if (t.start_date || t.due_date) throw badRequest('A subtarefa já tem datas: o botão só vale para subtarefas sem início e sem término.');
+  const p = one('SELECT start_date, due_date, code FROM tasks WHERE id = ?', t.parent_id);
+  if (!p.start_date && !p.due_date) throw badRequest('A tarefa principal também está sem datas.');
+  tx(() => {
+    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', p.start_date, p.due_date, nowIso(), id);
+    taskHistory(id, ctx.user.id, 'Datas copiadas da tarefa principal', `${p.code}: início ${fmtDate(p.start_date)} · término ${fmtDate(p.due_date)}`);
+    scheduleAround(`t:${id}`, ctx.user.id);
   });
 }
 

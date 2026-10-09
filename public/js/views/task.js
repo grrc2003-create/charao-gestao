@@ -1,7 +1,8 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
-import { pageHead } from './shared.js';
+import { pageHead, NAV_SEQ_KEY } from './shared.js';
+import { replaceNextRoute } from '../navhist.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
@@ -22,6 +23,21 @@ export async function view(ctx) {
     t._specsOwn = sp.own;
   }
   return build(t, ctx);
+}
+
+// Anterior/Próxima: segue a lista de onde a tarefa foi aberta; sem lista, as subtarefas irmãs ou as tarefas do projeto
+function taskNav(t) {
+  let seq = null;
+  try { seq = JSON.parse(sessionStorage.getItem(NAV_SEQ_KEY) || 'null'); } catch { seq = null; }
+  const idx = seq?.list?.findIndex(x => x.i === t.id) ?? -1;
+  const nav = idx >= 0
+    ? { prev: seq.list[idx - 1], next: seq.list[idx + 1], pos: idx + 1, total: seq.list.length, label: `na lista${seq.title ? ` “${seq.title}”` : ''}` }
+    : t.neighbors ? { ...t.neighbors, label: t.neighbors.scope === 'subtarefas' ? `subtarefas de ${t.parent_code}` : `tarefas do ${t.project_code}` } : null;
+  if (!nav || nav.total < 2) return '';
+  const link = (x, dir) => (x ? html`<a class="tnav-btn is-${dir}" href="#/tarefas/${x.i}" data-tnav title="${x.c} · ${x.t}">
+      ${dir === 'prev' ? html`<span class="tnav-arrow">‹</span>` : ''}<span class="tnav-txt"><small>${dir === 'prev' ? 'Anterior' : 'Próxima'}</small><b class="mono">${x.c}</b><em>${x.t}</em></span>${dir === 'next' ? html`<span class="tnav-arrow">›</span>` : ''}</a>`
+    : html`<span class="tnav-btn is-${dir} is-off"><span class="tnav-txt"><small>${dir === 'prev' ? 'Anterior' : 'Próxima'}</small><b>—</b></span></span>`);
+  return html`<nav class="task-nav" aria-label="Navegar entre tarefas">${link(nav.prev, 'prev')}<span class="tnav-pos"><b>${nav.pos}</b> de ${nav.total}<small>${nav.label}</small></span>${link(nav.next, 'next')}</nav>`;
 }
 
 function build(t, ctx) {
@@ -132,6 +148,7 @@ function build(t, ctx) {
     title: `${t.code} · ${t.title}`,
     html: html`
       ${pageHead({ back: { href: back, label: backLabel }, title: '' })}
+      ${taskNav(t)}
       ${t.cancelled_at ? html`<div class="cancel-banner" role="status">${icon('x')}<div><b>Tarefa cancelada</b>
         por ${t.cancelled_by_name || '—'} em ${fmtDateTime(t.cancelled_at)} — ${t.cancel_reason}
         <div class="muted" style="font-size:12.5px;margin-top:2px">Não aparece nas listas, indicadores, relatórios nem na lista de campo. ${can.reactivate_blocked || ''}</div></div></div>` : ''}
@@ -462,6 +479,8 @@ function mount(root, t, ctx) {
     document.addEventListener('click', outside);
     actMenu.addEventListener('keydown', e => { if (e.key === 'Escape') { actMenu.open = false; actMenu.querySelector('summary').focus(); } });
   }
+  // Anterior/Próxima não empilha telas no "Voltar"
+  root.querySelectorAll('[data-tnav]').forEach(a => a.addEventListener('click', () => replaceNextRoute()));
   root.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => {
     e.preventDefault();
     actions[b.dataset.act]?.();

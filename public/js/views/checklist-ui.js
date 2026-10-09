@@ -499,7 +499,8 @@ function itemCard(t, it, c) {
   const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''} cli-due-${lv.cls.slice(3)}`;
   // Recolhido: só descrição, prazo e situação. Ao tocar, abre com responsável, fotos, botões e histórico.
   const isOpen = uiOf(t.id).open.has(it.id);
-  return html`<details class="${cls}" ${raw(attrs)} ${isOpen ? 'open' : ''}>${summary}<div class="cli-detail">${head}<div class="cli-body">${body}</div></div></details>`;
+  const itemNav = html`<div class="cli-nav"><button type="button" class="btn btn-ghost btn-sm" data-cli-step="-1">‹ Item anterior</button><button type="button" class="btn btn-ghost btn-sm" data-cli-step="1">Próximo item ›</button></div>`;
+  return html`<details class="${cls}" ${raw(attrs)} ${isOpen ? 'open' : ''}>${summary}<div class="cli-detail">${head}<div class="cli-body">${body}${itemNav}</div></div></details>`;
 }
 
 // Cronograma semanal dos itens (início → término), com as setas das dependências entre itens
@@ -683,6 +684,16 @@ export function bindChecklist(root, t, ctx, refresh) {
     return updated;
   }, msg);
 
+  // Item anterior / próximo (entre os itens visíveis, respeitando filtros e agrupamento)
+  list.querySelectorAll('[data-cli-step]').forEach(b => b.addEventListener('click', () => {
+    const cur = b.closest('details.cli');
+    const vis = [...list.querySelectorAll('details.cli')].filter(d => d.offsetParent !== null);
+    const target = vis[vis.indexOf(cur) + Number(b.dataset.cliStep)];
+    if (!target) return toast(Number(b.dataset.cliStep) > 0 ? 'Este é o último item da lista.' : 'Este é o primeiro item da lista.', 'warn');
+    cur.open = false;
+    target.open = true;
+    setTimeout(() => target.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30);
+  }));
   list.querySelectorAll('details.cli').forEach(d => d.addEventListener('toggle', () => {
     const id = Number(d.dataset.itemId);
     if (d.open) st.open.add(id); else st.open.delete(id);

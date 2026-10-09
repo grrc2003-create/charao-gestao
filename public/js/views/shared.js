@@ -177,7 +177,17 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
   const table = html`<div class="card only-desktop"><div class="table-wrap"><table class="data">
     <thead><tr><th>Tarefa</th><th>Título</th>${showProject ? html`<th>Projeto</th>` : ''}${showAssignee ? html`<th>Responsável</th>` : ''}<th>Prazo</th><th>Prioridade</th><th>Status</th></tr></thead>
     <tbody>${tops.map(t => html`${rowOf(t)}${(kids.get(t.id) || []).map(s => rowOf(s, true))}`)}</tbody></table></div></div>`;
-  return html`${bar}${cards}${table}`;
+  // Ordem exibida (tarefa principal seguida das subtarefas) para navegar entre elas dentro da tarefa
+  const order = tops.flatMap(t => [t, ...(kids.get(t.id) || [])]).map(t => ({ i: t.id, c: t.code, t: t.title }));
+  return html`<div data-nav-list="${JSON.stringify(order)}">${bar}${cards}${table}</div>`;
+}
+
+// Ao abrir uma tarefa a partir de uma lista, guarda a ordem da lista (Anterior/Próxima na tela da tarefa)
+export const NAV_SEQ_KEY = 'charao-task-seq';
+function rememberList(el) {
+  const box = el.closest('[data-nav-list]');
+  if (!box) return;
+  try { sessionStorage.setItem(NAV_SEQ_KEY, JSON.stringify({ list: JSON.parse(box.dataset.navList), from: location.hash, title: document.title.replace(/ · Charão$/, '') })); } catch { /* sem armazenamento */ }
 }
 
 // Liga cliques nas linhas da tabela e tooltips de gráficos
@@ -216,6 +226,13 @@ function bindSubtasks(root) {
 
 export function bindCommon(root) {
   bindSubtasks(root);
+  if (!root.__navList) {
+    root.__navList = true; // o container da tela é reaproveitado entre as telas: liga uma vez só
+    root.addEventListener('click', e => {
+      const el = e.target.closest('[data-nav-list] a[href^="#/tarefas/"], [data-nav-list] tr[data-href]');
+      if (el && !e.target.closest('[data-sub-toggle]')) rememberList(el);
+    }, true);
+  }
   root.querySelectorAll('tr[data-href]').forEach(tr => {
     tr.addEventListener('click', () => (location.hash = tr.dataset.href));
     tr.addEventListener('keydown', e => { if (e.key === 'Enter') location.hash = tr.dataset.href; });

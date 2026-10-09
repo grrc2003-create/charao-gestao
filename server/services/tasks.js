@@ -188,6 +188,7 @@ export function getTask(ctx, id) {
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
     can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
     dependencies: taskDependencies(ctx, id),
+    neighbors: neighborsOf(ctx, t),
     impact: impactOfTask(id),
     // Prazo: dias úteis (calendário da obra) e corridos entre o início e o término
     work_days: t.start_date && t.due_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date) : null,
@@ -195,6 +196,18 @@ export function getTask(ctx, id) {
     dep_shift: shiftedOfTask(id),
     ...(t.task_type === 'checklist' ? checklistDetail(ctx, t) : {}),
   };
+}
+
+// Anterior/Próxima padrão: subtarefas da mesma tarefa principal, ou tarefas principais do projeto (ordem de criação)
+function neighborsOf(ctx, t) {
+  const rows = (t.parent_id
+    ? all('SELECT id, code, title, assignee_id, creator_id, project_id FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL ORDER BY seq, id', t.parent_id)
+    : all('SELECT id, code, title, assignee_id, creator_id, project_id FROM tasks WHERE project_id = ? AND parent_id IS NULL AND cancelled_at IS NULL ORDER BY seq, id', t.project_id))
+    .filter(r => canSeeTask(ctx, r));
+  const i = rows.findIndex(r => r.id === t.id);
+  if (i < 0) return null;
+  const pick = r => (r ? { i: r.id, c: r.code, t: r.title } : null);
+  return { prev: pick(rows[i - 1]), next: pick(rows[i + 1]), pos: i + 1, total: rows.length, scope: t.parent_id ? 'subtarefas' : 'projeto' };
 }
 
 // Check-list: itens + conferência do preenchimento no lugar da comprovação

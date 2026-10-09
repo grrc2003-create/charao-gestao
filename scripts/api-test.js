@@ -969,6 +969,18 @@ async function main() {
   ok((await ricardo('POST', `/tasks/${subNo}/parent-dates`, {})).status === 400, 'botão só vale para subtarefa sem datas');
   ok((await ricardo('POST', `/tasks/${pFix}/parent-dates`, {})).status === 400, 'botão só existe em subtarefas');
 
+
+  // Subtarefa criada em branco, ligada a uma predecessora e a uma sucessora: as datas saem dos dois vínculos
+  const pX = await mkCal('Pred da sub', '2099-03-16', '2099-03-20');
+  const sX = await mkCal('Suc da sub', '2099-03-30', '2099-04-03');
+  const subX = (await ricardo('POST', '/tasks', { parent_id: pFix, title: 'Sub em branco', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  ok(!(await ricardo('GET', `/tasks/${subX}`)).data.due_date, 'subtarefa nasce sem datas');
+  await ricardo('POST', '/dependencies', { pred: `t:${pX}`, succ: `t:${subX}` });
+  await ricardo('POST', '/dependencies', { pred: `t:${subX}`, succ: `t:${sX}` });
+  const subXv = (await ricardo('GET', `/tasks/${subX}`)).data;
+  ok(subXv.start_date === '2099-03-23' && subXv.due_date === '2099-03-27' && subXv.work_days === 5,
+    `subtarefa em branco recebe início pela predecessora (seg 23/03) e término antes da sucessora (sex 27/03) → ${subXv.start_date} a ${subXv.due_date}`);
+
 }
 
 main()

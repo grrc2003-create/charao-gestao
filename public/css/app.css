@@ -1336,3 +1336,6 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .due-parent { margin-top: 6px; font-size: 12px; }
 .due-parent { display: inline-flex; max-width: 100%; white-space: normal; height: auto; min-height: 30px; text-align: left; line-height: 1.2; padding: 4px 8px; }
 .due-parent svg { flex: none; }
+
+.parent-dates { display: grid; gap: 4px; justify-items: start; margin-top: 4px; }
+.parent-dates .hint { font-size: 12.5px; color: var(--muted); }

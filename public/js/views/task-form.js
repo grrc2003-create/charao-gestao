@@ -22,7 +22,7 @@ export async function view({ params, query, state, navigate }) {
   const projects = state.meta.projects.filter(p => !['concluido', 'cancelado'].includes(p.status) || (t && p.id === t.project_id));
   const projectId = String(t?.project_id || parent?.project_id || query.get('projeto') || (projects.length === 1 ? projects[0].id : ''));
   const v = t || (parent
-    ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: parent.due_date, stage_id: parent.stage_id }
+    ? { priority: parent.priority, proof_type: parent.proof_type, assignee_id: parent.assignee_id, due_date: '', start_date: '', stage_id: parent.stage_id }
     : { priority: 'media', proof_type: 'foto', assignee_id: null });
   const pending = []; // imagens/PDFs de referência escolhidos antes de salvar
   // Tipo: tarefa comum ou check-list (escolhido só na criação; subtarefa é sempre tarefa comum)
@@ -75,6 +75,10 @@ export async function view({ params, query, state, navigate }) {
             <div class="field"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
               <span class="hint">Opcional. Usado no cronograma (Gantt) dos relatórios.</span></div>
           </div>
+          ${!editing && parent && (parent.start_date || parent.due_date) ? html`<div class="parent-dates">
+            <button type="button" class="btn btn-ghost btn-sm" id="copy-parent-dates">${icon('calendar')}Copiar datas da tarefa principal</button>
+            <span class="hint">${parent.code}: início ${parent.start_date ? parent.start_date.split('-').reverse().join('/') : '—'} → término ${parent.due_date ? parent.due_date.split('-').reverse().join('/') : '—'}.
+              Deixando em branco, as datas podem ser definidas depois pelas dependências (predecessora e sucessora).</span></div>` : ''}
           ${editing && t.due_date ? html`<div class="notice notice-proto" id="resched-fields" hidden>
             <div style="display:grid;gap:10px;width:100%">
               <span>${icon('reschedule')} <b>Reagendamento</b> — o prazo atual é ${t.due_date.split('-').reverse().join('/')}${t.reschedule_count ? ` (já reagendada ${t.reschedule_count}x)` : ''}. Informe a justificativa.</span>
@@ -146,6 +150,12 @@ export async function view({ params, query, state, navigate }) {
         f.due_date.addEventListener('input', sync);
         f.due_date.addEventListener('change', sync);
       }
+      // Subtarefa: copiar início e término da tarefa principal (opcional)
+      root.querySelector('#copy-parent-dates')?.addEventListener('click', () => {
+        if (parent.start_date) f.start_date.value = parent.start_date;
+        if (parent.due_date) f.due_date.value = parent.due_date;
+        toast('Datas da tarefa principal copiadas.');
+      });
       const assigneeSel = f.querySelector('#assignee_id');
       // ---------- Check-list: tipo, itens e cadastro rápido ----------
       let team = [];

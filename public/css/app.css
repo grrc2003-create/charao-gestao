@@ -1436,3 +1436,4 @@ tr.sub-row td:first-child { padding-left: 26px; }
 body:not(.show-done) [data-done] { display: none !important; }
 .done-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12.5px; }
 .done-toggle[aria-pressed="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }
+body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }

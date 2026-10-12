@@ -120,8 +120,8 @@ export const checklistTag = t => (t.task_type === 'checklist'
 // Concluídas ficam ocultas nas listas; o botão "Mostrar concluídas" exibe (vale para a tela aberta).
 // Se a lista só tem concluídas (ex.: filtro "Concluída"), elas aparecem normalmente.
 const isDone = t => t.eff_status === 'concluida';
-export const doneToggle = n => (n ? html`<button type="button" class="btn btn-ghost btn-sm done-toggle" data-show-done
-    data-l-show="Mostrar concluídas (${n})" data-l-hide="Ocultar concluídas (${n})">${icon('check')}<span>Mostrar concluídas (${n})</span></button>` : '');
+export const doneToggle = (n, word = 'concluídas') => (n ? html`<button type="button" class="btn btn-ghost btn-sm done-toggle" data-show-done
+    data-l-show="Mostrar ${word} (${n})" data-l-hide="Ocultar ${word} (${n})">${icon('check')}<span>Mostrar ${word} (${n})</span></button>` : '');
 export function bindDoneToggle(root) {
   document.body.classList.remove('show-done');
   root.querySelectorAll('[data-show-done]').forEach(b => b.addEventListener('click', () => {

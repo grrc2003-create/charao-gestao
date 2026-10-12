@@ -6,6 +6,7 @@ import { periodKey, periodInfo } from './periods.js';
 import { depLists } from './deps-ui.js';
 import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
+import { doneToggle } from './shared.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
@@ -500,7 +501,9 @@ function itemCard(t, it, c) {
     ${dep || c.can_manage_items ? html`<details class="cli-depbox" ${dep ? 'open' : ''}><summary>${icon('history')} Dependências${dep ? ` (${dep.predecessors.length + dep.successors.length})` : ''}</summary>
       <div class="cli-deps">${depLists(dep || { predecessors: [], successors: [], waiting: [] }, !!c.can_manage_items, `i:${it.id}`)}</div></details>` : ''}
     ${history}`;
-  const attrs = `id="cli-${it.id}" data-item-id="${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"`;
+  // Itens resolvidos (Conforme/N/A) ficam ocultos enquanto houver pendentes ("Mostrar concluídos" exibe)
+  const hideDone = it.resolved && c.items.some(x => !x.resolved);
+  const attrs = `id="cli-${it.id}" data-item-id="${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"${hideDone ? ' data-done' : ''}`;
   const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''} cli-due-${lv.cls.slice(3)}`;
   // Recolhido: só descrição, prazo e situação. Ao tocar, abre com responsável, fotos, botões e histórico.
   const isOpen = uiOf(t.id).open.has(it.id);
@@ -603,6 +606,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           ${chip('all', 'Todos', s.total)}${s.mine_pending || c.items.some(i => i.mine) ? chip('mine', 'Meus itens', s.mine_pending ? `${s.mine_pending} pend.` : undefined) : ''}
           ${chip('pending', 'Pendentes', s.total - s.done)}${s.nao_conforme ? chip('nc', 'Não conformes', s.nao_conforme) : ''}
         </div>
+        ${s.done && s.done < s.total ? doneToggle(s.done, 'resolvidos') : ''}
         <div class="cl-tools">
           ${filterMenu}
           <button type="button" class="btn btn-ghost btn-sm cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button>

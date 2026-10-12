@@ -1,7 +1,7 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
-import { pageHead, NAV_SEQ_KEY } from './shared.js';
+import { pageHead, NAV_SEQ_KEY, doneToggle, bindDoneToggle } from './shared.js';
 import { replaceNextRoute } from '../navhist.js';
 import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
@@ -108,9 +108,12 @@ function build(t, ctx) {
 
   const activeSubs = t.subtasks.filter(s => !s.cancelled_at);
   const subDone = activeSubs.filter(s => s.status === 'concluida').length;
+  // Subtarefas concluídas ficam ocultas (botão para mostrar), se houver alguma em aberto
+  const subHide = t.subtasks.some(s => s.eff_status !== 'concluida');
+  const subDoneN = subHide ? t.subtasks.filter(s => s.eff_status === 'concluida').length : 0;
   const subtaskRow = s => {
     const d = dueInfo(s);
-    return html`<li><a class="row-link subtask-row st-${s.eff_status}" href="#/tarefas/${s.id}">
+    return html`<li ${s.eff_status === 'concluida' && subHide ? 'data-done' : ''}><a class="row-link subtask-row st-${s.eff_status}" href="#/tarefas/${s.id}">
       <div class="grow"><div class="row-title"><span class="mono muted" style="font-size:12px">${s.code}</span>${priorityTag(s.priority)}<span style="margin-left:auto">${statusBadge(s.eff_status, { short: true })}</span></div>
         <div style="font-weight:600">${s.title}</div>
         <div class="row-meta"><span>${icon('user')} ${s.assignee_name || 'Sem responsável'}</span><span class="${d.cls}">${icon('calendar')} ${d.text}</span>
@@ -122,6 +125,7 @@ function build(t, ctx) {
         <header class="block-head"><span class="step" style="background:var(--navy-700)">${icon('tasks')}</span><h2 id="blk-sub">Subtarefas</h2>
           <span class="right muted" style="font-size:12px">${activeSubs.length ? `${subDone} de ${activeSubs.length} concluídas` : ''}${t.subtasks.length > activeSubs.length ? ` · ${t.subtasks.length - activeSubs.length} cancelada(s)` : ''}</span></header>
         ${t.subtasks.length ? html`<div style="padding:12px 16px 0">${progress(activeSubs.length ? Math.round((subDone / activeSubs.length) * 100) : 0, 'Subtarefas concluídas')}</div>
+          ${subDoneN ? html`<div class="done-bar" style="padding:8px 16px 0">${doneToggle(subDoneN)}</div>` : ''}
           <ul class="rows">${t.subtasks.map(subtaskRow)}</ul>` : html`<div class="block-body"><p class="muted" style="margin:0">Divida esta tarefa em etapas com responsável, prazo e comprovação próprios.</p></div>`}
         ${can.add_subtask ? html`<div class="block-body" style="padding-top:8px"><a class="btn btn-ghost" href="#/tarefas/nova?pai=${t.id}">${icon('plus')}Adicionar subtarefa</a></div>` : ''}
         ${activeSubs.length && subDone < activeSubs.length ? html`<div class="block-body" style="padding-top:0"><div class="notice">${icon('info')}<span>A tarefa principal só pode ser enviada para conferência ou concluída depois que todas as subtarefas estiverem concluídas.</span></div></div>` : ''}
@@ -272,6 +276,7 @@ function build(t, ctx) {
 }
 
 function mount(root, t, ctx) {
+  bindDoneToggle(root);
   const refresh = updated => {
     if (t._team && !updated._team) { updated._team = t._team; updated._groups = t._groups; }
     if (t._specs && !updated._specs) { updated._specs = t._specs; updated._specsOwn = t._specsOwn; }

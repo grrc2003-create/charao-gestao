@@ -117,12 +117,28 @@ export const checklistTag = t => (t.task_type === 'checklist'
   ? html`<span class="cl-tag" title="Check-list: ${t.cl_done} de ${t.cl_total} itens respondidos${t.cl_nc ? ` · ${t.cl_nc} não conforme(s)` : ''}">☑ ${t.cl_done}/${t.cl_total}${t.cl_nc ? html` <b>✗${t.cl_nc}</b>` : ''}</span> `
   : '');
 
-export function taskList(tasks, { showProject = true, showAssignee = true, empty = 'Nenhuma tarefa encontrada.', groupBy = '' } = {}) {
+// Concluídas ficam ocultas nas listas; o botão "Mostrar concluídas" exibe (vale para a tela aberta).
+// Se a lista só tem concluídas (ex.: filtro "Concluída"), elas aparecem normalmente.
+const isDone = t => t.eff_status === 'concluida';
+export const doneToggle = n => (n ? html`<button type="button" class="btn btn-ghost btn-sm done-toggle" data-show-done
+    data-l-show="Mostrar concluídas (${n})" data-l-hide="Ocultar concluídas (${n})">${icon('check')}<span>Mostrar concluídas (${n})</span></button>` : '');
+export function bindDoneToggle(root) {
+  document.body.classList.remove('show-done');
+  root.querySelectorAll('[data-show-done]').forEach(b => b.addEventListener('click', () => {
+    const on = document.body.classList.toggle('show-done');
+    document.querySelectorAll('[data-show-done]').forEach(x => { x.querySelector('span').textContent = on ? x.dataset.lHide : x.dataset.lShow; x.setAttribute('aria-pressed', String(on)); });
+  }));
+}
+
+export function taskList(tasks, { showProject = true, showAssignee = true, empty = 'Nenhuma tarefa encontrada.', groupBy = '', inner = false, hideDone } = {}) {
   if (!tasks.length) return html`<div class="card empty-state"><p>${empty}</p></div>`;
+  const hide = hideDone ?? tasks.some(t => !isDone(t));
+  const nDone = hide ? tasks.filter(isDone).length : 0;
+  const doneBar = !inner && nDone ? html`<div class="done-bar"><span class="muted">${nDone} concluída(s) oculta(s)</span>${doneToggle(nDone)}</div>` : '';
   if (groupBy) {
-    return html`<div class="period-groups">${groupTasks(tasks, groupBy).map(g => {
+    return html`${doneBar}<div class="period-groups">${groupTasks(tasks, groupBy).map(g => {
       const by = Object.fromEntries(STATUS_ORDER.map(s => [s, g.items.filter(t => t.eff_status === s).length]));
-      return html`<section class="period-group period-${g.rel}">
+      return html`<section class="period-group period-${g.rel}" ${hide && g.items.every(isDone) ? raw('data-done') : ''}>
         <header class="period-head">
           <div><h3>${g.label}${g.hint ? html` <span class="period-hint">${g.hint}</span>` : ''}</h3>
             <div class="period-meta"><span><b>${g.items.length}</b> tarefa(s)</span>
@@ -130,7 +146,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
               ${by.concluida ? html`<span><b>${by.concluida}</b> concluída(s)</span>` : ''}</div></div>
           <div class="period-bar">${stackBar(by)}</div>
         </header>
-        ${taskList(g.items, { showProject, showAssignee })}
+        ${taskList(g.items, { showProject, showAssignee, inner: true, hideDone: hide })}
       </section>`;
     })}</div>`;
   }
@@ -144,7 +160,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
       <span class="sub-chev">${icon('chevron')}</span>${kids.get(t.id).length} subtarefa${kids.get(t.id).length > 1 ? 's' : ''}</button>` : '');
   const cardOf = (t, isSub = false) => {
     const due = dueInfo(t);
-    return html`<a class="task-card st-${t.eff_status} ${isSub ? 'is-sub' : ''}" href="#/tarefas/${t.id}">
+    return html`<a class="task-card st-${t.eff_status} ${isSub ? 'is-sub' : ''}" href="#/tarefas/${t.id}" ${hide && isDone(t) ? raw('data-done') : ''}>
       <div class="tc-top"><span class="tc-code">${t.code}</span><span class="tc-status">${statusBadge(t.eff_status, { short: true })}${lateDoneTag(t)}</span></div>
       ${t.parent_code ? html`<div class="sub-mark">↳ Subtarefa de ${t.parent_code}</div>` : ''}
       <div class="tc-title">${checklistTag(t)}${t.recurrence_id ? html`<span class="rec-tag" title="Tarefa recorrente">${t.recurrence_seq}ª</span> ` : ''}${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}${t.waiting_on ? html` <span class="dep-wait-tag" title="Aguardando predecessora(s)">${icon('clock')}Aguardando</span>` : ''}</div>
@@ -158,7 +174,7 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
   };
   const rowOf = (t, isSub = false) => {
       const due = dueInfo(t);
-      return html`<tr class="row-st st-${t.eff_status} ${isSub ? 'sub-row' : ''}" ${isSub ? raw(`data-sub-of="${t.parent_id}" hidden`) : ''} data-href="#/tarefas/${t.id}" tabindex="0">
+      return html`<tr class="row-st st-${t.eff_status} ${isSub ? 'sub-row' : ''}" ${isSub ? raw(`data-sub-of="${t.parent_id}" hidden`) : ''} ${hide && isDone(t) ? raw('data-done') : ''} data-href="#/tarefas/${t.id}" tabindex="0">
         <td class="mono nowrap">${t.code}</td>
         <td>${t.parent_code ? html`<div class="sub-mark">↳ ${isSub ? 'Subtarefa' : `Subtarefa de ${t.parent_code}`}</div>` : ''}<div class="t-title">${checklistTag(t)}${t.recurrence_id ? html`<span class="rec-tag" title="Tarefa recorrente">${t.recurrence_seq}ª</span> ` : ''}${t.title}${t.sub_total ? html` <span class="sub-count">· ${t.sub_done}/${t.sub_total} subtarefas</span>` : ''}${t.waiting_on ? html` <span class="dep-wait-tag" title="Aguardando predecessora(s)">${icon('clock')}Aguardando</span>` : ''}</div>${!isSub ? toggle(t, 'is-row') : ''}${t.stage_name && !t.stage_default ? html`<div style="margin-top:3px"><span class="stage-tag">${t.stage_name}</span></div>` : ''}${t.exec_count || t.ref_count ? html`<div class="t-sub">${t.ref_count ? `${t.ref_count} ref.` : ''} ${t.exec_count ? `· ${t.exec_count} foto(s) execução` : ''}</div>` : ''}</td>
         ${showProject ? html`<td><div>${t.project_name}</div><div class="t-sub mono">${t.project_code}</div></td>` : ''}
@@ -172,14 +188,14 @@ export function taskList(tasks, { showProject = true, showAssignee = true, empty
       <button type="button" class="btn btn-ghost btn-sm" data-sub-all="1">${icon('chevron')}Mostrar todas</button>
       <button type="button" class="btn btn-ghost btn-sm" data-sub-all="0" hidden>Ocultar todas</button></div>` : '';
   const cards = html`<div class="task-cards only-mobile">${tops.map(t => (kids.has(t.id)
-    ? html`<div class="tc-group">${cardOf(t)}${toggle(t, 'is-card')}<div class="tc-subs" data-sub-of="${t.id}" hidden>${kids.get(t.id).map(s => cardOf(s, true))}</div></div>`
+    ? html`<div class="tc-group" ${hide && isDone(t) ? raw('data-done') : ''}>${cardOf(t)}${toggle(t, 'is-card')}<div class="tc-subs" data-sub-of="${t.id}" hidden>${kids.get(t.id).map(s => cardOf(s, true))}</div></div>`
     : cardOf(t)))}</div>`;
   const table = html`<div class="card only-desktop"><div class="table-wrap"><table class="data">
     <thead><tr><th>Tarefa</th><th>Título</th>${showProject ? html`<th>Projeto</th>` : ''}${showAssignee ? html`<th>Responsável</th>` : ''}<th>Prazo</th><th>Prioridade</th><th>Status</th></tr></thead>
     <tbody>${tops.map(t => html`${rowOf(t)}${(kids.get(t.id) || []).map(s => rowOf(s, true))}`)}</tbody></table></div></div>`;
   // Ordem exibida (tarefa principal seguida das subtarefas) para navegar entre elas dentro da tarefa
   const order = tops.flatMap(t => [t, ...(kids.get(t.id) || [])]).map(t => ({ i: t.id, c: t.code, t: t.title }));
-  return html`<div data-nav-list="${JSON.stringify(order)}">${bar}${cards}${table}</div>`;
+  return html`<div data-nav-list="${JSON.stringify(order)}">${doneBar}${bar}${cards}${table}</div>`;
 }
 
 // Ao abrir uma tarefa a partir de uma lista, guarda a ordem da lista (Anterior/Próxima na tela da tarefa)
@@ -226,6 +242,7 @@ function bindSubtasks(root) {
 
 export function bindCommon(root) {
   bindSubtasks(root);
+  bindDoneToggle(root);
   if (!root.__navList) {
     root.__navList = true; // o container da tela é reaproveitado entre as telas: liga uma vez só
     root.addEventListener('click', e => {

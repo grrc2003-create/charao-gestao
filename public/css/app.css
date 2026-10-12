@@ -1431,3 +1431,8 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .cli-progress { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .cli-progress .k { font-weight: 700; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
 .cli-pg { font-size: 11px; font-weight: 700; color: var(--st-em_andamento, #2F6FB3); background: #EAF1FA; border-radius: 999px; padding: 1px 7px; }
+
+/* Concluídas ocultas nas listas (botão "Mostrar concluídas") */
+body:not(.show-done) [data-done] { display: none !important; }
+.done-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12.5px; }
+.done-toggle[aria-pressed="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }

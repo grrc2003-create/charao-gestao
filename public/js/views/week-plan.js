@@ -2,7 +2,7 @@
 // e definição de data para tarefas sem prazo — tudo sem sair da tela.
 import { html, api, icon, todayISO, fmtDate, PRIORITY, PROOF, STATUS } from '../core.js';
 import { toast, sheet } from '../ui.js';
-import { STATUS_COLOR } from './shared.js';
+import { STATUS_COLOR, doneToggle } from './shared.js';
 
 const DOW = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -27,7 +27,7 @@ const chip = (t, day) => {
   const multi = sp && sp.begin !== sp.due;
   const tag = !multi ? '' : day === sp.begin ? `início · até ${dm(sp.due)}` : day === sp.due ? `prazo · desde ${dm(sp.begin)}` : `continua · até ${dm(sp.due)}`;
   const part = !multi ? '' : day === sp.begin ? 'is-first' : day === sp.due ? 'is-last' : 'is-mid';
-  return html`<a class="wp-task ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}">
+  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} class="wp-task ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}">
   <span class="dot" style="--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'}"></span>
   <span class="wp-txt"><b>${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small></span></a>`;
 };
@@ -70,6 +70,7 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
           <button type="button" class="btn btn-ghost btn-sm" data-wp-week="${addDays(start, 7)}" aria-label="Próxima semana">›</button>
           ${start !== mondayOf(today) ? html`<button type="button" class="btn btn-ghost btn-sm" data-wp-week="">Esta semana</button>` : ''}
         </div>
+        ${doneToggle(new Set(days.flatMap(x => byDay.get(x).filter(t => t.status === 'concluida').map(t => t.id))).size)}
         ${canPlan ? html`<button type="button" class="btn btn-accent btn-sm" data-wp-add="${days.includes(today) ? today : start}">${icon('plus')}Nova tarefa</button>` : ''}
       </div>
       <div class="wp-grid">${days.map(dayCol)}</div>

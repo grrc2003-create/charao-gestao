@@ -21,15 +21,39 @@ const spanOf = t => {
 };
 const dm = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
 
+// Parcela do dia: o período (início → prazo) é dividido igualmente entre os dias úteis (seg–sex; se só houver
+// fim de semana, todos os dias). O avanço informado cobre as parcelas em ordem: parcela coberta = card verde,
+// parcela coberta em parte = card preenchido proporcionalmente.
+function dayShare(t, day) {
+  const pct = ['concluida', 'aguardando_conferencia'].includes(t.eff_status) ? 100 : t.progress_pct;
+  if (pct === null || pct === undefined || !t.due_date) return null;
+  const sp = spanOf(t);
+  const all = [];
+  for (let x = sp.begin; x <= sp.due; x = addDays(x, 1)) all.push(x);
+  const weekday = x => { const g = parse(x).getDay(); return g > 0 && g < 6; };
+  const work = all.some(weekday) ? all.filter(weekday) : all;
+  const n = work.length;
+  const upTo = work.filter(x => x <= day).length;
+  const before = work.filter(x => x < day).length;
+  const from = (before / n) * 100;
+  const to = (upTo / n) * 100;
+  const fill = to <= from ? (pct >= to ? 1 : 0) : Math.max(0, Math.min(1, (pct - from) / (to - from)));
+  return { pct, fill, share: work.includes(day) ? Math.round(100 / n) : 0, upto: Math.round(to) };
+}
+
 // day: dia da coluna — marca início, continuação e prazo das tarefas de vários dias
 const chip = (t, day) => {
   const sp = day && t.due_date ? spanOf(t) : null;
   const multi = sp && sp.begin !== sp.due;
   const tag = !multi ? '' : day === sp.begin ? `início · até ${dm(sp.due)}` : day === sp.due ? `prazo · desde ${dm(sp.begin)}` : `continua · até ${dm(sp.due)}`;
   const part = !multi ? '' : day === sp.begin ? 'is-first' : day === sp.due ? 'is-last' : 'is-mid';
-  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} class="wp-task ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}">
+  const sh = day ? dayShare(t, day) : null;
+  const shCls = !sh ? '' : sh.fill >= 1 ? 'is-share-done' : sh.fill > 0 ? 'is-share-part' : 'is-share-todo';
+  const shTip = sh ? ` · executado ${sh.pct}%${sh.share ? ` · parcela do dia ${sh.share}% (acumulado até o dia ${sh.upto}%)` : ''}${sh.fill >= 1 ? ' · parcela feita' : ''}` : '';
+  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} style="--fill:${sh ? Math.round(sh.fill * 100) : 0}%" class="wp-task ${shCls} ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}${shTip}">
   <span class="dot" style="--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'}"></span>
-  <span class="wp-txt"><b>${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small></span></a>`;
+  <span class="wp-txt"><b>${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small>
+    ${sh ? html`<small class="wp-share">${sh.fill >= 1 ? '✓ parcela feita' : sh.fill > 0 ? `parcela ${Math.round(sh.fill * 100)}% feita` : 'parcela a fazer'} · ${sh.pct}% executado</small>` : ''}</span></a>`;
 };
 
 export function weekPlanSection(d, { week, canPlan, firstName }) {

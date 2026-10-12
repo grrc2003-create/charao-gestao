@@ -1437,3 +1437,11 @@ body:not(.show-done) [data-done] { display: none !important; }
 .done-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12.5px; }
 .done-toggle[aria-pressed="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }
 body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
+
+/* Planejamento: parcela do dia coberta pelo avanço */
+.wp-task.is-share-done { background: #E6F4EC; border-color: #7CC29A; }
+.wp-task.is-share-done .wp-share { color: #1F7A4A; font-weight: 700; }
+.wp-task.is-share-part { background: linear-gradient(90deg, #E6F4EC 0 var(--fill), #fff var(--fill)); border-color: #A9D8BD; }
+.wp-task.is-share-part .wp-share { color: #2E8B57; }
+.wp-task.is-share-todo .wp-share { color: var(--muted); }
+.wp-task.is-mid.is-share-done, .wp-task.is-mid.is-share-part { border-style: dashed; }

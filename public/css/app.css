@@ -1411,3 +1411,9 @@ tr.sub-row td:first-child { padding-left: 26px; }
 /* Gantt: filtro por semana */
 .g-filter { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .g-wnav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }
+
+/* Planejamento: tarefas de vários dias */
+.wp-task.is-first { border-left: 3px solid var(--navy); }
+.wp-task.is-mid { border-style: dashed; background: #FAFAF8; }
+.wp-task.is-last { border-right: 3px solid var(--navy); }
+.wp-txt small em { font-style: normal; color: var(--ink-2); }

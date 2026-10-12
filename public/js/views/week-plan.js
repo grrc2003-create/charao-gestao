@@ -13,9 +13,24 @@ export const mondayOf = s => { const d = parse(s); return addDays(s, -((d.getDay
 
 const open = t => t.status !== 'concluida' && !t.cancelled_at;
 
-const chip = t => html`<a class="wp-task ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${STATUS[t.eff_status]?.label || ''}">
+// Período da tarefa no calendário: início previsto → prazo (sem início, só o dia do prazo)
+const spanOf = t => {
+  const due = t.due_date;
+  const begin = t.start_date && t.start_date <= due ? t.start_date : due;
+  return { begin, due };
+};
+const dm = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
+
+// day: dia da coluna — marca início, continuação e prazo das tarefas de vários dias
+const chip = (t, day) => {
+  const sp = day && t.due_date ? spanOf(t) : null;
+  const multi = sp && sp.begin !== sp.due;
+  const tag = !multi ? '' : day === sp.begin ? `início · até ${dm(sp.due)}` : day === sp.due ? `prazo · desde ${dm(sp.begin)}` : `continua · até ${dm(sp.due)}`;
+  const part = !multi ? '' : day === sp.begin ? 'is-first' : day === sp.due ? 'is-last' : 'is-mid';
+  return html`<a class="wp-task ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}">
   <span class="dot" style="--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'}"></span>
-  <span class="wp-txt"><b>${t.title}</b><small class="mono">${t.code}</small></span></a>`;
+  <span class="wp-txt"><b>${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small></span></a>`;
+};
 
 export function weekPlanSection(d, { week, canPlan, firstName }) {
   const today = todayISO();
@@ -23,12 +38,13 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const end = days[6];
   const tasks = d.tasks.filter(t => !t.cancelled_at);
-  const byDay = new Map(days.map(x => [x, tasks.filter(t => t.due_date === x)]));
-  // Em execução na semana: período (início → prazo) cruza a semana, mas o prazo é depois dela
-  const running = tasks.filter(t => open(t) && t.due_date > end && (t.start_date || t.due_date) <= end);
+  // A tarefa aparece em todos os dias do período (início → prazo); prazo do dia primeiro
+  const dated = tasks.filter(t => t.due_date);
+  const byDay = new Map(days.map(x => [x, dated.filter(t => { const sp = spanOf(t); return sp.begin <= x && x <= sp.due; })
+    .sort((a, b) => (a.due_date === x ? 0 : 1) - (b.due_date === x ? 0 : 1) || a.due_date.localeCompare(b.due_date) || a.code.localeCompare(b.code))]));
+  const inWeek = new Set(days.flatMap(x => byDay.get(x).filter(open).map(t => t.id)));
   const late = tasks.filter(t => open(t) && t.eff_status === 'atrasada' && t.due_date < start);
   const undated = tasks.filter(t => open(t) && !t.due_date);
-  const weekCount = days.reduce((n, x) => n + byDay.get(x).filter(open).length, 0);
   const label = `${fmtDate(start)} a ${fmtDate(end)}`;
 
   const dayCol = x => {
@@ -38,14 +54,14 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
     return html`<div class="wp-day ${x === today ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''} ${x < today ? 'is-past' : ''}" data-day="${x}">
       <div class="wp-day-head"><span><b>${DOW[dt.getDay()]}</b> ${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}</span>
         ${list.length ? html`<span class="n">${list.length}</span>` : ''}</div>
-      <div class="wp-list">${list.map(chip)}</div>
+      <div class="wp-list">${list.map(t => chip(t, x))}</div>
       ${canPlan ? html`<button type="button" class="wp-add" data-wp-add="${x}" aria-label="Nova tarefa para ${fmtDate(x)}">${icon('plus')}<span>Tarefa</span></button>` : ''}
     </div>`;
   };
 
   return html`<section class="card section week-plan" id="week-plan">
     <div class="card-head"><h2>${icon('calendar')}Planejamento da semana</h2>
-      <span class="sub">${weekCount} tarefa(s) de ${firstName} vencendo na semana</span></div>
+      <span class="sub">${inWeek.size} tarefa(s) em aberto de ${firstName} nesta semana</span></div>
     <div class="card-body">
       <div class="wp-bar">
         <div class="wp-nav">
@@ -57,8 +73,6 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
         ${canPlan ? html`<button type="button" class="btn btn-accent btn-sm" data-wp-add="${days.includes(today) ? today : start}">${icon('plus')}Nova tarefa</button>` : ''}
       </div>
       <div class="wp-grid">${days.map(dayCol)}</div>
-      ${running.length ? html`<details class="wp-extra"><summary>Em execução nesta semana, com prazo depois <span class="n">${running.length}</span></summary>
-        <div class="wp-list wp-list-row">${running.map(t => html`<div class="wp-row">${chip(t)}<span class="muted">até ${fmtDate(t.due_date)}</span></div>`)}</div></details>` : ''}
       ${late.length ? html`<details class="wp-extra wp-late"><summary>Atrasadas de semanas anteriores <span class="n">${late.length}</span></summary>
         <p class="muted wp-hint">Para trazer uma atrasada para esta semana, abra a tarefa e use <b>Reagendar</b> (pede a justificativa).</p>
         <div class="wp-list wp-list-row">${late.map(t => html`<div class="wp-row">${chip(t)}<span class="muted">venceu ${fmtDate(t.due_date)}</span></div>`)}</div></details>` : ''}

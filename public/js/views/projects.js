@@ -3,9 +3,10 @@ import { toast } from '../ui.js';
 import { pageHead, stackBar, bindCommon, STATUS_COLOR } from './shared.js';
 
 export async function list({ state, query, setQuery }) {
-  const projects = await api('/projects');
+  const [projects, types] = await Promise.all([api('/projects'), api('/settings/project-types', { query: { all: '1' } }).catch(() => [])]);
   const canCreate = state.meta.can.manage_projects;
   const filter = query.get('status') || 'ativos';
+  const typeQ = query.get('type') || '';
   const groups = {
     ativos: p => ['planejamento', 'em_andamento', 'pausado'].includes(p.status),
     concluidos: p => p.status === 'concluido',
@@ -33,7 +34,7 @@ export async function list({ state, query, setQuery }) {
         sub: 'Obras recebem código PRJ-000 e áreas internas da empresa INT-000; as tarefas seguem a sequência do código (ex.: PRJ-000-00000).',
         actions: canCreate ? html`<a class="btn btn-ghost" href="#/projetos/novo?tipo=interno">${icon('plus')}Nova área interna</a><a class="btn btn-accent" href="#/projetos/novo">${icon('plus')}Novo projeto</a>` : '',
       })}
-      <div class="chips" role="group" aria-label="Filtrar projetos" style="margin-bottom:14px">
+      <div class="chips" role="group" aria-label="Filtrar projetos" style="margin-bottom:8px">
         ${[['ativos', 'Ativos'], ['concluidos', 'Concluídos'], ['todos', 'Todos']].map(([k, l]) =>
           html`<button class="chip" data-filter="${k}" aria-pressed="${filter === k}">${l}<span class="n">${projects.filter(groups[k]).length}</span></button>`)}
       </div>
@@ -41,9 +42,21 @@ export async function list({ state, query, setQuery }) {
         const shown = projects.filter(groups[filter]);
         const obras = shown.filter(p => p.kind !== 'interno');
         const internas = shown.filter(p => p.kind === 'interno');
-        return html`<div class="grid grid-3" id="proj-grid">${obras.map(card)}</div>
-          ${!obras.length && projects.length ? html`<p class="muted">Nenhuma obra neste filtro.</p>` : ''}
-          ${internas.length ? html`<div class="page-head section" style="margin-bottom:10px"><div><div class="eyebrow">Empresa</div><h2>Interno (empresa)</h2>
+        // Agrupamento pelo tipo do projeto (ordem de Configurações → Tipos de projeto); sem tipo por último
+        const known = new Set(types.map(t => t.id));
+        const sections = [...types.map(t => ({ key: String(t.id), name: t.name, items: obras.filter(p => p.type_id === t.id) })),
+          { key: 'none', name: 'Sem tipo', items: obras.filter(p => !known.has(p.type_id)) }].filter(g => g.items.length);
+        const visible = typeQ ? sections.filter(g => g.key === typeQ) : sections;
+        const typeChips = sections.length > 1 || typeQ ? html`<div class="chips proj-type-chips" role="group" aria-label="Filtrar por tipo de projeto" style="margin-bottom:14px">
+            <button class="chip" data-ptype="" aria-pressed="${!typeQ}">Todos os tipos<span class="n">${obras.length}</span></button>
+            ${sections.map(g => html`<button class="chip" data-ptype="${g.key}" aria-pressed="${typeQ === g.key}"><span class="dot" style="--c:${typeColor(types.findIndex(t => String(t.id) === g.key))}"></span>${g.name}<span class="n">${g.items.length}</span></button>`)}
+          </div>` : html`<div style="margin-bottom:6px"></div>`;
+        return html`${typeChips}
+          <div id="proj-grid">${visible.map(g => html`<section class="proj-group" data-type="${g.key}">
+            <div class="proj-group-head"><span class="dot" style="--c:${typeColor(types.findIndex(t => String(t.id) === g.key))}"></span><h2>${g.name}</h2><span class="n">${g.items.length} ${g.items.length === 1 ? 'projeto' : 'projetos'}</span></div>
+            <div class="grid grid-3">${g.items.map(card)}</div></section>`)}</div>
+          ${!visible.length && projects.length ? html`<p class="muted">Nenhuma obra neste filtro.</p>` : ''}
+          ${internas.length && !typeQ ? html`<div class="page-head section" style="margin-bottom:10px"><div><div class="eyebrow">Empresa</div><h2>Interno (empresa)</h2>
             <p>Tarefas da própria Charão, não vinculadas a obras. Use as classificações como departamentos.</p></div></div>
             <div class="grid grid-3">${internas.map(card)}</div>` : ''}`;
       })()}
@@ -52,12 +65,20 @@ export async function list({ state, query, setQuery }) {
     mount(root, ctx) {
       bindCommon(root);
       root.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
-        setQuery({ status: b.dataset.filter });
+        setQuery({ status: b.dataset.filter, type: typeQ });
+        ctx.render();
+      }));
+      root.querySelectorAll('[data-ptype]').forEach(b => b.addEventListener('click', () => {
+        setQuery({ status: filter === 'ativos' ? '' : filter, type: b.dataset.ptype });
         ctx.render();
       }));
     },
   };
 }
+
+// Cores dos tipos de projeto (pela ordem em Configurações; "Sem tipo" em cinza)
+const TYPE_COLORS = ['#2A3D50', '#E07B39', '#3C8D6E', '#8E6CB0', '#C9A227', '#4A90B8', '#B5523B', '#5D7A3A'];
+export const typeColor = i => (i < 0 ? '#9AA3AD' : TYPE_COLORS[i % TYPE_COLORS.length]);
 
 const stageItem = s => html`<li class="stage-item" data-id="${s.id || ''}">
   <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
@@ -69,11 +90,12 @@ const stageItem = s => html`<li class="stage-item" data-id="${s.id || ''}">
 export async function form({ params, query, state, navigate, reloadMeta }) {
   const editing = !!params.id;
   if (!state.meta.can.manage_projects) throw new Error('Seu perfil não pode cadastrar ou editar projetos.');
-  const [p, users, templates, stageTpls] = await Promise.all([
+  const [p, users, templates, stageTpls, ptypes] = await Promise.all([
     editing ? api(`/projects/${params.id}`) : Promise.resolve(null),
     api('/users/directory'),
     api('/settings/specialties').catch(() => []),
     api('/settings/stage-templates').catch(() => []),
+    api('/settings/project-types', { query: { all: '1' } }).catch(() => []),
   ]);
   const kind = p ? p.kind : query.get('tipo') === 'interno' ? 'interno' : 'obra';
   const v = p || (kind === 'interno'
@@ -101,6 +123,10 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         <fieldset class="fieldset form"><legend>Identificação</legend>
           <div class="field"><label class="req" for="name" id="name-label">${isInt ? 'Nome da área' : 'Nome do projeto'}</label><input id="name" name="name" type="text" maxlength="160" required value="${v.name || ''}"
             placeholder="${isInt ? 'Ex.: Charão — Interno, Manutenção de frota' : ''}"></div>
+          <div class="field obra-only" ${isInt ? 'hidden' : ''}><label for="type_id">Tipo de projeto</label>
+            <select id="type_id" name="type_id"><option value="">Sem tipo</option>
+              ${ptypes.filter(t => t.active || t.id === v.type_id).map(t => opt(t.id, `${t.name}${t.active ? '' : ' (inativo)'}`, v.type_id))}</select>
+            <span class="hint">Os tipos são cadastrados em <b>Configurações → Tipos de projeto</b>. A tela de Projetos e o Dashboard agrupam por tipo.</span></div>
           <div class="form-row obra-only" ${isInt ? 'hidden' : ''}>
             <div class="field"><label class="req" for="client">Cliente</label><input id="client" name="client" type="text" maxlength="160" required value="${v.client || ''}"></div>
             <div class="field"><label for="location">Endereço da obra</label><input id="location" name="location" type="text" maxlength="200" value="${v.location || ''}"></div>

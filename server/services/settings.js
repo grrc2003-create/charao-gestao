@@ -65,6 +65,68 @@ export function saveReasons(ctx, input, ip) {
   return listReasons({ includeInactive: true });
 }
 
+// ---------- Tipos de projeto (Orçamento, Consultoria, Obra, Reforma…) ----------
+export function listProjectTypes({ includeInactive = false } = {}) {
+  return all(`SELECT t.id, t.name, t.active, t.sort_order, (SELECT COUNT(*) FROM projects p WHERE p.type_id = t.id) AS use_count
+    FROM project_types t ${includeInactive ? '' : 'WHERE t.active = 1'} ORDER BY t.sort_order, t.id`);
+}
+
+// Tipo escolhido no projeto: precisa existir e estar ativo (o tipo atual do projeto continua válido mesmo inativo)
+export function validProjectTypeId(v, current = null) {
+  const id = intOrNull(v);
+  if (!id) return null;
+  const t = one('SELECT id, active FROM project_types WHERE id = ?', id);
+  if (!t || (!t.active && id !== current)) throw badRequest('Tipo de projeto inválido.');
+  return id;
+}
+
+// Sincroniza a lista editada em Configurações: cria, renomeia, ordena, ativa/inativa e exclui (somente sem projetos)
+export function saveProjectTypes(ctx, input, ip) {
+  requireSettingsManager(ctx.user);
+  if (!Array.isArray(input)) throw badRequest('Lista de tipos inválida.');
+  const current = listProjectTypes({ includeInactive: true });
+  const byId = new Map(current.map(t => [t.id, t]));
+  const items = input.slice(0, 50).map((x, i) => ({
+    id: intOrNull(x?.id),
+    name: String(x?.name ?? '').replace(/\s+/g, ' ').trim(),
+    active: x?.active === false || x?.active === 0 ? 0 : 1,
+    order: i + 1,
+  }));
+  const seen = new Set();
+  for (const x of items) {
+    if (!x.name) throw badRequest('Informe o nome de todos os tipos.');
+    if (x.name.length > 60) throw badRequest(`Tipo "${x.name.slice(0, 30)}…" excede 60 caracteres.`);
+    const k = x.name.toLocaleLowerCase('pt-BR');
+    if (seen.has(k)) throw badRequest(`Tipo repetido: ${x.name}.`);
+    seen.add(k);
+    if (x.id && !byId.has(x.id)) throw badRequest('Tipo inválido.');
+  }
+  const keep = new Set(items.filter(x => x.id).map(x => x.id));
+  const removed = current.filter(t => !keep.has(t.id));
+  for (const t of removed) {
+    if (t.use_count) throw badRequest(`"${t.name}" está em ${t.use_count} projeto(s). Troque o tipo nesses projetos ou inative-o em vez de excluir.`);
+  }
+  const log = { criados: [], renomeados: [], inativados: [], reativados: [], excluidos: removed.map(t => t.name) };
+  tx(() => {
+    for (const t of removed) run('DELETE FROM project_types WHERE id = ?', t.id);
+    for (const x of items.filter(x => x.id)) run('UPDATE project_types SET name = ? WHERE id = ?', `~tmp~${x.id}`, x.id);
+    for (const x of items) {
+      if (x.id) {
+        const old = byId.get(x.id);
+        if (old.name !== x.name) log.renomeados.push(`${old.name} → ${x.name}`);
+        if (old.active && !x.active) log.inativados.push(x.name);
+        if (!old.active && x.active) log.reativados.push(x.name);
+        run(`UPDATE project_types SET name = ?, active = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, x.active, x.order, x.id);
+      } else {
+        run('INSERT INTO project_types (name, active, sort_order) VALUES (?, ?, ?)', x.name, x.active, x.order);
+        log.criados.push(x.name);
+      }
+    }
+    audit(ctx.user.id, 'settings', null, 'Tipos de projeto atualizados', log, ip);
+  });
+  return listProjectTypes({ includeInactive: true });
+}
+
 // ---------- Configurações gerais (chave/valor) ----------
 const GENERAL = {
   chronic_reschedule_threshold: { def: 3, min: 2, max: 10, label: 'Limite de tarefa crônica' },

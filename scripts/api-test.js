@@ -981,6 +981,36 @@ async function main() {
   ok(subXv.start_date === '2099-03-23' && subXv.due_date === '2099-03-27' && subXv.work_days === 5,
     `subtarefa em branco recebe início pela predecessora (seg 23/03) e término antes da sucessora (sex 27/03) → ${subXv.start_date} a ${subXv.due_date}`);
 
+  // Tipos de projeto: cadastro em Configurações, escolha no projeto, agrupamento e análise no Dashboard
+  const pTypes = (await ricardo('GET', '/settings/project-types')).data;
+  ok(pTypes.map(t => t.name).join('|') === 'Orçamento|Consultoria|Obra|Reforma', 'tipos de projeto padrão cadastrados');
+  ok((await marcos('PUT', '/settings/project-types', { types: [] })).status === 403, 'colaborador não altera os tipos de projeto');
+  const tObra = pTypes.find(t => t.name === 'Obra').id;
+  const tRef = pTypes.find(t => t.name === 'Reforma').id;
+  const ptA = (await ricardo('POST', '/projects', { name: 'Obra Tipo A', client: 'Cliente T', type_id: tObra })).data.id;
+  const ptB = (await ricardo('POST', '/projects', { name: 'Reforma Tipo B', client: 'Cliente T', type_id: tRef })).data.id;
+  ok((await ricardo('GET', `/projects/${ptA}`)).data.type_name === 'Obra', 'projeto guarda o tipo escolhido');
+  ok((await ricardo('POST', '/projects', { name: 'X', client: 'Y', type_id: 99999 })).status === 400, 'tipo inexistente é recusado');
+  const ptInt = (await ricardo('POST', '/projects', { name: 'Área T', kind: 'interno', type_id: tObra })).data.id;
+  ok((await ricardo('GET', `/projects/${ptInt}`)).data.type_id === null, 'área interna não recebe tipo');
+  await ricardo('POST', '/tasks', { project_id: ptB, title: 'Demolição', description: 'x', priority: 'media', proof_type: 'nenhuma', due_date: '2000-01-10' });
+  const dTypes = (await ricardo('GET', '/dashboard')).data.by_type;
+  const dRef = dTypes.find(t => t.name === 'Reforma');
+  ok(dRef && dRef.projects >= 1 && dRef.summary.total >= 1 && dRef.summary.late >= 1, 'Dashboard: análise por tipo conta projetos, tarefas e atrasos do tipo');
+  ok(dTypes.some(t => t.id === null && t.name === 'Sem tipo'), 'Dashboard: projetos sem tipo aparecem em "Sem tipo"');
+  ok(!dTypes.some(t => t.name === 'Orçamento'), 'Dashboard: tipos sem projetos não aparecem');
+  // Configurações: renomear, inativar, incluir e excluir
+  const typeBody = list => list.map(t => ({ id: t.id, name: t.name, active: t.active }));
+  ok((await ricardo('PUT', '/settings/project-types', { types: typeBody(pTypes).filter(t => t.id !== tRef) })).status === 400, 'tipo em uso não pode ser excluído');
+  ok((await ricardo('PUT', '/settings/project-types', { types: [...typeBody(pTypes), { name: 'obra' }] })).status === 400, 'tipo repetido é recusado');
+  let tSaved = (await ricardo('PUT', '/settings/project-types', { types: [...typeBody(pTypes).map(t => (t.id === tRef ? { ...t, active: false } : t)), { name: 'Manutenção predial' }] })).data;
+  ok(tSaved.length === 5 && !tSaved.find(t => t.id === tRef).active && tSaved.find(t => t.id === tRef).use_count >= 1, 'inclui tipo novo e inativa tipo em uso');
+  ok(!(await ricardo('GET', '/settings/project-types')).data.some(t => t.id === tRef), 'tipo inativo some da lista para novos projetos');
+  ok((await ricardo('POST', '/projects', { name: 'X2', client: 'Y', type_id: tRef })).status === 400, 'tipo inativo não vale para novo projeto');
+  ok((await ricardo('PUT', `/projects/${ptB}`, { name: 'Reforma Tipo B (editada)' })).status === 200 && (await ricardo('GET', `/projects/${ptB}`)).data.type_id === tRef, 'projeto mantém o tipo inativo ao ser editado');
+  tSaved = (await ricardo('PUT', '/settings/project-types', { types: typeBody(tSaved).filter(t => t.name !== 'Manutenção predial') })).data;
+  ok(tSaved.length === 4, 'tipo sem uso pode ser excluído');
+
 }
 
 main()

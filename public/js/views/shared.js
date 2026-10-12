@@ -89,7 +89,7 @@ export function stackBar(byStatus) {
 export const projectRow = p => html`<li><a class="row-link proj-row" href="#/projetos/${p.id}">
   <div class="grow">
     <div class="row-title"><span class="mono muted">${p.code}</span><span class="truncate">${p.name}</span></div>
-    <div class="row-meta"><span>${p.client}</span><span>${PROJECT_STATUS[p.status]}</span></div>
+    <div class="row-meta"><span>${p.client}</span>${p.type_name ? html`<span>${p.type_name}</span>` : ''}<span>${PROJECT_STATUS[p.status]}</span></div>
     ${progress(p.summary.completion_pct ?? 0, `Conclusão de ${p.name}`)}
     <div class="proj-stats"><span><b>${p.summary.total}</b> tarefas</span><span><b>${p.summary.in_progress}</b> em andamento</span>
       <span style="color:${p.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${p.summary.late}</b> atrasadas</span><span><b>${p.summary.done}</b> concluídas</span></div>

@@ -1355,3 +1355,13 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .tnav-pos small { font-size: 10.5px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 559px) { .tnav-txt em { display: none; } .tnav-pos small { display: none; } }
 .cli-nav { display: flex; justify-content: space-between; gap: 8px; border-top: 1px dashed var(--line); padding-top: 8px; }
+
+/* Tipos de projeto */
+.proj-group { margin-bottom: 18px; }
+.proj-group-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.proj-group-head h2 { font-size: 16px; margin: 0; }
+.proj-group-head .n { font-size: 12.5px; color: var(--muted); }
+.proj-group-head .dot, .type-row .dot, .proj-type-chips .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; display: inline-block; }
+.type-row .row-title { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.type-row .row-meta { margin-bottom: 6px; }
+.type-row .proj-pct small { display: block; font-size: 10.5px; font-weight: 600; color: var(--muted); text-align: center; }

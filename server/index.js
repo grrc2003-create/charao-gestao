@@ -153,6 +153,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
       .sort((a, b) => b.late_episodes - a.late_episodes || b.reschedule_count - a.reschedule_count).slice(0, 6),
     projects: projects.filter(p => p.status !== 'cancelado' && p.kind !== 'interno'),
     internal_areas: projects.filter(p => p.kind === 'interno' && p.status !== 'cancelado'),
+    by_type: Projects.analysisByType(projects, units),
     users,
     upcoming,
     late,
@@ -363,6 +364,8 @@ api.put('/api/settings/general', (req, res, { ctx, body }) => send(res, 200, Set
 api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
 api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listSpecialtyTemplates()));
 api.put('/api/settings/specialties', (req, res, { ctx, body }) => send(res, 200, Settings.saveSpecialtyTemplates(ctx, body.templates, clientIp(req))));
+api.get('/api/settings/project-types', (req, res, { query }) => send(res, 200, Settings.listProjectTypes({ includeInactive: query.get('all') === '1' })));
+api.put('/api/settings/project-types', (req, res, { ctx, body }) => send(res, 200, Settings.saveProjectTypes(ctx, body.types, clientIp(req))));
 api.get('/api/settings/stage-templates', (req, res) => send(res, 200, Settings.listStageTemplates()));
 api.put('/api/settings/stage-templates', (req, res, { ctx, body }) => send(res, 200, Settings.saveStageTemplates(ctx, body.templates, clientIp(req))));
 

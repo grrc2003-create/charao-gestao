@@ -11,6 +11,14 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
   <button type="button" class="icon-btn" data-rm ${r.use_count ? 'disabled' : ''} aria-label="Excluir justificativa"
     title="${r.use_count ? 'Já usada: inative em vez de excluir' : 'Excluir'}">✕</button></li>`;
 
+const typeItem = t => html`<li class="stage-item reason-item type-item ${t.active ? '' : 'is-inactive'}" data-id="${t.id || ''}">
+  <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
+  <input type="text" maxlength="60" value="${t.name}" aria-label="Nome do tipo" required>
+  <label class="reason-active" title="Inativos não aparecem para novos projetos"><input type="checkbox" data-active ${t.active ? 'checked' : ''}><span>Ativo</span></label>
+  <span class="stage-count">${t.use_count ? `${t.use_count} projeto(s)` : 'nenhum projeto'}</span>
+  <button type="button" class="icon-btn" data-rm ${t.use_count ? 'disabled' : ''} aria-label="Excluir tipo"
+    title="${t.use_count ? 'Em uso: troque o tipo nesses projetos ou inative-o' : 'Excluir'}">✕</button></li>`;
+
 // Modelo (especialidades ou classificações): nome + um item por linha
 const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
   <div class="spec-tpl-head">
@@ -24,8 +32,8 @@ const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
 
 export async function view({ state, reloadMeta }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
-  const [reasons, general, templates, stageTpls, cal] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
-    api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar')]);
+  const [reasons, general, templates, stageTpls, cal, types] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
+    api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar'), api('/settings/project-types', { query: { all: '1' } })]);
 
   return {
     title: 'Configurações',
@@ -40,6 +48,21 @@ export async function view({ state, reloadMeta }) {
             <span class="hint">Tarefas reagendadas este número de vezes ou mais são destacadas como <b>crônicas</b> no Dashboard, nas listas e nos relatórios. Entre 2 e 10.</span></div>
           <div class="form-error" hidden></div>
           <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
+        </form>
+      </section>
+      <section class="card" id="types-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('projects')}Tipos de projeto</h2><span class="sub">${types.filter(t => t.active).length} ativo(s)</span></div>
+        <form class="card-body form" id="types-form" novalidate>
+          <p class="muted" style="margin:0">Classificação dos projetos (ex.: Orçamento, Consultoria, Obra, Reforma). O tipo é escolhido no cadastro de cada projeto;
+            a tela de Projetos agrupa por tipo e o Dashboard mostra a análise por tipo. A ordem abaixo é a ordem de exibição.
+            Tipos em uso não podem ser excluídos — inative-os para que não apareçam em novos projetos.</p>
+          <ul class="stage-list" id="type-list">${types.map(typeItem)}</ul>
+          <div class="stage-add">
+            <input type="text" id="type-new" maxlength="60" placeholder="Novo tipo (ex.: Manutenção predial)" aria-label="Novo tipo de projeto">
+            <button type="button" class="btn btn-ghost" id="type-add">${icon('plus')}Adicionar</button>
+          </div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos</button></div>
         </form>
       </section>
       <section class="card" id="cal-card" style="max-width:900px;margin-bottom:16px">
@@ -138,6 +161,51 @@ export async function view({ state, reloadMeta }) {
         const body = { work_saturday: cf.work_saturday.checked, work_sunday: cf.work_sunday.checked, carnaval_off: cf.carnaval_off.checked, corpus_off: cf.corpus_off.checked,
           company_days: [...cl.querySelectorAll('li')].map(li => ({ date: li.querySelector('[data-cd-date]').value, name: li.querySelector('[data-cd-name]').value })) };
         try { await api('/settings/calendar', { method: 'PUT', body }); toast('Calendário de trabalho salvo.'); ctx.render(); } catch (ex) { cerr.textContent = ex.message; cerr.hidden = false; }
+      });
+      // Tipos de projeto
+      const tf = root.querySelector('#types-form');
+      const tl = root.querySelector('#type-list');
+      const tIn = root.querySelector('#type-new');
+      const addType = () => {
+        const name = tIn.value.replace(/\s+/g, ' ').trim();
+        if (!name) return tIn.focus();
+        if ([...tl.querySelectorAll('input[type=text]')].some(i => i.value.trim().toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'))) {
+          toast('Esse tipo já existe.', 'warn');
+          return tIn.select();
+        }
+        tl.insertAdjacentHTML('beforeend', typeItem({ name, active: 1, use_count: 0 }).toString());
+        tIn.value = '';
+        tIn.focus();
+      };
+      root.querySelector('#type-add').addEventListener('click', addType);
+      tIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addType(); } });
+      tl.addEventListener('click', e => {
+        const li = e.target.closest('.type-item');
+        if (!li) return;
+        if (e.target.closest('[data-rm]')) li.remove();
+        const mv = e.target.closest('[data-move]');
+        if (mv) {
+          const sib = Number(mv.dataset.move) < 0 ? li.previousElementSibling : li.nextElementSibling;
+          if (sib) Number(mv.dataset.move) < 0 ? sib.before(li) : sib.after(li);
+        }
+      });
+      tl.addEventListener('change', e => {
+        if (e.target.matches('[data-active]')) e.target.closest('.type-item').classList.toggle('is-inactive', !e.target.checked);
+      });
+      tf.addEventListener('submit', async e => {
+        e.preventDefault();
+        const terr = tf.querySelector('.form-error');
+        terr.hidden = true;
+        const payload = [...tl.querySelectorAll('.type-item')].map(li => ({
+          id: li.dataset.id ? Number(li.dataset.id) : null,
+          name: li.querySelector('input[type=text]').value,
+          active: li.querySelector('[data-active]').checked,
+        }));
+        try {
+          await api('/settings/project-types', { method: 'PUT', body: { types: payload } });
+          toast('Tipos de projeto salvos.');
+          ctx.render();
+        } catch (ex) { terr.textContent = ex.message; terr.hidden = false; }
       });
       bindTemplates('#specs-form', '#spec-list', '#spec-add', 'specialty', '/settings/specialties', 'Modelos de especialidades salvos.');
       bindTemplates('#stage-tpl-form', '#stage-tpl-list', '#stage-tpl-add', 'stage', '/settings/stage-templates', 'Modelos de classificação salvos.');

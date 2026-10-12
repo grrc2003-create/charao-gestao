@@ -1,8 +1,33 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
-import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, STATUS_COLOR } from './shared.js';
+import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, stackBar, STATUS_COLOR } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
+import { typeColor } from './projects.js';
+
+// Análise por tipo de projeto: obras, conclusão, atrasos e entregas no prazo de cada tipo
+function typeAnalysis(rows) {
+  if (!rows?.length) return '';
+  const row = r => {
+    const s = r.summary;
+    const color = typeColor(r.color_index);
+    const lateRate = s.total ? Math.round((s.late / s.total) * 100) : 0;
+    return html`<li><a class="row-link proj-row type-row" href="#/projetos?status=todos&type=${r.id ?? 'none'}">
+      <div class="grow">
+        <div class="row-title"><span class="dot" style="--c:${color}"></span><span class="truncate">${r.name}</span></div>
+        <div class="row-meta"><span><b>${r.projects}</b> ${r.projects === 1 ? 'projeto' : 'projetos'}</span><span>${r.active_projects} ativo(s)</span><span>${r.done_projects} concluído(s)</span></div>
+        ${stackBar(s.by_status)}
+        <div class="proj-stats"><span><b>${s.total}</b> tarefas</span><span><b>${s.in_progress}</b> em andamento</span>
+          <span style="color:${s.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.late}</b> atrasadas (${lateRate}%)</span>
+          <span><b>${fmtPct(s.on_time_pct)}</b> entregas no prazo</span>${s.avg_delay_days ? html`<span><b>${s.avg_delay_days.toLocaleString('pt-BR')}</b> dias de atraso médio</span>` : ''}</div>
+      </div>
+      <div class="proj-pct">${fmtPct(s.completion_pct ?? 0)}<small>concluído</small></div>
+      <span class="chev">${icon('chevron')}</span></a></li>`;
+  };
+  return html`<section class="card section" id="type-analysis">
+    <div class="card-head"><h2>${icon('projects')}Análise por tipo de projeto</h2><a class="sub" href="#/projetos?status=todos">Ver projetos</a></div>
+    <ul class="rows">${rows.map(row)}</ul></section>`;
+}
 
 export async function view({ state }) {
   const [d, impactRank] = await Promise.all([api('/dashboard'), api('/impact-ranking').catch(() => [])]);
@@ -53,6 +78,8 @@ export async function view({ state }) {
             <ul class="rows">${d.internal_areas.map(projectRow)}</ul>` : ''}
         </section>
       </div>
+
+      ${typeAnalysis(d.by_type)}
 
       <section class="card section">
         <div class="card-head"><h2>${icon('team')}Desempenho por usuário</h2><span class="sub">ordenado por entregas no prazo</span></div>

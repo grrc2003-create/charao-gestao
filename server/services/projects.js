@@ -6,14 +6,14 @@ import { summarize, monthlyTrend } from './metrics.js';
 import { listVisible, listCancelled } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
-import { getSetting, validTemplateId } from './settings.js';
+import { getSetting, validTemplateId, validProjectTypeId } from './settings.js';
 import { UFS } from './calendar.js';
 import { listRecurrences } from './recurrences.js';
 import { checklistDashboard } from './checklist.js';
 
 export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'];
 
-const BASE = `SELECT p.*, l.name AS lead_name FROM projects p LEFT JOIN users l ON l.id = p.lead_id`;
+const BASE = `SELECT p.*, l.name AS lead_name, pt.name AS type_name FROM projects p LEFT JOIN users l ON l.id = p.lead_id LEFT JOIN project_types pt ON pt.id = p.type_id`;
 
 // Equipe = usuários com o projeto liberado (mesma liberação de Usuários → Permissões)
 function members(projectId) {
@@ -80,9 +80,11 @@ export function getProject(ctx, id) {
   };
 }
 
-function readProjectBody(body) {
+function readProjectBody(body, currentType = null) {
   const kind = body.kind === 'interno' ? 'interno' : 'obra';
   const d = {
+    // Tipo do projeto (Configurações → Tipos de projeto); áreas internas não têm tipo
+    type_id: kind === 'interno' ? null : validProjectTypeId(body.type_id, currentType),
     name: str(body.name, { max: 160, required: true, label: kind === 'interno' ? 'Nome da área' : 'Nome do projeto' }),
     // Área interna: cliente é a própria empresa
     client: kind === 'interno' ? (str(body.client, { max: 160, label: 'Cliente' }) || COMPANY_NAME) : str(body.client, { max: 160, required: true, label: 'Cliente' }),
@@ -143,9 +145,9 @@ export function createProject(ctx, body, ip) {
     const code = nextCode(kind);
     const now = new Date().toISOString();
     const r = run(`INSERT INTO projects (code, name, client, location, description, status, start_date, end_date, actual_end_date,
-      lead_id, specialty_template_id, uf, municipio, ibge_code, kind, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      lead_id, specialty_template_id, uf, municipio, ibge_code, kind, type_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
-      d.uf, d.municipio, d.ibge_code, kind, ctx.user.id, now, now);
+      d.uf, d.municipio, d.ibge_code, kind, d.type_id, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
     const teamLog = syncTeam(id, memberIds);
     defaultStageId(id);
@@ -154,7 +156,7 @@ export function createProject(ctx, body, ip) {
     if (!isAdmin(ctx.user) && ctx.user.access_scope !== 'total') {
       run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', ctx.user.id, id);
     }
-    audit(ctx.user.id, 'project', id, 'Projeto criado', { code, name: d.name, classificacoes: stagesLog?.criadas || [], equipe: teamLog?.incluidos || [] }, ip);
+    audit(ctx.user.id, 'project', id, 'Projeto criado', { code, name: d.name, ...(d.type_id ? { tipo: one('SELECT name FROM project_types WHERE id = ?', d.type_id)?.name } : {}), classificacoes: stagesLog?.criadas || [], equipe: teamLog?.incluidos || [] }, ip);
     return id;
   });
 }
@@ -163,17 +165,37 @@ export function updateProject(ctx, id, body, ip) {
   const p = one('SELECT * FROM projects WHERE id = ?', id);
   if (!p || !canAccessProject(ctx.user, id, ctx.projects)) throw notFound('Projeto não encontrado.');
   if (!canManageProject(ctx, id)) throw forbidden('Você não pode editar este projeto.');
-  const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) });
+  const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) }, p.type_id);
   tx(() => {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
-      lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, updated_at=? WHERE id=?`,
+      lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, updated_at=? WHERE id=?`,
       d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
-      d.uf, d.municipio, d.ibge_code, new Date().toISOString(), id);
+      d.uf, d.municipio, d.ibge_code, d.type_id, new Date().toISOString(), id);
     const teamLog = body.member_ids !== undefined ? syncTeam(id, memberIds, members(id).map(m => m.id)) : null;
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));
     const stagesLog = syncStages(id, body.stages);
     audit(ctx.user.id, 'project', id, 'Projeto atualizado', { campos: changed, ...(stagesLog ? { classificacoes: stagesLog } : {}), ...(teamLog ? { equipe_e_acesso: teamLog } : {}) }, ip);
   });
+}
+
+// Dashboard: indicadores agrupados pelo tipo do projeto (obras; áreas internas e canceladas ficam de fora)
+export function analysisByType(projects, units) {
+  const obras = projects.filter(p => p.kind !== 'interno' && p.status !== 'cancelado');
+  const types = all('SELECT id, name FROM project_types ORDER BY sort_order, id');
+  const known = new Set(types.map(t => t.id));
+  return [...types, { id: null, name: 'Sem tipo' }].map((t, order) => {
+    const ps = obras.filter(p => (t.id === null ? !known.has(p.type_id) : p.type_id === t.id));
+    const ids = new Set(ps.map(p => p.id));
+    return {
+      id: t.id,
+      name: t.name,
+      color_index: t.id === null ? -1 : order, // cor do tipo (mesma ordem da tela de Projetos)
+      projects: ps.length,
+      active_projects: ps.filter(p => ['planejamento', 'em_andamento', 'pausado'].includes(p.status)).length,
+      done_projects: ps.filter(p => p.status === 'concluido').length,
+      summary: summarize(units.filter(u => ids.has(u.project_id))),
+    };
+  }).filter(t => t.projects);
 }
 
 export function projectAssignees(ctx, id) {

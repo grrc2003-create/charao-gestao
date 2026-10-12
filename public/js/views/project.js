@@ -28,7 +28,7 @@ export async function view({ params, query, setQuery, render }) {
     html: html`
       ${pageHead({
         back: { href: '#/projetos', label: 'Projetos' },
-        eyebrow: p.kind === 'interno' ? `${p.code} · Interno (empresa)` : `${p.code} · ${PROJECT_STATUS[p.status]}`,
+        eyebrow: p.kind === 'interno' ? `${p.code} · Interno (empresa)` : `${p.code}${p.type_name ? ` · ${p.type_name}` : ''} · ${PROJECT_STATUS[p.status]}`,
         title: p.name,
         sub: `${p.client}${p.location ? ` · ${p.location}` : ''}`,
         actions: html`

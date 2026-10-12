@@ -9,6 +9,7 @@ const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ });
 const toDay = ts => (ts ? (/^\d{4}-\d{2}-\d{2}$/.test(ts) ? ts : dayFmt.format(new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? ts : ts.replace(' ', 'T') + 'Z'))) : null);
 const ms = d => Date.parse(d + 'T00:00:00Z');
 const addDays = (d, n) => new Date(ms(d) + n * 86400e3).toISOString().slice(0, 10);
+const DOW = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
 export function ganttSpan(t, ref) {
@@ -35,7 +36,10 @@ function weekTicks(from, to) {
 function ticks(from, to) {
   const days = (ms(to) - ms(from)) / 86400e3;
   const out = [];
-  if (days <= 31) {
+  if (days <= 8) {
+    // Uma semana: um rótulo por dia, com o dia da semana
+    for (let d = from; d < to; d = addDays(d, 1)) out.push({ d, label: `${DOW[new Date(ms(d)).getUTCDay()]} ${d.slice(8, 10)}/${d.slice(5, 7)}`, mid: true });
+  } else if (days <= 31) {
     const step = days <= 14 ? 1 : 2;
     for (let d = from; d <= to; d = addDays(d, step)) out.push({ d, label: `${d.slice(8, 10)}/${d.slice(5, 7)}` });
   } else if (days <= 120) {
@@ -63,16 +67,25 @@ function ticks(from, to) {
  * @param rows  tarefas (formato gantt_tasks do relatório)
  * @param opts  { ref: 'YYYY-MM-DD', groupLabel: t => string|null, showProject: bool,
  *               weekly: colunas por semana (segunda a domingo), color: t => cor da barra, statusOf: t => texto,
- *               noun: ['tarefa(s)', 'concluída(s)'], head: 'Tarefa', legend: html, note: texto }
+ *               noun: ['tarefa(s)', 'concluída(s)'], head: 'Tarefa', legend: html, note: texto,
+ *               range: { from, to } — mostra só o período (ex.: uma semana), com as tarefas que passam por ele }
  */
-export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly = false, color, statusOf, noun = ['tarefa(s)', 'concluída(s)'], head = 'Tarefa', legend, note } = {}) {
+export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly = false, color, statusOf, noun = ['tarefa(s)', 'concluída(s)'], head = 'Tarefa', legend, note, range } = {}) {
   if (!rows.length) return html`<p class="muted">Sem ${noun[0].replace('(s)', 's')} para o cronograma.</p>`;
-  const spans = rows.map(t => ({ t, s: ganttSpan(t, ref) }));
+  const lastOf = s => [s.end, s.due, s.lateTo].filter(Boolean).reduce((b, v) => (v > b ? v : b), s.end);
+  let spans = rows.map(t => ({ t, s: ganttSpan(t, ref) }));
+  if (range) {
+    spans = spans.filter(x => x.s.start <= range.to && lastOf(x.s) >= range.from);
+    if (!spans.length) return html`<p class="muted">Nenhuma ${noun[0].replace('(s)', '')} passa por este período.</p>`;
+  }
   let from = spans.reduce((a, x) => (x.s.start < a ? x.s.start : a), spans[0].s.start);
-  let to = spans.reduce((a, x) => [x.s.end, x.s.due, x.s.lateTo].filter(Boolean).reduce((b, v) => (v > b ? v : b), a), spans[0].s.end);
+  let to = spans.reduce((a, x) => (lastOf(x.s) > a ? lastOf(x.s) : a), spans[0].s.end);
   if (ref > to) to = ref;
   if (ref < from) from = ref;
-  if (weekly) {
+  if (range) {
+    from = range.from;
+    to = addDays(range.to, 1);
+  } else if (weekly) {
     from = monday(from);
     to = addDays(monday(to), 7);
   } else {
@@ -85,9 +98,10 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
   const width = (a, b) => Math.max(0.6, pos(addDays(b, 1)) - pos(a)); // fim inclusivo
   const tk = weekly ? weekTicks(from, to) : ticks(from, to);
   const todayPct = pos(ref);
+  const showToday = ref >= from && ref < to;
   const wk = 100 / Math.max(tk.length, 1);
   // Semanal: colunas alternadas para facilitar a leitura de cada semana
-  const grid = html`${weekly ? tk.filter(x => x.week % 2).map(x => html`<i class="g-week" style="left:${pos(x.d).toFixed(2)}%;width:${wk.toFixed(2)}%"></i>`) : ''}${tk.map(x => html`<i class="g-tick" style="left:${pos(x.d).toFixed(2)}%"></i>`)}<i class="g-today" style="left:${todayPct.toFixed(2)}%"></i>`;
+  const grid = html`${weekly ? tk.filter(x => x.week % 2).map(x => html`<i class="g-week" style="left:${pos(x.d).toFixed(2)}%;width:${wk.toFixed(2)}%"></i>`) : ''}${tk.map(x => html`<i class="g-tick" style="left:${pos(x.d).toFixed(2)}%"></i>`)}${showToday ? html`<i class="g-today" style="left:${todayPct.toFixed(2)}%"></i>` : ''}`;
 
   const taskRow = ({ t, s }) => {
     const c = color ? color(t) : STATUS_COLOR[t.eff_status];
@@ -133,8 +147,8 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
   return html`<div class="gantt ${hasLinks ? 'has-links' : ''}">
     ${hasLinks ? html`<svg class="g-links" aria-hidden="true"></svg>` : ''}
     <table class="g-table">
-      <thead><tr><th class="g-label">${head}${weekly ? html`<span class="g-meta">Semanas: segunda a domingo</span>` : ''}</th><th class="g-track g-axis ${weekly ? 'is-weekly' : ''}">${tk.filter(x => x.label).map(x => html`<span style="left:${(weekly ? pos(x.d) + wk / 2 : pos(x.d)).toFixed(2)}%">${x.label}</span>`)}
-        <span class="g-today-label" style="left:${todayPct.toFixed(2)}%">hoje</span></th></tr></thead>
+      <thead><tr><th class="g-label">${head}${weekly ? html`<span class="g-meta">Semanas: segunda a domingo</span>` : ''}</th><th class="g-track g-axis ${weekly ? 'is-weekly' : ''}">${tk.filter(x => x.label).map(x => html`<span style="left:${(weekly || x.mid ? pos(x.d) + wk / 2 : pos(x.d)).toFixed(2)}%">${x.label}</span>`)}
+        ${showToday ? html`<span class="g-today-label" style="left:${todayPct.toFixed(2)}%">hoje</span>` : ''}</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
     ${legend || html`<div class="g-legend">
@@ -213,8 +227,29 @@ export function bindGanttSections(root, fetcher) {
         const g = await fetcher(d.dataset.ganttUrl);
         const showProject = d.dataset.ganttProj === '1';
         const label = d.dataset.ganttGroup === 'project' ? t => `${t.project_code}` : t => t.stage_name || 'Geral';
-        body.innerHTML = ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject }).toString();
-        drawGanttLinks(d);
+        // Filtro de período: todo o cronograma ou uma semana (segunda a domingo), lembrado por tela
+        const pkey = `${key}-periodo`;
+        let wk = '';
+        try { wk = sessionStorage.getItem(pkey) || ''; } catch { /* sem armazenamento */ }
+        const draw = () => {
+          const range = wk ? { from: wk, to: addDays(wk, 6) } : null;
+          const bar = html`<div class="g-filter" role="group" aria-label="Período do cronograma">
+            <div class="chips"><button type="button" class="chip" data-gper="" aria-pressed="${!wk}">Todo o período</button>
+              <button type="button" class="chip" data-gper="${wk || monday(g.ref)}" aria-pressed="${!!wk}">Por semana</button></div>
+            ${wk ? html`<div class="g-wnav"><button type="button" class="btn btn-ghost btn-sm" data-gper="${addDays(wk, -7)}" aria-label="Semana anterior">‹</button>
+              <b>${fmtDate(wk)} a ${fmtDate(addDays(wk, 6))}</b>
+              <button type="button" class="btn btn-ghost btn-sm" data-gper="${addDays(wk, 7)}" aria-label="Próxima semana">›</button>
+              ${wk !== monday(g.ref) ? html`<button type="button" class="btn btn-ghost btn-sm" data-gper="${monday(g.ref)}">Esta semana</button>` : ''}</div>` : ''}
+          </div>`;
+          body.innerHTML = html`${bar}${ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject, range })}`.toString();
+          body.querySelectorAll('[data-gper]').forEach(b => b.addEventListener('click', () => {
+            wk = b.dataset.gper;
+            try { sessionStorage.setItem(pkey, wk); } catch { /* sem armazenamento */ }
+            draw();
+          }));
+          drawGanttLinks(d);
+        };
+        draw();
       } catch (e) { body.innerHTML = html`<p class="muted">${e.message}</p>`.toString(); loaded = false; }
     };
     try { if (sessionStorage.getItem(key) === '1') { d.open = true; load(); } } catch { /* sem armazenamento */ }

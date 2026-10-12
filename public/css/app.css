@@ -1407,3 +1407,7 @@ tr.sub-row td:first-child { padding-left: 26px; }
   .wp-add span { display: none; }
   .wp-add { width: 34px; height: 34px; }
 }
+
+/* Gantt: filtro por semana */
+.g-filter { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.g-wnav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }

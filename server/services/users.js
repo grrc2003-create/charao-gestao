@@ -2,7 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { impactOfAssignee } from './dependencies.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
-import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin } from '../lib/permissions.js';
+import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend } from './metrics.js';
 import { listVisible } from './tasks.js';
@@ -68,6 +68,9 @@ export function getUser(ctx, id) {
     team_summary: team.size ? summarize(teamTasks) : null,
     team_tasks: teamTasks,
     can_edit: isAdmin(ctx.user),
+    // Planejamento da semana: projetos em que quem está vendo pode criar tarefas e que a pessoa da tela pode receber
+    plan_projects: u.active ? all(`SELECT id, code, name FROM projects WHERE status NOT IN ('concluido','cancelado') ORDER BY kind = 'interno', code`)
+      .filter(p => canCreateTaskIn(ctx, p.id) && userHasProjectAccess(id, p.id)) : [],
   };
 }
 

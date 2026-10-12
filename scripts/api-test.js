@@ -1011,6 +1011,17 @@ async function main() {
   tSaved = (await ricardo('PUT', '/settings/project-types', { types: typeBody(tSaved).filter(t => t.name !== 'Manutenção predial') })).data;
   ok(tSaved.length === 4, 'tipo sem uso pode ser excluído');
 
+  // Planejamento da semana (tela do usuário): projetos disponíveis e criação já direcionada à pessoa
+  const marcosId = 4;
+  const planM = (await ricardo('GET', `/users/${marcosId}`)).data;
+  ok(Array.isArray(planM.plan_projects) && planM.plan_projects.length > 0 && planM.plan_projects.every(p => p.code && p.name), 'tela do usuário traz os projetos para planejar a semana');
+  const wpProj = planM.plan_projects[0].id;
+  const wpId = (await ricardo('POST', '/tasks', { project_id: wpProj, title: 'Planejada na semana', description: 'Planejada na semana', assignee_id: marcosId, start_date: '2099-05-04', due_date: '2099-05-04', priority: 'alta', proof_type: 'foto' })).data.id;
+  const wpT = (await ricardo('GET', `/users/${marcosId}`)).data.tasks.find(t => t.id === wpId);
+  ok(wpT && wpT.due_date === '2099-05-04' && wpT.assignee_id === marcosId, 'tarefa criada pelo planejamento aparece na semana da pessoa');
+  const encerrado = (await ricardo('GET', '/projects')).data.find(p => p.status === 'concluido');
+  ok(!encerrado || !planM.plan_projects.some(p => p.id === encerrado.id), 'projeto concluído não aparece para planejar');
+
 }
 
 main()

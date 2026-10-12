@@ -5,6 +5,7 @@ import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRo
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
+import { weekPlanSection, bindWeekPlan } from './week-plan.js';
 
 export async function view({ params, query, setQuery, render, state }) {
   const d = await api(`/users/${params.id}`);
@@ -16,6 +17,7 @@ export async function view({ params, query, setQuery, render, state }) {
   const isMe = u.id === state.user.id;
   const filtered = st ? d.tasks.filter(t => t.eff_status === st) : d.tasks;
   const fmtDays = v => String(v).replace('.', ',');
+  const week = /^\d{4}-\d{2}-\d{2}$/.test(query.get('semana') || '') ? query.get('semana') : '';
 
   const tabs = [
     ['tarefas', `Tarefas atribuídas (${d.tasks.length})`],
@@ -82,6 +84,8 @@ export async function view({ params, query, setQuery, render, state }) {
           ${d.can_edit && (!u.is_external || u.login_enabled) ? html`<dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd>` : ''}</dl>` : ''}
       </section>
 
+      ${weekPlanSection(d, { week, canPlan: (d.plan_projects || []).length > 0, firstName: u.name.split(' ')[0] })}
+
       <div class="kpis section">
         ${kpi({ label: 'Pontualidade', value: fmtPct(s.on_time_pct), hero: true, pct: s.on_time_pct ?? 0, foot: `${s.on_time} de ${s.delivered} entregas no prazo` })}
         ${kpi({ label: 'Tarefas atribuídas', value: s.assigned, color: '#2A3D50', foot: `${s.open + s.in_progress} em aberto` })}
@@ -127,9 +131,11 @@ export async function view({ params, query, setQuery, render, state }) {
       bindCommon(root);
       bindGanttSections(root, url => api(url));
       bindChecklistCards(root);
-      root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab }); render(); }));
-      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st, org }); render(); }));
-      root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => { saveOrg(b.dataset.org); setQuery({ tab, status: st, org: b.dataset.org }); render(); }));
+      bindWeekPlan(root, { d, user: u, meta: state.meta, week, render,
+        setWeek: w => setQuery({ tab, status: st, org, semana: w }) });
+      root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab, semana: week }); render(); }));
+      root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st, org, semana: week }); render(); }));
+      root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => { saveOrg(b.dataset.org); setQuery({ tab, status: st, org: b.dataset.org, semana: week }); render(); }));
       root.querySelectorAll(`a[href^="#/usuarios/${u.id}?status="]`).forEach(a => a.addEventListener('click', e => {
         e.preventDefault();
         setQuery({ tab: 'tarefas', status: new URLSearchParams(a.getAttribute('href').split('?')[1]).get('status') });

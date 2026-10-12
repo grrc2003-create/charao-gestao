@@ -7,7 +7,7 @@ import { today, addDays, daysBetween, decorate } from './metrics.js';
 import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
-import { loadVisible, validateAssignee, autoStart, checklistMaxDue } from './tasks.js';
+import { loadVisible, validateAssignee, autoStart, checklistMaxDue, readProgress } from './tasks.js';
 import { applyShift, projectEndOf } from './dependencies.js';
 
 export const PHOTO_RULES = ['obrigatoria', 'livre'];
@@ -198,6 +198,7 @@ export function checklistView(ctx, t) {
       responsible_name: i.assignee_name || t.assignee_name || 'Sem responsável',
       result: i.result, resolved: isResolved(i.result), note: i.note, answered_by_name: i.answered_by_name, answered_at: i.answered_at,
       description: i.description, start_date: i.start_date, duration_days: i.duration_days, due_date: i.due_date,
+      progress_pct: isResolved(i.result) ? 100 : i.progress_pct ?? null,
       overdue: !isResolved(i.result) && !!i.due_date && i.due_date < ref,
       refs: st.refs,
       files: [...st.currentFiles, ...st.loose], loose_count: st.loose.length,
@@ -218,6 +219,8 @@ export function checklistView(ctx, t) {
     items,
     summary: {
       total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0,
+      // Avanço do check-list: média dos itens (resolvido = 100%, senão o avanço informado ou 0)
+      progress: items.length ? Math.round(items.reduce((n, i) => n + (i.resolved ? 100 : i.progress_pct || 0), 0) / items.length) : 0,
       conforme: count('conforme'), nao_conforme: items.filter(i => i.open_nc).length, na: count('na'), pending: items.filter(i => !i.result).length,
       nc_total: items.reduce((n, i) => n + i.nc_count, 0),
       overdue: items.filter(i => i.overdue).length,
@@ -275,6 +278,31 @@ const currentAnswerId = item => (item.result ? one('SELECT MAX(id) AS id FROM ch
 
 // Responder (ou trocar a resposta), registrar observação e anexar fotos — tudo numa chamada só.
 // Cada resposta nova vira um registro do histórico com as próprias fotos. Alterar um item já Conforme/N/A exige justificativa.
+// Avanço parcial do item (0–100% ou null). Itens já resolvidos contam 100%.
+export function setItemProgress(ctx, taskId, itemId, body = {}) {
+  const t = loadChecklistTask(ctx, taskId);
+  const item = loadItem(t, itemId);
+  if (!canAnswerItem(ctx, t, item)) {
+    throw isOpen(t) ? forbidden('Este item é de outro responsável.') : badRequest('O check-list não pode ser alterado neste status.');
+  }
+  if (isResolved(item.result)) throw badRequest('Item já resolvido: o avanço é 100%.');
+  const v = readProgress(body.progress);
+  if (v === (item.progress_pct ?? null)) return;
+  const fmt = x => (x === null || x === undefined ? 'não informado' : `${x}%`);
+  tx(() => {
+    run('UPDATE checklist_items SET progress_pct = ? WHERE id = ?', v, item.id);
+    taskHistory(t.id, ctx.user.id, `Avanço do item ${item.seq} atualizado`, `${item.text}: ${fmt(item.progress_pct)} → ${fmt(v)}`);
+    if (v) autoStart(ctx, t);
+  });
+}
+
+// Avanço calculado dos check-lists (para o Gantt): média dos itens, resolvidos = 100%
+export function checklistProgress(taskIds) {
+  if (!taskIds.length) return new Map();
+  return new Map(all(`SELECT task_id, ROUND(AVG(CASE WHEN result IN ('conforme','na') THEN 100 ELSE COALESCE(progress_pct, 0) END)) AS p
+    FROM checklist_items WHERE task_id IN (${taskIds.map(() => '?').join(',')}) GROUP BY task_id`, ...taskIds).map(r => [r.task_id, r.p]));
+}
+
 export function answerItem(ctx, taskId, itemId, body = {}) {
   const t = loadChecklistTask(ctx, taskId);
   const item = loadItem(t, itemId);

@@ -1417,3 +1417,17 @@ tr.sub-row td:first-child { padding-left: 26px; }
 .wp-task.is-mid { border-style: dashed; background: #FAFAF8; }
 .wp-task.is-last { border-right: 3px solid var(--navy); }
 .wp-txt small em { font-style: normal; color: var(--ink-2); }
+
+/* Avanço parcial (%) */
+.pg { display: inline-block; position: relative; width: 120px; height: 8px; border-radius: 6px; background: var(--line); overflow: hidden; vertical-align: middle; }
+.pg i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--st-em_andamento, #2F6FB3); border-radius: 6px; }
+.pg-sm { width: 80px; height: 6px; }
+.pg-line { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fact-progress .v .btn { margin-left: 6px; }
+.pg-edit { display: grid; gap: 12px; }
+.pg-val { display: flex; align-items: center; gap: 6px; font-size: 22px; font-weight: 700; }
+.pg-val input { width: 96px; font-size: 22px; font-weight: 700; text-align: right; }
+.pg-edit input[type=range] { width: 100%; }
+.cli-progress { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.cli-progress .k { font-weight: 700; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+.cli-pg { font-size: 11px; font-weight: 700; color: var(--st-em_andamento, #2F6FB3); background: #EAF1FA; border-radius: 999px; padding: 1px 7px; }

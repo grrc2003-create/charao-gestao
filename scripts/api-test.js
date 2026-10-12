@@ -1022,6 +1022,30 @@ async function main() {
   const encerrado = (await ricardo('GET', '/projects')).data.find(p => p.status === 'concluido');
   ok(!encerrado || !planM.plan_projects.some(p => p.id === encerrado.id), 'projeto concluído não aparece para planejar');
 
+  // Avanço parcial (%) opcional: tarefa, subtarefa e item de check-list; preenche o Gantt
+  const pgT = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Tarefa com avanço', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', start_date: '2099-08-03', due_date: '2099-08-14' })).data.id;
+  ok((await ricardo('GET', `/tasks/${pgT}`)).data.progress_pct === null, 'avanço nasce não informado');
+  ok((await camila('POST', `/tasks/${pgT}/progress`, { progress: 10 })).status === 404 || (await camila('POST', `/tasks/${pgT}/progress`, { progress: 10 })).status === 403, 'quem não é responsável nem gestor não informa avanço');
+  ok((await marcos('POST', `/tasks/${pgT}/progress`, { progress: 140 })).status === 400, 'avanço fora de 0–100 é recusado');
+  let pgV = (await marcos('POST', `/tasks/${pgT}/progress`, { progress: 40 })).data;
+  ok(pgV.progress_pct === 40 && pgV.status === 'em_andamento' && pgV.history.some(h => h.action === 'Avanço atualizado' && /não informado → 40%/.test(h.details || '')), 'responsável informa 40%: tarefa entra em andamento e fica no histórico');
+  const pgG = (await ricardo('GET', '/gantt?project=1')).data.tasks.find(x => x.id === pgT);
+  ok(pgG && pgG.progress_pct === 40, 'Gantt recebe o avanço da tarefa');
+  pgV = (await marcos('POST', `/tasks/${pgT}/progress`, { progress: null })).data;
+  ok(pgV.progress_pct === null && pgV.history.some(h => h.action === 'Avanço removido'), 'avanço pode ser removido (opcional)');
+  const pgSub = (await ricardo('POST', '/tasks', { parent_id: pgT, title: 'Sub com avanço', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma' })).data.id;
+  ok((await marcos('POST', `/tasks/${pgSub}/progress`, { progress: 75 })).data.progress_pct === 75, 'subtarefa aceita avanço');
+  const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
+  let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
+  ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');
+  const pgIa = pgClV.checklist.items.find(i => i.text === 'Item A').id;
+  pgClV = (await marcos('POST', `/tasks/${pgCl}/items/${pgIa}/progress`, { progress: 60 })).data;
+  ok(pgClV.checklist.items.find(i => i.id === pgIa).progress_pct === 60 && pgClV.checklist.summary.progress === 30, 'item recebe 60% e o check-list mostra a média (30%)');
+  ok(((await ricardo('GET', '/gantt?project=1')).data.tasks.find(x => x.id === pgCl) || {}).progress_pct === 30, 'Gantt do projeto usa o avanço calculado do check-list');
+  pgClV = (await marcos('POST', `/tasks/${pgCl}/items/${pgIa}/answer`, { result: 'conforme' })).data;
+  ok(pgClV.checklist.items.find(i => i.id === pgIa).progress_pct === 100 && pgClV.checklist.summary.progress === 50, 'item conforme conta 100%');
+  ok((await marcos('POST', `/tasks/${pgCl}/items/${pgIa}/progress`, { progress: 20 })).status === 400, 'item resolvido não recebe avanço');
+
 }
 
 main()

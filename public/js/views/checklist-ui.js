@@ -4,6 +4,7 @@ import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 import { periodKey, periodInfo } from './periods.js';
 import { depLists } from './deps-ui.js';
+import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
@@ -431,6 +432,7 @@ function itemCard(t, it, c) {
         ${it.specialty && !uiOf(t.id).levels.includes('especialidade') ? html`<span class="cli-spec cli-spec-sm" title="Especialidade">${it.specialty}</span>` : ''}
         <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
+        ${!it.resolved && it.progress_pct !== null ? html`<span class="cli-pg" title="Avanço informado">${it.progress_pct}%</span>` : ''}
         ${mainState}
       </span>
       <span class="cli-chev" aria-hidden="true">${icon('chevron')}</span>
@@ -482,6 +484,9 @@ function itemCard(t, it, c) {
       ${it.open_nc ? html`<div class="cli-hint">${icon('info')} Não conformidade em aberto: depois de corrigir, marque Conforme${c.photo_rule === 'obrigatoria' ? ' com a foto do depois' : ''}.</div>`
         : needPhoto && !it.result ? html`<div class="cli-hint">${icon('camera')} Foto obrigatória: ao tocar em Conforme ou Não conforme a câmera abre.</div>` : ''}`
       : !it.resolved ? html`<div class="cli-hint">${icon('clock')} ${c.locked ? 'Check-list fechado para alterações.' : `Aguardando ${it.responsible_name} (ou o responsável global).`}</div>` : ''}
+    ${!it.resolved && (it.can_answer || it.progress_pct !== null) ? html`<div class="cli-progress"><span class="k">Avanço</span>
+      ${it.progress_pct !== null ? html`${pctBar(it.progress_pct, { small: true })}<b>${it.progress_pct}%</b>` : html`<span class="muted">não informado</span>`}
+      ${it.can_answer ? html`<button type="button" class="btn btn-ghost btn-sm" data-item-progress="${it.id}">${it.progress_pct !== null ? 'Atualizar' : 'Informar'}</button>` : ''}</div>` : ''}
     ${others.length || it.can_answer ? html`<div class="cli-photos">
       ${others.map(fl => html`<figure class="cli-ph" data-src="/api/checklist-files/${fl.id}" data-caption="Item ${it.seq} · ${it.text}">
         <img src="/api/checklist-files/${fl.id}" alt="Foto do item ${it.seq}" loading="lazy">
@@ -511,7 +516,7 @@ function itemsGantt(c) {
   const rows = dated.map(i => ({
     id: i.id, code: String(i.seq), title: i.text, assignee_name: i.responsible_name, item: i,
     start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
-    eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento', days_late: 0,
+    eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento', days_late: 0, progress_pct: i.progress_pct,
     dep_key: `i:${i.id}`, preds: (c.item_deps?.[i.id]?.predecessors || []).filter(p => p.key.startsWith('i:')).map(p => ({ key: p.key, lag: p.lag_days })),
   }));
   const legend = html`<div class="g-legend"><span><i class="g-sw" style="--c:#A86F0E"></i>Pendente</span><span><i class="g-sw" style="--c:#C0392B"></i>Não conforme em aberto</span>
@@ -770,6 +775,14 @@ export function bindChecklist(root, t, ctx, refresh) {
     list.dataset.filter = b.dataset.clf;
     root.querySelectorAll('.cl-filters [data-clf]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     applySel();
+  }));
+  // Avanço parcial do item
+  root.querySelectorAll('[data-item-progress]').forEach(b => b.addEventListener('click', async () => {
+    const it = c.items.find(x => x.id === Number(b.dataset.itemProgress));
+    const pending = progressSheet({ title: `Avanço do item ${it.seq}`, current: it.progress_pct, what: 'o item' });
+    bindProgressSheet();
+    const r = await pending;
+    if (r) run(() => api(`/tasks/${t.id}/items/${it.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.' : `Avanço do item ${it.seq}: ${r.progress}%.`);
   }));
   root.querySelectorAll('button[data-answer]').forEach(b => b.addEventListener('click', async () => {
     const it = c.items.find(x => x.id === Number(b.dataset.item));

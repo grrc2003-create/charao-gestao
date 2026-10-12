@@ -105,8 +105,11 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
 
   const taskRow = ({ t, s }) => {
     const c = color ? color(t) : STATUS_COLOR[t.eff_status];
-    const bar = html`<span class="g-bar ${t.eff_status === 'concluida' ? 'is-done' : ''}" data-gbar style="left:${pos(s.start).toFixed(2)}%;width:${width(s.start, s.end).toFixed(2)}%;--c:${c}"
-      title="${t.code} · ${fmtDate(s.start)} → ${fmtDate(s.end)} · ${statusOf ? statusOf(t) : STATUS[t.eff_status].label}"></span>`;
+    // Avanço parcial: parte preenchida da barra (concluídas já são cheias)
+    const pg = t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined ? t.progress_pct : null;
+    const bar = html`<span class="g-bar ${t.eff_status === 'concluida' ? 'is-done' : ''} ${pg !== null ? 'has-progress' : ''}" data-gbar style="left:${pos(s.start).toFixed(2)}%;width:${width(s.start, s.end).toFixed(2)}%;--c:${c}"
+      title="${t.code} · ${fmtDate(s.start)} → ${fmtDate(s.end)} · ${statusOf ? statusOf(t) : STATUS[t.eff_status].label}${pg !== null ? ` · avanço ${pg}%` : ''}">${pg !== null ? html`<i class="g-fill" style="width:${pg}%"></i>` : ''}</span>
+      ${pg !== null && pg < 100 ? html`<span class="g-pct" style="left:${(pos(s.start) + width(s.start, s.end)).toFixed(2)}%">${pg}%</span>` : ''}`;
     const late = s.lateTo && s.lateTo > s.due
       ? html`<span class="g-late" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%;width:${(pos(addDays(s.lateTo, 1)) - pos(addDays(s.due, 1))).toFixed(2)}%"></span>` : '';
     const dueMark = s.due ? html`<span class="g-due" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%" title="Prazo ${fmtDate(s.due)}"></span>` : '';
@@ -116,7 +119,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     return html`<tr class="g-row ${t.critical ? 'is-critical' : ''}" data-gkey="${t.dep_key || ''}" data-preds="${(t.preds || []).map(x => x.key).join(',')}">
       <td class="g-label"><span class="g-code">${t.code}</span>${showProject ? html`<span class="g-proj">${t.project_code}</span>` : ''}
         <span class="g-title">${t.parent_code ? '↳ ' : ''}${t.title}</span>
-        <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}</span></td>
+        <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}${t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined && t.progress_pct < 100 ? ` · ${t.progress_pct}% executado` : ''}</span></td>
       <td class="g-track">${grid}${bar}${late}${origMark}${dueMark}</td></tr>`;
   };
 
@@ -133,7 +136,10 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       const gs = items.reduce((a, x) => (x.s.start < a ? x.s.start : a), items[0].s.start);
       const ge = items.reduce((a, x) => [x.s.end, x.s.lateTo].filter(Boolean).reduce((b, v) => (v > b ? v : b), a), items[0].s.end);
       const done = items.filter(x => x.t.eff_status === 'concluida').length;
-      body.push(html`<tr class="g-group"><td class="g-label"><b>${label}</b><span class="g-meta">${items.length} ${noun[0]} · ${done} ${noun[1]} · ${fmtDate(gs)} → ${fmtDate(ge)}</span></td>
+      // Avanço do grupo (quando algum item tem avanço informado): média, concluídos = 100%
+      const anyPg = items.some(x => x.t.eff_status !== 'concluida' && x.t.progress_pct !== null && x.t.progress_pct !== undefined);
+      const gpg = anyPg ? Math.round(items.reduce((n, x) => n + (x.t.eff_status === 'concluida' ? 100 : x.t.progress_pct || 0), 0) / items.length) : null;
+      body.push(html`<tr class="g-group"><td class="g-label"><b>${label}</b><span class="g-meta">${items.length} ${noun[0]} · ${done} ${noun[1]}${gpg !== null ? ` · avanço ${gpg}%` : ''} · ${fmtDate(gs)} → ${fmtDate(ge)}</span></td>
         <td class="g-track">${grid}<span class="g-span" style="left:${pos(gs).toFixed(2)}%;width:${width(gs, ge).toFixed(2)}%"></span></td></tr>`);
       body.push(...items.map(taskRow));
     }
@@ -154,6 +160,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     ${legend || html`<div class="g-legend">
       <span><i class="g-sw" style="--c:${STATUS_COLOR.em_andamento}"></i>Previsto (início → prazo), cor do status</span>
       <span><i class="g-sw is-done" style="--c:${STATUS_COLOR.concluida}"></i>Concluída (até a conclusão)</span>
+      ${rows.some(t => t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined) ? html`<span><i class="g-sw g-sw-pg" style="--c:${STATUS_COLOR.em_andamento}"></i>Parte executada (avanço %)</span>` : ''}
       <span><i class="g-sw g-sw-late"></i>Atraso (prazo → hoje)</span>
       <span><i class="g-due g-due-legend"></i>Prazo</span>
       <span><i class="g-due g-orig g-due-legend"></i>Prazo original (reagendada)</span>

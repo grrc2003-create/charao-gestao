@@ -126,6 +126,8 @@ export function permissionsFor(ctx, t) {
     due_from_items: t.task_type === 'checklist' && !!checklistMaxDue(t.id),
     execute: editableExec,
     start: execute && t.status === 'aberta',
+    // Avanço parcial (%): responsável ou quem gerencia, enquanto a tarefa está aberta ou em andamento (check-list: pelos itens)
+    progress: t.task_type !== 'checklist' && (execute || manage) && (t.status === 'aberta' || t.status === 'em_andamento'),
     submit: editableExec,
     review: review && t.status === 'aguardando_conferencia',
     reopen: manage && t.status === 'concluida',
@@ -534,6 +536,31 @@ export function updateExecution(ctx, id, body) {
     if ('exec_description' in next) taskHistory(id, ctx.user.id, 'Descrição da execução registrada', onBehalf(ctx, t));
     if ('exec_notes' in next) taskHistory(id, ctx.user.id, 'Observação da execução registrada', onBehalf(ctx, t));
     autoStart(ctx, t);
+  });
+}
+
+// Avanço parcial informado (0–100%, ou null para remover). Maior que zero coloca a tarefa em andamento.
+export function readProgress(v) {
+  if (v === null || v === '' || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 100) throw badRequest('Avanço: informe um número inteiro entre 0 e 100.');
+  return n;
+}
+
+export function setProgress(ctx, id, body = {}) {
+  const t = loadVisible(ctx, id);
+  assertNotCancelled(t);
+  if (!permissionsFor(ctx, t).progress) {
+    throw t.task_type === 'checklist' ? badRequest('No check-list, o avanço é calculado pelos itens.')
+      : ['aberta', 'em_andamento'].includes(t.status) ? forbidden('Você não pode informar o avanço desta tarefa.') : badRequest('O avanço só pode ser informado em tarefas abertas ou em andamento.');
+  }
+  const v = readProgress(body.progress);
+  if (v === (t.progress_pct ?? null)) return;
+  const fmt = x => (x === null || x === undefined ? 'não informado' : `${x}%`);
+  tx(() => {
+    run('UPDATE tasks SET progress_pct = ?, updated_at = ? WHERE id = ?', v, nowIso(), id);
+    taskHistory(id, ctx.user.id, v === null ? 'Avanço removido' : 'Avanço atualizado', withBehalf(ctx, t, `${fmt(t.progress_pct)} → ${fmt(v)}`));
+    if (v) autoStart(ctx, t);
   });
 }
 

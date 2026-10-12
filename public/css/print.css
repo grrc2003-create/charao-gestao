@@ -269,3 +269,9 @@
 .g-link-legend { display: inline-block; width: 22px; height: 0; border-top: 1.5px dashed #46535F; position: relative; }
 .g-sw-crit { border: 1px solid #C0392B; box-shadow: 0 0 0 1.5px #C0392B; background: #fff; }
 .g-legend-dep { margin-top: 4px; }
+
+/* Gantt: avanço parcial (parte executada da barra) */
+.g-bar.has-progress { overflow: hidden; }
+.g-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); }
+.g-pct { position: absolute; top: 50%; transform: translate(9px, -50%); font-size: 9.5px; font-weight: 700; color: #2A3D50; z-index: 3; white-space: nowrap; }
+.g-sw.g-sw-pg { background: linear-gradient(90deg, var(--c) 0 55%, color-mix(in srgb, var(--c) 30%, #fff) 55%); border: 1px solid var(--c); }

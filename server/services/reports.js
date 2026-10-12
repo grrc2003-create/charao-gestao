@@ -6,6 +6,7 @@ import { summarize, userStats, today, monthlyTrend, localDate, PERIODS, groupByP
 import { listVisible, taskFilters, filterTasks, DUE_FILTERS } from './tasks.js';
 import { getSetting } from './settings.js';
 import { ganttLinks, criticalPath, impactRankingIn } from './dependencies.js';
+import { checklistProgress } from './checklist.js';
 
 export const REPORT_TYPES = ['projeto', 'usuario', 'equipe', 'geral', 'tarefas'];
 export const LEVELS = ['resumo', 'detalhado', 'completo'];
@@ -27,6 +28,16 @@ function groupByStage(tasks, multiProject) {
 }
 
 // Dados mínimos para o cronograma (Gantt)
+// Avanço (%) para o Gantt: informado na tarefa, calculado pelos itens no check-list; entregue/concluída = 100%
+function withProgress(tasks, rows) {
+  const cl = checklistProgress(tasks.filter(t => t.task_type === 'checklist').map(t => t.id));
+  return rows.map((r, i) => {
+    const t = tasks[i];
+    const p = ['concluida', 'aguardando_conferencia'].includes(t.eff_status) ? 100 : t.task_type === 'checklist' ? (cl.get(t.id) ?? null) : t.progress_pct ?? null;
+    return { ...r, progress_pct: p };
+  });
+}
+
 const ganttRow = t => ({
   id: t.id, code: t.code, title: t.title, parent_code: t.parent_code, assignee_name: t.assignee_name,
   project_code: t.project_code, stage_id: t.stage_id, stage_name: t.stage_name,
@@ -165,7 +176,8 @@ export function buildReport(ctx, q) {
       // Ligações (predecessoras) entre as tarefas do Gantt e o caminho crítico
       const links = ganttLinks(tasks.map(t => t.id));
       const crit = criticalPath(tasks);
-      return (group === 'classificacao' || byPeriod ? tasks : [...tasks].sort(byStage)).map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) }));
+      const ordered = group === 'classificacao' || byPeriod ? tasks : [...tasks].sort(byStage);
+      return withProgress(ordered, ordered.map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) })));
     })() : [],
     impact_rank: impactRankingIn(ctx, tasks.map(t => t.id)),
     issued_at: new Date().toISOString(),
@@ -280,6 +292,9 @@ export function ganttFor(ctx, q) {
   const crit = projectId ? criticalPath(tasks) : new Set();
   return {
     ref: today(),
-    tasks: [...tasks].sort(byStage).map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) })),
+    tasks: (() => {
+      const ordered = [...tasks].sort(byStage);
+      return withProgress(ordered, ordered.map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) })));
+    })(),
   };
 }

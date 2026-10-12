@@ -168,7 +168,7 @@ export async function view({ params, query, state }) {
   const ganttRows = dated.map(i => ({
     code: String(i.seq), title: i.text, assignee_name: i.responsible_name, group: i.group || 'Sem grupo', item: i,
     start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
-    eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento',
+    eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento', progress_pct: i.progress_pct,
     dep_key: `i:${i.id}`, preds: (c.item_deps?.[i.id]?.predecessors || []).filter(p => p.key.startsWith('i:')).map(p => ({ key: p.key, lag: p.lag_days })),
     days_late: i.overdue ? Math.round((Date.parse(today) - Date.parse(i.due_date)) / 86400e3) : 0,
   })).sort((a, b) => (levels[0] === 'especialidade' ? specRank(a.item.specialty || '') - specRank(b.item.specialty || '') : 0) || a.item.seq - b.item.seq);

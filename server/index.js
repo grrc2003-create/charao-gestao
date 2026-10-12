@@ -237,6 +237,10 @@ api.patch('/api/tasks/:id', (req, res, { ctx, params, body }) => {
   Tasks.updateTask(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
+api.post('/api/tasks/:id/progress', (req, res, { ctx, params, body }) => {
+  Tasks.setProgress(ctx, intOrNull(params.id), body);
+  send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
+});
 api.patch('/api/tasks/:id/execution', (req, res, { ctx, params, body }) => {
   Tasks.updateExecution(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
@@ -265,6 +269,7 @@ api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }
 api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { Checklist.assignItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.patch('/api/tasks/:id/items/:iid', (req, res, { ctx, params, body }) => { Checklist.updateItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.delete('/api/tasks/:id/items/:iid', (req, res, { ctx, params }) => { Checklist.deleteItem(ctx, intOrNull(params.id), intOrNull(params.iid)); taskOut(res, ctx, intOrNull(params.id)); });
+api.post('/api/tasks/:id/items/:iid/progress', (req, res, { ctx, params, body }) => { Checklist.setItemProgress(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/answer', (req, res, { ctx, params, body }) => { Checklist.answerItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.delete('/api/tasks/:id/items/:iid/files/:fid', (req, res, { ctx, params }) => {
   Checklist.removeItemFile(ctx, intOrNull(params.id), intOrNull(params.iid), intOrNull(params.fid));

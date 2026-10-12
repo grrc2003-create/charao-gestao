@@ -3,6 +3,7 @@ import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmt
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead, NAV_SEQ_KEY } from './shared.js';
 import { replaceNextRoute } from '../navhist.js';
+import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
@@ -169,6 +170,18 @@ function build(t, ctx) {
             ${t.reschedule_count ? html`<button type="button" class="resched-badge ${t.chronic ? 'is-chronic' : ''}" data-act="goresched" style="cursor:pointer" title="Prazo original: ${fmtDate(t.original_due)}">↻ ${t.reschedule_count}x reagendada${t.chronic ? ' · crônica' : ''}</button>` : ''}
             ${t.late_episodes ? html`<i class="late-badge" title="Repactuações após vencer + entrega após o prazo + atraso atual">atrasou ${t.late_episodes}x</i>` : ''}</span></div></div>
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
+          ${(() => {
+            // Avanço (%): opcional; concluída/entregue = 100%; check-list = média dos itens
+            const done = ['concluida', 'aguardando_conferencia'].includes(t.eff_status);
+            const pct = done ? 100 : t.checklist ? t.checklist.summary.progress : t.progress_pct;
+            if (pct === null || pct === undefined) {
+              return can.progress ? html`<div class="fact fact-wide fact-progress"><div class="k">${icon('clock')}Avanço</div><div class="v"><span class="muted">Não informado</span>
+                <button type="button" class="btn btn-ghost btn-sm" data-act="progress">Informar avanço</button></div></div>` : '';
+            }
+            return html`<div class="fact fact-wide fact-progress"><div class="k">${icon('clock')}Avanço</div><div class="v"><span class="pg-line">${pctBar(pct)}<b>${pct}%</b>
+              ${can.progress ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="progress">Atualizar</button>` : ''}</span>
+              <small>${done ? (t.eff_status === 'concluida' ? 'Concluída' : 'Entregue, aguardando conferência') : t.checklist ? 'Média dos itens (resolvido = 100%)' : 'Informado pelo responsável'}</small></div></div>`;
+          })()}
           ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
@@ -299,6 +312,12 @@ function mount(root, t, ctx) {
   });
 
   const actions = {
+    progress: async () => {
+      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa' });
+      bindProgressSheet();
+      const r = await pending;
+      if (r) run(() => api(`/tasks/${t.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.' : `Avanço: ${r.progress}%.`);
+    },
     parentdates: () => run(() => api(`/tasks/${t.id}/parent-dates`, { method: 'POST' }), 'Datas da tarefa principal aplicadas.'),
     // Duplicar a tarefa (com subtarefas / itens do check-list); responsáveis e prazos só se marcados
     duplicate: async () => {

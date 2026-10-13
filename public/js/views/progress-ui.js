@@ -12,7 +12,13 @@ export const startField = () => html`<div class="field start-ask"><label class="
   <span class="hint">Esta tarefa está sem data de início. Informe quando a execução começou — obrigatório para dar avanço ou concluir.</span></div>`;
 
 // finish: o que acontece ao chegar a 100% ([{ k: 'submit'|'conclude', label, warn }]); vazio = aviso at100
-export function progressSheet({ title = 'Avanço da tarefa', current = null, what = 'a tarefa', askStart = false, finish = [], at100 = '' } = {}) {
+// Campo opcional "terminou antes de hoje?" (envio): a data vai para autorização de quem confere
+export const doneDateField = (t, { superior = false } = {}) => html`<div class="field done-ask"><label for="dd">${superior ? 'Data em que terminou (se foi antes de hoje)' : 'Terminou antes de hoje? Informe o dia'}</label>
+  <input type="date" id="dd" name="done_date" max="${todayISO()}" ${t.start_date ? html`min="${t.start_date}"` : ''}>
+  <span class="hint">${superior ? 'Opcional. Fica registrada como a data da conclusão, com os dias de atraso de preenchimento.'
+    : 'Opcional. Se a execução terminou antes de hoje, informe o dia: ele precisa ser autorizado por quem confere. Autorizado, conta para o prazo e fica registrado o atraso de preenchimento.'}</span></div>`;
+
+export function progressSheet({ title = 'Avanço da tarefa', current = null, what = 'a tarefa', askStart = false, finish = [], at100 = '', doneField = '' } = {}) {
   const v = current ?? 0;
   return sheet({
     title,
@@ -26,12 +32,12 @@ export function progressSheet({ title = 'Avanço da tarefa', current = null, wha
       <div class="pg-100" hidden>
         ${finish.length ? html`<div class="notice">${icon('info')}<span><b>100% = execução terminada.</b> Ao salvar, o status muda para:</span></div>
           ${finish.map((f, i) => html`<label class="switch pg-finish"><input type="radio" name="finish" value="${f.k}" ${i === 0 ? 'checked' : ''}><span>${f.label}</span></label>
-            ${f.warn ? html`<span class="hint pg-warn">${f.warn}</span>` : ''}`)}`
+            ${f.warn ? html`<span class="hint pg-warn">${f.warn}</span>` : ''}`)}${doneField}`
         : html`<div class="notice">${icon('info')}<span>${at100 || 'Com 100%, o status não muda automaticamente.'}</span></div>`}
       </div>
       ${current !== null ? html`<label class="switch"><input type="checkbox" name="clear" value="1">Remover o avanço (voltar a "não informado")</label>` : ''}
     </div>`,
-    onSubmit: data => ({ progress: data.clear ? null : data.progress === '' ? null : Number(data.progress), ...(data.start_date ? { start_date: data.start_date } : {}), ...(data.finish ? { finish: data.finish } : {}) }),
+    onSubmit: data => ({ progress: data.clear ? null : data.progress === '' ? null : Number(data.progress), ...(data.start_date ? { start_date: data.start_date } : {}), ...(data.finish ? { finish: data.finish } : {}), ...(data.done_date ? { done_date: data.done_date } : {}) }),
   });
 }
 

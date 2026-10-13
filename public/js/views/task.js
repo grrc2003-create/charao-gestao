@@ -3,7 +3,7 @@ import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmt
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead, NAV_SEQ_KEY, doneToggle, bindDoneToggle } from './shared.js';
 import { replaceNextRoute } from '../navhist.js';
-import { pctBar, progressSheet, bindProgressSheet, startField } from './progress-ui.js';
+import { pctBar, progressSheet, bindProgressSheet, startField, doneDateField } from './progress-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
@@ -188,6 +188,7 @@ function build(t, ctx) {
               <div class="v"><span class="real-line"><b>${fmtDate(a.end)}</b>${dev}</span>
                 <small>Tempo total: ${fmtDate(a.start)} → ${fmtDate(a.end)} · <b>${a.work_days ?? '—'} dia${a.work_days === 1 ? '' : 's'} út${a.work_days === 1 ? 'il' : 'eis'}</b> (${a.calendar_days} corrido${a.calendar_days === 1 ? '' : 's'})${a.planned_work_days !== null ? ` · planejado ${a.planned_work_days} dia(s) útil(eis)${plan ? ` (${plan > 0 ? '+' : '−'}${Math.abs(plan)})` : ''}` : ''}</small>
                 ${a.original_due ? html`<small>Prazo ${a.due_shift > 0 ? 'adiado' : 'antecipado'}: original ${fmtDate(a.original_due)} → final ${fmtDate(t.due_date)} (${a.due_shift > 0 ? '+' : '−'}${d(a.due_shift)}) · contra o original: ${a.vs_original > 0 ? `${d(a.vs_original)} depois` : a.vs_original < 0 ? `${d(a.vs_original)} antes` : 'no dia'}</small>` : ''}
+                ${a.registered ? html`<small class="fill-delay">${a.date_status === 'negada' ? 'Data informada negada pelo superior' : 'Data autorizada'} · registrada no sistema em ${fmtDate(a.registered)} · <b>${a.filling_delay_days} dia(s) de atraso de preenchimento</b></small>` : ''}
                 ${a.approved && a.approved !== a.end ? html`<small>Conferência aprovada em ${fmtDate(a.approved)}</small>` : ''}</div></div>`;
           })()}
           ${(() => {
@@ -206,6 +207,8 @@ function build(t, ctx) {
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
         </div>
         ${waitingNotice(t.dependencies)}
+        ${t.done_date_status === 'pendente' && t.claimed_done_date ? html`<div class="notice notice-warn">${icon('clock')}<span><b>Data de conclusão aguardando autorização:</b> informada ${fmtDate(t.claimed_done_date)}, registrada em ${fmtDate(t.delivered_date)}.
+          ${can.review ? 'Decida ao aprovar a conferência.' : 'Quem confere vai autorizar ou definir a data.'}</span></div>` : ''}
         ${impactBox(t)}
         ${t.checklist || can.edit || can.reassign || can.reopen || can.conclude_directly || can.cancel || can.reactivate || can.delete || can.delete_blocked || can.duplicate ? html`<details class="act-menu">
           <summary class="btn btn-ghost btn-sm">${icon('more')}Ações<span class="act-chev">${icon('chevron')}</span></summary>
@@ -346,7 +349,7 @@ function mount(root, t, ctx) {
         ...(t.can.submit ? [{ k: 'submit', label: html`Enviar para conferência → <b>Aguardando conferência</b>`, warn: blockers ? `Antes de salvar 100%: ${blockers}.` : '' }] : []),
         ...(t.can.conclude_directly ? [{ k: 'conclude', label: html`Concluir diretamente → <b>Concluída</b>`, warn: subPend ? `Antes: conclua ${subPend} subtarefa(s) pendente(s).` : '' }] : []),
       ];
-      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart, finish });
+      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart, finish, doneField: doneDateField(t) });
       bindProgressSheet();
       const r = await pending;
       if (r) run(() => api(`/tasks/${t.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.'
@@ -435,23 +438,35 @@ function mount(root, t, ctx) {
     refs: () => upload('referencia'),
     start: () => run(() => api(`/tasks/${t.id}/actions/start`, { method: 'POST' }), 'Execução iniciada.'),
     submit: async () => {
-      if (needStart) {
-        const r = await sheet({
-          title: 'Enviar para conferência',
-          body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${dueNote}${startField()}`,
-          submitLabel: 'Enviar',
-          onSubmit: d => api(`/tasks/${t.id}/actions/submit`, { method: 'POST', body: d }),
-        });
-        if (r) { toast('Enviada para conferência.'); refresh(r); }
-        return;
-      }
-      if (!(await confirmSheet('Enviar para conferência', `A tarefa ficará bloqueada para edição até a conferência.${t.due_date ? '' : ' Como está sem prazo, o prazo final será o dia de hoje.'} Deseja enviar?`, 'Enviar'))) return;
-      run(() => api(`/tasks/${t.id}/actions/submit`, { method: 'POST' }), 'Enviada para conferência.');
+      const r = await sheet({
+        title: 'Enviar para conferência',
+        body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${dueNote}${needStart ? startField() : ''}${doneDateField(t)}`,
+        submitLabel: 'Enviar',
+        onSubmit: d => api(`/tasks/${t.id}/actions/submit`, { method: 'POST', body: d }),
+      });
+      if (r) { toast(r.done_date_status === 'pendente' ? 'Enviada para conferência. A data informada aguarda autorização.' : 'Enviada para conferência.'); refresh(r); }
     },
     approve: async () => {
+      // "Negar — usar outra data" mostra o campo da data (e o torna obrigatório)
+      setTimeout(() => document.querySelectorAll('[name=date_decision]').forEach(x => x.addEventListener('change', () => {
+        const box = document.querySelector('[data-other-date]');
+        const other = document.querySelector('[name=date_decision]:checked')?.value === 'outra';
+        box.hidden = !other;
+        box.querySelector('input').required = other;
+      })), 0);
       const r = await sheet({
         title: 'Aprovar e concluir',
-        body: html`${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+        body: html`${t.done_date_status === 'pendente' && t.claimed_done_date ? (() => {
+            const reg = t.delivered_date;
+            return html`<fieldset class="fieldset form date-decision"><legend>Data de conclusão informada</legend>
+              <p class="muted" style="margin:0">${t.assignee_name || 'O responsável'} informou que terminou em <b>${fmtDate(t.claimed_done_date)}</b>, mas registrou em <b>${fmtDate(reg)}</b>.
+                ${t.due_date ? html`Prazo: <b>${fmtDate(t.due_date)}</b>.` : ''}</p>
+              <label class="switch"><input type="radio" name="date_decision" value="autorizar" required><span>Autorizar ${fmtDate(t.claimed_done_date)}${t.due_date ? (t.claimed_done_date <= t.due_date ? ' — fica no prazo' : ' — continua atrasada') : ''} · registra o atraso de preenchimento</span></label>
+              <label class="switch"><input type="radio" name="date_decision" value="registro"><span>Negar — usar a data do registro (${fmtDate(reg)})</span></label>
+              <label class="switch"><input type="radio" name="date_decision" value="outra"><span>Negar — usar outra data</span></label>
+              <div class="field" data-other-date hidden><label for="dd2">Outra data de conclusão</label><input type="date" id="dd2" name="decided_date" max="${reg}" ${t.start_date ? html`min="${t.start_date}"` : ''}></div>
+            </fieldset>`;
+          })() : ''}${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
         submitLabel: 'Aprovar',
         onSubmit: d => api(`/tasks/${t.id}/actions/approve`, { method: 'POST', body: d }),
       });
@@ -471,7 +486,7 @@ function mount(root, t, ctx) {
       const r = await sheet({
         title: 'Concluir diretamente',
         body: html`<p class="muted">Use quando a conferência já foi feita pessoalmente. A ação fica registrada no histórico.</p>
-          ${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+          ${dueNote}${needStart ? startField() : ''}${!t.delivered_at ? doneDateField(t, { superior: true }) : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
         submitLabel: 'Concluir',
         onSubmit: d => api(`/tasks/${t.id}/actions/conclude`, { method: 'POST', body: d }),
       });

@@ -1075,6 +1075,33 @@ async function main() {
   const h3r = await marcos('POST', `/tasks/${h3}/progress`, { progress: 100 });
   const h3v = (await ricardo('GET', `/tasks/${h3}`)).data;
   ok(h3r.status === 400 && /Comprovação/.test(h3r.data.error) && h3v.progress_pct === null && h3v.status === 'aberta', '100% sem a comprovação exigida é recusado e nada é gravado');
+  // Data de conclusão informada com atraso: vai para autorização de quem confere
+  const mkDone = async title => (await ricardo('POST', '/tasks', { project_id: 1, title, description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', start_date: '2026-03-02', due_date: '2026-03-10' })).data.id;
+  const c1 = await mkDone('Data autorizada');
+  ok((await marcos('POST', `/tasks/${c1}/actions/submit`, { done_date: '2099-01-01' })).status === 400, 'data de conclusão no futuro é recusada');
+  ok((await marcos('POST', `/tasks/${c1}/actions/submit`, { done_date: '2026-02-01' })).status === 400, 'data de conclusão antes do início é recusada');
+  let c1v = (await marcos('POST', `/tasks/${c1}/actions/submit`, { done_date: '2026-03-09' })).data;
+  ok(c1v.status === 'aguardando_conferencia' && c1v.done_date_status === 'pendente' && c1v.claimed_done_date === '2026-03-09' && c1v.on_time === false, 'responsável informa que terminou em 09/03: fica aguardando autorização (até lá vale o registro)');
+  ok((await ricardo('POST', `/tasks/${c1}/actions/approve`, {})).status === 400, 'aprovar exige decidir sobre a data informada');
+  c1v = (await ricardo('POST', `/tasks/${c1}/actions/approve`, { date_decision: 'autorizar' })).data;
+  ok(c1v.status === 'concluida' && c1v.delivered_date === '2026-03-09' && c1v.on_time === true && c1v.done_date_status === 'autorizada'
+    && c1v.actual.filling_delay_days > 0 && c1v.actual.registered > '2026-03-09', 'superior autoriza: conta como entregue no prazo e registra o atraso de preenchimento');
+  const c2 = await mkDone('Data negada');
+  await marcos('POST', `/tasks/${c2}/actions/submit`, { done_date: '2026-03-09' });
+  const c2v = (await ricardo('POST', `/tasks/${c2}/actions/approve`, { date_decision: 'registro' })).data;
+  ok(c2v.done_date_status === 'negada' && c2v.on_time === false && c2v.delivered_date > '2026-03-10' && !c2v.filling_delay_days, 'superior nega: vale a data do registro (atrasada)');
+  const c3 = await mkDone('Outra data');
+  await marcos('POST', `/tasks/${c3}/actions/submit`, { done_date: '2026-03-09' });
+  ok((await ricardo('POST', `/tasks/${c3}/actions/approve`, { date_decision: 'outra' })).status === 400, 'negar com outra data exige a data');
+  const c3v = (await ricardo('POST', `/tasks/${c3}/actions/approve`, { date_decision: 'outra', decided_date: '2026-03-12' })).data;
+  ok(c3v.delivered_date === '2026-03-12' && c3v.done_date_status === 'negada' && c3v.on_time === false && c3v.filling_delay_days > 0, 'superior define outra data (12/03): vale essa data, com atraso de preenchimento');
+  const c4 = await mkDone('Devolvida');
+  await marcos('POST', `/tasks/${c4}/actions/submit`, { done_date: '2026-03-09' });
+  const c4v = (await ricardo('POST', `/tasks/${c4}/actions/return`, { comment: 'Refazer acabamento' })).data;
+  ok(c4v.status === 'em_andamento' && !c4v.claimed_done_date && !c4v.done_date_status, 'devolver para ajustes descarta a data informada');
+  const c5 = await mkDone('Conclusão direta com data');
+  const c5v = (await ricardo('POST', `/tasks/${c5}/actions/conclude`, { done_date: '2026-03-08' })).data;
+  ok(c5v.delivered_date === '2026-03-08' && c5v.on_time === true && c5v.filling_delay_days > 0, 'superior conclui direto informando o dia real (com atraso de preenchimento)');
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

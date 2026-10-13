@@ -1460,3 +1460,8 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 .pg-100 { display: grid; gap: 6px; }
 .pg-100[hidden] { display: none; }
 .pg-warn { color: #C0392B; font-weight: 600; }
+
+/* Data de conclusão informada com atraso */
+.date-decision { display: grid; gap: 8px; margin-bottom: 10px; }
+.fill-delay { color: #8A5A00; }
+.notice-warn { background: #FFF7E6; border-color: #F3D9A4; }

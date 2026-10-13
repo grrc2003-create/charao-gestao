@@ -128,7 +128,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       <td class="g-label"><span class="g-code">${t.code}</span>${showProject ? html`<span class="g-proj">${t.project_code}</span>` : ''}
         <span class="g-title">${t.parent_code ? '↳ ' : ''}${t.title}</span>
         <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${t.actual
-          ? `${fmtDate(t.actual.start)} → concluída ${fmtDate(t.actual.end)} · ${t.actual.work_days ?? '—'} d úteis (${t.actual.calendar_days} corridos)${t.actual.vs_due > 0 ? ` · ${t.actual.vs_due}d após o prazo` : t.actual.vs_due < 0 ? ` · ${-t.actual.vs_due}d antes do prazo` : t.actual.vs_due === 0 ? ' · no prazo' : ''}`
+          ? `${fmtDate(t.actual.start)} → concluída ${fmtDate(t.actual.end)}${t.actual.filling_delay_days ? ` (registrada ${t.actual.filling_delay_days}d depois)` : ''} · ${t.actual.work_days ?? '—'} d úteis (${t.actual.calendar_days} corridos)${t.actual.vs_due > 0 ? ` · ${t.actual.vs_due}d após o prazo` : t.actual.vs_due < 0 ? ` · ${-t.actual.vs_due}d antes do prazo` : t.actual.vs_due === 0 ? ' · no prazo' : ''}`
           : `${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}`}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}${t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined && t.progress_pct < 100 ? ` · ${t.progress_pct}% executado` : ''}</span></td>
       <td class="g-track">${grid}${bar}${late}${doneLate}${doneEarly}${origMark}${dueMark}${doneTag}</td></tr>`;
   };

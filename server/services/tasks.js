@@ -185,6 +185,11 @@ export function actualOf(t) {
     original_due: orig,
     due_shift: orig ? daysBetween(orig, t.due_date) : 0,
     vs_original: orig ? daysBetween(orig, end) : null,
+    // Conclusão informada depois do fato: quando foi registrada e quantos dias de atraso de preenchimento
+    registered: t.delivered_registered_at ? localDate(t.delivered_registered_at) : null,
+    filling_delay_days: t.filling_delay_days || 0,
+    date_status: t.done_date_status || null,
+    claimed: t.done_date_status === 'pendente' ? t.claimed_done_date : null,
   };
 }
 
@@ -608,7 +613,7 @@ export function setProgress(ctx, id, body = {}) {
     if (v === 100) {
       const can = permissionsFor(ctx, rawTask(id));
       const finish = body.finish === 'conclude' && can.conclude_directly ? 'conclude' : can.submit ? 'submit' : can.conclude_directly ? 'conclude' : null;
-      if (finish) transition(ctx, id, finish, { start_date: body.start_date, comment: body.comment });
+      if (finish) transition(ctx, id, finish, { start_date: body.start_date, comment: body.comment, done_date: body.done_date });
     }
   });
 }
@@ -677,6 +682,24 @@ export function fileForUser(ctx, fileId) {
 }
 
 // Transições de status
+// Data de conclusão informada (anterior a hoje): validada contra hoje e o início da tarefa
+function readDoneDate(t, v, label = 'Data de conclusão') {
+  const d = date(v, label);
+  if (!d) return null;
+  if (d > today()) throw badRequest(`${label}: não pode ser no futuro.`);
+  if (t.start_date && d < t.start_date) throw badRequest(`${label}: não pode ser antes do início da tarefa (${t.start_date.split('-').reverse().join('/')}).`);
+  return d;
+}
+const dmy = d => d.split('-').reverse().join('/');
+// Data válida de entrega diferente do registro: grava o dia (meio-dia local) e o atraso de preenchimento
+function setEffectiveDone(id, effective, registeredAt) {
+  const reg = localDate(registeredAt);
+  if (!effective || effective === reg) return 0;
+  const delay = Math.max(0, daysBetween(effective, reg));
+  run('UPDATE tasks SET delivered_at = ?, delivered_registered_at = ?, filling_delay_days = ? WHERE id = ?', `${effective}T15:00:00.000Z`, registeredAt, delay || null, id);
+  return delay;
+}
+
 export function transition(ctx, id, action, body = {}) {
   const t = loadVisible(ctx, id);
   assertNotCancelled(t);
@@ -689,8 +712,7 @@ export function transition(ctx, id, action, body = {}) {
   };
   const endBefore = projectEndOf(t.project_id);
   // Terminou depois do prazo: as sucessoras são empurradas pelo atraso real
-  const lateFinish = () => {
-    const finish = today();
+  const lateFinish = (finish = today()) => {
     if (t.due_date && finish > t.due_date) {
       applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: id, code: t.code, title: t.title }, kind: 'conclusao_atrasada',
         causeOldDue: t.due_date, causeNewDue: finish, sources: [{ key: `t:${id}`, finish }], projectEndBefore: endBefore });
@@ -705,21 +727,43 @@ export function transition(ctx, id, action, body = {}) {
       case 'submit': {
         if (!can.submit) throw forbidden('Ação não permitida.');
         requireStart(ctx, t, body);
-        autoDue(ctx, t, today());
+        // Terminou antes de hoje: a data informada fica aguardando autorização de quem confere
+        const claim = readDoneDate(t, body.done_date);
+        const pendingClaim = claim && claim < today() ? claim : null;
+        if (!pendingClaim) autoDue(ctx, t, today());
         const files = all('SELECT kind, mime FROM task_files WHERE task_id = ?', id);
         const pc = proofCheck(t, files);
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
         assertChecklistDone(t);
         assertSubtasksDone(t);
-        change('aguardando_conferencia', ', delivered_at = ?, review_status = \'pendente\', review_comment = NULL, started_at = COALESCE(started_at, ?)', now, now);
+        change('aguardando_conferencia', ', delivered_at = ?, review_status = \'pendente\', review_comment = NULL, started_at = COALESCE(started_at, ?), claimed_done_date = ?, done_date_status = ?, delivered_registered_at = NULL, filling_delay_days = NULL',
+          now, now, pendingClaim, pendingClaim ? 'pendente' : null);
         taskHistory(id, ctx.user.id, 'Enviada para conferência', withBehalf(ctx, t, pc.has_photo || pc.has_desc ? 'Comprovação anexada' : null));
-        lateFinish();
+        if (pendingClaim) {
+          taskHistory(id, ctx.user.id, 'Data de conclusão informada — aguardando autorização', `Terminou em ${dmy(pendingClaim)} · registrada em ${dmy(today())} (${daysBetween(pendingClaim, today())} dia(s) depois)`);
+        } else lateFinish();
         break;
       }
       case 'approve': {
         if (!can.review) throw forbidden('Você não pode conferir esta tarefa.');
         assertSubtasksDone(t);
         requireStart(ctx, t, body);
+        // Data de conclusão informada com atraso: autorizar, ou negar usando a data do registro ou outra data
+        if (t.done_date_status === 'pendente' && t.claimed_done_date) {
+          const decision = oneOf(body.date_decision, ['autorizar', 'registro', 'outra'], 'Decisão sobre a data de conclusão', null);
+          if (!decision) throw badRequest(`Decida sobre a data de conclusão informada (${dmy(t.claimed_done_date)}): autorizar, usar a data do registro ou outra data.`);
+          const reg = localDate(t.delivered_at);
+          const effective = decision === 'autorizar' ? t.claimed_done_date : decision === 'registro' ? reg
+            : readDoneDate(t, body.decided_date, 'Outra data de conclusão');
+          if (!effective) throw badRequest('Informe a outra data de conclusão.');
+          const delay = setEffectiveDone(id, effective, t.delivered_at);
+          run('UPDATE tasks SET done_date_status = ? WHERE id = ?', decision === 'autorizar' ? 'autorizada' : 'negada', id);
+          taskHistory(id, ctx.user.id, decision === 'autorizar' ? 'Data de conclusão autorizada' : 'Data de conclusão negada',
+            decision === 'autorizar' ? `Conclusão em ${dmy(effective)} · ${delay} dia(s) de atraso de preenchimento`
+              : `Informada ${dmy(t.claimed_done_date)} · vale ${dmy(effective)}${decision === 'registro' ? ' (data do registro)' : ' (data definida pelo superior)'}${delay ? ` · ${delay} dia(s) de atraso de preenchimento` : ''}`);
+          t.delivered_at = effective === reg ? t.delivered_at : `${effective}T15:00:00.000Z`;
+          lateFinish(effective);
+        }
         autoDue(ctx, t, (t.delivered_at && localDate(t.delivered_at)) || today());
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', review_status = \'aprovada\', review_comment = ?, reviewed_by = ?, reviewed_at = ?, completed_at = ?', comment, ctx.user.id, now, now);
@@ -730,8 +774,9 @@ export function transition(ctx, id, action, body = {}) {
       case 'return': {
         if (!can.review) throw forbidden('Você não pode conferir esta tarefa.');
         const comment = str(body.comment, { max: 1000, required: true, label: 'Motivo da devolução' });
-        change('em_andamento', ', review_status = \'devolvida\', review_comment = ?, reviewed_by = ?, reviewed_at = ?, delivered_at = NULL', comment, ctx.user.id, now);
+        change('em_andamento', ', review_status = \'devolvida\', review_comment = ?, reviewed_by = ?, reviewed_at = ?, delivered_at = NULL, claimed_done_date = NULL, done_date_status = NULL', comment, ctx.user.id, now);
         taskHistory(id, ctx.user.id, 'Devolvida para ajustes', comment);
+        if (t.done_date_status === 'pendente') taskHistory(id, ctx.user.id, 'Data de conclusão informada descartada', `${dmy(t.claimed_done_date)} — informe novamente ao reenviar`);
         break;
       }
       case 'conclude': {
@@ -739,11 +784,18 @@ export function transition(ctx, id, action, body = {}) {
         assertSubtasksDone(t);
         assertChecklistDone(t);
         requireStart(ctx, t, body);
-        autoDue(ctx, t, (t.delivered_at && localDate(t.delivered_at)) || today());
+        // Quem conclui direto (superior) pode registrar o dia real em que terminou
+        const doneOn = !t.delivered_at ? readDoneDate(t, body.done_date) : null;
+        autoDue(ctx, t, doneOn || (t.delivered_at && localDate(t.delivered_at)) || today());
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', delivered_at = COALESCE(delivered_at, ?), completed_at = ?, reviewed_by = ?, reviewed_at = ?, review_status = \'aprovada\', review_comment = ?', now, now, ctx.user.id, now, comment);
         taskHistory(id, ctx.user.id, 'Concluída diretamente pelo gestor', comment);
-        if (!t.delivered_at) lateFinish();
+        if (doneOn && doneOn < today()) {
+          const delay = setEffectiveDone(id, doneOn, now);
+          run(`UPDATE tasks SET done_date_status = 'autorizada' WHERE id = ?`, id);
+          taskHistory(id, ctx.user.id, 'Data de conclusão registrada pelo superior', `Conclusão em ${dmy(doneOn)} · ${delay} dia(s) de atraso de preenchimento`);
+        }
+        if (!t.delivered_at) lateFinish(doneOn || today());
         if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa concluída', `${t.code} · ${t.title}`);
         break;
       }
@@ -753,7 +805,7 @@ export function transition(ctx, id, action, body = {}) {
           throw badRequest(`Reabra antes a tarefa principal ${t.parent_code}.`);
         }
         const comment = str(body.comment, { max: 1000, required: true, label: 'Motivo da reabertura' });
-        change('em_andamento', ', completed_at = NULL, delivered_at = NULL, review_status = NULL');
+        change('em_andamento', ', completed_at = NULL, delivered_at = NULL, review_status = NULL, claimed_done_date = NULL, done_date_status = NULL, delivered_registered_at = NULL, filling_delay_days = NULL');
         taskHistory(id, ctx.user.id, 'Tarefa reaberta', comment);
         break;
       }

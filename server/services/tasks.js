@@ -3,7 +3,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
   canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
-import { decorate, today, daysBetween } from './metrics.js';
+import { decorate, today, daysBetween, localDate } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
@@ -559,6 +559,14 @@ export function requireStart(ctx, t, body = {}) {
   t.start_date = sd;
 }
 
+// Sem prazo ao concluir: o prazo final passa a ser o dia da entrega/conclusão (fica registrado no histórico)
+function autoDue(ctx, t, day) {
+  if (t.due_date || !day) return;
+  run('UPDATE tasks SET due_date = ? WHERE id = ?', day, t.id);
+  taskHistory(t.id, ctx.user.id, 'Prazo definido na conclusão', `Tarefa sem prazo: prazo final = ${day.split('-').reverse().join('/')} (dia da ${t.status === 'aguardando_conferencia' ? 'entrega' : 'conclusão'})`);
+  t.due_date = day;
+}
+
 export function setProgress(ctx, id, body = {}) {
   const t = loadVisible(ctx, id);
   assertNotCancelled(t);
@@ -669,6 +677,7 @@ export function transition(ctx, id, action, body = {}) {
       case 'submit': {
         if (!can.submit) throw forbidden('Ação não permitida.');
         requireStart(ctx, t, body);
+        autoDue(ctx, t, today());
         const files = all('SELECT kind, mime FROM task_files WHERE task_id = ?', id);
         const pc = proofCheck(t, files);
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
@@ -683,6 +692,7 @@ export function transition(ctx, id, action, body = {}) {
         if (!can.review) throw forbidden('Você não pode conferir esta tarefa.');
         assertSubtasksDone(t);
         requireStart(ctx, t, body);
+        autoDue(ctx, t, (t.delivered_at && localDate(t.delivered_at)) || today());
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', review_status = \'aprovada\', review_comment = ?, reviewed_by = ?, reviewed_at = ?, completed_at = ?', comment, ctx.user.id, now, now);
         taskHistory(id, ctx.user.id, 'Conferência aprovada — tarefa concluída', comment);
@@ -701,6 +711,7 @@ export function transition(ctx, id, action, body = {}) {
         assertSubtasksDone(t);
         assertChecklistDone(t);
         requireStart(ctx, t, body);
+        autoDue(ctx, t, (t.delivered_at && localDate(t.delivered_at)) || today());
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', delivered_at = COALESCE(delivered_at, ?), completed_at = ?, reviewed_by = ?, reviewed_at = ?, review_status = \'aprovada\', review_comment = ?', now, now, ctx.user.id, now, comment);
         taskHistory(id, ctx.user.id, 'Concluída diretamente pelo gestor', comment);

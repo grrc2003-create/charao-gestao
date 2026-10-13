@@ -1047,7 +1047,13 @@ async function main() {
   const nsSub = await marcos('POST', `/tasks/${nsT}/actions/submit`);
   ok(nsSub.status === 400 && /data de início/.test(nsSub.data.error), 'enviar para conferência sem data de início é bloqueado');
   ok((await ricardo('POST', `/tasks/${nsT}/actions/conclude`, {})).status === 400, 'concluir diretamente sem data de início é bloqueado');
-  ok((await ricardo('POST', `/tasks/${nsT}/actions/conclude`, { start_date: '2026-02-02' })).data.start_date === '2026-02-02', 'concluir informando a data de início');
+  const nsV = (await ricardo('POST', `/tasks/${nsT}/actions/conclude`, { start_date: '2026-02-02' })).data;
+  ok(nsV.start_date === '2026-02-02', 'concluir informando a data de início');
+  ok(nsV.due_date === nsV.completed_at.slice(0, 10) || !!nsV.due_date, 'sem prazo: ao concluir, o prazo final vira o dia da conclusão');
+  ok(nsV.history.some(h => h.action === 'Prazo definido na conclusão') && nsV.on_time === true && !nsV.reschedule_count, 'prazo automático fica no histórico, não conta como reagendamento e a entrega fica no prazo');
+  const nsT2 = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Sem prazo — envio', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', start_date: '2026-03-02' })).data.id;
+  const nsV2 = (await marcos('POST', `/tasks/${nsT2}/actions/submit`)).data;
+  ok(!!nsV2.due_date && nsV2.history.some(h => h.action === 'Prazo definido na conclusão'), 'sem prazo: ao enviar para conferência, o prazo final vira o dia da entrega');
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

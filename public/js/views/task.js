@@ -318,6 +318,8 @@ function mount(root, t, ctx) {
 
   // Sem data de início (tarefa/subtarefa): avanço, envio e conclusão pedem a data
   const needStart = !t.start_date && !t.checklist;
+  // Sem prazo: ao concluir/entregar, o prazo final passa a ser o dia da conclusão
+  const dueNote = t.due_date ? '' : html`<p class="notice" style="margin:0 0 10px">${icon('calendar')}<span>Tarefa sem prazo: o prazo final será registrado como o dia ${t.delivered_at ? 'da entrega' : 'de hoje'}.</span></p>`;
   const actions = {
     progress: async () => {
       const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart });
@@ -410,20 +412,20 @@ function mount(root, t, ctx) {
       if (needStart) {
         const r = await sheet({
           title: 'Enviar para conferência',
-          body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${startField()}`,
+          body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${dueNote}${startField()}`,
           submitLabel: 'Enviar',
           onSubmit: d => api(`/tasks/${t.id}/actions/submit`, { method: 'POST', body: d }),
         });
         if (r) { toast('Enviada para conferência.'); refresh(r); }
         return;
       }
-      if (!(await confirmSheet('Enviar para conferência', 'A tarefa ficará bloqueada para edição até a conferência. Deseja enviar?', 'Enviar'))) return;
+      if (!(await confirmSheet('Enviar para conferência', `A tarefa ficará bloqueada para edição até a conferência.${t.due_date ? '' : ' Como está sem prazo, o prazo final será o dia de hoje.'} Deseja enviar?`, 'Enviar'))) return;
       run(() => api(`/tasks/${t.id}/actions/submit`, { method: 'POST' }), 'Enviada para conferência.');
     },
     approve: async () => {
       const r = await sheet({
         title: 'Aprovar e concluir',
-        body: html`${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+        body: html`${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
         submitLabel: 'Aprovar',
         onSubmit: d => api(`/tasks/${t.id}/actions/approve`, { method: 'POST', body: d }),
       });
@@ -443,7 +445,7 @@ function mount(root, t, ctx) {
       const r = await sheet({
         title: 'Concluir diretamente',
         body: html`<p class="muted">Use quando a conferência já foi feita pessoalmente. A ação fica registrada no histórico.</p>
-          ${needStart ? startField() : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+          ${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
         submitLabel: 'Concluir',
         onSubmit: d => api(`/tasks/${t.id}/actions/conclude`, { method: 'POST', body: d }),
       });

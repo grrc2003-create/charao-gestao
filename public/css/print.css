@@ -282,3 +282,12 @@
 .g-done-tag.is-ok { color: #1F7A4A; }
 .g-done-tag.is-late { color: #C0392B; }
 .g-sw.g-sw-early { border: 1px dashed #2E8B57; background: rgba(46, 139, 87, .08); }
+
+/* Gantt: subtarefas recolhidas embaixo da tarefa principal */
+.g-row[hidden] { display: none; }
+.g-subtoggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; padding: 1px 8px; font-size: 11px; font-weight: 700; color: var(--navy, #2A3D50);
+  background: #EEF2F6; border: 1px solid #D5DDE5; border-radius: 999px; cursor: pointer; }
+.g-subtoggle .g-chev { display: inline-block; transition: transform .15s; }
+.g-subtoggle[aria-expanded="true"] .g-chev { transform: rotate(90deg); }
+.g-row.g-sub .g-label { padding-left: 18px; background: #FBFAF7; }
+@media print { .g-subtoggle { display: none; } }

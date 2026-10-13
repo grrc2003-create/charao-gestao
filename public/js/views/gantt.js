@@ -1,7 +1,7 @@
 // Cronograma (Gantt) das tarefas — HTML/CSS puro, adequado à tela e à impressão A4.
 // Barra: início previsto (ou início da execução / criação) até o prazo. Concluídas vão até a data de conclusão;
 // atrasadas ganham uma extensão hachurada do prazo até hoje. Losango = prazo. Linha laranja = hoje.
-import { html, icon, STATUS, fmtDate } from '../core.js';
+import { html, raw, icon, STATUS, fmtDate } from '../core.js';
 import { STATUS_COLOR } from './shared.js';
 
 const TZ = 'America/Sao_Paulo';
@@ -71,7 +71,7 @@ function ticks(from, to) {
  *               noun: ['tarefa(s)', 'concluída(s)'], head: 'Tarefa', legend: html, note: texto,
  *               range: { from, to } — mostra só o período (ex.: uma semana), com as tarefas que passam por ele }
  */
-export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly = false, color, statusOf, noun = ['tarefa(s)', 'concluída(s)'], head = 'Tarefa', legend, note, range } = {}) {
+export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly = false, color, statusOf, noun = ['tarefa(s)', 'concluída(s)'], head = 'Tarefa', legend, note, range, collapseSubs = false, openSubs = new Set() } = {}) {
   if (!rows.length) return html`<p class="muted">Sem ${noun[0].replace('(s)', 's')} para o cronograma.</p>`;
   const lastOf = s => [s.end, s.due, s.lateTo].filter(Boolean).reduce((b, v) => (v > b ? v : b), s.end);
   let spans = rows.map(t => ({ t, s: ganttSpan(t, ref) }));
@@ -79,6 +79,14 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     spans = spans.filter(x => x.s.start <= range.to && lastOf(x.s) >= range.from);
     if (!spans.length) return html`<p class="muted">Nenhuma ${noun[0].replace('(s)', '')} passa por este período.</p>`;
   }
+  // Subtarefas recolhidas embaixo da tarefa principal (telas); relatórios mostram tudo
+  const codes = new Set(spans.map(x => x.t.code));
+  const kidsOf = new Map();
+  if (collapseSubs) {
+    for (const x of spans) if (x.t.parent_code && codes.has(x.t.parent_code)) { if (!kidsOf.has(x.t.parent_code)) kidsOf.set(x.t.parent_code, []); kidsOf.get(x.t.parent_code).push(x); }
+    if (kidsOf.size) spans = spans.filter(x => !(x.t.parent_code && kidsOf.has(x.t.parent_code))).flatMap(x => [x, ...(kidsOf.get(x.t.code) || [])]);
+  }
+  const isKid = x => collapseSubs && x.t.parent_code && kidsOf.has(x.t.parent_code);
   let from = spans.reduce((a, x) => (x.s.start < a ? x.s.start : a), spans[0].s.start);
   let to = spans.reduce((a, x) => (lastOf(x.s) > a ? lastOf(x.s) : a), spans[0].s.end);
   if (ref > to) to = ref;
@@ -124,12 +132,16 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     // Prazo original (antes dos reagendamentos): losango vazado
     const origMark = t.original_due && t.original_due !== s.due
       ? html`<span class="g-due g-orig" style="left:${pos(addDays(t.original_due, 1)).toFixed(2)}%" title="Prazo original ${fmtDate(t.original_due)} · reagendada ${t.reschedule_count}x"></span>` : '';
-    return html`<tr class="g-row ${t.critical ? 'is-critical' : ''}" data-gkey="${t.dep_key || ''}" data-preds="${(t.preds || []).map(x => x.key).join(',')}">
+    const kid = collapseSubs && t.parent_code && kidsOf.has(t.parent_code);
+    const kids = kidsOf.get(t.code);
+    const open = kid && openSubs.has(t.parent_code);
+    return html`<tr class="g-row ${t.critical ? 'is-critical' : ''} ${kid ? 'g-sub' : ''}" data-gkey="${t.dep_key || ''}" data-gcode="${t.code}" data-preds="${(t.preds || []).map(x => x.key).join(',')}"
+      ${kid ? raw(`data-gsub="${t.parent_code}"${open ? '' : ' hidden'}`) : ''}>
       <td class="g-label"><span class="g-code">${t.code}</span>${showProject ? html`<span class="g-proj">${t.project_code}</span>` : ''}
         <span class="g-title">${t.parent_code ? '↳ ' : ''}${t.title}</span>
         <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${t.actual
           ? `${fmtDate(t.actual.start)} → concluída ${fmtDate(t.actual.end)}${t.actual.filling_delay_days ? ` (registrada ${t.actual.filling_delay_days}d depois)` : ''} · ${t.actual.work_days ?? '—'} d úteis (${t.actual.calendar_days} corridos)${t.actual.vs_due > 0 ? ` · ${t.actual.vs_due}d após o prazo` : t.actual.vs_due < 0 ? ` · ${-t.actual.vs_due}d antes do prazo` : t.actual.vs_due === 0 ? ' · no prazo' : ''}`
-          : `${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}`}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}${t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined && t.progress_pct < 100 ? ` · ${t.progress_pct}% executado` : ''}</span></td>
+          : `${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}`}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}${t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined && t.progress_pct < 100 ? ` · ${t.progress_pct}% executado` : ''}</span>${kids ? html`<button type="button" class="g-subtoggle" data-gsubt="${t.code}" aria-expanded="${openSubs.has(t.code)}"><span class="g-chev">▸</span>${kids.length} subtarefa${kids.length > 1 ? 's' : ''}</button>` : ''}</td>
       <td class="g-track">${grid}${bar}${late}${doneLate}${doneEarly}${origMark}${dueMark}${doneTag}</td></tr>`;
   };
 
@@ -137,8 +149,9 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
   const body = [];
   if (groupLabel) {
     const groups = new Map();
+    const parentOf = new Map(spans.map(x => [x.t.code, x]));
     for (const x of spans) {
-      const k = groupLabel(x.t);
+      const k = groupLabel(isKid(x) ? parentOf.get(x.t.parent_code).t : x.t);
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(x);
     }
@@ -191,18 +204,25 @@ function drawOne(g) {
   svg.setAttribute('width', box.width);
   svg.setAttribute('height', box.height);
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
-  const rowOf = key => g.querySelector(`tr[data-gkey="${key}"]`);
+  // Subtarefa recolhida: a seta usa a linha da tarefa principal
+  const shown = tr => (tr && tr.hidden && tr.dataset.gsub ? g.querySelector(`tr[data-gcode="${tr.dataset.gsub}"]`) : tr);
+  const rowOf = key => shown(g.querySelector(`tr[data-gkey="${key}"]`));
   const parts = ['<defs><marker id="g-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#46535F"/></marker>',
     '<marker id="g-arrow-c" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#C0392B"/></marker></defs>'];
-  g.querySelectorAll('tr[data-preds]').forEach(tr => {
-    const keys = (tr.dataset.preds || '').split(',').filter(Boolean);
-    const sb = tr.querySelector('[data-gbar]');
+  const drawn = new Set();
+  g.querySelectorAll('tr[data-preds]').forEach(row => {
+    const tr = shown(row);
+    const keys = (row.dataset.preds || '').split(',').filter(Boolean);
+    const sb = tr?.querySelector('[data-gbar]');
     if (!keys.length || !sb) return;
     const s = sb.getBoundingClientRect();
     for (const k of keys) {
       const pr = rowOf(k);
       const pb = pr?.querySelector('[data-gbar]');
-      if (!pb) continue;
+      if (!pb || pr === tr) continue;
+      const pair = `${pr.dataset.gcode}>${tr.dataset.gcode}`;
+      if (drawn.has(pair)) continue;
+      drawn.add(pair);
       const p = pb.getBoundingClientRect();
       const x1 = p.right - box.left, y1 = p.top + p.height / 2 - box.top;
       const x2 = s.left - box.left - 1, y2 = s.top + s.height / 2 - box.top;
@@ -248,6 +268,7 @@ export function bindGanttSections(root, fetcher) {
         // Filtro de período: todo o cronograma ou uma semana (segunda a domingo), lembrado por tela
         const pkey = `${key}-periodo`;
         let wk = '';
+        const openSubs = new Set();
         try { wk = sessionStorage.getItem(pkey) || ''; } catch { /* sem armazenamento */ }
         const draw = () => {
           const range = wk ? { from: wk, to: addDays(wk, 6) } : null;
@@ -258,8 +279,26 @@ export function bindGanttSections(root, fetcher) {
               <b>${fmtDate(wk)} a ${fmtDate(addDays(wk, 6))}</b>
               <button type="button" class="btn btn-ghost btn-sm" data-gper="${addDays(wk, 7)}" aria-label="Próxima semana">›</button>
               ${wk !== monday(g.ref) ? html`<button type="button" class="btn btn-ghost btn-sm" data-gper="${monday(g.ref)}">Esta semana</button>` : ''}</div>` : ''}
+            ${g.tasks.some(x => x.parent_code) ? html`<button type="button" class="btn btn-ghost btn-sm" data-gsuball>${openSubs.size ? 'Ocultar subtarefas' : 'Mostrar subtarefas'}</button>` : ''}
           </div>`;
-          body.innerHTML = html`${bar}${ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject, range })}`.toString();
+          body.innerHTML = html`${bar}${ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject, range, collapseSubs: true, openSubs })}`.toString();
+          // Subtarefas: abrir/fechar embaixo da tarefa principal
+          const toggleSubs = (code, on) => {
+            body.querySelectorAll(`tr[data-gsub="${code}"]`).forEach(r => { r.hidden = !on; });
+            const b = body.querySelector(`[data-gsubt="${code}"]`);
+            if (b) b.setAttribute('aria-expanded', String(on));
+            if (on) openSubs.add(code); else openSubs.delete(code);
+          };
+          body.querySelectorAll('[data-gsubt]').forEach(b => b.addEventListener('click', () => {
+            toggleSubs(b.dataset.gsubt, b.getAttribute('aria-expanded') !== 'true');
+            drawGanttLinks(d);
+          }));
+          body.querySelector('[data-gsuball]')?.addEventListener('click', e => {
+            const on = !openSubs.size;
+            body.querySelectorAll('[data-gsubt]').forEach(b => toggleSubs(b.dataset.gsubt, on));
+            e.currentTarget.textContent = on ? 'Ocultar subtarefas' : 'Mostrar subtarefas';
+            drawGanttLinks(d);
+          });
           body.querySelectorAll('[data-gper]').forEach(b => b.addEventListener('click', () => {
             wk = b.dataset.gper;
             try { sessionStorage.setItem(pkey, wk); } catch { /* sem armazenamento */ }

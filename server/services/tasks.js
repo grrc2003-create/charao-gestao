@@ -302,7 +302,8 @@ export function createTask(ctx, body) {
     start_date: date(body.start_date, 'Início previsto'),
     priority: oneOf(body.priority, PRIORITIES, 'Prioridade', 'media'),
     proof_type: isChecklist ? 'nenhuma' : oneOf(body.proof_type, PROOF_TYPES, 'Tipo de comprovação', 'nenhuma'),
-    assignee_id: validateAssignee(intOrNull(body.assignee_id), projectId),
+    // Sem responsável indicado: fica com quem criou a tarefa/subtarefa
+    assignee_id: validateAssignee(intOrNull(body.assignee_id) || ctx.user.id, projectId),
   };
   if (isChecklist) {
     data.items = readItems(body.items, projectId, { required: true, requirePhoto: data.photo_rule === 'obrigatoria' });

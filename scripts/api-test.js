@@ -1107,6 +1107,12 @@ async function main() {
   ok(ust.exec_days_avg > 0 && ust.exec_work_days_avg > 0 && ust.exec_count > 0, `média de dias de execução (${ust.exec_days_avg} corridos · ${ust.exec_work_days_avg} úteis)`);
   ok(ust.early >= 2 && ust.early_days_avg > 0, `tarefas antecipadas contadas (${ust.early})`);
   ok(ust.filling_delays >= 3 && ust.filling_delay_days_avg > 0 && ust.behavior.some(b => /atraso de preenchimento/.test(b)), `atraso de preenchimento contado (${ust.filling_delays}) e no resumo do comportamento`);
+  // Sem responsável indicado: a tarefa/subtarefa fica com quem a criou
+  const rpT = (await marcos('POST', '/tasks', { project_id: 1, title: 'Sem responsável indicado', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  ok((await ricardo('GET', `/tasks/${rpT}`)).data.assignee_id === 4, 'tarefa criada sem responsável fica com quem criou');
+  const rpS = (await ricardo('POST', '/tasks', { parent_id: rpT, title: 'Sub sem responsável', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  ok((await ricardo('GET', `/tasks/${rpS}`)).data.assignee_name === 'Ricardo Menezes', 'subtarefa criada sem responsável fica com quem criou');
+
   // Prazo rápido: início + nº de dias (úteis pelo calendário da obra, ou corridos)
   const qd1 = (await ricardo('GET', '/projects/1/plan-dates?start=2099-03-02&days=5')).data;
   ok(qd1.due === '2099-03-06' && qd1.work_days === 5, `5 dias úteis a partir de seg 02/03 → sex 06/03 (${qd1.due})`);

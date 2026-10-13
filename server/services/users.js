@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/h
 import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend } from './metrics.js';
-import { listVisible } from './tasks.js';
+import { listVisible, actualOf } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
 import { checklistDashboard } from './checklist.js';
@@ -57,7 +57,12 @@ export function getUser(ctx, id) {
   const projects = all('SELECT project_id FROM user_project_access WHERE user_id = ?', id).map(r => r.project_id);
   return {
     user: { ...publicUser(ctx, u), manager_name: map.get(u.manager_id)?.name || null, project_ids: projects },
-    stats: userStats(u, tasks, map),
+    stats: (() => {
+      const st = userStats(u, tasks, map);
+      const acts = own.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
+      st.exec_work_days_avg = acts.length ? Math.round((acts.reduce((n, a) => n + a.work_days, 0) / acts.length) * 10) / 10 : null;
+      return st;
+    })(),
     trend: monthlyTrend(own),
     chronic_min: getSetting('chronic_reschedule_threshold'),
     checklists: checklistDashboard(tasks, { userId: id }),

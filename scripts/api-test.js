@@ -1102,6 +1102,11 @@ async function main() {
   const c5 = await mkDone('Conclusão direta com data');
   const c5v = (await ricardo('POST', `/tasks/${c5}/actions/conclude`, { done_date: '2026-03-08' })).data;
   ok(c5v.delivered_date === '2026-03-08' && c5v.on_time === true && c5v.filling_delay_days > 0, 'superior conclui direto informando o dia real (com atraso de preenchimento)');
+  // Indicadores de execução do usuário: média de dias, antecipadas e atraso de preenchimento
+  const ust = (await ricardo('GET', '/users/4')).data.stats;
+  ok(ust.exec_days_avg > 0 && ust.exec_work_days_avg > 0 && ust.exec_count > 0, `média de dias de execução (${ust.exec_days_avg} corridos · ${ust.exec_work_days_avg} úteis)`);
+  ok(ust.early >= 2 && ust.early_days_avg > 0, `tarefas antecipadas contadas (${ust.early})`);
+  ok(ust.filling_delays >= 3 && ust.filling_delay_days_avg > 0 && ust.behavior.some(b => /atraso de preenchimento/.test(b)), `atraso de preenchimento contado (${ust.filling_delays}) e no resumo do comportamento`);
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

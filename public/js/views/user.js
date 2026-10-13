@@ -94,6 +94,12 @@ export async function view({ params, query, setQuery, render, state }) {
         ${kpi({ label: 'Média de atraso', value: fmtDays(s.avg_delay_days), unit: ' dias', color: STATUS_COLOR.aguardando_conferencia, foot: 'entregas tardias e atrasos ativos' })}
         ${kpi({ label: 'Origem das tarefas', value: s.self_created, unit: ` próprias`, color: '#707E8B', foot: `${s.assigned_by_manager} atribuídas por gestor · ${s.created_by_user} criadas no total` })}
       </div>
+      <div class="kpis kpis-3 section kpis-exec">
+        ${kpi({ label: 'Média de execução', value: s.exec_work_days_avg !== null && s.exec_work_days_avg !== undefined ? fmtDays(s.exec_work_days_avg) : s.exec_days_avg !== null ? fmtDays(s.exec_days_avg) : '—', unit: s.exec_days_avg !== null ? ' dias úteis' : '', color: '#2A3D50',
+          foot: s.exec_days_avg !== null ? `${fmtDays(s.exec_days_avg)} dias corridos · do início à conclusão real · ${s.exec_count} entrega(s)` : 'sem entregas ainda' })}
+        ${kpi({ label: 'Tarefas antecipadas', value: s.early, color: STATUS_COLOR.concluida, foot: s.early ? `${fmtPct(s.early_pct)} das entregas · em média ${fmtDays(s.early_days_avg)} dia(s) antes do prazo` : 'nenhuma entrega antes do prazo' })}
+        ${kpi({ label: 'Atraso de preenchimento', value: s.filling_delays, color: '#B7791F', foot: s.filling_delays ? `conclusões registradas depois do dia real · média ${fmtDays(s.filling_delay_days_avg)} dia(s)` : 'todas registradas no dia da conclusão' })}
+      </div>
 
       ${d.impact ? html`<section class="card section dep-user-impact"><div class="card-head"><h2>${icon('alert')}Impacto dos atrasos em outras tarefas</h2>
           <span class="sub">${d.impact.causes} tarefa(s) que atrasaram · ${d.impact.tasks} impactada(s) · <b>${d.impact.days} dia(s)-tarefa</b></span></div>

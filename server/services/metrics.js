@@ -75,8 +75,16 @@ export function summarize(tasks, ref = today()) {
   let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0, rescheduled = 0, reschedules = 0;
   let withDue = 0, everLate = 0, episodes = 0, preventive = 0, corrective = 0, chronic = 0, daysAdded = 0, onTimeOriginal = 0;
   const dist = { r0: 0, r1: 0, r2: 0, r3: 0 };
+  // Execução: dias do início à conclusão real, entregas antecipadas e atraso de preenchimento
+  let execN = 0, execDays = 0, early = 0, earlyDays = 0, fillN = 0, fillDays = 0;
   tasks = tasks.filter(t => !t.cancelled_at);
   for (const t of tasks) {
+    if (t.delivered && t.delivered_date) {
+      const st = t.start_date || localDate(t.started_at) || localDate(t.created_at);
+      if (st && st <= t.delivered_date) { execN++; execDays += daysBetween(st, t.delivered_date) + 1; }
+      if (t.due_date && t.delivered_date < t.due_date) { early++; earlyDays += daysBetween(t.delivered_date, t.due_date); }
+      if (t.filling_delay_days > 0) { fillN++; fillDays += t.filling_delay_days; }
+    }
     if (t.reschedule_count) { rescheduled++; reschedules += t.reschedule_count; }
     if (t.due_date || t.original_due) {
       withDue++;
@@ -134,6 +142,13 @@ export function summarize(tasks, ref = today()) {
     late_episodes_avg: withDue ? Math.round((episodes / withDue) * 100) / 100 : 0,
     on_time_original: onTimeOriginal,
     on_time_original_pct: pct(onTimeOriginal, delivered),
+    exec_days_avg: execN ? Math.round((execDays / execN) * 10) / 10 : null,
+    exec_count: execN,
+    early,
+    early_pct: pct(early, delivered),
+    early_days_avg: early ? Math.round((earlyDays / early) * 10) / 10 : 0,
+    filling_delays: fillN,
+    filling_delay_days_avg: fillN ? Math.round((fillDays / fillN) * 10) / 10 : 0,
   };
 }
 
@@ -192,6 +207,9 @@ export function behaviorSummary(s, assigned, selfCreated) {
     else lines.push('A maior parte das repactuações é feita antes do vencimento — sinal de planejamento.');
   }
   if (s.chronic) lines.push(`${s.chronic} tarefa(s) crônica(s), com reagendamentos repetidos.`);
+  if (s.exec_days_avg !== null) lines.push(`Executa as tarefas em média em ${br(s.exec_days_avg)} dia(s) (do início à conclusão).`);
+  if (s.early) lines.push(`${s.early} entrega(s) antecipada(s), em média ${br(s.early_days_avg)} dia(s) antes do prazo.`);
+  if (s.filling_delays) lines.push(`${s.filling_delays} conclusão(ões) registrada(s) com atraso de preenchimento (média de ${br(s.filling_delay_days_avg)} dia(s)) — registrar no dia evita dependências e indicadores defasados.`);
   if (s.on_time_original_pct !== null && s.on_time_pct !== null && s.on_time_pct - s.on_time_original_pct >= 10) {
     lines.push(`Pontualidade cai de ${String(s.on_time_pct).replace('.', ',')}% para ${String(s.on_time_original_pct).replace('.', ',')}% quando medida contra o prazo original.`);
   }

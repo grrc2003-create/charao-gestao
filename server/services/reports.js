@@ -3,7 +3,7 @@ import { all, one } from '../db.js';
 import { badRequest, notFound, oneOf, intOrNull, date } from '../lib/http.js';
 import { canAccessProject, canSeeUser, teamIds } from '../lib/permissions.js';
 import { summarize, userStats, today, monthlyTrend, localDate, PERIODS, groupByPeriod, periodKey, periodLabel, byDue } from './metrics.js';
-import { listVisible, taskFilters, filterTasks, DUE_FILTERS } from './tasks.js';
+import { listVisible, taskFilters, filterTasks, DUE_FILTERS, actualOf } from './tasks.js';
 import { getSetting } from './settings.js';
 import { ganttLinks, criticalPath, impactRankingIn } from './dependencies.js';
 import { checklistProgress } from './checklist.js';
@@ -44,6 +44,7 @@ const ganttRow = t => ({
   start_date: t.start_date, started_at: t.started_at, created_at: t.created_at, due_date: t.due_date,
   original_due: t.original_due, reschedule_count: t.reschedule_count,
   completed_at: t.completed_at, delivered_date: t.delivered_date, eff_status: t.eff_status, days_late: t.days_late,
+  actual: actualOf(t),
 });
 
 function usersMap() {

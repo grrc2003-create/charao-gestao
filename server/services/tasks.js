@@ -167,6 +167,27 @@ function assertSubtasksDone(t) {
   if (pending) throw badRequest(`Conclua as subtarefas antes: ${pending} pendente(s).`);
 }
 
+// Realizado x previsto de uma tarefa entregue/concluída: conclusão real (dia da entrega), desvio contra o prazo
+// final e o original (antecipada < 0 < atrasada), mudança do prazo por reagendamento e tempo total percorrido.
+export function actualOf(t) {
+  if (!t.delivered || !t.delivered_date) return null;
+  const end = t.delivered_date;
+  const st = t.start_date || localDate(t.started_at) || localDate(t.created_at) || end;
+  const start = st <= end ? st : end;
+  const orig = t.original_due && t.original_due !== t.due_date ? t.original_due : null;
+  return {
+    start, end,
+    approved: t.status === 'concluida' ? localDate(t.completed_at) : null,
+    calendar_days: daysBetween(start, end) + 1,
+    work_days: workingDaysBetween(t.project_id, start, end),
+    planned_work_days: t.start_date && t.due_date && t.due_date >= t.start_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date) : null,
+    vs_due: t.due_date ? daysBetween(t.due_date, end) : null,
+    original_due: orig,
+    due_shift: orig ? daysBetween(orig, t.due_date) : 0,
+    vs_original: orig ? daysBetween(orig, end) : null,
+  };
+}
+
 export function getTask(ctx, id) {
   const t = loadVisible(ctx, id);
   const files = all(`SELECT f.id, f.kind, f.mime, f.size, f.caption, f.original_name, f.created_at, f.uploaded_by, u.name AS uploaded_by_name
@@ -185,6 +206,7 @@ export function getTask(ctx, id) {
   const { reschedule_entries: entries, ...dec } = decorate(t, ref, reschedules, chronicMin);
   return {
     ...dec, files, history, subtasks,
+    actual: actualOf(dec),
     reschedules: entries,
     chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),

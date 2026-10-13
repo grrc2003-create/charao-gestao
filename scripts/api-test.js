@@ -1054,6 +1054,15 @@ async function main() {
   const nsT2 = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Sem prazo — envio', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', start_date: '2026-03-02' })).data.id;
   const nsV2 = (await marcos('POST', `/tasks/${nsT2}/actions/submit`)).data;
   ok(!!nsV2.due_date && nsV2.history.some(h => h.action === 'Prazo definido na conclusão'), 'sem prazo: ao enviar para conferência, o prazo final vira o dia da entrega');
+  // Realizado x previsto: conclusão real, antecipação/atraso e tempo total percorrido
+  const rlT = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Antecipada', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', start_date: '2026-03-02', due_date: '2099-03-31' })).data.id;
+  const rlV = (await ricardo('POST', `/tasks/${rlT}/actions/conclude`, {})).data;
+  ok(rlV.actual && rlV.actual.vs_due < 0 && rlV.actual.start === '2026-03-02' && rlV.actual.calendar_days > 1 && rlV.actual.work_days > 0, 'concluída antes do prazo: desvio negativo (antecipada) e tempo total em dias úteis e corridos');
+  const rlL = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Atrasada', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', start_date: '2026-03-02', due_date: '2026-03-06' })).data.id;
+  const rlLV = (await ricardo('POST', `/tasks/${rlL}/actions/conclude`, {})).data;
+  ok(rlLV.actual.vs_due > 0 && rlLV.actual.planned_work_days === 5, 'concluída após o prazo: desvio positivo e duração planejada');
+  const rlG = (await ricardo('GET', '/gantt?project=1')).data.tasks.find(x => x.id === rlL);
+  ok(rlG && rlG.actual && rlG.actual.vs_due === rlLV.actual.vs_due, 'Gantt recebe a conclusão real e o desvio');
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

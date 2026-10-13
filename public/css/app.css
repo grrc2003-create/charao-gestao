@@ -1449,3 +1449,10 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 /* Campo obrigatório vazio e ação bloqueada (com aviso ao tocar) */
 .is-invalid { border-color: #C0392B !important; box-shadow: 0 0 0 3px rgba(192, 57, 43, .15) !important; }
 [aria-disabled="true"].btn, [aria-disabled="true"].icon-btn { opacity: .5; cursor: not-allowed; }
+
+/* Tarefa concluída: conclusão real x prazo */
+.real-line { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dev { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 9px; background: var(--line); color: var(--ink-2); }
+.dev-early, .dev-ok { background: #E6F4EC; color: #1F7A4A; }
+.dev-late { background: #FBE9E6; color: #C0392B; }
+.fact-real small { display: block; margin-top: 3px; }

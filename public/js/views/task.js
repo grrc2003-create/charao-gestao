@@ -175,6 +175,22 @@ function build(t, ctx) {
             ${t.late_episodes ? html`<i class="late-badge" title="Repactuações após vencer + entrega após o prazo + atraso atual">atrasou ${t.late_episodes}x</i>` : ''}</span></div></div>
           <div class="fact"><div class="k">${icon('projects')}Projeto</div><div class="v"><a href="#/projetos/${t.project_id}">${t.project_code}</a><small>${t.project_name}</small></div></div>
           ${(() => {
+            // Conclusão real x prazo (antecipada / no prazo / atrasada) e tempo total percorrido
+            const a = t.actual;
+            if (!a) return '';
+            const d = n => `${Math.abs(n)} dia${Math.abs(n) === 1 ? '' : 's'}`;
+            const dev = a.vs_due === null ? html`<span class="dev">sem prazo</span>`
+              : a.vs_due < 0 ? html`<span class="dev dev-early">Antecipada · ${d(a.vs_due)} antes do prazo</span>`
+                : a.vs_due === 0 ? html`<span class="dev dev-ok">No dia do prazo</span>`
+                  : html`<span class="dev dev-late">Atrasada · ${d(a.vs_due)} após o prazo</span>`;
+            const plan = a.planned_work_days !== null ? a.work_days - a.planned_work_days : null;
+            return html`<div class="fact fact-wide fact-real"><div class="k">${icon('check')}${t.eff_status === 'concluida' ? 'Conclusão real' : 'Entrega (aguardando conferência)'}</div>
+              <div class="v"><span class="real-line"><b>${fmtDate(a.end)}</b>${dev}</span>
+                <small>Tempo total: ${fmtDate(a.start)} → ${fmtDate(a.end)} · <b>${a.work_days ?? '—'} dia${a.work_days === 1 ? '' : 's'} út${a.work_days === 1 ? 'il' : 'eis'}</b> (${a.calendar_days} corrido${a.calendar_days === 1 ? '' : 's'})${a.planned_work_days !== null ? ` · planejado ${a.planned_work_days} dia(s) útil(eis)${plan ? ` (${plan > 0 ? '+' : '−'}${Math.abs(plan)})` : ''}` : ''}</small>
+                ${a.original_due ? html`<small>Prazo ${a.due_shift > 0 ? 'adiado' : 'antecipado'}: original ${fmtDate(a.original_due)} → final ${fmtDate(t.due_date)} (${a.due_shift > 0 ? '+' : '−'}${d(a.due_shift)}) · contra o original: ${a.vs_original > 0 ? `${d(a.vs_original)} depois` : a.vs_original < 0 ? `${d(a.vs_original)} antes` : 'no dia'}</small>` : ''}
+                ${a.approved && a.approved !== a.end ? html`<small>Conferência aprovada em ${fmtDate(a.approved)}</small>` : ''}</div></div>`;
+          })()}
+          ${(() => {
             // Avanço (%): opcional; concluída/entregue = 100%; check-list = média dos itens
             const done = ['concluida', 'aguardando_conferencia'].includes(t.eff_status);
             const pct = done ? 100 : t.checklist ? t.checklist.summary.progress : t.progress_pct;

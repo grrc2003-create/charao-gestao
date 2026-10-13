@@ -15,7 +15,8 @@ const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', '
 export function ganttSpan(t, ref) {
   const start = t.start_date || toDay(t.started_at) || toDay(t.created_at) || ref;
   const due = t.due_date || null;
-  const done = t.eff_status === 'concluida' ? toDay(t.completed_at) : null;
+  // Concluída: a barra vai até a conclusão real (dia da entrega)
+  const done = t.eff_status === 'concluida' ? (t.delivered_date || toDay(t.completed_at)) : null;
   const delivered = t.eff_status === 'aguardando_conferencia' ? t.delivered_date : null;
   const end = done || delivered || due || start;
   const lateTo = t.eff_status === 'atrasada' && due ? ref : null;
@@ -112,6 +113,13 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       ${pg !== null && pg < 100 ? html`<span class="g-pct" style="left:${(pos(s.start) + width(s.start, s.end)).toFixed(2)}%">${pg}%</span>` : ''}`;
     const late = s.lateTo && s.lateTo > s.due
       ? html`<span class="g-late" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%;width:${(pos(addDays(s.lateTo, 1)) - pos(addDays(s.due, 1))).toFixed(2)}%"></span>` : '';
+    // Concluída/entregue depois do prazo: trecho hachurado (atraso realizado); antes do prazo: trecho tracejado (antecipação)
+    const a = t.actual;
+    const doneLate = a && s.due && a.end > s.due
+      ? html`<span class="g-late g-late-done" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%;width:${(pos(addDays(a.end, 1)) - pos(addDays(s.due, 1))).toFixed(2)}%" title="Concluída ${a.vs_due} dia(s) após o prazo"></span>` : '';
+    const doneEarly = a && s.due && a.end < s.due
+      ? html`<span class="g-early" style="left:${pos(addDays(a.end, 1)).toFixed(2)}%;width:${(pos(addDays(s.due, 1)) - pos(addDays(a.end, 1))).toFixed(2)}%" title="Concluída ${-a.vs_due} dia(s) antes do prazo"></span>` : '';
+    const doneTag = a ? html`<span class="g-pct g-done-tag ${a.vs_due > 0 ? 'is-late' : 'is-ok'}" style="left:${pos(addDays([a.end, s.due].filter(Boolean).sort().at(-1), 1)).toFixed(2)}%">✓ ${fmtDate(a.end).slice(0, 5)}${a.vs_due ? ` · ${a.vs_due > 0 ? '+' : '−'}${Math.abs(a.vs_due)}d` : ''}</span>` : '';
     const dueMark = s.due ? html`<span class="g-due" style="left:${pos(addDays(s.due, 1)).toFixed(2)}%" title="Prazo ${fmtDate(s.due)}"></span>` : '';
     // Prazo original (antes dos reagendamentos): losango vazado
     const origMark = t.original_due && t.original_due !== s.due
@@ -119,8 +127,10 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     return html`<tr class="g-row ${t.critical ? 'is-critical' : ''}" data-gkey="${t.dep_key || ''}" data-preds="${(t.preds || []).map(x => x.key).join(',')}">
       <td class="g-label"><span class="g-code">${t.code}</span>${showProject ? html`<span class="g-proj">${t.project_code}</span>` : ''}
         <span class="g-title">${t.parent_code ? '↳ ' : ''}${t.title}</span>
-        <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}${t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined && t.progress_pct < 100 ? ` · ${t.progress_pct}% executado` : ''}</span></td>
-      <td class="g-track">${grid}${bar}${late}${origMark}${dueMark}</td></tr>`;
+        <span class="g-meta">${t.assignee_name || 'Sem responsável'} · ${t.actual
+          ? `${fmtDate(t.actual.start)} → concluída ${fmtDate(t.actual.end)} · ${t.actual.work_days ?? '—'} d úteis (${t.actual.calendar_days} corridos)${t.actual.vs_due > 0 ? ` · ${t.actual.vs_due}d após o prazo` : t.actual.vs_due < 0 ? ` · ${-t.actual.vs_due}d antes do prazo` : t.actual.vs_due === 0 ? ' · no prazo' : ''}`
+          : `${fmtDate(s.start)} → ${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}${t.days_late ? ` · ${t.days_late}d atraso` : ''}`}${t.reschedule_count ? ` · ↻${t.reschedule_count}` : ''}${t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined && t.progress_pct < 100 ? ` · ${t.progress_pct}% executado` : ''}</span></td>
+      <td class="g-track">${grid}${bar}${late}${doneLate}${doneEarly}${origMark}${dueMark}${doneTag}</td></tr>`;
   };
 
   // Agrupamento (classificação), com barra-resumo do grupo
@@ -161,7 +171,8 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       <span><i class="g-sw" style="--c:${STATUS_COLOR.em_andamento}"></i>Previsto (início → prazo), cor do status</span>
       <span><i class="g-sw is-done" style="--c:${STATUS_COLOR.concluida}"></i>Concluída (até a conclusão)</span>
       ${rows.some(t => t.eff_status !== 'concluida' && t.progress_pct !== null && t.progress_pct !== undefined) ? html`<span><i class="g-sw g-sw-pg" style="--c:${STATUS_COLOR.em_andamento}"></i>Parte executada (avanço %)</span>` : ''}
-      <span><i class="g-sw g-sw-late"></i>Atraso (prazo → hoje)</span>
+      <span><i class="g-sw g-sw-late"></i>Atraso (prazo → hoje ou → conclusão)</span>
+      ${rows.some(t => t.actual && t.actual.vs_due < 0) ? html`<span><i class="g-sw g-sw-early"></i>Antecipação (concluída antes do prazo)</span>` : ''}
       <span><i class="g-due g-due-legend"></i>Prazo</span>
       <span><i class="g-due g-orig g-due-legend"></i>Prazo original (reagendada)</span>
       <span><i class="g-today-legend"></i>Hoje (${fmtDate(ref)})</span>

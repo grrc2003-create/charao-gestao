@@ -1480,3 +1480,11 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 .exec-inline .ok b { color: var(--st-concluida); }
 .exec-inline .warn b { color: #B7791F; }
 .sub-exec .exec-inline { margin-top: 2px; }
+
+/* Prazo rápido e datas pelas dependências (cadastro da tarefa) */
+.qd-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.qd-chips { margin-top: 6px; flex-wrap: wrap; }
+.qd-chips .chip { padding: 3px 10px; font-size: 12px; }
+.dep-dates { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 4px; }
+.dep-dates[hidden] { display: none; }
+.dep-dates-btns { display: grid; gap: 4px; justify-items: start; margin-top: 4px; }

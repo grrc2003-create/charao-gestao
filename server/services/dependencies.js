@@ -419,6 +419,26 @@ export function alignToPredecessors(key, userId) {
   }
 }
 
+// Datas sugeridas pelas ligações (botões "Puxar" no cadastro): início pela predecessora mais tardia (+ folga)
+// e término pelo dia útil antes da sucessora mais cedo (− folga)
+export function suggestedDates(ctx, taskId) {
+  const t = loadVisible(ctx, taskId);
+  const n = node(`t:${t.id}`);
+  const preds = all('SELECT pred_task_id, pred_item_id, lag_days FROM dependencies WHERE succ_task_id = ?', t.id).map(r => {
+    const pn = node(r.pred_task_id ? `t:${r.pred_task_id}` : `i:${r.pred_item_id}`);
+    const f = datesOf(pn).due;
+    return f ? { code: pn.code, finish: f, start: addWorkingDays(n.project_id, f, 1 + r.lag_days), lag: r.lag_days } : null;
+  }).filter(Boolean).sort((a, b) => b.start.localeCompare(a.start));
+  const succs = all('SELECT succ_task_id, succ_item_id, lag_days FROM dependencies WHERE pred_task_id = ?', t.id).map(r => {
+    const sn = node(r.succ_task_id ? `t:${r.succ_task_id}` : `i:${r.succ_item_id}`);
+    const s = datesOf(sn).start;
+    return s ? { code: sn.code, start: s, due: prevWorkingDay(n.project_id, addDays(s, -1 - (r.lag_days || 0))), lag: r.lag_days } : null;
+  }).filter(Boolean).sort((a, b) => a.due.localeCompare(b.due));
+  const hasPred = !!one('SELECT 1 FROM dependencies WHERE succ_task_id = ? LIMIT 1', t.id);
+  const hasSucc = !!one('SELECT 1 FROM dependencies WHERE pred_task_id = ? LIMIT 1', t.id);
+  return { has_pred: hasPred, has_succ: hasSucc, from_pred: preds[0] || null, from_succ: succs[0] || null };
+}
+
 // Preenche datas em branco: início = término da predecessora + folga (dia útil); término = dia útil antes da sucessora
 export function fillBlankDates(key, userId) {
   const n = node(key);

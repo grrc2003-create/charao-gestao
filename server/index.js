@@ -221,6 +221,8 @@ api.post('/api/projects/:id/calendar/days', (req, res, { ctx, params, body }) =>
 api.patch('/api/projects/:id/calendar/days', (req, res, { ctx, params, body }) => { Calendar.setProjectDayWorking(ctx, intOrNull(params.id), body); send(res, 200, { ok: true }); });
 api.delete('/api/projects/:id/calendar/days/:dayId', (req, res, { ctx, params }) => { Calendar.removeProjectDay(ctx, intOrNull(params.id), params.dayId); send(res, 200, { ok: true }); });
 // Dependências (predecessora → sucessora)
+api.get('/api/projects/:id/plan-dates', (req, res, { ctx, params, query }) => send(res, 200, Calendar.planDates(ctx, intOrNull(params.id), Object.fromEntries(query))));
+api.get('/api/tasks/:id/dep-dates', (req, res, { ctx, params }) => send(res, 200, Deps.suggestedDates(ctx, intOrNull(params.id))));
 api.get('/api/projects/:id/nodes', (req, res, { ctx, params }) => send(res, 200, Deps.projectNodes(ctx, intOrNull(params.id))));
 api.post('/api/tasks/:id/parent-dates', (req, res, { ctx, params }) => { Tasks.useParentDates(ctx, intOrNull(params.id)); send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))); });
 api.post('/api/tasks/:id/impact-preview', (req, res, { ctx, params, body }) => send(res, 200, Deps.previewReschedule(ctx, intOrNull(params.id), body.due_date || null)));

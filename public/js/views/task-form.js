@@ -68,13 +68,19 @@ export async function view({ params, query, state, navigate }) {
               <select id="assignee_id" name="assignee_id"><option value="">Selecione o projeto primeiro</option></select>
               <span class="hint cl-only" ${isChecklist ? '' : 'hidden'}><b>Responsável global</b>: acompanha todos os itens, responde os que não têm responsável próprio e envia o check-list para conferência.</span>
               <span class="hint" id="assignee-hint">Aparecem os usuários e terceirizados da equipe do projeto. Não encontrou alguém? Inclua a pessoa na equipe (Projetos → Editar) ou libere o projeto em Usuários.</span></div>
+          </div>
+          <div class="form-row form-row-3 dates-row">
+            <div class="field" id="start-row"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
+              <span class="hint">Opcional. Usado no cronograma (Gantt).</span></div>
+            <div class="field quick-due" id="quick-due" ${editing && t.can?.due_from_items ? 'hidden' : ''}><label for="qd-days">Duração</label>
+              <div class="qd-line"><input id="qd-days" type="number" min="1" max="2000" step="1" inputmode="numeric" placeholder="nº de dias" aria-label="Quantidade de dias">
+                <select id="qd-mode" aria-label="Tipo de dia"><option value="uteis">dias úteis</option><option value="corridos">dias corridos</option></select></div>
+              <div class="chips qd-chips">${[1, 2, 3, 5, 10, 15, 20, 30].map(n => html`<button type="button" class="chip" data-qd="${n}">${n}</button>`)}</div>
+              <span class="hint" id="qd-info">Preencha o início e a quantidade de dias: o prazo é calculado (o dia de início conta como 1º dia).</span></div>
             <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}" ${editing && t.can?.due_from_items ? 'readonly' : ''}>
               <span class="hint cl-only" id="due-hint" ${isChecklist ? '' : 'hidden'}>No check-list, o prazo acompanha o <b>maior prazo dos itens</b>${editing && t.can?.due_from_items ? ' — altere o prazo dos itens para mudar.' : ' (se algum item tiver data de término).'}</span></div>
           </div>
-          <div class="form-row" id="start-row">
-            <div class="field"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
-              <span class="hint">Opcional. Usado no cronograma (Gantt) dos relatórios.</span></div>
-          </div>
+          ${editing ? html`<div class="dep-dates" id="dep-dates" hidden></div>` : ''}
           ${!editing && parent && (parent.start_date || parent.due_date) ? html`<div class="parent-dates">
             <button type="button" class="btn btn-ghost btn-sm" id="copy-parent-dates">${icon('calendar')}Copiar datas da tarefa principal</button>
             <span class="hint">${parent.code}: início ${parent.start_date ? parent.start_date.split('-').reverse().join('/') : '—'} → término ${parent.due_date ? parent.due_date.split('-').reverse().join('/') : '—'}.
@@ -131,6 +137,7 @@ export async function view({ params, query, state, navigate }) {
           root.querySelector('#due-label').textContent = on ? 'Prazo da 1ª ocorrência' : 'Prazo';
           root.querySelector('#due-label').classList.toggle('req', on);
           root.querySelector('#start-row').hidden = on;
+          root.querySelector('#quick-due').hidden = on;
           root.querySelector('#submit-label').textContent = on ? 'Criar tarefa recorrente' : 'Criar tarefa';
         },
       }) : null;
@@ -149,6 +156,70 @@ export async function view({ params, query, state, navigate }) {
         };
         f.due_date.addEventListener('input', sync);
         f.due_date.addEventListener('change', sync);
+      }
+      // ---------- Prazo rápido: início + nº de dias (úteis pelo calendário da obra, ou corridos) → prazo ----------
+      const qdDays = root.querySelector('#qd-days');
+      const qdMode = root.querySelector('#qd-mode');
+      const qdInfo = root.querySelector('#qd-info');
+      const setDue = val => { f.due_date.value = val; f.due_date.dispatchEvent(new Event('input')); f.due_date.dispatchEvent(new Event('change')); };
+      const fmtBR = d => d.split('-').reverse().join('/');
+      let qdTimer = null;
+      const showSpan = async () => {
+        // Início + prazo já preenchidos: mostra a duração em dias úteis e corridos
+        const pid = f.project_id.value;
+        if (!pid || !f.start_date.value || !f.due_date.value || f.due_date.value < f.start_date.value) return;
+        try {
+          const r = await api(`/projects/${pid}/plan-dates`, { query: { start: f.start_date.value, due: f.due_date.value } });
+          qdInfo.innerHTML = html`${fmtBR(r.start)} → ${fmtBR(r.due)} · <b>${r.work_days} dia(s) útil(eis)</b> (${r.calendar_days} corridos)`.toString();
+        } catch { /* só informativo */ }
+      };
+      const calc = async () => {
+        const pid = f.project_id.value;
+        const n = Number(qdDays.value);
+        if (!n) return showSpan();
+        if (!f.start_date.value) { qdInfo.textContent = 'Preencha primeiro o início.'; return f.start_date.focus(); }
+        if (!pid) { qdInfo.textContent = 'Escolha o projeto (o calendário de dias úteis é o da obra).'; return; }
+        if (f.due_date.readOnly) return;
+        try {
+          const r = await api(`/projects/${pid}/plan-dates`, { query: { start: f.start_date.value, days: n, mode: qdMode.value } });
+          setDue(r.due);
+          qdInfo.innerHTML = html`Prazo: <b>${fmtBR(r.due)}</b> · ${r.work_days} dia(s) útil(eis) (${r.calendar_days} corridos)${!r.start_working ? ' · atenção: o início cai em dia não útil' : ''}`.toString();
+        } catch (e) { qdInfo.textContent = e.message; }
+      };
+      qdDays?.addEventListener('input', () => { clearTimeout(qdTimer); qdTimer = setTimeout(calc, 300); });
+      qdMode?.addEventListener('change', calc);
+      root.querySelectorAll('[data-qd]').forEach(b => b.addEventListener('click', () => { qdDays.value = b.dataset.qd; calc(); }));
+      f.start_date.addEventListener('change', () => (qdDays?.value ? calc() : showSpan()));
+      f.due_date.addEventListener('change', () => { if (document.activeElement === f.due_date) { if (qdDays) qdDays.value = ''; } showSpan(); });
+      showSpan();
+      // ---------- Datas pelas dependências (predecessora / sucessora) ----------
+      const depBox = root.querySelector('#dep-dates');
+      if (depBox) {
+        api(`/tasks/${t.id}/dep-dates`).then(d => {
+          if (!d.has_pred && !d.has_succ) return;
+          depBox.hidden = false;
+          depBox.innerHTML = html`<span class="sub-label">Datas pelas dependências</span>
+            <div class="dep-dates-btns">
+              ${d.has_pred ? (d.from_pred ? html`<button type="button" class="btn btn-ghost btn-sm" data-pull="start">${icon('calendar')}Puxar início da predecessora · ${fmtBR(d.from_pred.start)}</button>
+                <span class="hint">${d.from_pred.code} termina em ${fmtBR(d.from_pred.finish)}${d.from_pred.lag ? ` + ${d.from_pred.lag} dia(s) de folga` : ''} → início no dia útil seguinte.</span>`
+                : html`<span class="hint">A predecessora ainda não tem término.</span>`) : ''}
+              ${d.has_succ ? (d.from_succ ? html`<button type="button" class="btn btn-ghost btn-sm" data-pull="due">${icon('calendar')}Puxar término pela sucessora · ${fmtBR(d.from_succ.due)}</button>
+                <span class="hint">${d.from_succ.code} começa em ${fmtBR(d.from_succ.start)}${d.from_succ.lag ? ` (folga ${d.from_succ.lag} dia(s))` : ''} → término no dia útil anterior.</span>`
+                : html`<span class="hint">A sucessora ainda não tem início.</span>`) : ''}
+            </div>`.toString();
+          depBox.querySelector('[data-pull=start]')?.addEventListener('click', () => {
+            f.start_date.value = d.from_pred.start;
+            f.start_date.dispatchEvent(new Event('change'));
+            toast(`Início puxado da predecessora: ${fmtBR(d.from_pred.start)}.${qdDays?.value ? ' Prazo recalculado pela duração.' : ''}`);
+          });
+          depBox.querySelector('[data-pull=due]')?.addEventListener('click', () => {
+            if (f.due_date.readOnly) return toast('No check-list, o prazo vem dos itens.', 'warn');
+            setDue(d.from_succ.due);
+            if (qdDays) qdDays.value = '';
+            showSpan();
+            toast(`Término puxado pela sucessora: ${fmtBR(d.from_succ.due)}.`);
+          });
+        }).catch(() => {});
       }
       // Subtarefa: copiar início e término da tarefa principal (opcional)
       root.querySelector('#copy-parent-dates')?.addEventListener('click', () => {

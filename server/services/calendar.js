@@ -213,6 +213,27 @@ export function addWorkingDays(projectId, d, n) {
   return x;
 }
 
+// Prazo rápido: início + N dias (úteis pelo calendário da obra, ou corridos) → término; ou início + término → dias
+export function planDates(ctx, projectId, q) {
+  if (!canAccessProject(ctx.user, projectId, ctx.projects)) throw notFound('Projeto não encontrado.');
+  const start = readDate(q.start, 'Início');
+  if (!start) throw badRequest('Informe o início.');
+  const corridos = q.mode === 'corridos';
+  let due = readDate(q.due, 'Término');
+  const days = intOrNull(q.days);
+  if (!due) {
+    if (!days || days < 1 || days > 2000) throw badRequest('Informe a quantidade de dias (1 a 2000).');
+    // O dia de início conta como o 1º dia
+    due = corridos ? addDaysISO(start, days - 1) : addWorkingDays(projectId, start, days - 1);
+  }
+  return {
+    start, due,
+    start_working: isWorkingDay(projectId, start),
+    work_days: workingDaysBetween(projectId, start, due),
+    calendar_days: due >= start ? Math.round((Date.parse(due) - Date.parse(start)) / 86400e3) + 1 : null,
+  };
+}
+
 // ---------- Calendário da obra (tela) ----------
 export function projectCalendar(ctx, projectId, year) {
   const p = one('SELECT * FROM projects WHERE id = ?', projectId);

@@ -1107,6 +1107,24 @@ async function main() {
   ok(ust.exec_days_avg > 0 && ust.exec_work_days_avg > 0 && ust.exec_count > 0, `média de dias de execução (${ust.exec_days_avg} corridos · ${ust.exec_work_days_avg} úteis)`);
   ok(ust.early >= 2 && ust.early_days_avg > 0, `tarefas antecipadas contadas (${ust.early})`);
   ok(ust.filling_delays >= 3 && ust.filling_delay_days_avg > 0 && ust.behavior.some(b => /atraso de preenchimento/.test(b)), `atraso de preenchimento contado (${ust.filling_delays}) e no resumo do comportamento`);
+  // Prazo rápido: início + nº de dias (úteis pelo calendário da obra, ou corridos)
+  const qd1 = (await ricardo('GET', '/projects/1/plan-dates?start=2099-03-02&days=5')).data;
+  ok(qd1.due === '2099-03-06' && qd1.work_days === 5, `5 dias úteis a partir de seg 02/03 → sex 06/03 (${qd1.due})`);
+  const qd2 = (await ricardo('GET', '/projects/1/plan-dates?start=2099-03-02&days=10&mode=corridos')).data;
+  ok(qd2.due === '2099-03-11' && qd2.calendar_days === 10, `10 dias corridos → 11/03 (${qd2.due})`);
+  const qd3 = (await ricardo('GET', '/projects/1/plan-dates?start=2099-03-02&due=2099-03-13')).data;
+  ok(qd3.work_days === 10 && qd3.calendar_days === 12, 'início + prazo → dias úteis e corridos');
+  ok((await ricardo('GET', '/projects/1/plan-dates?start=2099-03-02')).status === 400, 'sem dias nem prazo é recusado');
+  // Datas sugeridas pelas dependências (botões Puxar)
+  const pullA = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Pred puxar', description: 'x', priority: 'media', proof_type: 'nenhuma', start_date: '2099-04-06', due_date: '2099-04-10' })).data.id;
+  const pullB = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Meio puxar', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  const pullC = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Suc puxar', description: 'x', priority: 'media', proof_type: 'nenhuma', start_date: '2099-04-27', due_date: '2099-04-30' })).data.id;
+  await ricardo('POST', '/dependencies', { pred: `t:${pullA}`, succ: `t:${pullB}` });
+  await ricardo('POST', '/dependencies', { pred: `t:${pullB}`, succ: `t:${pullC}` });
+  const pullS = (await ricardo('GET', `/tasks/${pullB}/dep-dates`)).data;
+  ok(pullS.from_pred?.start === '2099-04-13' && pullS.from_succ?.due === '2099-04-24', `sugestão: início pela predecessora (seg 13/04) e término pela sucessora (sex 24/04) → ${pullS.from_pred?.start} / ${pullS.from_succ?.due}`);
+  ok(!(await ricardo('GET', `/tasks/${pullA}/dep-dates`)).data.has_pred, 'sem predecessora: não sugere início');
+
   // Os mesmos indicadores por projeto, por classificação e nas subtarefas de uma tarefa
   const pj1 = (await ricardo('GET', '/projects/1')).data;
   ok(pj1.summary.exec_count > 0 && pj1.summary.early >= 1 && pj1.summary.filling_delays >= 1 && pj1.summary.exec_work_days_avg > 0, 'projeto: média de execução, antecipadas e atraso de preenchimento');

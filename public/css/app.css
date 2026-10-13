@@ -1456,3 +1456,7 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 .dev-early, .dev-ok { background: #E6F4EC; color: #1F7A4A; }
 .dev-late { background: #FBE9E6; color: #C0392B; }
 .fact-real small { display: block; margin-top: 3px; }
+
+.pg-100 { display: grid; gap: 6px; }
+.pg-100[hidden] { display: none; }
+.pg-warn { color: #C0392B; font-weight: 600; }

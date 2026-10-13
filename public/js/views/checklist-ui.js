@@ -783,7 +783,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   // Avanço parcial do item
   root.querySelectorAll('[data-item-progress]').forEach(b => b.addEventListener('click', async () => {
     const it = c.items.find(x => x.id === Number(b.dataset.itemProgress));
-    const pending = progressSheet({ title: `Avanço do item ${it.seq}`, current: it.progress_pct, what: 'o item' });
+    const pending = progressSheet({ title: `Avanço do item ${it.seq}`, current: it.progress_pct, what: 'o item', at100: 'Com 100%, o item continua pendente até ser marcado como Conforme (ou N/A).' });
     bindProgressSheet();
     const r = await pending;
     if (r) run(() => api(`/tasks/${t.id}/items/${it.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.' : `Avanço do item ${it.seq}: ${r.progress}%.`);

@@ -45,14 +45,20 @@ export function migrate() {
   }
 }
 
+// Transação; chamada dentro de outra vira um SAVEPOINT (desfaz só a parte interna em caso de erro)
+let txDepth = 0;
 export function tx(fn) {
-  db.exec('BEGIN');
+  const sp = txDepth ? `sp${txDepth}` : null;
+  db.exec(sp ? `SAVEPOINT ${sp}` : 'BEGIN');
+  txDepth++;
   try {
     const r = fn();
-    db.exec('COMMIT');
+    txDepth--;
+    db.exec(sp ? `RELEASE ${sp}` : 'COMMIT');
     return r;
   } catch (e) {
-    db.exec('ROLLBACK');
+    txDepth--;
+    db.exec(sp ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : 'ROLLBACK');
     throw e;
   }
 }

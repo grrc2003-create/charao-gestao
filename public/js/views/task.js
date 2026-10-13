@@ -338,10 +338,20 @@ function mount(root, t, ctx) {
   const dueNote = t.due_date ? '' : html`<p class="notice" style="margin:0 0 10px">${icon('calendar')}<span>Tarefa sem prazo: o prazo final será registrado como o dia ${t.delivered_at ? 'da entrega' : 'de hoje'}.</span></p>`;
   const actions = {
     progress: async () => {
-      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart });
+      // 100%: envia para conferência (responsável) ou conclui (gestor); avisa antes o que ainda falta
+      const subPend = (t.subtasks || []).filter(s => !s.cancelled_at && s.status !== 'concluida').length;
+      const pcx = t.proof_check || { ok: true, missing: [] };
+      const blockers = [!pcx.ok ? `falta registrar ${pcx.missing.join(' e ')}` : '', subPend ? `há ${subPend} subtarefa(s) pendente(s)` : ''].filter(Boolean).join('; ');
+      const finish = [
+        ...(t.can.submit ? [{ k: 'submit', label: html`Enviar para conferência → <b>Aguardando conferência</b>`, warn: blockers ? `Antes de salvar 100%: ${blockers}.` : '' }] : []),
+        ...(t.can.conclude_directly ? [{ k: 'conclude', label: html`Concluir diretamente → <b>Concluída</b>`, warn: subPend ? `Antes: conclua ${subPend} subtarefa(s) pendente(s).` : '' }] : []),
+      ];
+      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart, finish });
       bindProgressSheet();
       const r = await pending;
-      if (r) run(() => api(`/tasks/${t.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.' : `Avanço: ${r.progress}%.`);
+      if (r) run(() => api(`/tasks/${t.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.'
+        : r.progress === 100 && r.finish === 'conclude' ? 'Avanço 100%: tarefa concluída.'
+          : r.progress === 100 && r.finish === 'submit' ? 'Avanço 100%: tarefa enviada para conferência (Aguardando conferência).' : `Avanço: ${r.progress}%.`);
     },
     parentdates: () => run(() => api(`/tasks/${t.id}/parent-dates`, { method: 'POST' }), 'Datas da tarefa principal aplicadas.'),
     // Duplicar a tarefa (com subtarefas / itens do check-list); responsáveis e prazos só se marcados

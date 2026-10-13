@@ -604,6 +604,12 @@ export function setProgress(ctx, id, body = {}) {
     run('UPDATE tasks SET progress_pct = ?, updated_at = ? WHERE id = ?', v, nowIso(), id);
     taskHistory(id, ctx.user.id, v === null ? 'Avanço removido' : 'Avanço atualizado', withBehalf(ctx, t, `${fmt(t.progress_pct)} → ${fmt(v)}`));
     if (v) autoStart(ctx, t);
+    // 100%: a tarefa sai da execução — vai para conferência (responsável) ou é concluída (gestor, se escolher)
+    if (v === 100) {
+      const can = permissionsFor(ctx, rawTask(id));
+      const finish = body.finish === 'conclude' && can.conclude_directly ? 'conclude' : can.submit ? 'submit' : can.conclude_directly ? 'conclude' : null;
+      if (finish) transition(ctx, id, finish, { start_date: body.start_date, comment: body.comment });
+    }
   });
 }
 

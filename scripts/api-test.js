@@ -1063,6 +1063,18 @@ async function main() {
   ok(rlLV.actual.vs_due > 0 && rlLV.actual.planned_work_days === 5, 'concluída após o prazo: desvio positivo e duração planejada');
   const rlG = (await ricardo('GET', '/gantt?project=1')).data.tasks.find(x => x.id === rlL);
   ok(rlG && rlG.actual && rlG.actual.vs_due === rlLV.actual.vs_due, 'Gantt recebe a conclusão real e o desvio');
+  // Avanço 100%: o status muda (responsável → Aguardando conferência; gestor pode concluir direto)
+  const mk100 = async (title, proof) => (await ricardo('POST', '/tasks', { project_id: 1, title, description: 'x', assignee_id: 4, priority: 'media', proof_type: proof, start_date: '2026-03-02', due_date: '2099-03-31' })).data.id;
+  const h1 = await mk100('100 envio', 'nenhuma');
+  const h1v = (await marcos('POST', `/tasks/${h1}/progress`, { progress: 100 })).data;
+  ok(h1v.status === 'aguardando_conferencia' && h1v.progress_pct === 100, 'responsável dá 100%: tarefa vai para Aguardando conferência');
+  const h2 = await mk100('100 conclui', 'nenhuma');
+  const h2v = (await ricardo('POST', `/tasks/${h2}/progress`, { progress: 100, finish: 'conclude' })).data;
+  ok(h2v.status === 'concluida', 'gestor dá 100% escolhendo concluir: tarefa concluída');
+  const h3 = await mk100('100 sem foto', 'foto');
+  const h3r = await marcos('POST', `/tasks/${h3}/progress`, { progress: 100 });
+  const h3v = (await ricardo('GET', `/tasks/${h3}`)).data;
+  ok(h3r.status === 400 && /Comprovação/.test(h3r.data.error) && h3v.progress_pct === null && h3v.status === 'aberta', '100% sem a comprovação exigida é recusado e nada é gravado');
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

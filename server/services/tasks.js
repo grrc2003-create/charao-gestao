@@ -547,6 +547,18 @@ export function readProgress(v) {
   return n;
 }
 
+// Tarefa/subtarefa sem data de início: dar avanço, enviar para conferência ou concluir exige informar a data de início
+// (check-list fica de fora: as datas são dos itens). Grava a data e registra no histórico.
+export function requireStart(ctx, t, body = {}) {
+  if (t.task_type === 'checklist' || t.start_date) return;
+  const sd = date(body.start_date, 'Data de início');
+  if (!sd) throw badRequest('Esta tarefa está sem data de início: informe a data de início para continuar.');
+  if (sd > today()) throw badRequest('A data de início não pode ser no futuro.');
+  run('UPDATE tasks SET start_date = ?, updated_at = ? WHERE id = ?', sd, nowIso(), t.id);
+  taskHistory(t.id, ctx.user.id, 'Data de início informada', sd.split('-').reverse().join('/'));
+  t.start_date = sd;
+}
+
 export function setProgress(ctx, id, body = {}) {
   const t = loadVisible(ctx, id);
   assertNotCancelled(t);
@@ -558,6 +570,7 @@ export function setProgress(ctx, id, body = {}) {
   if (v === (t.progress_pct ?? null)) return;
   const fmt = x => (x === null || x === undefined ? 'não informado' : `${x}%`);
   tx(() => {
+    if (v !== null) requireStart(ctx, t, body);
     run('UPDATE tasks SET progress_pct = ?, updated_at = ? WHERE id = ?', v, nowIso(), id);
     taskHistory(id, ctx.user.id, v === null ? 'Avanço removido' : 'Avanço atualizado', withBehalf(ctx, t, `${fmt(t.progress_pct)} → ${fmt(v)}`));
     if (v) autoStart(ctx, t);
@@ -655,6 +668,7 @@ export function transition(ctx, id, action, body = {}) {
         break;
       case 'submit': {
         if (!can.submit) throw forbidden('Ação não permitida.');
+        requireStart(ctx, t, body);
         const files = all('SELECT kind, mime FROM task_files WHERE task_id = ?', id);
         const pc = proofCheck(t, files);
         if (!pc.ok) throw badRequest(`Comprovação incompleta: falta ${pc.missing.join(' e ')}.`);
@@ -668,6 +682,7 @@ export function transition(ctx, id, action, body = {}) {
       case 'approve': {
         if (!can.review) throw forbidden('Você não pode conferir esta tarefa.');
         assertSubtasksDone(t);
+        requireStart(ctx, t, body);
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', review_status = \'aprovada\', review_comment = ?, reviewed_by = ?, reviewed_at = ?, completed_at = ?', comment, ctx.user.id, now, now);
         taskHistory(id, ctx.user.id, 'Conferência aprovada — tarefa concluída', comment);
@@ -685,6 +700,7 @@ export function transition(ctx, id, action, body = {}) {
         if (!can.conclude_directly) throw forbidden('Ação não permitida.');
         assertSubtasksDone(t);
         assertChecklistDone(t);
+        requireStart(ctx, t, body);
         const comment = str(body.comment, { max: 1000, label: 'Comentário' });
         change('concluida', ', delivered_at = COALESCE(delivered_at, ?), completed_at = ?, reviewed_by = ?, reviewed_at = ?, review_status = \'aprovada\', review_comment = ?', now, now, ctx.user.id, now, comment);
         taskHistory(id, ctx.user.id, 'Concluída diretamente pelo gestor', comment);

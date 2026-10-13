@@ -58,6 +58,9 @@ function tinyPng() {
 }
 
 let felipeLoginCheck;
+// Tarefa sem data de início: avanço, envio e conclusão exigem informar o início (testes enviam uma data passada)
+const SD = { start_date: '2020-01-01' };
+
 async function main() {
   for (let i = 0; i < 50; i++) { try { await fetch(BASE + '/api/config'); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
 
@@ -105,7 +108,7 @@ async function main() {
   ok(t.files.length === 1 && t.files[0].kind === 'referencia', 'imagem de referência armazenada');
   ok((await camila('GET', `/tasks/${tid}`)).status === 404, 'usuário sem acesso ao projeto não vê a tarefa');
   ok((await ricardo('PATCH', `/tasks/${tid}/execution`, { exec_description: 'x' })).status === 403, 'apenas o responsável registra a execução');
-  ok((await marcos('POST', `/tasks/${tid}/actions/submit`)).status === 400, 'envio bloqueado sem comprovação exigida');
+  ok((await marcos('POST', `/tasks/${tid}/actions/submit`, SD)).status === 400, 'envio bloqueado sem comprovação exigida');
   await marcos('PATCH', `/tasks/${tid}/execution`, { exec_description: 'Armação conferida e liberada.', exec_notes: 'Sem pendências.' });
   t = (await marcos('GET', `/tasks/${tid}`)).data;
   ok(t.status === 'em_andamento', 'registro de execução inicia a tarefa automaticamente');
@@ -113,10 +116,10 @@ async function main() {
   ok(bad.status === 400, 'arquivo que não é imagem real é rejeitado');
   ok((await marcos('POST', `/tasks/${tid}/files`, { kind: 'execucao', images: [{ data: tinyPng() }] })).status === 200, 'responsável envia foto da execução');
   ok((await marcos('POST', `/tasks/${tid}/actions/approve`)).status === 403, 'responsável não confere a própria entrega');
-  ok((await marcos('POST', `/tasks/${tid}/actions/submit`)).data.status === 'aguardando_conferencia', 'enviada para conferência');
+  ok((await marcos('POST', `/tasks/${tid}/actions/submit`, SD)).data.status === 'aguardando_conferencia', 'enviada para conferência');
   ok((await ricardo('POST', `/tasks/${tid}/actions/return`, {})).status === 400, 'devolução exige motivo');
   ok((await ricardo('POST', `/tasks/${tid}/actions/return`, { comment: 'Ajustar foto' })).data.status === 'em_andamento', 'gestor devolve para ajustes');
-  await marcos('POST', `/tasks/${tid}/actions/submit`);
+  await marcos('POST', `/tasks/${tid}/actions/submit`, SD);
   t = (await ricardo('POST', `/tasks/${tid}/actions/approve`, { comment: 'Ok' })).data;
   ok(t.status === 'concluida' && t.on_time === true, 'gestor aprova; entrega no prazo');
   const actions = t.history.map(h => h.action);
@@ -162,19 +165,19 @@ async function main() {
   ok((await camila('POST', '/tasks', { parent_id: mother, title: 'X', description: 'x' })).status === 404, 'sem acesso ao projeto não cria subtarefa');
   let m = (await ricardo('GET', `/tasks/${mother}`)).data;
   ok(m.subtasks.length === 2 && m.sub_total === 2 && m.history.some(h => h.action === 'Subtarefa adicionada'), 'tarefa principal lista subtarefas e registra no histórico');
-  ok((await marcos('POST', `/tasks/${mother}/actions/submit`)).status === 400, 'principal não vai para conferência com subtarefas pendentes');
-  ok((await ricardo('POST', `/tasks/${mother}/actions/conclude`, {})).status === 400, 'principal não é concluída com subtarefas pendentes');
+  ok((await marcos('POST', `/tasks/${mother}/actions/submit`, SD)).status === 400, 'principal não vai para conferência com subtarefas pendentes');
+  ok((await ricardo('POST', `/tasks/${mother}/actions/conclude`, SD)).status === 400, 'principal não é concluída com subtarefas pendentes');
   const fel = await login('felipe@charao.eng.br');
-  ok((await fel('POST', `/tasks/${s1.id}/actions/submit`)).status === 400, 'subtarefa exige a própria comprovação');
+  ok((await fel('POST', `/tasks/${s1.id}/actions/submit`, SD)).status === 400, 'subtarefa exige a própria comprovação');
   await fel('POST', `/tasks/${s1.id}/files`, { kind: 'execucao', images: [{ data: tinyPng() }] });
-  ok((await fel('POST', `/tasks/${s1.id}/actions/submit`)).data.status === 'aguardando_conferencia', 'subtarefa segue o fluxo de execução e conferência');
-  await ricardo('POST', `/tasks/${s1.id}/actions/approve`, {});
-  await marcos('POST', `/tasks/${s2}/actions/submit`);
-  await ricardo('POST', `/tasks/${s2}/actions/approve`, {});
+  ok((await fel('POST', `/tasks/${s1.id}/actions/submit`, SD)).data.status === 'aguardando_conferencia', 'subtarefa segue o fluxo de execução e conferência');
+  await ricardo('POST', `/tasks/${s1.id}/actions/approve`, SD);
+  await marcos('POST', `/tasks/${s2}/actions/submit`, SD);
+  await ricardo('POST', `/tasks/${s2}/actions/approve`, SD);
   m = (await ricardo('GET', `/tasks/${mother}`)).data;
   ok(m.sub_done === 2 && m.history.filter(h => h.action === 'Subtarefa concluída').length === 2, 'conclusão das subtarefas registrada na principal');
-  ok((await marcos('POST', `/tasks/${mother}/actions/submit`)).data.status === 'aguardando_conferencia', 'principal liberada após concluir subtarefas');
-  await ricardo('POST', `/tasks/${mother}/actions/approve`, {});
+  ok((await marcos('POST', `/tasks/${mother}/actions/submit`, SD)).data.status === 'aguardando_conferencia', 'principal liberada após concluir subtarefas');
+  await ricardo('POST', `/tasks/${mother}/actions/approve`, SD);
   ok((await ricardo('POST', `/tasks/${s1.id}/actions/reopen`, { comment: 'x' })).status === 400, 'subtarefa não reabre com a principal concluída');
   const onlySubs = (await ricardo('GET', '/tasks?nivel=subtarefas')).data;
   ok(onlySubs.length >= 2 && onlySubs.every(t => t.parent_id), 'filtro "somente subtarefas"');
@@ -281,7 +284,7 @@ async function main() {
   // Pontualidade real × repactuada: entrega após o prazo original e antes do prazo vigente
   const tReal = await mk('Pontualidade', '2020-03-01');
   await ricardo('POST', `/tasks/${tReal}/reschedule`, { due_date: '2099-03-01', reason_id: rsn });
-  await ricardo('POST', `/tasks/${tReal}/actions/submit`); // responsável = Ricardo (mk)
+  await ricardo('POST', `/tasks/${tReal}/actions/submit`, SD); // responsável = Ricardo (mk)
   x = (await ricardo('GET', `/tasks/${tReal}`)).data;
   ok(x.on_time === true && x.on_time_original === false, 'entrega no prazo repactuado, mas fora do prazo original');
   ok((await ricardo('GET', '/tasks?due=ja_atrasadas')).data.some(t => t.id === tCorr) && !(await ricardo('GET', '/tasks?due=ja_atrasadas')).data.some(t => t.id === tPrev), 'filtro "ficaram atrasadas"');
@@ -289,7 +292,7 @@ async function main() {
   ok((await ricardo('GET', '/tasks?due=cronicas')).data.some(t => t.id === tChr), 'filtro "crônicas"');
   // Concluída com atraso: entrega após o prazo vigente
   const tLateDone = await mk('Concluída com atraso', '2020-05-01');
-  await ricardo('POST', `/tasks/${tLateDone}/actions/conclude`, {});
+  await ricardo('POST', `/tasks/${tLateDone}/actions/conclude`, SD);
   const lateDone = (await ricardo('GET', '/tasks?due=concluidas_atraso')).data;
   ok(lateDone.some(t => t.id === tLateDone && t.days_late > 0) && lateDone.every(t => t.status === 'concluida' && t.on_time === false), 'filtro "concluídas com atraso"');
   ok(!lateDone.some(t => t.id === tOk), 'tarefas no prazo não entram no filtro de concluídas com atraso');
@@ -347,7 +350,7 @@ async function main() {
   const cP = await mkC('Principal', { due_date: '2099-01-01' });
   const cS1 = (await ricardo('POST', '/tasks', { parent_id: cP, title: 'Sub 1', description: 'Sub 1' })).data.id;
   const cS2 = (await ricardo('POST', '/tasks', { parent_id: cP, title: 'Sub 2', description: 'Sub 2' })).data.id;
-  await ricardo('POST', `/tasks/${cS2}/actions/conclude`, {});
+  await ricardo('POST', `/tasks/${cS2}/actions/conclude`, SD);
   await ricardo('POST', `/tasks/${cP}/cancel`, { reason: 'Etapa eliminada do projeto' });
   ok((await ricardo('GET', `/tasks/${cS1}`)).data.cancelled_at && !(await ricardo('GET', `/tasks/${cS2}`)).data.cancelled_at, 'cancelar a principal cancela as subtarefas não concluídas');
   ok((await ricardo('POST', `/tasks/${cS1}/reactivate`, {})).status === 400, 'subtarefa só reativa com a principal ativa');
@@ -355,7 +358,7 @@ async function main() {
   const cP2 = await mkC('Principal 2', { due_date: '2099-01-01' });
   const cS3 = (await ricardo('POST', '/tasks', { parent_id: cP2, title: 'Sub 3', description: 'Sub 3' })).data.id;
   await ricardo('POST', `/tasks/${cS3}/cancel`, { reason: 'Não será mais necessária' });
-  ok((await ricardo('POST', `/tasks/${cP2}/actions/conclude`, {})).data.status === 'concluida', 'subtarefa cancelada não impede concluir a principal');
+  ok((await ricardo('POST', `/tasks/${cP2}/actions/conclude`, SD)).data.status === 'concluida', 'subtarefa cancelada não impede concluir a principal');
   // Exclusão definitiva
   const dOk = await mkC('Criada por engano', { images: [{ data: tinyPng() }] });
   ok((await ricardo('GET', `/tasks/${dOk}`)).data.can.delete === false, 'gestor não vê a opção de excluir');
@@ -475,12 +478,12 @@ async function main() {
   ok(!(await felipeLoginCheck())?.can?.execute, 'outro colaborador não executa pelo terceirizado');
   await marcos('PATCH', `/tasks/${tExt}/execution`, { exec_description: 'Alvenaria do 5º pavimento executada pela equipe da Alfa.' });
   await marcos('POST', `/tasks/${tExt}/files`, { kind: 'execucao', images: [{ data: tinyPng() }] });
-  te = (await marcos('POST', `/tasks/${tExt}/actions/submit`)).data;
+  te = (await marcos('POST', `/tasks/${tExt}/actions/submit`, SD)).data;
   ok(te.status === 'aguardando_conferencia' && te.history.some(h => h.action === 'Enviada para conferência' && h.details.includes('em nome de José Pedreiro (terceirizado)')), 'histórico registra "em nome de" o terceirizado');
   ok(te.can.review, 'líder (colaborador) pode conferir a entrega do terceirizado sem login');
   ok((await marcos('POST', `/tasks/${tExt}/actions/return`, { comment: 'Faltou a foto do encunhamento.' })).data.status === 'em_andamento', 'líder devolve a entrega do terceirizado');
-  await marcos('POST', `/tasks/${tExt}/actions/submit`);
-  ok((await marcos('POST', `/tasks/${tExt}/actions/approve`, {})).data.status === 'concluida', 'líder aprova e conclui a entrega do terceirizado');
+  await marcos('POST', `/tasks/${tExt}/actions/submit`, SD);
+  ok((await marcos('POST', `/tasks/${tExt}/actions/approve`, SD)).data.status === 'concluida', 'líder aprova e conclui a entrega do terceirizado');
   const leaderView = (await marcos('GET', `/users/${extId}`)).data;
   ok(leaderView.stats.assigned === 1 && leaderView.stats.done === 1, 'líder avalia o desempenho do terceirizado');
   ok((await marcos('GET', '/users/4')).data.team.some(m => m.id === extId), 'terceirizado aparece na equipe do líder');
@@ -500,10 +503,10 @@ async function main() {
   let tl = (await paulo('GET', `/tasks/${tL}`)).data;
   ok(tl.can.execute && !tl.can.review, 'com acesso: o próprio terceirizado executa e não confere');
   await paulo('PATCH', `/tasks/${tL}/execution`, { exec_description: 'Forro executado.' });
-  tl = (await paulo('POST', `/tasks/${tL}/actions/submit`)).data;
+  tl = (await paulo('POST', `/tasks/${tL}/actions/submit`, SD)).data;
   ok(tl.status === 'aguardando_conferencia' && !tl.history.some(h => (h.details || '').includes('em nome de')), 'com acesso: envio registrado pelo próprio terceirizado');
   ok(!(await marcos('GET', `/tasks/${tL}`)).data.can.review, 'com acesso: líder colaborador não confere (regra de Colaborador)');
-  ok((await ricardo('POST', `/tasks/${tL}/actions/approve`, {})).data.status === 'concluida', 'com acesso: gestor confere');
+  ok((await ricardo('POST', `/tasks/${tL}/actions/approve`, SD)).data.status === 'concluida', 'com acesso: gestor confere');
   await ana('PUT', `/users/${extL}`, { login_enabled: false });
   ok((await paulo('GET', '/projects')).status === 401 && (await client()('POST', '/auth/login', { email: 'paulo@gesso.com', password: 'gesso1234' })).status === 401, 'desligar o acesso encerra a sessão e bloqueia o login');
   ok((await ana('PUT', `/users/${extId}`, { login_enabled: true, email: 'jose@alfa.com' })).status === 400, 'ligar o acesso exige senha');
@@ -581,7 +584,7 @@ async function main() {
   const rb = (await brunoC('POST', `/tasks/${tA}/assignee`, { assignee_id: 4 })).data;
   ok(rb.assignee_name === 'Marcos Silva' && (rb.hidden || rb.assignee_id === 4), 'quem só vê as próprias tarefas pode repassar a sua (e deixa de vê-la sem erro)');
   await marcos('PATCH', `/tasks/${tA}/execution`, { exec_description: 'ok' });
-  await marcos('POST', `/tasks/${tA}/actions/submit`);
+  await marcos('POST', `/tasks/${tA}/actions/submit`, SD);
   ok((await felipeC('POST', `/tasks/${tA}/assignee`, { assignee_id: 5 })).status === 400 && !(await felipeC('GET', `/tasks/${tA}`)).data.can.reassign, 'tarefa entregue para conferência não troca de responsável');
 
   console.log('Check-list (itens, responsáveis por item, foto obrigatória, conferência)');
@@ -652,7 +655,7 @@ async function main() {
   ok((await felipeC('POST', `/tasks/${clId}/items/${iPint}/answer`, { result: 'na' })).status === 200, 'N/A não exige foto');
   cl = (await marcos('POST', `/tasks/${clId}/items/${iPia}/answer`, { result: 'nao_conforme', note: 'Sifão gotejando', images: [{ data: tinyPng() }] })).data;
   ok(cl.checklist.items[1].result === 'nao_conforme' && cl.checklist.items[1].note === 'Sifão gotejando', 'responsável global responde item sem responsável, com observação');
-  ok(!cl.checklist.check.ok && (await marcos('POST', `/tasks/${clId}/actions/submit`)).status === 400, 'envio bloqueado com item sem resposta');
+  ok(!cl.checklist.check.ok && (await marcos('POST', `/tasks/${clId}/actions/submit`, SD)).status === 400, 'envio bloqueado com item sem resposta');
   cl = (await marcos('POST', `/tasks/${clId}/items/${iRej}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] })).data;
   ok(cl.history.some(h => h.action === 'Item do check-list respondido' && h.details.includes('em nome de Carlos Pintor')), 'líder responde o item do terceirizado sem acesso (histórico "em nome de")');
   ok((await felipeC('POST', `/tasks/${clId}/items`, { items: [{ text: 'Novo' }] })).status === 403, 'responsável só de itens não altera a lista do check-list');
@@ -721,12 +724,12 @@ async function main() {
   const byType = (await ricardo('GET', '/tasks?tipo=checklist')).data;
   ok(byType.every(t => t.task_type === 'checklist') && byType.some(t => t.id === clId), 'filtro por tipo Check-list');
   ok((await ana('GET', `/tasks/${clId}`)).data.can.delete === false, 'check-list com itens respondidos não pode ser excluído definitivamente');
-  ok((await marcos('POST', `/tasks/${clId}/actions/submit`)).status === 400 && (await marcos('GET', `/tasks/${clId}`)).data.checklist.check.missing.some(m => m.includes('não conformidade')), 'não conformidade em aberto bloqueia o envio');
+  ok((await marcos('POST', `/tasks/${clId}/actions/submit`, SD)).status === 400 && (await marcos('GET', `/tasks/${clId}`)).data.checklist.check.missing.some(m => m.includes('não conformidade')), 'não conformidade em aberto bloqueia o envio');
   await marcos('POST', `/tasks/${clId}/items/${iPia}/answer`, { result: 'conforme', images: [{ data: tinyPng() }] });
-  cl = (await marcos('POST', `/tasks/${clId}/actions/submit`)).data;
+  cl = (await marcos('POST', `/tasks/${clId}/actions/submit`, SD)).data;
   ok(cl.status === 'aguardando_conferencia' && cl.cl_total === 5 && cl.cl_done === 5 && cl.cl_nc === 0 && cl.checklist.summary.nc_total === 7, `tudo Conforme/N/A: vai para conferência, guardando as não conformidades no histórico (5 cadastradas com foto + 2 respondidas = ${cl.checklist.summary.nc_total})`);
   ok((await brunoC('POST', `/tasks/${clId}/items/${iTom}/answer`, { result: 'na' })).status === 400, 'depois de entregue os itens não mudam');
-  ok((await ricardo('POST', `/tasks/${clId}/actions/approve`, {})).data.status === 'concluida', 'gestor confere e conclui o check-list');
+  ok((await ricardo('POST', `/tasks/${clId}/actions/approve`, SD)).data.status === 'concluida', 'gestor confere e conclui o check-list');
   const clLivre = (await ricardo('POST', '/tasks', { ...clBase, photo_rule: 'livre', items: [{ text: 'Item livre' }] })).data.id;
   const clLivreView = (await ricardo('GET', `/tasks/${clLivre}`)).data;
   const il = clLivreView.checklist.items[0].id;
@@ -781,21 +784,21 @@ async function main() {
   // Própria tarefa: executa, envia e aprova
   const tOwn = (await carla('POST', '/tasks', { project_id: 1, title: 'Vistoria do coordenador', description: 'Vistoria', assignee_id: coordId, proof_type: 'descricao', due_date: '2099-04-01' })).data.id;
   await carla('PATCH', `/tasks/${tOwn}/execution`, { exec_description: 'Vistoria realizada.' });
-  let tc = (await carla('POST', `/tasks/${tOwn}/actions/submit`)).data;
+  let tc = (await carla('POST', `/tasks/${tOwn}/actions/submit`, SD)).data;
   ok(tc.status === 'aguardando_conferencia' && tc.can.review, 'coordenador pode conferir a própria entrega');
-  ok((await carla('POST', `/tasks/${tOwn}/actions/approve`, {})).data.status === 'concluida', 'coordenador aprova a própria tarefa');
+  ok((await carla('POST', `/tasks/${tOwn}/actions/approve`, SD)).data.status === 'concluida', 'coordenador aprova a própria tarefa');
   // Tarefa da equipe
   const diego = await login('diego@charao.eng.br', 'diego1234');
   const tTeam = (await carla('POST', '/tasks', { project_id: 1, title: 'Tarefa do Diego', description: 'x', assignee_id: membroId, proof_type: 'descricao', due_date: '2099-04-02' })).data.id;
   await diego('PATCH', `/tasks/${tTeam}/execution`, { exec_description: 'Feito.' });
-  await diego('POST', `/tasks/${tTeam}/actions/submit`);
+  await diego('POST', `/tasks/${tTeam}/actions/submit`, SD);
   ok(!(await diego('GET', `/tasks/${tTeam}`)).data.can.review, 'colaborador continua sem conferir a própria entrega');
-  ok((await carla('POST', `/tasks/${tTeam}/actions/approve`, {})).data.status === 'concluida', 'coordenador aprova a tarefa da equipe');
+  ok((await carla('POST', `/tasks/${tTeam}/actions/approve`, SD)).data.status === 'concluida', 'coordenador aprova a tarefa da equipe');
   // Gestor continua sem aprovar a própria
   const tGest = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Tarefa do gestor', description: 'x', assignee_id: 2, proof_type: 'descricao', due_date: '2099-04-03' })).data.id;
   await ricardo('PATCH', `/tasks/${tGest}/execution`, { exec_description: 'Feito.' });
-  const tg = (await ricardo('POST', `/tasks/${tGest}/actions/submit`)).data;
-  ok(!tg.can.review && (await ricardo('POST', `/tasks/${tGest}/actions/approve`, {})).status === 403, 'gestor continua sem aprovar a própria tarefa');
+  const tg = (await ricardo('POST', `/tasks/${tGest}/actions/submit`, SD)).data;
+  ok(!tg.can.review && (await ricardo('POST', `/tasks/${tGest}/actions/approve`, SD)).status === 403, 'gestor continua sem aprovar a própria tarefa');
   ok((await carla('GET', '/projects')).data.every(p => p.id === 1 || p.lead_id === coordId), 'coordenador respeita a restrição por projeto');
 
   console.log('Administração de usuários');
@@ -894,7 +897,7 @@ async function main() {
   const xE = await mkDep('Dep E (atrasada)', '2020-01-01', '2020-01-05');
   const xF = await mkDep('Dep F', '2020-01-06', '2020-01-08');
   await ricardo('POST', '/dependencies', { pred: `t:${xE}`, succ: `t:${xF}` });
-  await ricardo('POST', `/tasks/${xE}/actions/conclude`, { comment: 'Concluída com atraso' });
+  await ricardo('POST', `/tasks/${xE}/actions/conclude`, { ...SD, comment: 'Concluída com atraso' });
   const dpVF = (await ricardo('GET', `/tasks/${xF}`)).data;
   ok(dpVF.start_date > '2020-01-06' && dpVF.due_date > '2020-01-08' && !dpVF.reschedule_count && (await ricardo('GET', `/tasks/${xE}`)).data.impact?.tasks === 1,
     'predecessora concluída com atraso empurra a sucessora (sem penalizá-la) e registra o impacto');
@@ -1034,7 +1037,17 @@ async function main() {
   pgV = (await marcos('POST', `/tasks/${pgT}/progress`, { progress: null })).data;
   ok(pgV.progress_pct === null && pgV.history.some(h => h.action === 'Avanço removido'), 'avanço pode ser removido (opcional)');
   const pgSub = (await ricardo('POST', '/tasks', { parent_id: pgT, title: 'Sub com avanço', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma' })).data.id;
-  ok((await marcos('POST', `/tasks/${pgSub}/progress`, { progress: 75 })).data.progress_pct === 75, 'subtarefa aceita avanço');
+  const pgNoStart = await marcos('POST', `/tasks/${pgSub}/progress`, { progress: 75 });
+  ok(pgNoStart.status === 400 && /data de início/.test(pgNoStart.data.error), 'subtarefa sem data de início: avanço exige informar o início');
+  ok((await marcos('POST', `/tasks/${pgSub}/progress`, { progress: 75, start_date: '2099-01-01' })).status === 400, 'data de início no futuro é recusada');
+  const pgSubV = (await marcos('POST', `/tasks/${pgSub}/progress`, { progress: 75, start_date: '2026-01-05' })).data;
+  ok(pgSubV.progress_pct === 75 && pgSubV.start_date === '2026-01-05' && pgSubV.history.some(h => h.action === 'Data de início informada'), 'subtarefa aceita avanço com a data de início (gravada no histórico)');
+  // Enviar e concluir sem data de início também exigem informar o início
+  const nsT = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Sem início', description: 'x', assignee_id: 4, priority: 'media', proof_type: 'nenhuma' })).data.id;
+  const nsSub = await marcos('POST', `/tasks/${nsT}/actions/submit`);
+  ok(nsSub.status === 400 && /data de início/.test(nsSub.data.error), 'enviar para conferência sem data de início é bloqueado');
+  ok((await ricardo('POST', `/tasks/${nsT}/actions/conclude`, {})).status === 400, 'concluir diretamente sem data de início é bloqueado');
+  ok((await ricardo('POST', `/tasks/${nsT}/actions/conclude`, { start_date: '2026-02-02' })).data.start_date === '2026-02-02', 'concluir informando a data de início');
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

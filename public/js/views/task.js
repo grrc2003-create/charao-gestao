@@ -3,7 +3,7 @@ import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmt
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
 import { pageHead, NAV_SEQ_KEY, doneToggle, bindDoneToggle } from './shared.js';
 import { replaceNextRoute } from '../navhist.js';
-import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
+import { pctBar, progressSheet, bindProgressSheet, startField } from './progress-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 
@@ -316,9 +316,11 @@ function mount(root, t, ctx) {
     onSubmit: data => api(`/tasks/${t.id}/execution`, { method: 'PATCH', body: { [field]: data.text } }),
   });
 
+  // Sem data de início (tarefa/subtarefa): avanço, envio e conclusão pedem a data
+  const needStart = !t.start_date && !t.checklist;
   const actions = {
     progress: async () => {
-      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa' });
+      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart });
       bindProgressSheet();
       const r = await pending;
       if (r) run(() => api(`/tasks/${t.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.' : `Avanço: ${r.progress}%.`);
@@ -405,13 +407,23 @@ function mount(root, t, ctx) {
     refs: () => upload('referencia'),
     start: () => run(() => api(`/tasks/${t.id}/actions/start`, { method: 'POST' }), 'Execução iniciada.'),
     submit: async () => {
+      if (needStart) {
+        const r = await sheet({
+          title: 'Enviar para conferência',
+          body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${startField()}`,
+          submitLabel: 'Enviar',
+          onSubmit: d => api(`/tasks/${t.id}/actions/submit`, { method: 'POST', body: d }),
+        });
+        if (r) { toast('Enviada para conferência.'); refresh(r); }
+        return;
+      }
       if (!(await confirmSheet('Enviar para conferência', 'A tarefa ficará bloqueada para edição até a conferência. Deseja enviar?', 'Enviar'))) return;
       run(() => api(`/tasks/${t.id}/actions/submit`, { method: 'POST' }), 'Enviada para conferência.');
     },
     approve: async () => {
       const r = await sheet({
         title: 'Aprovar e concluir',
-        body: html`<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+        body: html`${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
         submitLabel: 'Aprovar',
         onSubmit: d => api(`/tasks/${t.id}/actions/approve`, { method: 'POST', body: d }),
       });
@@ -431,7 +443,7 @@ function mount(root, t, ctx) {
       const r = await sheet({
         title: 'Concluir diretamente',
         body: html`<p class="muted">Use quando a conferência já foi feita pessoalmente. A ação fica registrada no histórico.</p>
-          <div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+          ${needStart ? startField() : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
         submitLabel: 'Concluir',
         onSubmit: d => api(`/tasks/${t.id}/actions/conclude`, { method: 'POST', body: d }),
       });

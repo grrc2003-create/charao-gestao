@@ -32,6 +32,13 @@ function usersMap() {
   return new Map(all(`SELECT ${PUBLIC_FIELDS} FROM users`).map(u => [u.id, u]));
 }
 
+// Média de execução em dias úteis (calendário de cada obra), do início à conclusão real
+function execWorkDaysAvg(own) {
+  const acts = own.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
+  return acts.length ? Math.round((acts.reduce((n, a) => n + a.work_days, 0) / acts.length) * 10) / 10 : null;
+}
+const withExec = (st, tasks, userId) => ({ ...st, exec_work_days_avg: execWorkDaysAvg(tasks.filter(t => t.assignee_id === userId)) });
+
 export function listUsers(ctx, tasks = listVisible(ctx)) {
   const map = usersMap();
   const rows = [...map.values()].filter(u => canSeeUser(ctx, u.id));
@@ -39,7 +46,7 @@ export function listUsers(ctx, tasks = listVisible(ctx)) {
     ...publicUser(ctx, u),
     manager_name: map.get(u.manager_id)?.name || null,
     team_size: teamIds(u.id).size,
-    stats: userStats(u, tasks, map),
+    stats: withExec(userStats(u, tasks, map), tasks, u.id),
   })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
@@ -52,17 +59,12 @@ export function getUser(ctx, id) {
   const own = tasks.filter(t => t.assignee_id === id);
   const team = teamIds(id);
   const teamMembers = [...team].map(tid => map.get(tid)).filter(Boolean).filter(m => canSeeUser(ctx, m.id))
-    .map(m => ({ id: m.id, name: m.name, job_title: m.job_title, role: m.role, stats: userStats(m, tasks, map) }));
+    .map(m => ({ id: m.id, name: m.name, job_title: m.job_title, role: m.role, stats: withExec(userStats(m, tasks, map), tasks, m.id) }));
   const teamTasks = tasks.filter(t => team.has(t.assignee_id));
   const projects = all('SELECT project_id FROM user_project_access WHERE user_id = ?', id).map(r => r.project_id);
   return {
     user: { ...publicUser(ctx, u), manager_name: map.get(u.manager_id)?.name || null, project_ids: projects },
-    stats: (() => {
-      const st = userStats(u, tasks, map);
-      const acts = own.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
-      st.exec_work_days_avg = acts.length ? Math.round((acts.reduce((n, a) => n + a.work_days, 0) / acts.length) * 10) / 10 : null;
-      return st;
-    })(),
+    stats: withExec(userStats(u, tasks, map), tasks, id),
     trend: monthlyTrend(own),
     chronic_min: getSetting('chronic_reschedule_threshold'),
     checklists: checklistDashboard(tasks, { userId: id }),

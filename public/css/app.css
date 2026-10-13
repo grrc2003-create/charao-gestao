@@ -1470,3 +1470,6 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 .kpis.kpis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 699px) { .kpis.kpis-3 { grid-template-columns: 1fr; } }
 .kpis-exec { margin-top: 10px; }
+
+/* Desempenho por usuário: indicadores de execução */
+.rank-metrics .warn b { color: #B7791F; }

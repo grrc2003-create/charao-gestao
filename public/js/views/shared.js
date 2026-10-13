@@ -105,6 +105,9 @@ export const userRankRow = (u, i) => html`<li><a class="row-link rank" href="#/u
     <div><b>${u.stats.done}</b>concluídas</div>
     <div class="late"><b>${u.stats.late}</b>atrasadas</div>
     <div><b>${u.stats.assigned}</b>atribuídas</div>
+    <div title="Média de dias úteis do início à conclusão real"><b>${String(u.stats.exec_work_days_avg ?? u.stats.exec_days_avg ?? '—').replace('.', ',')}</b>${u.stats.exec_work_days_avg !== null && u.stats.exec_work_days_avg !== undefined ? 'dias úteis/exec.' : 'dias/exec.'}</div>
+    <div class="ok" title="Entregas antes do prazo"><b>${u.stats.early ?? 0}</b>antecipadas</div>
+    <div class="${u.stats.filling_delays ? 'warn' : ''}" title="Conclusões registradas depois do dia real${u.stats.filling_delays ? ` · média ${u.stats.filling_delay_days_avg} dia(s)` : ''}"><b>${u.stats.filling_delays ?? 0}</b>atr. preench.</div>
   </div><span class="chev">${icon('chevron')}</span></a></li>`;
 
 // Concluída após o prazo vigente: selo com os dias de atraso da entrega

@@ -1,6 +1,6 @@
 import { html, api, icon, PROJECT_STATUS, fmtDate, fmtPct, progress, todayISO } from '../core.js';
 import { toast } from '../ui.js';
-import { pageHead, stackBar, bindCommon, STATUS_COLOR } from './shared.js';
+import { pageHead, stackBar, bindCommon, STATUS_COLOR, execInline } from './shared.js';
 
 export async function list({ state, query, setQuery }) {
   const [projects, types] = await Promise.all([api('/projects'), api('/settings/project-types', { query: { all: '1' } }).catch(() => [])]);
@@ -22,6 +22,7 @@ export async function list({ state, query, setQuery }) {
       ${stackBar(p.summary.by_status)}
       <div class="stat-inline"><span><b>${p.summary.total}</b> tarefas</span><span><b>${p.summary.in_progress}</b> em andamento</span>
         <span style="color:${p.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${p.summary.late}</b> atrasadas</span></div>
+      ${execInline(p.summary)}
       ${p.lead_name || p.start_date || p.end_date ? html`<div class="stat-inline">${p.lead_name ? html`<span>${icon('user')} ${p.lead_name}</span>` : ''}${p.start_date || p.end_date ? html`<span>${icon('calendar')} ${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}</span>` : ''}</div>` : ''}
     </div></a>`;
 

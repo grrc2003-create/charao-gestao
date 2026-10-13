@@ -1,7 +1,7 @@
 // Tela interna da tarefa — prioriza o celular: informações principais, Solicitação, Execução e Histórico.
 import { html, api, icon, STATUS, PROOF, PRIORITY, statusBadge, priorityTag, fmtDate, fmtDateTime, dueInfo, avatar, progress } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySize, lightbox, galleryFrom, fileInput } from '../ui.js';
-import { pageHead, NAV_SEQ_KEY, doneToggle, bindDoneToggle } from './shared.js';
+import { pageHead, NAV_SEQ_KEY, doneToggle, bindDoneToggle, execInline } from './shared.js';
 import { replaceNextRoute } from '../navhist.js';
 import { pctBar, progressSheet, bindProgressSheet, startField, doneDateField } from './progress-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
@@ -124,7 +124,9 @@ function build(t, ctx) {
       <section class="card block" aria-labelledby="blk-sub">
         <header class="block-head"><span class="step" style="background:var(--navy-700)">${icon('tasks')}</span><h2 id="blk-sub">Subtarefas</h2>
           <span class="right muted" style="font-size:12px">${activeSubs.length ? `${subDone} de ${activeSubs.length} concluídas` : ''}${t.subtasks.length > activeSubs.length ? ` · ${t.subtasks.length - activeSubs.length} cancelada(s)` : ''}</span></header>
-        ${t.subtasks.length ? html`<div style="padding:12px 16px 0">${progress(activeSubs.length ? Math.round((subDone / activeSubs.length) * 100) : 0, 'Subtarefas concluídas')}</div>
+        ${t.subtasks.length ? html`<div style="padding:12px 16px 0">${progress(activeSubs.length ? Math.round((subDone / activeSubs.length) * 100) : 0, 'Subtarefas concluídas')}
+            ${t.sub_summary?.exec_count || t.sub_summary?.early || t.sub_summary?.filling_delays ? html`<div class="sub-exec"><span class="sub-label" style="margin:8px 0 2px">Desempenho das subtarefas</span>
+              <div class="exec-inline"><span><b>${t.sub_summary.on_time_pct === null ? '—' : String(t.sub_summary.on_time_pct).replace('.', ',') + '%'}</b> no prazo</span></div>${execInline(t.sub_summary)}</div>` : ''}</div>
           ${subDoneN ? html`<div class="done-bar" style="padding:8px 16px 0">${doneToggle(subDoneN)}</div>` : ''}
           <ul class="rows">${t.subtasks.map(subtaskRow)}</ul>` : html`<div class="block-body"><p class="muted" style="margin:0">Divida esta tarefa em etapas com responsável, prazo e comprovação próprios.</p></div>`}
         ${can.add_subtask ? html`<div class="block-body" style="padding-top:8px"><a class="btn btn-ghost" href="#/tarefas/nova?pai=${t.id}">${icon('plus')}Adicionar subtarefa</a></div>` : ''}

@@ -3,7 +3,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
   canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
-import { decorate, today, daysBetween, localDate } from './metrics.js';
+import { decorate, today, daysBetween, localDate, summarize } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
@@ -193,6 +193,14 @@ export function actualOf(t) {
   };
 }
 
+// Média de execução em dias úteis (calendário de cada obra), do início à conclusão real
+export function execWorkDaysAvg(tasks) {
+  const acts = tasks.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
+  return acts.length ? Math.round((acts.reduce((n, a) => n + a.work_days, 0) / acts.length) * 10) / 10 : null;
+}
+// Resumo com os indicadores de execução (antecipadas, atraso de preenchimento e média em dias úteis)
+export const execSummary = tasks => ({ ...summarize(tasks), exec_work_days_avg: execWorkDaysAvg(tasks) });
+
 export function getTask(ctx, id) {
   const t = loadVisible(ctx, id);
   const files = all(`SELECT f.id, f.kind, f.mime, f.size, f.caption, f.original_name, f.created_at, f.uploaded_by, u.name AS uploaded_by_name
@@ -212,6 +220,8 @@ export function getTask(ctx, id) {
   return {
     ...dec, files, history, subtasks,
     actual: actualOf(dec),
+    // Subtarefas: indicadores de desempenho do conjunto
+    sub_summary: subtasks.length ? execSummary(subtasks) : null,
     reschedules: entries,
     chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),

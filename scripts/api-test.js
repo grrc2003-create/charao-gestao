@@ -1107,6 +1107,13 @@ async function main() {
   ok(ust.exec_days_avg > 0 && ust.exec_work_days_avg > 0 && ust.exec_count > 0, `média de dias de execução (${ust.exec_days_avg} corridos · ${ust.exec_work_days_avg} úteis)`);
   ok(ust.early >= 2 && ust.early_days_avg > 0, `tarefas antecipadas contadas (${ust.early})`);
   ok(ust.filling_delays >= 3 && ust.filling_delay_days_avg > 0 && ust.behavior.some(b => /atraso de preenchimento/.test(b)), `atraso de preenchimento contado (${ust.filling_delays}) e no resumo do comportamento`);
+  // Os mesmos indicadores por projeto, por classificação e nas subtarefas de uma tarefa
+  const pj1 = (await ricardo('GET', '/projects/1')).data;
+  ok(pj1.summary.exec_count > 0 && pj1.summary.early >= 1 && pj1.summary.filling_delays >= 1 && pj1.summary.exec_work_days_avg > 0, 'projeto: média de execução, antecipadas e atraso de preenchimento');
+  ok(pj1.stages.some(st => st.summary.exec_count > 0 && 'filling_delays' in st.summary && 'exec_work_days_avg' in st.summary), 'classificações trazem os indicadores de execução');
+  ok((await ricardo('GET', '/projects')).data.find(x => x.id === 1).summary.exec_work_days_avg > 0, 'lista de projetos traz a média de execução');
+  const sumT = (await ricardo('GET', `/tasks/${pgT}`)).data;
+  ok(sumT.sub_summary && sumT.sub_summary.total >= 1 && 'early' in sumT.sub_summary, 'tarefa com subtarefas traz o desempenho das subtarefas');
   const pgCl = (await ricardo('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'CL avanço', assignee_id: 4, photo_rule: 'livre', items: [{ text: 'Item A', start_date: '2099-08-03', due_date: '2099-08-05' }, { text: 'Item B' }] })).data.id;
   let pgClV = (await ricardo('GET', `/tasks/${pgCl}`)).data;
   ok((await marcos('POST', `/tasks/${pgCl}/progress`, { progress: 10 })).status === 400, 'check-list: avanço vem dos itens, não é informado na tarefa');

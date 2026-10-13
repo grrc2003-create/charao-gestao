@@ -38,6 +38,29 @@ export function kpi({ label, value, unit, foot, color, href, hero, pct }) {
 }
 
 // Bloco padrão de indicadores a partir de um resumo do backend
+// Indicadores de execução: média de dias (úteis) do início à conclusão real, antecipadas e atraso de preenchimento
+const dec = v => String(v).replace('.', ',');
+export function execKpis(s, { title = '' } = {}) {
+  if (!s) return '';
+  const avg = s.exec_work_days_avg ?? null;
+  return html`${title ? html`<div class="sub-label section">${title}</div>` : ''}<div class="kpis kpis-3 ${title ? '' : 'section'} kpis-exec">
+    ${kpi({ label: 'Média de execução', value: avg !== null ? dec(avg) : s.exec_days_avg !== null && s.exec_days_avg !== undefined ? dec(s.exec_days_avg) : '—', unit: s.exec_count ? (avg !== null ? ' dias úteis' : ' dias') : '', color: '#2A3D50',
+      foot: s.exec_count ? `${dec(s.exec_days_avg)} dias corridos · do início à conclusão real · ${s.exec_count} entrega(s)` : 'sem entregas ainda' })}
+    ${kpi({ label: 'Tarefas antecipadas', value: s.early ?? 0, color: STATUS_COLOR.concluida, foot: s.early ? `${fmtPct(s.early_pct)} das entregas · em média ${dec(s.early_days_avg)} dia(s) antes do prazo` : 'nenhuma entrega antes do prazo' })}
+    ${kpi({ label: 'Atraso de preenchimento', value: s.filling_delays ?? 0, color: '#B7791F', foot: s.filling_delays ? `conclusões registradas depois do dia real · média ${dec(s.filling_delay_days_avg)} dia(s)` : 'todas registradas no dia da conclusão' })}
+  </div>`;
+}
+// Versão em linha (listas: classificações, projetos, pessoas, subtarefas)
+export function execInline(s) {
+  if (!s || !(s.exec_count || s.early || s.filling_delays)) return '';
+  const avg = s.exec_work_days_avg ?? s.exec_days_avg;
+  return html`<div class="exec-inline">
+    ${avg !== null && avg !== undefined ? html`<span title="Média do início à conclusão real">⏱ <b>${dec(avg)}</b> ${s.exec_work_days_avg !== null && s.exec_work_days_avg !== undefined ? 'dias úteis' : 'dias'}/exec.</span>` : ''}
+    <span class="ok" title="Entregas antes do prazo">✓ <b>${s.early || 0}</b> antecipada(s)</span>
+    <span class="${s.filling_delays ? 'warn' : ''}" title="Conclusões registradas depois do dia real${s.filling_delays ? ` · média ${dec(s.filling_delay_days_avg)} dia(s)` : ''}">✎ <b>${s.filling_delays || 0}</b> atr. preench.</span>
+  </div>`;
+}
+
 export function kpiBlock(s, { linkBase, extra = [] } = {}) {
   const link = st => (linkBase ? `${linkBase}${linkBase.includes('?') ? '&' : '?'}status=${st}` : undefined);
   return html`<div class="kpis">
@@ -93,6 +116,7 @@ export const projectRow = p => html`<li><a class="row-link proj-row" href="#/pro
     ${progress(p.summary.completion_pct ?? 0, `Conclusão de ${p.name}`)}
     <div class="proj-stats"><span><b>${p.summary.total}</b> tarefas</span><span><b>${p.summary.in_progress}</b> em andamento</span>
       <span style="color:${p.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${p.summary.late}</b> atrasadas</span><span><b>${p.summary.done}</b> concluídas</span></div>
+    ${execInline(p.summary)}
   </div>
   <div class="proj-pct">${fmtPct(p.summary.completion_pct ?? 0)}</div>
   <span class="chev">${icon('chevron')}</span></a></li>`;

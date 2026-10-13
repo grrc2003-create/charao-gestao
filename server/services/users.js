@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/h
 import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend } from './metrics.js';
-import { listVisible, actualOf } from './tasks.js';
+import { listVisible, execWorkDaysAvg } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
 import { checklistDashboard } from './checklist.js';
@@ -32,11 +32,6 @@ function usersMap() {
   return new Map(all(`SELECT ${PUBLIC_FIELDS} FROM users`).map(u => [u.id, u]));
 }
 
-// Média de execução em dias úteis (calendário de cada obra), do início à conclusão real
-function execWorkDaysAvg(own) {
-  const acts = own.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
-  return acts.length ? Math.round((acts.reduce((n, a) => n + a.work_days, 0) / acts.length) * 10) / 10 : null;
-}
 const withExec = (st, tasks, userId) => ({ ...st, exec_work_days_avg: execWorkDaysAvg(tasks.filter(t => t.assignee_id === userId)) });
 
 export function listUsers(ctx, tasks = listVisible(ctx)) {

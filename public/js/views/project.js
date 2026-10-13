@@ -1,5 +1,5 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
-import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR } from './shared.js';
+import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
@@ -38,6 +38,7 @@ export async function view({ params, query, setQuery, render }) {
       })}
 
       ${kpiBlock(p.summary)}
+      ${execKpis(p.summary)}
       ${checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` })}
 
       <div class="grid grid-dash section">
@@ -72,7 +73,8 @@ export async function view({ params, query, setQuery, render }) {
           <div class="grow"><div class="row-title"><span class="stage-tag">${s.name}</span>${s.is_default ? html`<span class="muted" style="font-size:12px">sem classificação específica</span>` : ''}</div>
             ${progress(s.summary.completion_pct ?? 0, `Conclusão de ${s.name}`)}
             <div class="proj-stats"><span><b>${s.summary.total}</b> tarefas</span><span><b>${s.summary.in_progress}</b> em andamento</span>
-              <span style="color:${s.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.summary.late}</b> atrasadas</span><span><b>${s.summary.done}</b> concluídas</span></div></div>
+              <span style="color:${s.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.summary.late}</b> atrasadas</span><span><b>${s.summary.done}</b> concluídas</span></div>
+            ${execInline(s.summary)}</div>
           <div class="proj-pct">${fmtPct(s.summary.completion_pct ?? 0)}</div></button></li>`)}</ul>
       </section>` : ''}
 
@@ -135,5 +137,6 @@ export async function view({ params, query, setQuery, render }) {
 
 const personRow = u => html`${avatar(u.name, 'sm')}<div class="grow"><div class="row-title">${u.name}</div>
   <div class="row-meta"><span>${u.summary.total} tarefas</span><span>${u.summary.done} concluídas</span>
-  <span style="color:${u.summary.late ? STATUS_COLOR.atrasada : ''}">${u.summary.late} atrasadas</span><span>${fmtPct(u.summary.on_time_pct)} no prazo</span></div></div>
+  <span style="color:${u.summary.late ? STATUS_COLOR.atrasada : ''}">${u.summary.late} atrasadas</span><span>${fmtPct(u.summary.on_time_pct)} no prazo</span></div>
+  ${execInline(u.summary)}</div>
   <b style="font-variant-numeric:tabular-nums">${fmtPct(u.summary.completion_pct ?? 0)}</b>`;

@@ -1,5 +1,5 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
-import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, stackBar, STATUS_COLOR } from './shared.js';
+import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, stackBar, STATUS_COLOR, execInline } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
@@ -20,6 +20,7 @@ function typeAnalysis(rows) {
         <div class="proj-stats"><span><b>${s.total}</b> tarefas</span><span><b>${s.in_progress}</b> em andamento</span>
           <span style="color:${s.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.late}</b> atrasadas (${lateRate}%)</span>
           <span><b>${fmtPct(s.on_time_pct)}</b> entregas no prazo</span>${s.avg_delay_days ? html`<span><b>${s.avg_delay_days.toLocaleString('pt-BR')}</b> dias de atraso médio</span>` : ''}</div>
+        ${execInline(s)}
       </div>
       <div class="proj-pct">${fmtPct(s.completion_pct ?? 0)}<small>concluído</small></div>
       <span class="chev">${icon('chevron')}</span></a></li>`;

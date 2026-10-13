@@ -1473,3 +1473,10 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 
 /* Desempenho por usuário: indicadores de execução */
 .rank-metrics .warn b { color: #B7791F; }
+
+/* Indicadores de execução em linha */
+.exec-inline { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.exec-inline b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.exec-inline .ok b { color: var(--st-concluida); }
+.exec-inline .warn b { color: #B7791F; }
+.sub-exec .exec-inline { margin-top: 2px; }

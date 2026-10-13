@@ -3,7 +3,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } from '../lib/permissions.js';
 import { summarize, monthlyTrend } from './metrics.js';
-import { listVisible, listCancelled } from './tasks.js';
+import { listVisible, listCancelled, execSummary } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
 import { getSetting, validTemplateId, validProjectTypeId } from './settings.js';
@@ -44,7 +44,7 @@ export function listProjects(ctx, tasks = listVisible(ctx)) {
   const rows = all(`${BASE} ORDER BY p.kind = 'interno', p.code`).filter(p => canAccessProject(ctx.user, p.id, ctx.projects));
   return rows.map(p => {
     const pt = tasks.filter(t => t.project_id === p.id);
-    return { ...p, members: members(p.id), summary: summarize(pt), can_edit: canManageProject(ctx, p.id) };
+    return { ...p, members: members(p.id), summary: execSummary(pt), can_edit: canManageProject(ctx, p.id) };
   });
 }
 
@@ -59,10 +59,10 @@ export function getProject(ctx, id) {
     if (!byUser.has(k)) byUser.set(k, { id: t.assignee_id, name: t.assignee_name || 'Sem responsável', tasks: [] });
     byUser.get(k).tasks.push(t);
   }
-  const people = [...byUser.values()].map(u => ({ id: u.id, name: u.name, summary: summarize(u.tasks) }))
+  const people = [...byUser.values()].map(u => ({ id: u.id, name: u.name, summary: execSummary(u.tasks) }))
     .sort((a, b) => b.summary.total - a.summary.total);
   // Andamento por classificação (Grupo/Local/Etapa)
-  const stages = listStages(id).map(s => ({ ...s, summary: summarize(tasks.filter(t => t.stage_id === s.id)) }));
+  const stages = listStages(id).map(s => ({ ...s, summary: execSummary(tasks.filter(t => t.stage_id === s.id)) }));
   return {
     ...p,
     stages,
@@ -71,7 +71,7 @@ export function getProject(ctx, id) {
     recurrences: listRecurrences(ctx, { project: id }),
     chronic_min: getSetting('chronic_reschedule_threshold'),
     members: members(id),
-    summary: summarize(tasks),
+    summary: execSummary(tasks),
     checklists: checklistDashboard(tasks),
     tasks,
     people,
@@ -193,7 +193,7 @@ export function analysisByType(projects, units) {
       projects: ps.length,
       active_projects: ps.filter(p => ['planejamento', 'em_andamento', 'pausado'].includes(p.status)).length,
       done_projects: ps.filter(p => p.status === 'concluido').length,
-      summary: summarize(units.filter(u => ids.has(u.project_id))),
+      summary: execSummary(units.filter(u => ids.has(u.project_id))),
     };
   }).filter(t => t.projects);
 }

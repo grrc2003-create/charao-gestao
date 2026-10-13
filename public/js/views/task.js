@@ -93,7 +93,7 @@ function build(t, ctx) {
         ${pc.need_desc ? html`<li class="${pc.has_desc ? 'ok' : 'no'}">${pc.has_desc ? '✓' : '○'} Descrição da execução</li>` : ''}
         ${!pc.need_photo && !pc.need_desc ? html`<li class="ok">✓ Nenhuma comprovação obrigatória</li>` : ''}
       </ul>
-      <button type="button" class="btn btn-success btn-block ${canSend ? 'hide-mobile' : ''}" data-act="submit" ${canSend ? '' : 'disabled'}>${icon('send')}Enviar para conferência</button>
+      <button type="button" class="btn btn-success btn-block ${canSend ? 'hide-mobile' : ''}" data-act="submit" aria-disabled="${canSend ? 'false' : 'true'}" data-why="${!pc.ok ? `Para enviar, registre: ${pc.missing.join(' e ')}.` : subPending ? `Conclua antes ${subPending} subtarefa(s) pendente(s).` : ''}">${icon('send')}Enviar para conferência</button>
       ${!pc.ok ? html`<span class="muted" style="font-size:12.5px">Para enviar, registre: ${pc.missing.join(' e ')}.</span>` : ''}
       ${subPending ? html`<span class="muted" style="font-size:12.5px">Conclua antes ${subPending} subtarefa(s) pendente(s).</span>` : ''}
     </div>` : '';
@@ -167,7 +167,7 @@ function build(t, ctx) {
           <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}
             ${t.assignee_external ? html`<small>Terceirizado${t.assignee_company ? ` · ${t.assignee_company}` : ''} · líder: ${t.assignee_leader_name || '—'}</small>` : ''}</div></div>
           <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}
-            ${t.parent_id && can.edit ? html`<button type="button" class="btn btn-ghost btn-sm due-parent" data-act="parentdates" ${t.start_date || t.due_date ? 'disabled' : ''}
+            ${t.parent_id && can.edit ? html`<button type="button" class="btn btn-ghost btn-sm due-parent" data-act="parentdates" aria-disabled="${t.start_date || t.due_date ? 'true' : 'false'}"
               title="${t.start_date || t.due_date ? 'Disponível só quando a subtarefa está sem início e sem término' : 'Copia o início e o término da tarefa principal'}">${icon('calendar')}Usar datas da tarefa principal</button>` : ''}
             ${t.start_date || t.due_date ? html`<span class="due-range">Início ${t.start_date ? fmtDate(t.start_date) : '—'} → término ${t.due_date ? fmtDate(t.due_date) : '—'}${t.work_days !== null && t.work_days !== undefined ? html` · <b>${t.work_days} dia${t.work_days === 1 ? '' : 's'} út${t.work_days === 1 ? 'il' : 'eis'}</b> (${t.calendar_days} corridos)` : ''}</span>` : ''}<small>${t.cancelled_at ? 'Tarefa cancelada' : can.due_from_items && !t.delivered ? `${relDue(t)} · maior prazo dos itens` : t.due_date && !t.delivered ? relDue(t) : t.on_time === true ? 'Entregue no prazo' : t.on_time === false ? `Entregue com ${t.days_late}d de atraso` : ''}</small>
             <span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">

@@ -84,7 +84,7 @@ const stageItem = s => html`<li class="stage-item" data-id="${s.id || ''}">
   <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
   <input type="text" maxlength="60" value="${s.name}" aria-label="Nome da classificação" required>
   <span class="stage-count">${s.task_count ? `${s.task_count} tarefa(s)` : 'sem tarefas'}</span>
-  <button type="button" class="icon-btn" data-rm ${s.task_count ? 'disabled' : ''} aria-label="Remover classificação"
+  <button type="button" class="icon-btn" data-rm aria-disabled="${s.task_count ? 'true' : 'false'}" aria-label="Remover classificação"
     title="${s.task_count ? 'Possui tarefas: reclassifique-as antes de remover' : 'Remover'}">✕</button></li>`;
 
 export async function form({ params, query, state, navigate, reloadMeta }) {

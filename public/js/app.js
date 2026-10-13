@@ -1,6 +1,7 @@
 // Aplicação: sessão, layout (shell) e roteamento por hash.
 import { api, html, icon, avatar, ROLE, brandMark } from './core.js';
 import { toast } from './ui.js';
+import './required.js';
 import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';

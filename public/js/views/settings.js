@@ -8,7 +8,7 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
   <input type="text" maxlength="120" value="${r.name}" aria-label="Texto da justificativa" required>
   <label class="reason-active" title="Inativas não aparecem para novos reagendamentos"><input type="checkbox" data-active ${r.active ? 'checked' : ''}><span>Ativa</span></label>
   <span class="stage-count">${r.use_count ? `usada ${r.use_count}x` : 'nunca usada'}</span>
-  <button type="button" class="icon-btn" data-rm ${r.use_count ? 'disabled' : ''} aria-label="Excluir justificativa"
+  <button type="button" class="icon-btn" data-rm aria-disabled="${r.use_count ? 'true' : 'false'}" aria-label="Excluir justificativa"
     title="${r.use_count ? 'Já usada: inative em vez de excluir' : 'Excluir'}">✕</button></li>`;
 
 const typeItem = t => html`<li class="stage-item reason-item type-item ${t.active ? '' : 'is-inactive'}" data-id="${t.id || ''}">
@@ -16,7 +16,7 @@ const typeItem = t => html`<li class="stage-item reason-item type-item ${t.activ
   <input type="text" maxlength="60" value="${t.name}" aria-label="Nome do tipo" required>
   <label class="reason-active" title="Inativos não aparecem para novos projetos"><input type="checkbox" data-active ${t.active ? 'checked' : ''}><span>Ativo</span></label>
   <span class="stage-count">${t.use_count ? `${t.use_count} projeto(s)` : 'nenhum projeto'}</span>
-  <button type="button" class="icon-btn" data-rm ${t.use_count ? 'disabled' : ''} aria-label="Excluir tipo"
+  <button type="button" class="icon-btn" data-rm aria-disabled="${t.use_count ? 'true' : 'false'}" aria-label="Excluir tipo"
     title="${t.use_count ? 'Em uso: troque o tipo nesses projetos ou inative-o' : 'Excluir'}">✕</button></li>`;
 
 // Modelo (especialidades ou classificações): nome + um item por linha
@@ -24,7 +24,7 @@ const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
   <div class="spec-tpl-head">
     <input type="text" maxlength="80" value="${t.name}" data-name aria-label="Nome do modelo" placeholder="Nome do modelo (ex.: Acabamentos — padrão)" required>
     <span class="stage-count">${t.kind === 'stage' ? `${(t.items || []).length} classificação(ões)` : t.project_count ? `usado em ${t.project_count} obra(s)` : 'nenhuma obra'}</span>
-    <button type="button" class="icon-btn" data-rm-tpl ${t.project_count ? 'disabled' : ''} aria-label="Excluir modelo"
+    <button type="button" class="icon-btn" data-rm-tpl aria-disabled="${t.project_count ? 'true' : 'false'}" aria-label="Excluir modelo"
       title="${t.project_count ? 'Em uso: troque o modelo nessas obras antes de excluir' : 'Excluir modelo'}">✕</button>
   </div>
   <textarea rows="${Math.min(Math.max((t.items || []).length, 4), 12)}" data-items aria-label="Itens do modelo (um por linha)" placeholder="${t.kind === 'stage' ? 'Uma classificação por linha&#10;Fundação&#10;Estrutura&#10;Bloco A' : 'Uma especialidade por linha&#10;Pintura&#10;Revestimento&#10;Elétrica'}">${(t.items || []).join('\n')}</textarea>

@@ -629,7 +629,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
       ${can.submit ? html`<div class="submit-bar">
         <ul class="proof-check">${c.check.ok ? html`<li class="ok">✓ Todos os itens respondidos${c.photo_rule === 'obrigatoria' ? ' e com foto' : ''}</li>`
           : c.check.missing.map(m => html`<li class="no">○ Falta: ${m}</li>`)}</ul>
-        <button type="button" class="btn btn-success btn-block ${c.check.ok ? 'hide-mobile' : ''}" data-act="submit" ${c.check.ok ? '' : 'disabled'}>${icon('send')}Enviar check-list para conferência</button>
+        <button type="button" class="btn btn-success btn-block ${c.check.ok ? 'hide-mobile' : ''}" data-act="submit" aria-disabled="${c.check.ok ? 'false' : 'true'}" data-why="${c.check.ok ? '' : `Para enviar o check-list, falta: ${c.check.missing.join('; ')}.`}">${icon('send')}Enviar check-list para conferência</button>
       </div>` : ''}
       ${reviewActions}
     </div>

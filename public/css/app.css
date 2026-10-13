@@ -1445,3 +1445,7 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 .wp-task.is-share-part .wp-share { color: #2E8B57; }
 .wp-task.is-share-todo .wp-share { color: var(--muted); }
 .wp-task.is-mid.is-share-done, .wp-task.is-mid.is-share-part { border-style: dashed; }
+
+/* Campo obrigatório vazio e ação bloqueada (com aviso ao tocar) */
+.is-invalid { border-color: #C0392B !important; box-shadow: 0 0 0 3px rgba(192, 57, 43, .15) !important; }
+[aria-disabled="true"].btn, [aria-disabled="true"].icon-btn { opacity: .5; cursor: not-allowed; }

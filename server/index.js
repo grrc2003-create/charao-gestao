@@ -193,7 +193,7 @@ api.get('/api/meta', (req, res, { ctx }) => {
 });
 
 // ---------- Contratos (liberação por usuário) ----------
-api.get('/api/contracts/dashboard', (req, res, { ctx }) => send(res, 200, Contracts.contractsDashboard(ctx)));
+api.get('/api/contracts/dashboard', (req, res, { ctx, query }) => send(res, 200, Contracts.contractsDashboard(ctx, { months: query.get('meses') })));
 api.get('/api/contracts', (req, res, { ctx }) => send(res, 200, Contracts.listContracts(ctx)));
 api.post('/api/contracts', (req, res, { ctx, body }) => send(res, 201, { id: Contracts.createContract(ctx, body, clientIp(req)) }));
 api.get('/api/contracts/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))));

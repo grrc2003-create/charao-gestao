@@ -1,5 +1,5 @@
 // Contratos (liberação por usuário): faturamento global, contratos, planilha contratual e medições (boletins).
-import { html, api, icon, fmtDate } from '../core.js';
+import { html, raw, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
 
@@ -24,33 +24,102 @@ function denied(state) {
   if (!state.meta.can.contracts) throw new Error('Acesso restrito: solicite ao administrador a liberação de Contratos (Usuários → Editar).');
 }
 
-// ---------- Faturamento global + lista de contratos ----------
+// ---------- Painel de faturamento + contratos ----------
+// Cores por papel (mesmas em todo o painel): Medido = azul, Faturado = laranja, Recebido = verde-água; saldo = trilho neutro.
+const SERIES = [
+  { k: 'measured', label: 'Medido', note: 'mês de referência', cls: 's-med' },
+  { k: 'billed', label: 'Faturado', note: 'mês da NF', cls: 's-fat' },
+  { k: 'received', label: 'Recebido', note: 'mês do pagamento', cls: 's-rec' },
+];
+// Valor compacto para eixos e rótulos: R$ 12 mil · R$ 1,2 mi
+export const moneyShort = v => {
+  const a = Math.abs(v);
+  if (a >= 1e6) return `R$ ${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  if (a >= 1e3) return `R$ ${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: a >= 1e5 ? 0 : 1 })} mil`;
+  return money(v);
+};
+const niceMax = v => {
+  if (v <= 0) return 1000;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].map(m => m * p).find(x => x >= v);
+};
+
+// Colunas agrupadas (Medido · Faturado · Recebido) por mês, com eixo, grade e dica ao passar o mouse
+function monthlyChart(series) {
+  const W = 760, H = 250, L = 72, R = 8, T = 14, B = 30;
+  const max = niceMax(Math.max(0, ...series.flatMap(s => [s.measured, s.billed, s.received])));
+  const iw = W - L - R, ih = H - T - B;
+  const band = iw / series.length;
+  const bw = Math.min(14, (band - 10) / 3);
+  const y = v => T + ih - (v / max) * ih;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  // Coluna com ponta arredondada (4px) e base reta
+  const col = (x, v, cls) => {
+    if (!v) return '';
+    const h = Math.max(1.5, (v / max) * ih);
+    const r = Math.min(4, h, bw / 2);
+    const yb = T + ih, yt = yb - h;
+    return `<path class="${cls}" d="M${x},${yb} V${yt + r} Q${x},${yt} ${x + r},${yt} H${x + bw - r} Q${x + bw},${yt} ${x + bw},${yt + r} V${yb} Z"/>`;
+  };
+  const bestIdx = series.reduce((b, s, i) => (s.billed > series[b].billed ? i : b), 0);
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="ct-svg" role="img" aria-label="Medido, faturado e recebido por mês">
+    ${ticks.map(t => `<line class="g-grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="g-ytick" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${moneyShort(t)}</text>`).join('')}
+    ${series.map((s, i) => {
+      const x0 = L + i * band + (band - (bw * 3 + 4)) / 2;
+      return `<g class="g-month" data-i="${i}">
+        <rect class="g-hit" x="${L + i * band}" y="${T}" width="${band}" height="${ih + B}" tabindex="0"/>
+        ${col(x0, s.measured, 's-med')}${col(x0 + bw + 2, s.billed, 's-fat')}${col(x0 + 2 * (bw + 2), s.received, 's-rec')}
+        <text class="g-xtick" x="${L + i * band + band / 2}" y="${H - 10}" text-anchor="middle">${s.label}</text>
+      </g>`;
+    }).join('')}
+    ${series[bestIdx].billed ? `<text class="g-peak" x="${L + bestIdx * band + band / 2}" y="${y(series[bestIdx].billed) - 6}" text-anchor="middle">${moneyShort(series[bestIdx].billed)}</text>` : ''}
+    <line class="g-base" x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}"/>
+  </svg>`;
+  return html`<div class="ct-chart-box">${raw(svg)}<div class="ct-tip" hidden></div></div>`;
+}
+
+// Barra de composição (parte do todo) com vãos de 2px e legenda com valores
+function compositionBar(parts, total, { big = false } = {}) {
+  const shown = parts.filter(p => p.v > 0);
+  if (!total || !shown.length) return html`<div class="ct-comp ${big ? 'is-big' : ''}"><i class="s-none" style="flex:1"></i></div>`;
+  return html`<div class="ct-comp ${big ? 'is-big' : ''}" role="img" aria-label="${shown.map(p => `${p.label}: ${money(p.v)}`).join('; ')}">
+    ${shown.map(p => html`<i class="${p.cls}" style="flex:${p.v}" title="${p.label}: ${money(p.v)} (${Math.round((p.v / total) * 100)}%)"></i>`)}</div>`;
+}
+const pipeParts = s => [
+  { label: 'Recebido', v: Math.max(0, s.received), cls: 's-rec' },
+  { label: 'A receber (faturado)', v: Math.max(0, s.to_receive), cls: 's-fat' },
+  { label: 'Emitido aguardando NF', v: Math.max(0, s.to_bill), cls: 's-med' },
+  { label: 'Saldo a medir', v: Math.max(0, s.balance), cls: 's-none' },
+];
+
+const delta = (cur, prev, prevYear) => {
+  if (!prev) return html`<span class="ct-delta">sem base no ano anterior</span>`;
+  const d = Math.round(((cur - prev) / prev) * 1000) / 10;
+  return html`<span class="ct-delta ${d >= 0 ? 'is-up' : 'is-down'}">${d >= 0 ? '▲' : '▼'} ${String(Math.abs(d)).replace('.', ',')}% vs mesmo período de ${prevYear}</span>`;
+};
+const SEV = { critical: { label: 'Crítico', ic: 'alert' }, serious: { label: 'Atenção', ic: 'clock' }, warning: { label: 'Pendente', ic: 'info' } };
+
 export async function list({ state, query, setQuery, render }) {
   denied(state);
-  const d = await api('/contracts/dashboard');
+  const months = query.get('meses') || '12';
+  const d = await api('/contracts/dashboard', { query: { meses: months } });
   const t = d.totals;
+  const Y = d.year;
   const filter = query.get('status') || 'vigente';
   const shown = d.contracts.filter(c => filter === 'todos' || c.status === filter);
-  const max = Math.max(1, ...d.series.flatMap(s => [s.measured, s.billed, s.received]));
-  const bar = (v, cls, label) => html`<i class="${cls}" style="height:${Math.max(v ? 2 : 0, Math.round((v / max) * 100))}%" title="${label}: ${money(v)}"></i>`;
+  const port = { received: t.received, to_receive: t.to_receive, to_bill: t.to_bill, balance: t.balance };
+  const portTotal = port.received + port.to_receive + port.to_bill + Math.max(0, port.balance);
+  const agingMax = Math.max(1, ...d.aging.map(a => a.total));
+  const sumSeries = k => d.series.reduce((s, x) => s + x[k], 0);
 
-  const card = c => {
+  const contractRow = c => {
     const s = c.summary;
-    return html`<a class="card ct-card" href="#/contratos/${c.id}">
-      <div class="card-body" style="display:grid;gap:8px">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="mono muted" style="font-weight:600">${c.code}</span>
-          <span class="pill ${c.status === 'vigente' ? '' : 'pill-sand'}">${CT_STATUS[c.status]}</span></div>
-        <div><h2 style="font-size:16px">${c.client}</h2><div class="muted" style="font-size:13px">${c.title}${c.number ? ` · contrato ${c.number}` : ''}</div></div>
-        <div class="ct-prog"><div class="ct-prog-bar"><i style="width:${Math.min(100, s.pct || 0)}%"></i></div><b>${pct(s.pct)}</b></div>
-        <div class="ct-nums">
-          <span><small>Contratado</small><b>${money(s.value)}</b></span>
-          <span><small>Medido</small><b>${money(s.measured_total)}</b></span>
-          <span><small>A receber</small><b class="${s.to_receive ? 'is-due' : ''}">${money(s.to_receive)}</b></span>
-          <span><small>Saldo a medir</small><b>${money(s.balance)}</b></span>
-        </div>
-        <div class="stat-inline"><span>${s.measurements} medição(ões)</span>${s.last ? html`<span>Última: <b>${s.last.code}</b> · ${ym(s.last.ref_month)} ${mBadge(s.last.status)}</span>` : ''}
-          ${s.drafts ? html`<span class="m-badge m-draft">${s.drafts} rascunho</span>` : ''}</div>
-      </div></a>`;
+    return html`<a class="ct-row" href="#/contratos/${c.id}">
+      <div class="ct-row-id"><span class="mono">${c.code}</span><b>${c.client}</b><small>${c.title}</small></div>
+      <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
+        <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
+      <div class="ct-row-nums"><span><small>Contratado</small><b>${money(s.value)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b></span><span><small>Saldo a medir</small><b>${money(s.balance)}</b></span></div>
+      <span class="chev">${icon('chevron')}</span></a>`;
   };
 
   return {
@@ -59,36 +128,113 @@ export async function list({ state, query, setQuery, render }) {
       ${pageHead({
         eyebrow: 'Acesso restrito · liberação por usuário',
         title: 'Contratos e faturamento',
-        sub: 'Contratos fechados pela Charão, medições (boletins) e o faturamento global: medido, faturado, recebido e a receber.',
         actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas de contratos</a>` : ''}<a class="btn btn-accent" href="#/contratos/novo">${icon('plus')}Novo contrato</a>`,
       })}
-      <div class="kpis kpis-6">
-        ${kpi({ label: 'Contratado (vigentes)', value: money(t.value), color: '#2A3D50', foot: `${t.active} vigente(s) de ${t.contracts}` })}
-        ${kpi({ label: 'Medido (emitido)', value: money(t.measured), color: '#2F6FB3', foot: 'boletins emitidos, faturados e recebidos' })}
-        ${kpi({ label: 'Faturado', value: money(t.billed), color: '#8E6CB0', foot: `${money(t.to_bill)} emitido aguardando NF` })}
-        ${kpi({ label: 'Recebido', value: money(t.received), color: '#2E8B57' })}
-        ${kpi({ label: 'A receber', value: money(t.to_receive), color: '#C0392B', foot: 'faturado e ainda não recebido' })}
-        ${kpi({ label: 'Saldo a medir', value: money(t.balance), color: '#707E8B', foot: t.drafts ? `${t.drafts} medição(ões) em rascunho` : 'contratos vigentes' })}
-      </div>
-      <section class="card section">
-        <div class="card-head"><h2>${icon('reports')}Faturamento mensal</h2><span class="sub">últimos 12 meses</span></div>
-        <div class="card-body">
-          <div class="ct-chart-wrap"><div class="ct-chart" role="img" aria-label="Medido, faturado e recebido por mês">
-            ${d.series.map(s => html`<div class="ct-col"><div class="ct-bars">${bar(s.measured, 'b-med', 'Medido')}${bar(s.billed, 'b-fat', 'Faturado')}${bar(s.received, 'b-rec', 'Recebido')}</div><span>${s.label}</span></div>`)}
-          </div></div>
-          <div class="ct-legend"><span><i class="b-med"></i>Medido (mês de referência)</span><span><i class="b-fat"></i>Faturado (mês da NF)</span><span><i class="b-rec"></i>Recebido (mês do pagamento)</span></div>
+      <div class="ct-dash">
+        <section class="card ct-hero">
+          <div class="ct-hero-main">
+            <div class="ct-hero-label">Faturado em ${Y.year} <small>até ${Y.through.split('-').reverse().join('/')}</small></div>
+            <div class="ct-hero-value">${money(Y.billed)}</div>
+            ${delta(Y.billed, Y.billed_prev, Y.prev)}
+            <div class="ct-hero-sub">
+              <span><i class="k s-rec"></i>Recebido no ano <b>${money(Y.received)}</b></span>
+              <span><i class="k s-med"></i>Medido no ano <b>${money(Y.measured)}</b></span>
+            </div>
+          </div>
+          <div class="ct-hero-port">
+            <div class="ct-port-head"><b>Carteira de contratos vigentes</b><span>${money(t.value)} · ${t.active} contrato(s)</span></div>
+            ${compositionBar(pipeParts(port), portTotal, { big: true })}
+            <ul class="ct-port-legend">${pipeParts(port).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span><b>${money(p.v)}</b><small>${portTotal ? Math.round((p.v / portTotal) * 100) : 0}%</small></li>`)}</ul>
+          </div>
+        </section>
+
+        <div class="ct-tiles">
+          ${[['Contratado (vigentes)', money(t.value), `${t.active} de ${t.contracts} contrato(s)`],
+            ['Medido (total)', money(t.measured), 'boletins emitidos'],
+            ['Faturado (total)', money(t.billed), `${money(t.to_bill)} aguardando NF`],
+            ['Recebido (total)', money(t.received), ''],
+            ['A receber', money(t.to_receive), 'faturado e não recebido'],
+            ['Saldo a medir', money(t.balance), t.drafts ? `${t.drafts} medição(ões) em rascunho` : 'contratos vigentes']]
+            .map(([l, v, f]) => html`<div class="ct-tile"><span>${l}</span><b>${v}</b>${f ? html`<small>${f}</small>` : ''}</div>`)}
         </div>
-      </section>
-      ${d.by_client.length > 1 ? html`<section class="card section"><div class="card-head"><h2>Por cliente</h2></div>
-        <div class="table-wrap"><table class="data ct-table"><thead><tr><th>Cliente</th><th class="num">Contratos</th><th class="num">Contratado</th><th class="num">Medido</th><th class="num">Faturado</th><th class="num">Recebido</th><th class="num">A receber</th></tr></thead>
-        <tbody>${d.by_client.map(b => html`<tr><td>${b.client}</td><td class="num">${b.contracts}</td><td class="num">${money(b.value)}</td><td class="num">${money(b.measured)}</td><td class="num">${money(b.billed)}</td><td class="num">${money(b.received)}</td><td class="num">${money(b.to_receive)}</td></tr>`)}</tbody></table></div></section>` : ''}
-      <div class="chips section" role="group" aria-label="Filtrar contratos" style="margin-bottom:12px">
-        ${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
-          html`<button class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n">${k === 'todos' ? d.contracts.length : d.contracts.filter(c => c.status === k).length}</span></button>`)}
-      </div>
-      ${shown.length ? html`<div class="grid grid-3">${shown.map(card)}</div>` : html`<div class="card empty-state"><p>${d.contracts.length ? 'Nenhum contrato neste filtro.' : 'Nenhum contrato cadastrado. Comece em “Novo contrato”.'}</p></div>`}`,
+
+        <section class="card ct-month">
+          <div class="card-head"><h2>${icon('reports')}Faturamento mensal</h2>
+            <div class="chips" role="group" aria-label="Período">${['6', '12', '24'].map(n => html`<button class="chip" data-meses="${n}" aria-pressed="${months === n}">${n} meses</button>`)}</div></div>
+          <div class="card-body">
+            <ul class="ct-legend">${SERIES.map(s => html`<li><i class="k ${s.cls}"></i>${s.label}<small>${s.note}</small><b>${moneyShort(sumSeries(s.k))}</b></li>`)}</ul>
+            ${monthlyChart(d.series)}
+            <details class="ct-table-view"><summary>Ver tabela</summary>
+              <div class="table-wrap"><table class="data ct-table"><thead><tr><th>Mês</th><th class="num">Medido</th><th class="num">Faturado</th><th class="num">Recebido</th></tr></thead>
+              <tbody>${d.series.map(s => html`<tr><td>${s.label}</td><td class="num">${money(s.measured)}</td><td class="num">${money(s.billed)}</td><td class="num">${money(s.received)}</td></tr>`)}</tbody></table></div></details>
+          </div>
+        </section>
+
+        <div class="ct-two">
+          <section class="card">
+            <div class="card-head"><h2>${icon('clock')}A receber por antiguidade</h2><span class="sub">dias desde a NF</span></div>
+            <div class="card-body ct-aging">
+              ${d.aging.map((a, i) => html`<div class="ct-age ${i === 3 && a.total ? 'is-crit' : ''}">
+                <span class="ct-age-l">${i === 3 && a.total ? html`${icon('alert')} ` : ''}${a.label}</span>
+                <div class="ct-age-bar"><i style="width:${(a.total / agingMax) * 100}%"></i></div>
+                <span class="ct-age-v"><b>${money(a.total)}</b><small>${a.count} NF</small></span></div>`)}
+              ${!t.to_receive ? html`<p class="muted" style="margin:6px 0 0">Nenhuma nota fiscal em aberto.</p>` : ''}
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>${icon('alert')}Próximas ações</h2><span class="sub">${d.actions.length} pendência(s)</span></div>
+            ${d.actions.length ? html`<ul class="ct-actions">${d.actions.slice(0, 8).map(a => html`<li class="sev-${a.severity}"><a href="${a.href}">
+              <span class="ct-sev">${icon(SEV[a.severity].ic)}${SEV[a.severity].label}</span>
+              <span class="ct-act-t"><b>${a.text}</b><small>${a.client} · ${a.code}</small></span>${icon('chevron')}</a></li>`)}</ul>
+              ${d.actions.length > 8 ? html`<div class="card-body muted" style="font-size:12.5px">+ ${d.actions.length - 8} pendência(s)</div>` : ''}`
+              : html`<div class="card-body muted">Tudo em dia: medições do mês passado lançadas, boletins faturados e recebimentos em dia.</div>`}
+          </section>
+        </div>
+
+        ${d.by_client.length > 1 ? html`<section class="card">
+          <div class="card-head"><h2>${icon('team')}Por cliente</h2><span class="sub">composição da carteira de cada cliente</span></div>
+          <div class="card-body ct-clients">${d.by_client.map(b => html`<div class="ct-client"><div class="ct-client-h"><b>${b.client}</b><span>${money(b.value)} · ${b.contracts} contrato(s)</span></div>
+            ${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: Math.max(0, b.measured - b.billed), balance: Math.max(0, b.value - b.measured) }), b.value)}</div>`)}</div>
+        </section>` : ''}
+
+        <section class="card">
+          <div class="card-head"><h2>${icon('contract')}Contratos</h2>
+            <div class="chips" role="group" aria-label="Filtrar contratos">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
+              html`<button class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n">${k === 'todos' ? d.contracts.length : d.contracts.filter(c => c.status === k).length}</span></button>`)}</div></div>
+          <ul class="ct-port-legend is-inline">${pipeParts(port).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span></li>`)}</ul>
+          ${shown.length ? html`<div class="ct-rows">${shown.map(contractRow)}</div>`
+            : html`<div class="card-body muted">${d.contracts.length ? 'Nenhum contrato neste filtro.' : 'Nenhum contrato cadastrado. Comece em “Novo contrato”.'}</div>`}
+        </section>
+      </div>`,
     mount(root) {
-      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.ctf }); render(); }));
+      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.ctf, meses: months }); render(); }));
+      root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery({ status: filter, meses: b.dataset.meses }); render(); }));
+      // Dica do gráfico: mês + os três valores (valor em destaque, série em seguida)
+      const box = root.querySelector('.ct-chart-box');
+      const tip = box?.querySelector('.ct-tip');
+      const show = g => {
+        const s = d.series[Number(g.dataset.i)];
+        box.querySelectorAll('.g-month.is-on').forEach(x => x.classList.remove('is-on'));
+        g.classList.add('is-on');
+        tip.replaceChildren();
+        const h = document.createElement('div'); h.className = 'ct-tip-h'; h.textContent = s.label; tip.appendChild(h);
+        for (const se of SERIES) {
+          const row = document.createElement('div'); row.className = 'ct-tip-r';
+          const k = document.createElement('i'); k.className = `ln ${se.cls}`;
+          const v = document.createElement('b'); v.textContent = money(s[se.k]);
+          const l = document.createElement('span'); l.textContent = se.label;
+          row.append(k, v, l); tip.appendChild(row);
+        }
+        tip.hidden = false;
+        const br = box.getBoundingClientRect(), gr = g.querySelector('.g-hit').getBoundingClientRect();
+        const left = Math.min(br.width - tip.offsetWidth - 4, Math.max(4, gr.left - br.left + gr.width / 2 - tip.offsetWidth / 2));
+        tip.style.left = `${left}px`;
+      };
+      box?.querySelectorAll('.g-month').forEach(g => {
+        g.addEventListener('pointerenter', () => show(g));
+        g.querySelector('.g-hit').addEventListener('focus', () => show(g));
+      });
+      box?.addEventListener('pointerleave', () => { tip.hidden = true; box.querySelectorAll('.g-month.is-on').forEach(x => x.classList.remove('is-on')); });
     },
   };
 }

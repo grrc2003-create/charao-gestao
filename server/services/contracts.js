@@ -383,6 +383,7 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
 // ---------- Faturamento global ----------
 export function contractsDashboard(ctx, { months = 12 } = {}) {
   requireContracts(ctx.user);
+  months = [6, 12, 24].includes(Number(months)) ? Number(months) : 12;
   const list = listContracts(ctx);
   const sum = k => r2(list.reduce((s, c) => s + (c.summary[k] || 0), 0));
   const active = list.filter(c => c.status === 'vigente');
@@ -408,7 +409,52 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
     b.contracts++;
     for (const f of ['value', 'measured', 'billed', 'received', 'to_receive']) b[f] = r2(b[f] + (c.summary[f] || 0));
   }
+  // Ano corrente x mesmo período do ano anterior (faturado pela data da NF, recebido pela data do pagamento)
+  const ref = today();
+  const year = ref.slice(0, 4);
+  const prevYear = String(Number(year) - 1);
+  const md = ref.slice(5);
+  const inYear = (d, y) => d && d.slice(0, 4) === y && d.slice(5) <= md;
+  const billedIn = y => r2(ms.filter(m => inYear(m.nf_date, y)).reduce((s, m) => s + totalOf.get(m.id), 0));
+  const receivedIn = y => r2(ms.filter(m => m.status === 'recebida' && inYear(m.paid_date, y)).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0));
+  const measuredIn = y => r2(ms.filter(m => m.ref_month.slice(0, 4) === y && m.ref_month <= `${y}-${md.slice(0, 2)}`).reduce((s, m) => s + totalOf.get(m.id), 0));
+  // A receber por antiguidade (dias desde a NF)
+  const code = new Map(list.map(c => [c.id, c]));
+  const open = ms.filter(m => m.status === 'faturada').map(m => ({
+    id: m.id, code: m.code, contract: code.get(m.contract_id)?.client, contract_id: m.contract_id, nf: m.nf_number, nf_date: m.nf_date,
+    total: totalOf.get(m.id), days: m.nf_date ? Math.max(0, Math.round((Date.parse(ref) - Date.parse(m.nf_date)) / 86400e3)) : 0,
+  }));
+  const BUCKETS = [['0–30 dias', 0, 30], ['31–60 dias', 31, 60], ['61–90 dias', 61, 90], ['Mais de 90 dias', 91, 1e9]];
+  const aging = BUCKETS.map(([label, a, b]) => {
+    const it = open.filter(x => x.days >= a && x.days <= b);
+    return { label, count: it.length, total: r2(it.reduce((s, x) => s + x.total, 0)) };
+  });
+  // Próximas ações
+  const [py, pm] = (() => { let [y2, m2] = ref.slice(0, 7).split('-').map(Number); m2--; if (!m2) { m2 = 12; y2--; } return [y2, m2]; })();
+  const lastMonth = `${py}-${String(pm).padStart(2, '0')}`;
+  const actions = [];
+  for (const c of active) {
+    if (c.start_date && c.start_date.slice(0, 7) > lastMonth) continue;
+    if (!one('SELECT 1 FROM measurements WHERE contract_id = ? AND ref_month = ?', c.id, lastMonth)) {
+      actions.push({ kind: 'medir', severity: 'warning', text: `Sem medição de ${monthLabel(lastMonth)}`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });
+    }
+    if (c.end_date && c.end_date >= ref && Math.round((Date.parse(c.end_date) - Date.parse(ref)) / 86400e3) <= 60) {
+      actions.push({ kind: 'vencendo', severity: 'warning', text: `Contrato termina em ${c.end_date.split('-').reverse().join('/')}`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });
+    }
+  }
+  for (const m of ms.filter(x => x.status === 'emitida')) {
+    actions.push({ kind: 'faturar', severity: 'serious', text: `Boletim ${m.code} emitido aguardando NF · ${totalOf.get(m.id).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: code.get(m.contract_id)?.client, code: m.code, href: `#/medicoes/${m.id}` });
+  }
+  for (const o of open.filter(x => x.days > 30)) {
+    actions.push({ kind: 'cobrar', severity: o.days > 90 ? 'critical' : 'serious', text: `NF ${o.nf} sem recebimento há ${o.days} dias · ${o.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: o.contract, code: o.code, href: `#/medicoes/${o.id}` });
+  }
+  const sev = { critical: 0, serious: 1, warning: 2 };
+  actions.sort((a, b) => sev[a.severity] - sev[b.severity]);
   return {
+    months,
+    year: { year, prev: prevYear, through: md, billed: billedIn(year), billed_prev: billedIn(prevYear), received: receivedIn(year), received_prev: receivedIn(prevYear), measured: measuredIn(year), measured_prev: measuredIn(prevYear) },
+    aging,
+    actions,
     totals: {
       contracts: list.length, active: active.length,
       value: r2(active.reduce((s, c) => s + c.summary.value, 0)),

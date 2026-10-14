@@ -13,7 +13,7 @@ import { checklistDashboard } from './checklist.js';
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts';
 
 export function publicUser(ctx, u) {
   const out = { ...u };
@@ -118,6 +118,8 @@ function readUserBody(body, { creating }) {
     manager_id: intOrNull(body.manager_id),
     job_title: str(body.job_title, { max: 120, label: 'Cargo' }),
     phone: str(body.phone, { max: 40, label: 'Telefone' }),
+    // Liberação da seção Contratos (e das tarefas da área restrita)
+    can_contracts: body.can_contracts === true || body.can_contracts === 1 || body.can_contracts === '1' || body.can_contracts === 'on' ? 1 : 0,
   };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) throw badRequest('E-mail inválido.');
   if (d.role === 'admin') d.access_scope = 'total';
@@ -156,11 +158,11 @@ export function createUser(ctx, body, ip) {
   assertNoManagerCycle(null, d.manager_id);
   if (d.manager_id && one('SELECT is_external FROM users WHERE id = ?', d.manager_id)?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
   return tx(() => {
-    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, must_change_password)
-      VALUES (?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone);
+    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, can_contracts, must_change_password)
+      VALUES (?,?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.can_contracts);
     const id = Number(r.lastInsertRowid);
     for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
-    audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, projetos: projectIds }, ip);
+    audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, projetos: projectIds, contratos: !!d.can_contracts }, ip);
     return id;
   });
 }
@@ -181,16 +183,18 @@ export function updateUser(ctx, id, body, ip) {
   if (!active && id === ctx.user.id) throw badRequest('Você não pode desativar o próprio usuário.');
   if (u.role === 'admin' && !active) ensureAnotherAdmin(id);
   tx(() => {
-    run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, active=?, updated_at=datetime('now') WHERE id=?`,
-      d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, active, id);
+    run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, body.can_contracts === undefined ? u.can_contracts : d.can_contracts, active, id);
+    const ctChanged = body.can_contracts !== undefined && !!u.can_contracts !== !!d.can_contracts;
     const before = all('SELECT project_id FROM user_project_access WHERE user_id = ?', id).map(r => r.project_id).sort();
     if (body.project_ids !== undefined) {
       run('DELETE FROM user_project_access WHERE user_id = ?', id);
       for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
     }
-    const permChanged = u.role !== d.role || u.access_scope !== d.access_scope || (body.project_ids !== undefined && before.join() !== [...projectIds].sort().join());
+    const permChanged = ctChanged || u.role !== d.role || u.access_scope !== d.access_scope || (body.project_ids !== undefined && before.join() !== [...projectIds].sort().join());
     audit(ctx.user.id, 'user', id, permChanged ? 'Permissões alteradas' : 'Usuário atualizado', {
       perfil: `${u.role} → ${d.role}`, escopo: `${u.access_scope} → ${d.access_scope}`, projetos: projectIds, ativo: !!active,
+      ...(ctChanged ? { contratos: d.can_contracts ? 'liberado' : 'retirado' } : {}),
       gestor: d.manager_id,
     }, ip);
     // Encerra sessões ao desativar ou ao reduzir permissões, forçando novo login

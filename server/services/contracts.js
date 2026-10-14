@@ -1,0 +1,425 @@
+// Controle de contratos: contratos, planilha contratual (itens/aditivos), medições (boletins) e faturamento global.
+// Somente usuários liberados (users.can_contracts) acessam; a área interna restrita "Contratos" segue a mesma liberação.
+import { all, one, run, tx } from '../db.js';
+import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
+import { audit } from './audit.js';
+import { today } from './metrics.js';
+import { defaultStageId } from './stages.js';
+
+export const STATUSES = ['vigente', 'suspenso', 'encerrado'];
+export const MEASUREMENT_STATUSES = ['rascunho', 'emitida', 'faturada', 'recebida'];
+const BILLED = ['emitida', 'faturada', 'recebida'];
+
+export const canContracts = user => !!user?.can_contracts;
+export function requireContracts(user) {
+  if (!canContracts(user)) throw forbidden('Acesso restrito: solicite a liberação de Contratos ao administrador.');
+}
+
+const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+const r4 = v => Math.round((Number(v) || 0) * 10000) / 10000;
+// Número em formato brasileiro ("1.234,56") ou JS (1234.56)
+const num = (v, label, { min = -1e12 } = {}) => {
+  if (v === '' || v === null || v === undefined) return 0;
+  const s = typeof v === 'number' ? v : String(v).trim();
+  const n = typeof s === 'number' ? s : Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s);
+  if (!Number.isFinite(n)) throw badRequest(`${label}: número inválido.`);
+  if (n < min) throw badRequest(`${label}: valor inválido.`);
+  return n;
+};
+
+// ---------- Área interna restrita (tarefas de contratos) ----------
+export function ensureContractsArea() {
+  if (one(`SELECT value FROM app_settings WHERE key = 'contracts_area_created'`)) return null;
+  return tx(() => {
+    const r0 = one(`SELECT MAX(CAST(SUBSTR(code, 5) AS INTEGER)) AS n FROM projects WHERE code LIKE 'INT-%'`);
+    const code = `INT-${String((r0?.n || 0) + 1).padStart(3, '0')}`;
+    const now = new Date().toISOString();
+    const r = run(`INSERT INTO projects (code, name, client, description, status, kind, restricted, created_at, updated_at) VALUES (?,?,?,?, 'em_andamento', 'interno', 1, ?, ?)`,
+      code, 'Contratos (restrito)', 'Charão Engenharia e Construção',
+      'Tarefas de contratos, medições, faturamento e cobrança. Visível somente para quem tem a liberação de Contratos.', now, now);
+    const id = Number(r.lastInsertRowid);
+    defaultStageId(id);
+    ['Medições', 'Faturamento', 'Cobrança', 'Renovações e aditivos'].forEach((n, i) => run('INSERT INTO project_stages (project_id, name, sort_order) VALUES (?,?,?)', id, n, i + 1));
+    run(`INSERT INTO app_settings (key, value) VALUES ('contracts_area_created', ?)`, String(id));
+    audit(null, 'contract', null, 'Área interna restrita de Contratos criada', { codigo: code });
+    return id;
+  });
+}
+export const contractsAreaId = () => one('SELECT id FROM projects WHERE restricted = 1 ORDER BY id LIMIT 1')?.id || null;
+
+// ---------- Cálculos ----------
+const itemsOf = contractId => all('SELECT * FROM contract_items WHERE contract_id = ? ORDER BY seq, id', contractId);
+const measurementsOf = contractId => all('SELECT * FROM measurements WHERE contract_id = ? ORDER BY seq', contractId);
+
+// Valores de uma medição: soma das linhas (qtd × preço) e dos ajustes
+function measurementTotals(m, items = null) {
+  const its = items || all('SELECT id, unit_price FROM contract_items WHERE contract_id = ?', m.contract_id);
+  const price = new Map(its.map(i => [i.id, i.unit_price]));
+  const lines = all('SELECT item_id, quantity FROM measurement_lines WHERE measurement_id = ?', m.id);
+  const measured = r2(lines.reduce((s, l) => s + l.quantity * (price.get(l.item_id) || 0), 0));
+  const adjustments = r2(one('SELECT COALESCE(SUM(amount), 0) AS s FROM measurement_adjustments WHERE measurement_id = ?', m.id).s);
+  return { measured, adjustments, total: r2(measured + adjustments) };
+}
+
+function contractSummary(c) {
+  const items = itemsOf(c.id);
+  const ms = measurementsOf(c.id).map(m => ({ ...m, ...measurementTotals(m, items) }));
+  const sum = (arr, k) => r2(arr.reduce((s, x) => s + (x[k] || 0), 0));
+  const issued = ms.filter(m => BILLED.includes(m.status));
+  const billed = ms.filter(m => m.status === 'faturada' || m.status === 'recebida');
+  const received = ms.filter(m => m.status === 'recebida');
+  const value = r2(items.reduce((s, i) => s + i.quantity * i.unit_price, 0));
+  const measured = sum(issued, 'measured');
+  return {
+    value,
+    measured,
+    measured_total: sum(issued, 'total'),
+    billed: sum(billed, 'total'),
+    received: r2(received.reduce((s, m) => s + (m.paid_amount ?? m.total), 0)),
+    to_receive: r2(sum(billed.filter(m => m.status === 'faturada'), 'total')),
+    to_bill: r2(sum(ms.filter(m => m.status === 'emitida'), 'total')),
+    balance: r2(value - measured),
+    pct: value ? Math.round((measured / value) * 1000) / 10 : null,
+    measurements: ms.length,
+    drafts: ms.filter(m => m.status === 'rascunho').length,
+    last: ms.filter(m => m.status !== 'rascunho').at(-1) || null,
+  };
+}
+
+// ---------- Contratos ----------
+export function listContracts(ctx) {
+  requireContracts(ctx.user);
+  return all(`SELECT c.*, p.code AS project_code, p.name AS project_name FROM contracts c LEFT JOIN projects p ON p.id = c.project_id
+    ORDER BY c.status = 'encerrado', c.code`).map(c => ({ ...c, summary: contractSummary(c) }));
+}
+
+export function getContract(ctx, id) {
+  requireContracts(ctx.user);
+  const c = one(`SELECT c.*, p.code AS project_code, p.name AS project_name FROM contracts c LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?`, id);
+  if (!c) throw notFound('Contrato não encontrado.');
+  const items = itemsOf(id);
+  const issuedIds = all(`SELECT id FROM measurements WHERE contract_id = ? AND status <> 'rascunho'`, id).map(m => m.id);
+  const measuredQty = new Map(issuedIds.length ? all(`SELECT item_id, SUM(quantity) AS q FROM measurement_lines WHERE measurement_id IN (${issuedIds.map(() => '?').join(',')}) GROUP BY item_id`, ...issuedIds).map(r => [r.item_id, r.q]) : []);
+  const used = new Set(all('SELECT DISTINCT item_id FROM measurement_lines l JOIN measurements m ON m.id = l.measurement_id WHERE m.contract_id = ? AND l.quantity <> 0', id).map(r => r.item_id));
+  return {
+    ...c,
+    items: items.map(i => {
+      const mq = r4(measuredQty.get(i.id) || 0);
+      return { ...i, value: r2(i.quantity * i.unit_price), measured_qty: mq, measured_value: r2(mq * i.unit_price), balance_qty: r4(i.quantity - mq), balance_value: r2((i.quantity - mq) * i.unit_price), used: used.has(i.id) };
+    }),
+    measurements: measurementsOf(id).map(m => ({ ...m, ...measurementTotals(m, items) })),
+    summary: contractSummary(c),
+  };
+}
+
+function readContract(body) {
+  const d = {
+    client: str(body.client, { max: 160, required: true, label: 'Cliente' }),
+    client_doc: str(body.client_doc, { max: 30, label: 'CNPJ/CPF' }),
+    number: str(body.number, { max: 60, label: 'Nº do contrato' }),
+    title: str(body.title, { max: 200, required: true, label: 'Objeto' }),
+    scope: str(body.scope, { max: 2000, label: 'Escopo' }),
+    project_id: intOrNull(body.project_id),
+    start_date: date(body.start_date, 'Início'),
+    end_date: date(body.end_date, 'Término'),
+    bulletin_prefix: (str(body.bulletin_prefix, { max: 10, required: true, label: 'Prefixo do boletim' }) || '').toUpperCase().replace(/[^A-Z0-9-]/g, ''),
+    payment_info: str(body.payment_info, { max: 1000, label: 'Dados para pagamento' }),
+    notes: str(body.notes, { max: 3000, label: 'Observações' }),
+    status: oneOf(body.status, STATUSES, 'Situação', 'vigente'),
+  };
+  if (!d.bulletin_prefix) throw badRequest('Prefixo do boletim: use letras e números (ex.: ORBE).');
+  if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('O término deve ser posterior ao início.');
+  if (d.project_id && !one('SELECT id FROM projects WHERE id = ?', d.project_id)) throw badRequest('Projeto inválido.');
+  const items = (Array.isArray(body.items) ? body.items : []).map((x, i) => ({
+    id: intOrNull(x?.id),
+    seq: i + 1,
+    description: str(x?.description, { max: 300, required: true, label: `Descrição do item ${i + 1}` }),
+    unit: str(x?.unit, { max: 12, label: 'Unidade' }) || 'vb',
+    unit_price: r4(num(x?.unit_price, `Preço unitário do item ${i + 1}`, { min: 0 })),
+    quantity: r4(num(x?.quantity, `Quantidade do item ${i + 1}`, { min: 0 })),
+    additive: x?.additive ? 1 : 0,
+  }));
+  if (!items.length) throw badRequest('Cadastre ao menos um item na planilha contratual.');
+  return { d, items };
+}
+
+function syncItems(contractId, items) {
+  const current = itemsOf(contractId);
+  const byId = new Map(current.map(i => [i.id, i]));
+  const keep = new Set(items.filter(i => i.id).map(i => i.id));
+  for (const i of items) if (i.id && !byId.has(i.id)) throw badRequest('Item inválido.');
+  for (const old of current.filter(i => !keep.has(i.id))) {
+    if (one('SELECT 1 FROM measurement_lines WHERE item_id = ? AND quantity <> 0 LIMIT 1', old.id)) throw badRequest(`O item "${old.description}" já foi medido e não pode ser removido.`);
+    run('DELETE FROM measurement_lines WHERE item_id = ?', old.id);
+    run('DELETE FROM contract_items WHERE id = ?', old.id);
+  }
+  for (const i of items) {
+    if (i.id) run('UPDATE contract_items SET seq = ?, description = ?, unit = ?, unit_price = ?, quantity = ?, additive = ? WHERE id = ?', i.seq, i.description, i.unit, i.unit_price, i.quantity, i.additive, i.id);
+    else run('INSERT INTO contract_items (contract_id, seq, description, unit, unit_price, quantity, additive) VALUES (?,?,?,?,?,?,?)', contractId, i.seq, i.description, i.unit, i.unit_price, i.quantity, i.additive);
+  }
+}
+
+export function createContract(ctx, body, ip) {
+  requireContracts(ctx.user);
+  const { d, items } = readContract(body);
+  return tx(() => {
+    const n = one(`SELECT MAX(CAST(SUBSTR(code, 4) AS INTEGER)) AS n FROM contracts WHERE code LIKE 'CT-%'`)?.n || 0;
+    const code = `CT-${String(n + 1).padStart(3, '0')}`;
+    const r = run(`INSERT INTO contracts (code, client, client_doc, number, title, scope, project_id, start_date, end_date, bulletin_prefix, payment_info, notes, status, created_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, code, d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, ctx.user.id);
+    const id = Number(r.lastInsertRowid);
+    syncItems(id, items);
+    audit(ctx.user.id, 'contract', id, 'Contrato cadastrado', { codigo: code, cliente: d.client, objeto: d.title, itens: items.length }, ip);
+    return id;
+  });
+}
+
+export function updateContract(ctx, id, body, ip) {
+  requireContracts(ctx.user);
+  const c = one('SELECT * FROM contracts WHERE id = ?', id);
+  if (!c) throw notFound('Contrato não encontrado.');
+  const { d, items } = readContract({ ...c, ...body });
+  tx(() => {
+    run(`UPDATE contracts SET client=?, client_doc=?, number=?, title=?, scope=?, project_id=?, start_date=?, end_date=?, bulletin_prefix=?, payment_info=?, notes=?, status=?, updated_at=datetime('now') WHERE id=?`,
+      d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, id);
+    if (body.items !== undefined) syncItems(id, items);
+    audit(ctx.user.id, 'contract', id, 'Contrato atualizado', { codigo: c.code, campos: Object.keys(d).filter(k => (d[k] ?? null) !== (c[k] ?? null)), itens: items.length }, ip);
+  });
+}
+
+// ---------- Medições ----------
+const monthBounds = ym => {
+  const [y, m] = ym.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return [`${ym}-01`, `${ym}-${String(last).padStart(2, '0')}`];
+};
+const MONTHS = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+export const monthLabel = ym => `${MONTHS[Number(ym.slice(5, 7)) - 1]}/${ym.slice(2, 4)}`;
+
+function loadMeasurement(ctx, id) {
+  requireContracts(ctx.user);
+  const m = one('SELECT * FROM measurements WHERE id = ?', id);
+  if (!m) throw notFound('Medição não encontrada.');
+  return m;
+}
+
+export function createMeasurement(ctx, contractId, body, ip) {
+  requireContracts(ctx.user);
+  const c = one('SELECT * FROM contracts WHERE id = ?', contractId);
+  if (!c) throw notFound('Contrato não encontrado.');
+  if (c.status === 'encerrado') throw badRequest('Contrato encerrado não recebe novas medições.');
+  if (one(`SELECT 1 FROM measurements WHERE contract_id = ? AND status = 'rascunho'`, contractId)) throw badRequest('Já existe uma medição em rascunho neste contrato. Emita ou exclua antes de criar outra.');
+  const ref = /^\d{4}-\d{2}$/.test(String(body.ref_month || '')) ? body.ref_month : today().slice(0, 7);
+  const [ps, pe] = monthBounds(ref);
+  const period_start = date(body.period_start, 'Início do período') || ps;
+  const period_end = date(body.period_end, 'Fim do período') || pe;
+  if (period_end < period_start) throw badRequest('O fim do período deve ser posterior ao início.');
+  return tx(() => {
+    const seq = (one('SELECT MAX(seq) AS n FROM measurements WHERE contract_id = ?', contractId)?.n || 0) + 1;
+    const code = `${c.bulletin_prefix}${String(seq).padStart(4, '0')}.${ref.slice(2, 4)}`;
+    const r = run(`INSERT INTO measurements (contract_id, seq, code, ref_month, period_start, period_end, created_by) VALUES (?,?,?,?,?,?,?)`,
+      contractId, seq, code, ref, period_start, period_end, ctx.user.id);
+    const id = Number(r.lastInsertRowid);
+    for (const i of itemsOf(contractId)) run('INSERT INTO measurement_lines (measurement_id, item_id, quantity) VALUES (?,?,0)', id, i.id);
+    // Descontos/acréscimos recorrentes: repete as descrições da medição anterior (com valor zerado)
+    const prev = one(`SELECT id FROM measurements WHERE contract_id = ? AND seq < ? ORDER BY seq DESC LIMIT 1`, contractId, seq);
+    if (prev) all('SELECT description, unit FROM measurement_adjustments WHERE measurement_id = ? ORDER BY seq', prev.id)
+      .forEach((a, k) => run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,0)', id, k + 1, a.description, a.unit));
+    audit(ctx.user.id, 'measurement', id, 'Medição criada (rascunho)', { contrato: c.code, boletim: code, referencia: monthLabel(ref) }, ip);
+    return id;
+  });
+}
+
+// Boletim completo: por item, Contrato · Acumulado anterior · Medição · Acumulado atual · Saldo (quantidade e valor)
+export function getMeasurement(ctx, id) {
+  const m = loadMeasurement(ctx, id);
+  const c = one(`SELECT c.*, p.code AS project_code, p.name AS project_name FROM contracts c LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?`, m.contract_id);
+  const items = itemsOf(c.id);
+  const prevIds = all(`SELECT id FROM measurements WHERE contract_id = ? AND seq < ? AND status <> 'rascunho'`, c.id, m.seq).map(r => r.id);
+  const inList = ids => ids.map(() => '?').join(',');
+  const prevQty = new Map(prevIds.length ? all(`SELECT item_id, SUM(quantity) AS q FROM measurement_lines WHERE measurement_id IN (${inList(prevIds)}) GROUP BY item_id`, ...prevIds).map(r => [r.item_id, r.q]) : []);
+  const curQty = new Map(all('SELECT item_id, quantity FROM measurement_lines WHERE measurement_id = ?', id).map(r => [r.item_id, r.quantity]));
+  const rows = items.map(i => {
+    const pq = r4(prevQty.get(i.id) || 0);
+    const cq = r4(curQty.get(i.id) || 0);
+    const aq = r4(pq + cq);
+    return {
+      item_id: i.id, seq: i.seq, description: i.description, unit: i.unit, unit_price: i.unit_price, additive: !!i.additive,
+      contract_qty: i.quantity, contract_value: r2(i.quantity * i.unit_price),
+      prev_qty: pq, prev_value: r2(pq * i.unit_price),
+      qty: cq, value: r2(cq * i.unit_price),
+      acc_qty: aq, acc_value: r2(aq * i.unit_price),
+      bal_qty: r4(i.quantity - aq), bal_value: r2((i.quantity - aq) * i.unit_price),
+      exceeded: aq > i.quantity + 1e-9,
+    };
+  });
+  // Descontos/acréscimos: acumulado por descrição
+  const prevAdj = prevIds.length ? all(`SELECT description, SUM(amount) AS s FROM measurement_adjustments WHERE measurement_id IN (${inList(prevIds)}) GROUP BY description`, ...prevIds) : [];
+  const prevAdjMap = new Map(prevAdj.map(a => [a.description.toLocaleLowerCase('pt-BR'), r2(a.s)]));
+  const cur = all('SELECT * FROM measurement_adjustments WHERE measurement_id = ? ORDER BY seq, id', id);
+  const adjustments = cur.map(a => {
+    const p = prevAdjMap.get(a.description.toLocaleLowerCase('pt-BR')) || 0;
+    return { id: a.id, description: a.description, unit: a.unit, prev: p, amount: r2(a.amount), acc: r2(p + a.amount) };
+  });
+  // Ajustes de medições anteriores que não se repetem nesta (aparecem só no acumulado)
+  for (const a of prevAdj) {
+    if (!cur.some(x => x.description.toLocaleLowerCase('pt-BR') === a.description.toLocaleLowerCase('pt-BR'))) adjustments.push({ id: null, description: a.description, unit: 'vb', prev: r2(a.s), amount: 0, acc: r2(a.s) });
+  }
+  const sum = (arr, k) => r2(arr.reduce((s, x) => s + (x[k] || 0), 0));
+  const totals = {
+    contract: sum(rows, 'contract_value'),
+    prev: sum(rows, 'prev_value'), measured: sum(rows, 'value'), acc: sum(rows, 'acc_value'), balance: sum(rows, 'bal_value'),
+    adj_prev: sum(adjustments, 'prev'), adj: sum(adjustments, 'amount'), adj_acc: sum(adjustments, 'acc'),
+  };
+  totals.prev_total = r2(totals.prev + totals.adj_prev);
+  totals.to_bill = r2(totals.measured + totals.adj);
+  totals.acc_total = r2(totals.acc + totals.adj_acc);
+  const later = one(`SELECT 1 FROM measurements WHERE contract_id = ? AND seq > ? AND status <> 'rascunho' LIMIT 1`, c.id, m.seq);
+  return {
+    ...m, ref_label: monthLabel(m.ref_month),
+    contract: c, rows, adjustments, totals,
+    issued_by_name: m.issued_by ? one('SELECT name FROM users WHERE id = ?', m.issued_by)?.name : null,
+    can: {
+      edit: m.status === 'rascunho',
+      issue: m.status === 'rascunho',
+      reopen: m.status === 'emitida' && !later,
+      bill: m.status === 'emitida',
+      receive: m.status === 'faturada',
+      undo: (m.status === 'faturada' || m.status === 'recebida'),
+      delete: m.status === 'rascunho',
+    },
+  };
+}
+
+export function updateMeasurement(ctx, id, body, ip) {
+  const m = loadMeasurement(ctx, id);
+  if (m.status !== 'rascunho') throw badRequest('Só é possível alterar uma medição em rascunho. Reabra-a se precisar corrigir.');
+  const ref = body.ref_month !== undefined ? (/^\d{4}-\d{2}$/.test(String(body.ref_month)) ? body.ref_month : null) : m.ref_month;
+  if (!ref) throw badRequest('Mês de referência inválido.');
+  const ps = body.period_start !== undefined ? date(body.period_start, 'Início do período') : m.period_start;
+  const pe = body.period_end !== undefined ? date(body.period_end, 'Fim do período') : m.period_end;
+  if (ps && pe && pe < ps) throw badRequest('O fim do período deve ser posterior ao início.');
+  const items = new Set(all('SELECT id FROM contract_items WHERE contract_id = ?', m.contract_id).map(i => i.id));
+  const lines = body.lines && typeof body.lines === 'object' ? Object.entries(body.lines).map(([k, v]) => {
+    const itemId = intOrNull(k);
+    if (!items.has(itemId)) throw badRequest('Item da medição inválido.');
+    return [itemId, r4(num(v, 'Quantidade medida'))];
+  }) : null;
+  const adjustments = Array.isArray(body.adjustments) ? body.adjustments.map((a, k) => ({
+    seq: k + 1,
+    description: str(a?.description, { max: 200, required: true, label: 'Descrição do desconto/acréscimo' }),
+    unit: str(a?.unit, { max: 12, label: 'Unidade' }) || 'vb',
+    amount: r2(num(a?.amount, 'Valor do desconto/acréscimo')),
+  })) : null;
+  const c = one('SELECT bulletin_prefix FROM contracts WHERE id = ?', m.contract_id);
+  tx(() => {
+    run(`UPDATE measurements SET ref_month = ?, code = ?, period_start = ?, period_end = ?, notes = ?, updated_at = datetime('now') WHERE id = ?`,
+      ref, `${c.bulletin_prefix}${String(m.seq).padStart(4, '0')}.${ref.slice(2, 4)}`, ps, pe,
+      body.notes !== undefined ? str(body.notes, { max: 2000, label: 'Observações' }) : m.notes, id);
+    if (lines) for (const [itemId, q] of lines) run(`INSERT INTO measurement_lines (measurement_id, item_id, quantity) VALUES (?,?,?)
+      ON CONFLICT(measurement_id, item_id) DO UPDATE SET quantity = excluded.quantity`, id, itemId, q);
+    if (adjustments) {
+      run('DELETE FROM measurement_adjustments WHERE measurement_id = ?', id);
+      for (const a of adjustments) run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', id, a.seq, a.description, a.unit, a.amount);
+    }
+  });
+  return getMeasurement(ctx, id);
+}
+
+export function measurementAction(ctx, id, action, body = {}, ip) {
+  const m = loadMeasurement(ctx, id);
+  const view = getMeasurement(ctx, id);
+  const can = view.can;
+  const log = (msg, det) => audit(ctx.user.id, 'measurement', id, msg, { boletim: m.code, ...det }, ip);
+  tx(() => {
+    switch (action) {
+      case 'issue': {
+        if (!can.issue) throw badRequest('A medição não está em rascunho.');
+        if (!view.totals.measured && !view.totals.adj) throw badRequest('Informe ao menos uma quantidade medida ou um desconto/acréscimo antes de emitir.');
+        run(`UPDATE measurements SET status = 'emitida', issued_at = ?, issued_by = ?, updated_at = datetime('now') WHERE id = ?`, new Date().toISOString(), ctx.user.id, id);
+        log('Medição emitida', { total_a_faturar: view.totals.to_bill });
+        break;
+      }
+      case 'reopen':
+        if (!can.reopen) throw badRequest('Só a última medição emitida (ainda não faturada) pode ser reaberta.');
+        run(`UPDATE measurements SET status = 'rascunho', issued_at = NULL, issued_by = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+        log('Medição reaberta para correção');
+        break;
+      case 'bill': {
+        if (!can.bill) throw badRequest('Só uma medição emitida pode ser faturada.');
+        const nf = str(body.nf_number, { max: 40, required: true, label: 'Nº da nota fiscal' });
+        const nfDate = date(body.nf_date, 'Data da nota fiscal') || today();
+        run(`UPDATE measurements SET status = 'faturada', nf_number = ?, nf_date = ?, updated_at = datetime('now') WHERE id = ?`, nf, nfDate, id);
+        log('Medição faturada', { nf, data: nfDate, valor: view.totals.to_bill });
+        break;
+      }
+      case 'receive': {
+        if (!can.receive) throw badRequest('Só uma medição faturada pode ser marcada como recebida.');
+        const pd = date(body.paid_date, 'Data do recebimento') || today();
+        const amount = body.paid_amount === '' || body.paid_amount === undefined || body.paid_amount === null ? view.totals.to_bill : r2(num(body.paid_amount, 'Valor recebido', { min: 0 }));
+        run(`UPDATE measurements SET status = 'recebida', paid_date = ?, paid_amount = ?, updated_at = datetime('now') WHERE id = ?`, pd, amount, id);
+        log('Recebimento registrado', { data: pd, valor: amount });
+        break;
+      }
+      case 'undo': {
+        if (!can.undo) throw badRequest('Nada a desfazer.');
+        if (m.status === 'recebida') run(`UPDATE measurements SET status = 'faturada', paid_date = NULL, paid_amount = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+        else run(`UPDATE measurements SET status = 'emitida', nf_number = NULL, nf_date = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+        log(m.status === 'recebida' ? 'Recebimento desfeito' : 'Faturamento desfeito');
+        break;
+      }
+      case 'delete':
+        if (!can.delete) throw badRequest('Só é possível excluir medição em rascunho.');
+        run('DELETE FROM measurements WHERE id = ?', id);
+        log('Medição em rascunho excluída');
+        break;
+      default:
+        throw badRequest('Ação desconhecida.');
+    }
+  });
+  return action === 'delete' ? { deleted: true, contract_id: m.contract_id } : getMeasurement(ctx, id);
+}
+
+// ---------- Faturamento global ----------
+export function contractsDashboard(ctx, { months = 12 } = {}) {
+  requireContracts(ctx.user);
+  const list = listContracts(ctx);
+  const sum = k => r2(list.reduce((s, c) => s + (c.summary[k] || 0), 0));
+  const active = list.filter(c => c.status === 'vigente');
+  // Série mensal: medido (mês de referência), faturado (mês da NF) e recebido (mês do pagamento)
+  const ms = all('SELECT * FROM measurements WHERE status <> \'rascunho\'');
+  const totalOf = new Map(ms.map(m => [m.id, measurementTotals(m).total]));
+  const end = today().slice(0, 7);
+  const keys = [];
+  let [y, mo] = end.split('-').map(Number);
+  for (let k = 0; k < months; k++) { keys.unshift(`${y}-${String(mo).padStart(2, '0')}`); mo--; if (!mo) { mo = 12; y--; } }
+  const series = keys.map(k => ({
+    month: k, label: monthLabel(k),
+    measured: r2(ms.filter(m => m.ref_month === k).reduce((s, m) => s + totalOf.get(m.id), 0)),
+    billed: r2(ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === k).reduce((s, m) => s + totalOf.get(m.id), 0)),
+    received: r2(ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === k).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0)),
+  }));
+  // Por cliente
+  const byClient = new Map();
+  for (const c of list) {
+    const k = c.client;
+    if (!byClient.has(k)) byClient.set(k, { client: k, contracts: 0, value: 0, measured: 0, billed: 0, received: 0, to_receive: 0 });
+    const b = byClient.get(k);
+    b.contracts++;
+    for (const f of ['value', 'measured', 'billed', 'received', 'to_receive']) b[f] = r2(b[f] + (c.summary[f] || 0));
+  }
+  return {
+    totals: {
+      contracts: list.length, active: active.length,
+      value: r2(active.reduce((s, c) => s + c.summary.value, 0)),
+      value_all: sum('value'), measured: sum('measured_total'), billed: sum('billed'), received: sum('received'),
+      to_receive: sum('to_receive'), to_bill: sum('to_bill'),
+      balance: r2(active.reduce((s, c) => s + c.summary.balance, 0)),
+      drafts: list.reduce((s, c) => s + c.summary.drafts, 0),
+    },
+    series,
+    by_client: [...byClient.values()].sort((a, b) => b.value - a.value),
+    contracts: list,
+    area_id: contractsAreaId(),
+  };
+}

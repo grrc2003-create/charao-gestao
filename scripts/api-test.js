@@ -442,7 +442,7 @@ async function main() {
   ok(/^INT-001-\d{5}$/.test(tIntD.code) && tIntD.project_kind === 'interno' && tIntD.stage_name === 'Financeiro', `tarefa interna com código próprio (${tIntD.code})`);
   const nInt = await ricardo('POST', '/projects', { kind: 'interno', name: 'Manutenção de frota' });
   const nIntD = (await ricardo('GET', `/projects/${nInt.data.id}`)).data;
-  ok(nInt.status === 201 && nIntD.code === 'INT-002' && nIntD.client === 'Charão Engenharia e Construção', 'nova área interna sem cliente (INT-002)');
+  ok(nInt.status === 201 && nIntD.code === 'INT-003' && nIntD.client === 'Charão Engenharia e Construção', 'nova área interna sem cliente (INT-003; INT-002 é a área restrita de Contratos)');
   ok((await ricardo('POST', '/projects', { name: 'Obra sem cliente' })).status === 400, 'obra continua exigindo cliente');
   await ricardo('PUT', `/projects/${nIntD.id}`, { kind: 'obra', name: 'Manutenção de frota' });
   ok((await ricardo('GET', `/projects/${nIntD.id}`)).data.kind === 'interno', 'tipo do projeto não muda na edição');
@@ -1107,6 +1107,55 @@ async function main() {
   ok(ust.exec_days_avg > 0 && ust.exec_work_days_avg > 0 && ust.exec_count > 0, `média de dias de execução (${ust.exec_days_avg} corridos · ${ust.exec_work_days_avg} úteis)`);
   ok(ust.early >= 2 && ust.early_days_avg > 0, `tarefas antecipadas contadas (${ust.early})`);
   ok(ust.filling_delays >= 3 && ust.filling_delay_days_avg > 0 && ust.behavior.some(b => /atraso de preenchimento/.test(b)), `atraso de preenchimento contado (${ust.filling_delays}) e no resumo do comportamento`);
+  // ---------- Contratos: liberação, área restrita, medições e faturamento ----------
+  const kAnaId = (await ana('GET', '/auth/me')).data.user.id;
+  ok((await ana('GET', '/contracts')).status === 403, 'sem liberação, nem o administrador acessa Contratos');
+  ok(!(await ana('GET', '/meta')).data.can.contracts, 'menu Contratos oculto sem liberação');
+  const kAnaU = (await ana('GET', `/users/${kAnaId}`)).data.user;
+  ok((await ana('PUT', `/users/${kAnaId}`, { ...kAnaU, can_contracts: true })).status === 200, 'administrador libera Contratos para si');
+  const kAnaC = await login('ana@charao.eng.br');
+  ok((await kAnaC('GET', '/meta')).data.can.contracts === true, 'liberado: menu Contratos aparece');
+  const kCtBody = { client: 'Orbe Consultoria', title: 'Gerenciamento', scope: 'Relatórios técnicos e planejamento', bulletin_prefix: 'orbe', payment_info: 'Santander', start_date: '2026-01-01',
+    items: [{ description: 'Entrega de projetos', unit: 'vb', unit_price: '10.000,00', quantity: 12 }, { description: 'Aditivo - apoio', unit: 'vb', unit_price: 3500, quantity: 2, additive: true }] };
+  const kCtId = (await kAnaC('POST', '/contracts', kCtBody)).data.id;
+  let kCt = (await kAnaC('GET', `/contracts/${kCtId}`)).data;
+  ok(kCt.code === 'CT-001' && kCt.bulletin_prefix === 'ORBE' && kCt.summary.value === 127000 && kCt.items[0].unit_price === 10000, `contrato cadastrado com itens e aditivo (valor ${kCt.summary.value})`);
+  ok((await ricardo('GET', `/contracts/${kCtId}`)).status === 403, 'gestor sem liberação não vê o contrato');
+  const kM1 = (await kAnaC('POST', `/contracts/${kCtId}/measurements`, { ref_month: '2026-01' })).data.id;
+  ok((await kAnaC('POST', `/contracts/${kCtId}/measurements`, { ref_month: '2026-02' })).status === 400, 'só um rascunho por vez');
+  let kMv = (await kAnaC('GET', `/measurements/${kM1}`)).data;
+  ok(kMv.code === 'ORBE0001.26' && kMv.period_start === '2026-01-01' && kMv.period_end === '2026-01-31' && kMv.status === 'rascunho', 'boletim numerado (ORBE0001.26) com o período do mês');
+  ok((await kAnaC('POST', `/measurements/${kM1}/actions/issue`)).status === 400, 'não emite medição vazia');
+  const kIt1 = kCt.items[0].id;
+  kMv = (await kAnaC('PUT', `/measurements/${kM1}`, { lines: { [kIt1]: 1 }, adjustments: [{ description: 'Desconto AMIL', amount: '-158,95' }] })).data;
+  ok(kMv.totals.measured === 10000 && kMv.totals.adj === -158.95 && kMv.totals.to_bill === 9841.05 && kMv.rows[0].bal_qty === 11, `totais do boletim: medição 10.000, desconto −158,95, a faturar ${kMv.totals.to_bill}`);
+  kMv = (await kAnaC('POST', `/measurements/${kM1}/actions/issue`)).data;
+  ok(kMv.status === 'emitida' && !kMv.can.edit, 'medição emitida (não edita mais)');
+  ok((await kAnaC('PUT', `/measurements/${kM1}`, { lines: { [kIt1]: 2 } })).status === 400, 'emitida não aceita alteração');
+  const kM2 = (await kAnaC('POST', `/contracts/${kCtId}/measurements`, { ref_month: '2026-02' })).data.id;
+  let kMv2 = (await kAnaC('GET', `/measurements/${kM2}`)).data;
+  ok(kMv2.adjustments.some(a => a.description === 'Desconto AMIL' && a.prev === -158.95 && a.amount === 0), 'desconto recorrente repetido na medição seguinte, com o acumulado anterior');
+  kMv2 = (await kAnaC('PUT', `/measurements/${kM2}`, { lines: { [kIt1]: 1 } })).data;
+  ok(kMv2.rows[0].prev_qty === 1 && kMv2.rows[0].acc_qty === 2 && kMv2.rows[0].bal_qty === 10 && kMv2.totals.prev === 10000, 'acumulado anterior, acumulado atual e saldo contratual');
+  ok((await kAnaC('POST', `/measurements/${kM1}/actions/bill`, {})).status === 400, 'faturar exige o nº da NF');
+  kMv = (await kAnaC('POST', `/measurements/${kM1}/actions/bill`, { nf_number: '123', nf_date: '2026-02-05' })).data;
+  ok(kMv.status === 'faturada' && kMv.nf_number === '123', 'medição faturada com NF');
+  kMv = (await kAnaC('POST', `/measurements/${kM1}/actions/receive`, { paid_date: '2026-02-20' })).data;
+  ok(kMv.status === 'recebida' && kMv.paid_amount === 9841.05, 'recebimento registrado (valor do boletim)');
+  const kDsh = (await kAnaC('GET', '/contracts/dashboard')).data;
+  ok(kDsh.totals.value === 127000 && kDsh.totals.measured === 9841.05 && kDsh.totals.received === 9841.05 && kDsh.totals.drafts === 1 && kDsh.series.length === 12, 'faturamento global: contratado, medido, recebido e série mensal');
+  ok((await kAnaC('POST', `/measurements/${kM2}/actions/delete`)).data.deleted, 'rascunho pode ser excluído');
+  // Área restrita: tarefas só para liberados (inclusive administradores)
+  const kArea = kDsh.area_id;
+  ok(!!kArea, 'área interna restrita de Contratos criada');
+  const kCtTask = (await kAnaC('POST', '/tasks', { project_id: kArea, title: 'Emitir medição de outubro', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
+  ok(!!kCtTask, 'liberado cria tarefa na área restrita');
+  ok((await ricardo('GET', `/tasks/${kCtTask}`)).status === 404 && !(await ricardo('GET', '/tasks')).data.some(t => t.id === kCtTask), 'sem liberação, a tarefa da área restrita não aparece');
+  ok(!(await ricardo('GET', '/projects')).data.some(p => p.id === kArea), 'sem liberação, a área restrita não aparece em Projetos');
+  ok((await ricardo('POST', '/tasks', { project_id: kArea, title: 'x', description: 'x', priority: 'media', proof_type: 'nenhuma' })).status === 403, 'sem liberação não cria tarefa na área restrita');
+  ok((await kAnaC('POST', '/tasks', { project_id: kArea, title: 'y', description: 'x', assignee_id: (await ricardo('GET', '/auth/me')).data.user.id, priority: 'media', proof_type: 'nenhuma' })).status === 400, 'não atribui tarefa restrita a quem não é liberado');
+  ok(!(await ricardo('GET', '/dashboard')).data.internal_areas.some(p => p.id === kArea), 'Dashboard de quem não é liberado não mostra a área restrita');
+
   // Sem responsável indicado: a tarefa/subtarefa fica com quem a criou
   const rpT = (await marcos('POST', '/tasks', { project_id: 1, title: 'Sem responsável indicado', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;
   ok((await ricardo('GET', `/tasks/${rpT}`)).data.assignee_id === 4, 'tarefa criada sem responsável fica com quem criou');

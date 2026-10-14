@@ -20,6 +20,8 @@ import * as Account from './views/account.js';
 import * as Audit from './views/audit.js';
 import * as Settings from './views/settings.js';
 import * as Recurrences from './views/recurrences.js';
+import * as Contracts from './views/contracts.js';
+import * as ReportMeasurement from './views/report-measurement.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
 
@@ -57,6 +59,12 @@ const routes = [
   ['/imprimir/relatorio', ReportDoc.view, { print: true }],
   ['/imprimir/campo', FieldList.view, { print: true }],
   ['/imprimir/checklist/:id', ReportChecklist.view, { print: true }],
+  ['/imprimir/medicao/:id', ReportMeasurement.view, { print: true }],
+  ['/contratos', Contracts.list],
+  ['/contratos/novo', Contracts.form],
+  ['/contratos/:id', Contracts.view],
+  ['/contratos/:id/editar', Contracts.form],
+  ['/medicoes/:id', Contracts.measurement],
   ['/conta', Account.view],
   ['/auditoria', Audit.view],
   ['/configuracoes', Settings.view],
@@ -114,6 +122,7 @@ function shell() {
       <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
       <div class="sidebar-tag">Gestão de Obras</div>
       <nav>${NAV.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
+        ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.view_audit ? html`<a href="#/auditoria" data-nav="/auditoria">${icon('shield')}<span>Auditoria</span></a>` : ''}
         ${state.meta?.can.manage_settings ? html`<a href="#/configuracoes" data-nav="/configuracoes">${icon('settings')}<span>Configurações</span></a>` : ''}
       </nav>

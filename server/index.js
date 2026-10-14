@@ -16,6 +16,7 @@ import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
+import * as Contracts from './services/contracts.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
@@ -27,7 +28,7 @@ import { all } from './db.js';
 
 migrate();
 bootstrap();
-if (one('SELECT COUNT(*) AS n FROM users').n) Projects.ensureInternalArea();
+if (one('SELECT COUNT(*) AS n FROM users').n) { Projects.ensureInternalArea(); Contracts.ensureContractsArea(); }
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -186,9 +187,21 @@ api.get('/api/meta', (req, res, { ctx }) => {
       manage_projects: isAdmin(ctx.user) || isManagerRole(ctx.user),
       view_audit: isAdmin(ctx.user),
       manage_settings: canManageSettings(ctx.user),
+      contracts: Contracts.canContracts(ctx.user),
     },
   });
 });
+
+// ---------- Contratos (liberação por usuário) ----------
+api.get('/api/contracts/dashboard', (req, res, { ctx }) => send(res, 200, Contracts.contractsDashboard(ctx)));
+api.get('/api/contracts', (req, res, { ctx }) => send(res, 200, Contracts.listContracts(ctx)));
+api.post('/api/contracts', (req, res, { ctx, body }) => send(res, 201, { id: Contracts.createContract(ctx, body, clientIp(req)) }));
+api.get('/api/contracts/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))));
+api.put('/api/contracts/:id', (req, res, { ctx, params, body }) => { Contracts.updateContract(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))); });
+api.post('/api/contracts/:id/measurements', (req, res, { ctx, params, body }) => send(res, 201, { id: Contracts.createMeasurement(ctx, intOrNull(params.id), body, clientIp(req)) }));
+api.get('/api/measurements/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getMeasurement(ctx, intOrNull(params.id))));
+api.put('/api/measurements/:id', (req, res, { ctx, params, body }) => send(res, 200, Contracts.updateMeasurement(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/measurements/:id/actions/:action', (req, res, { ctx, params, body }) => send(res, 200, Contracts.measurementAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 
 // ---------- Projetos ----------
 api.get('/api/projects', (req, res, { ctx }) => send(res, 200, Projects.listProjects(ctx)));
@@ -342,7 +355,8 @@ api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
 });
 api.get('/api/audit', (req, res, { user }) => {
   requireAdmin(user);
-  send(res, 200, listAudit());
+  // Registros de contratos só para quem tem a liberação
+  send(res, 200, listAudit().filter(a => user.can_contracts || !['contract', 'measurement'].includes(a.entity)));
 });
 
 // ---------- Tarefas recorrentes ----------

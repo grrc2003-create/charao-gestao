@@ -291,3 +291,36 @@
 .g-subtoggle[aria-expanded="true"] .g-chev { transform: rotate(90deg); }
 .g-row.g-sub .g-label { padding-left: 18px; background: #FBFAF7; }
 @media print { .g-subtoggle { display: none; } }
+
+/* Boletim de medição (paisagem) */
+.bm-doc { width: 297mm; min-height: 210mm; padding: 10mm 10mm 12mm; font-size: 8pt; page: paisagem; }
+@media (max-width: 1100px) { .bm-doc { width: 100%; min-height: 0; padding: 14px; } }
+@media print { .bm-doc { width: auto; min-height: 0; padding: 0; } }
+.bm-head { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; border-bottom: 2px solid #2A3D50; padding-bottom: 8px; }
+.bm-logo { height: 46px; }
+.bm-kicker { font-size: 7.5pt; letter-spacing: .12em; color: #F26B21; font-weight: 700; }
+.bm-title h1 { font-size: 15pt; margin: 2px 0; }
+.bm-client { font-size: 8.5pt; }
+.bm-meta { border-collapse: collapse; font-size: 8pt; }
+.bm-meta th, .bm-meta td { border: 1px solid #9AA3AD; padding: 3px 8px; text-align: center; }
+.bm-meta th { background: #2A3D50; color: #fff; font-size: 7pt; letter-spacing: .04em; }
+.bm-scope { margin: 6px 0 8px; font-size: 8pt; }
+.bm-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7.5pt; }
+.bm-table th, .bm-table td { border: 1px solid #9AA3AD; padding: 3px 4px; }
+.bm-table thead th { background: #2A3D50; color: #fff; font-size: 6.8pt; text-align: center; font-weight: 700; }
+.bm-table thead th.bm-hl { background: #F26B21; }
+.bm-table td.bm-hl { background: #FFF3EB; }
+.bm-table .bm-item { width: 28px; }
+.bm-table th:nth-child(2) { width: 17%; }
+.bm-table td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bm-table td.c { text-align: center; }
+.bm-table .bm-desc { overflow-wrap: anywhere; }
+.bm-table tr.bm-empty td { height: 14px; }
+.bm-table tr.bm-sub td { background: #EEF2F6; font-weight: 700; }
+.bm-table tr.bm-total td { background: #DDE5EE; font-weight: 700; font-size: 7pt; }
+.bm-table td.n { font-size: 7pt; }
+.bm-table tr.bm-total td.bm-hl { background: #F26B21; color: #fff; text-align: center; }
+.bm-foot { display: grid; grid-template-columns: 1fr auto; gap: 14px; margin-top: 8px; font-size: 8pt; }
+.bm-pay { border: 1px solid #9AA3AD; padding: 6px 10px; white-space: pre-line; min-width: 70mm; }
+.bm-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 30mm; margin-top: 16mm; font-size: 8pt; text-align: center; }
+.bm-sign span { display: block; border-top: 1px solid #2A3D50; margin-bottom: 3px; }

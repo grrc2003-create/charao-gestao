@@ -10,11 +10,21 @@ export const isAdmin = u => u.role === 'admin';
 // Gestor e Coordenador têm as mesmas permissões de gestão
 export const isManagerRole = u => u.role === 'gestor' || u.role === 'coordenador';
 
+// Projetos restritos (área interna de Contratos): só para quem tem a liberação de Contratos
+export const restrictedProjectIds = () => new Set(all('SELECT id FROM projects WHERE restricted = 1').map(r => r.id));
+export const hiddenProjectIds = user => (user?.can_contracts ? new Set() : restrictedProjectIds());
+
 // null = todos os projetos; Set = apenas os ids listados
 export function accessibleProjectIds(user) {
-  if (isAdmin(user) || user.access_scope === 'total') return null;
+  const restricted = restrictedProjectIds();
+  if (isAdmin(user) || user.access_scope === 'total') {
+    if (!restricted.size || user.can_contracts) return null;
+    return new Set(all('SELECT id FROM projects WHERE restricted = 0').map(r => r.id));
+  }
   const ids = new Set(all('SELECT project_id FROM user_project_access WHERE user_id = ?', user.id).map(r => r.project_id));
   for (const r of all('SELECT id FROM projects WHERE lead_id = ?', user.id)) ids.add(r.id);
+  // Liberado em Contratos: acessa a área restrita; sem liberação, nunca
+  for (const id of restricted) { if (user.can_contracts) ids.add(id); else ids.delete(id); }
   return ids;
 }
 
@@ -47,11 +57,13 @@ export function accessContext(user) {
   // Check-lists em que o usuário (ou um terceirizado sem acesso liderado por ele) é responsável por algum item
   const checklist = new Set(all(`SELECT DISTINCT ci.task_id FROM checklist_items ci LEFT JOIN users u ON u.id = ci.assignee_id
     WHERE ci.assignee_id = ? OR (u.is_external = 1 AND u.login_enabled = 0 AND u.manager_id = ?)`, user.id, user.id).map(r => r.task_id));
-  return { user, projects: accessibleProjectIds(user), team: teamIds(user.id), checklist };
+  return { user, projects: accessibleProjectIds(user), team: teamIds(user.id), checklist, hidden: hiddenProjectIds(user) };
 }
 
 export function canSeeTask(ctx, t) {
   const { user } = ctx;
+  // Tarefas da área restrita (Contratos): somente liberados, inclusive administradores
+  if ((ctx.hidden || hiddenProjectIds(user)).has(t.project_id)) return false;
   if (isAdmin(user)) return true;
   if (t.assignee_id === user.id || t.creator_id === user.id) return true;
   if (t.assignee_id && ctx.team.has(t.assignee_id)) return true; // gestor acompanha a equipe

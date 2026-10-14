@@ -106,6 +106,11 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <span class="hint" id="proj-hint"></span></div>
         </fieldset>
 
+        <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''}><legend>Contratos</legend>
+          <label class="switch"><input type="checkbox" name="can_contracts" ${u.can_contracts ? 'checked' : ''}>Liberar a seção Contratos</label>
+          <span class="hint">Contratos, medições (boletins) e faturamento global. As tarefas da área interna <b>Contratos (restrito)</b> só aparecem para quem tiver esta liberação — inclusive administradores.</span>
+        </fieldset>
+
         ${editing ? html`<fieldset class="fieldset form"><legend>Situação</legend>
           <label class="switch"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}>Usuário ativo (pode fazer login)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap" ${ext && !hadLogin ? 'hidden' : ''}><button type="button" class="btn btn-ghost btn-sm" id="reset-pw">${icon('key')}Redefinir senha</button></div>
@@ -128,6 +133,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         const isExt = role === 'terceirizado';
         const hasLogin = !isExt || f.querySelector('#login_enabled').checked;
         root.querySelectorAll('.ext-only').forEach(e => (e.hidden = !isExt));
+        root.querySelectorAll('.int-only').forEach(e => (e.hidden = isExt));
         root.querySelector('#email-label').textContent = hasLogin ? 'E-mail (login)' : 'E-mail (contato, opcional)';
         root.querySelector('#email-label').classList.toggle('req', hasLogin);
         const pw = root.querySelector('#pw-field');
@@ -166,6 +172,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
+        data.can_contracts = !!f.querySelector('[name=can_contracts]')?.checked && !f.querySelector('[name=can_contracts]').closest('[hidden]');
         data.project_ids = [...f.querySelectorAll('[name=project]:checked')].map(c => Number(c.value));
         delete data.project;
         if (editing) data.active = f.querySelector('[name=active]').checked;

@@ -462,9 +462,15 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
     const tot = a => r2(a.reduce((s, v) => s + v, 0));
     return { year: y, measured, billed, received, totals: { measured: tot(measured), billed: tot(billed), received: tot(received) } };
   });
+  // Faturamento por nota (para o ranking de clientes por período, filtrado na tela)
+  const billing = ms.filter(m => m.nf_date).map(m => {
+    const c = code.get(m.contract_id);
+    return { client: c?.client || '—', contract: c?.code, nf_date: m.nf_date, total: totalOf.get(m.id), received: m.status === 'recebida' ? (m.paid_amount ?? totalOf.get(m.id)) : 0 };
+  });
   return {
     months,
     annual,
+    billing,
     year: { year, prev: prevYear, through: md, billed: billedIn(year), billed_prev: billedIn(prevYear), received: receivedIn(year), received_prev: receivedIn(prevYear), measured: measuredIn(year), measured_prev: measuredIn(prevYear) },
     aging,
     actions,

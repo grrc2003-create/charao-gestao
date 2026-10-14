@@ -51,6 +51,7 @@ function monthlyChart(series) {
   const iw = W - L - R, ih = H - T - B;
   const band = iw / series.length;
   const bw = Math.min(14, (band - 10) / 3);
+  const step = series.length <= 12 ? 1 : series.length <= 18 ? 2 : 3; // rótulos do eixo sem sobreposição
   const y = v => T + ih - (v / max) * ih;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
   // Coluna com ponta arredondada (4px) e base reta
@@ -69,7 +70,7 @@ function monthlyChart(series) {
       return `<g class="g-month" data-i="${i}">
         <rect class="g-hit" x="${L + i * band}" y="${T}" width="${band}" height="${ih + B}" tabindex="0"/>
         ${col(x0, s.measured, 's-med')}${col(x0 + bw + 2, s.billed, 's-fat')}${col(x0 + 2 * (bw + 2), s.received, 's-rec')}
-        <text class="g-xtick" x="${L + i * band + band / 2}" y="${H - 10}" text-anchor="middle">${s.label}</text>
+        ${(series.length - 1 - i) % step === 0 ? `<text class="g-xtick" x="${L + i * band + band / 2}" y="${H - 10}" text-anchor="middle">${s.label}</text>` : ''}
       </g>`;
     }).join('')}
     ${series[bestIdx].billed ? `<text class="g-peak" x="${L + bestIdx * band + band / 2}" y="${y(series[bestIdx].billed) - 6}" text-anchor="middle">${moneyShort(series[bestIdx].billed)}</text>` : ''}
@@ -209,6 +210,58 @@ function bindAnnual(root, d) {
   draw();
 }
 
+// ---------- Ranking de clientes por faturamento (período escolhido) ----------
+// Uma só série (faturado, laranja): barras horizontais ordenadas, valor na ponta, % do total e recebido como texto.
+const RK_PERIODS = [['ano', 'Ano atual'], ['ano_ant', 'Ano anterior'], ['12m', 'Últimos 12 meses'], ['6m', 'Últimos 6 meses'], ['3m', 'Últimos 3 meses'], ['tudo', 'Todo o período']];
+function rkRange(k, ref) {
+  const y = Number(ref.slice(0, 4));
+  const back = n => { const d = new Date(`${ref}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - n); return d.toISOString().slice(0, 10); };
+  return { ano: [`${y}-01-01`, ref], ano_ant: [`${y - 1}-01-01`, `${y - 1}-12-31`], '12m': [back(12), ref], '6m': [back(6), ref], '3m': [back(3), ref], tudo: ['0000', '9999'] }[k];
+}
+
+function rankingSection() {
+  return html`<section class="card ct-rank" id="ct-rank">
+    <div class="card-head"><h2>${icon('team')}Clientes que mais faturam</h2>
+      <div class="chips" role="group" aria-label="Período do ranking">${RK_PERIODS.map(([k, l]) => html`<button class="chip" data-rk="${k}" aria-pressed="${k === 'ano'}">${l}</button>`)}</div></div>
+    <div class="card-body"><div data-rk-body></div></div>
+  </section>`;
+}
+
+function bindRanking(root, d) {
+  const sec = root.querySelector('#ct-rank');
+  if (!sec) return;
+  const body = sec.querySelector('[data-rk-body]');
+  const ref = `${d.year.year}-${d.year.through}`;
+  const draw = k => {
+    const [a, b] = rkRange(k, ref);
+    const by = new Map();
+    for (const n of d.billing.filter(x => x.nf_date >= a && x.nf_date <= b)) {
+      if (!by.has(n.client)) by.set(n.client, { client: n.client, total: 0, received: 0, nfs: 0, contracts: new Set() });
+      const c = by.get(n.client);
+      c.total += n.total; c.received += n.received; c.nfs++; c.contracts.add(n.contract);
+    }
+    const rows = [...by.values()].sort((x, y) => y.total - x.total);
+    const total = rows.reduce((s, r) => s + r.total, 0);
+    const max = Math.max(1, ...rows.map(r => r.total));
+    const top = rows.slice(0, 10);
+    const rest = rows.slice(10);
+    if (rest.length) top.push({ client: `Outros (${rest.length})`, total: rest.reduce((s, r) => s + r.total, 0), received: rest.reduce((s, r) => s + r.received, 0), nfs: rest.reduce((s, r) => s + r.nfs, 0), contracts: new Set(), other: true });
+    const label = k === 'tudo' ? 'todo o período' : `${a.split('-').reverse().join('/')} a ${b.split('-').reverse().join('/')}`;
+    body.innerHTML = (rows.length ? html`
+      <div class="ct-rk-head"><span>Faturado (pela data da NF) · ${label}</span><b>${money(total)}</b><small>${rows.length} cliente(s)</small></div>
+      <ol class="ct-rk-list">${top.map((r, i) => html`<li class="${r.other ? 'is-other' : ''}">
+        <span class="ct-rk-pos">${r.other ? '' : `${i + 1}º`}</span>
+        <div class="ct-rk-main">
+          <div class="ct-rk-name"><b>${r.client}</b><span>${r.nfs} NF · recebido ${money(r.received)}</span></div>
+          <div class="ct-rk-bar"><i style="width:calc((100% - 120px) * ${Math.max(0.015, r.total / max).toFixed(4)})"></i><em>${money(r.total)}</em></div>
+        </div>
+        <span class="ct-rk-share">${String(total ? Math.round((r.total / total) * 1000) / 10 : 0).replace('.', ',')}%</span></li>`)}</ol>`
+      : html`<p class="muted" style="margin:0">Nenhuma nota fiscal emitida neste período.</p>`).toString();
+  };
+  sec.querySelectorAll('[data-rk]').forEach(b => b.addEventListener('click', () => { sec.querySelectorAll('[data-rk]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(b.dataset.rk); }));
+  draw('ano');
+}
+
 export async function list({ state, query, setQuery, render }) {
   denied(state);
   const months = query.get('meses') || '12';
@@ -281,6 +334,7 @@ export async function list({ state, query, setQuery, render }) {
         </section>
 
         ${annualSection(d)}
+        ${rankingSection()}
 
         <div class="ct-two">
           <section class="card">
@@ -322,6 +376,7 @@ export async function list({ state, query, setQuery, render }) {
       root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.ctf, meses: months }); render(); }));
       root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery({ status: filter, meses: b.dataset.meses }); render(); }));
       bindAnnual(root, d);
+      bindRanking(root, d);
       // Dica do gráfico: mês + os três valores (valor em destaque, série em seguida)
       const box = root.querySelector('.ct-chart-box');
       const tip = box?.querySelector('.ct-tip');

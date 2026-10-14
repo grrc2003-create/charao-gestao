@@ -99,6 +99,116 @@ const delta = (cur, prev, prevYear) => {
 };
 const SEV = { critical: { label: 'Crítico', ic: 'alert' }, serious: { label: 'Atenção', ic: 'clock' }, warning: { label: 'Pendente', ic: 'info' } };
 
+// ---------- Comparativo anual ----------
+// Uma linha por ano (jan → dez) da métrica escolhida; o ano atual em destaque na cor da métrica, os anteriores em cinza.
+const MET = { billed: { label: 'Faturado', note: 'pela data da NF', color: 'var(--s-fat)' }, measured: { label: 'Medido', note: 'pelo mês de referência', color: 'var(--s-med)' }, received: { label: 'Recebido', note: 'pela data do pagamento', color: 'var(--s-rec)' } };
+const MES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+const OLD = ['#8E979F', '#C4C9CE'];
+const cum = a => a.reduce((o, v, i) => (o.push((o[i - 1] || 0) + v), o), []);
+
+function annualChart(annual, metric, mode, curYear, curMonth) {
+  const ys = annual.slice(-3);
+  const W = 760, H = 260, L = 72, R = 56, T = 16, B = 30;
+  const iw = W - L - R, ih = H - T - B;
+  const vals = y => {
+    const a = mode === 'acum' ? cum(y[metric]) : y[metric];
+    return y.year === curYear ? a.slice(0, curMonth) : a; // ano atual só até o mês corrente
+  };
+  const max = niceMax(Math.max(0, ...ys.flatMap(vals)));
+  const x = i => L + (i / 11) * iw;
+  const y = v => T + ih - (v / max) * ih;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  const colorOf = (yy, k) => (yy.year === curYear ? MET[metric].color : OLD[Math.min(OLD.length - 1, ys.length - 2 - k)] || OLD[0]);
+  const lines = ys.map((yy, k) => {
+    const v = vals(yy);
+    if (!v.length) return '';
+    const c = colorOf(yy, k);
+    const cur = yy.year === curYear;
+    const pts = v.map((val, i) => `${x(i).toFixed(1)},${y(val).toFixed(1)}`).join(' ');
+    const li = v.length - 1;
+    return `<polyline points="${pts}" style="fill:none;stroke:${c};stroke-width:${cur ? 3 : 2}px;stroke-linejoin:round;stroke-linecap:round"/>
+      ${cur ? `<circle cx="${x(li)}" cy="${y(v[li])}" r="5" style="fill:${c};stroke:#fff;stroke-width:2px"/>
+        <text class="g-peak" x="${x(li) + 8}" y="${y(v[li]) + 4}">${moneyShort(v[li])}</text>` : ''}`;
+  }).join('');
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="ct-svg" role="img" aria-label="Comparativo anual">
+    ${ticks.map(t => `<line class="g-grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="g-ytick" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${moneyShort(t)}</text>`).join('')}
+    <line class="g-base" x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}"/>
+    ${MES.map((m, i) => `<text class="g-xtick" x="${x(i)}" y="${H - 10}" text-anchor="middle">${m}</text>`).join('')}
+    <line class="g-cross" x1="0" x2="0" y1="${T}" y2="${T + ih}" visibility="hidden"/>
+    ${lines}
+    ${MES.map((m, i) => `<rect class="g-hit" data-m="${i}" x="${x(i) - iw / 22}" y="${T}" width="${iw / 11}" height="${ih}" tabindex="0"/>`).join('')}
+  </svg>`;
+  return { svg, ys, colorOf, vals };
+}
+
+function annualSection(d) {
+  return html`<section class="card ct-annual" id="ct-annual">
+    <div class="card-head"><h2>${icon('history')}Comparativo anual</h2>
+      <div class="ct-ann-ctrl">
+        <div class="chips" role="group" aria-label="Métrica">${Object.entries(MET).map(([k, m]) => html`<button class="chip" data-am="${k}" aria-pressed="${k === 'billed'}">${m.label}</button>`)}</div>
+        <div class="chips" role="group" aria-label="Visão">${[['mes', 'Mês a mês'], ['acum', 'Acumulado no ano']].map(([k, l]) => html`<button class="chip" data-av="${k}" aria-pressed="${k === 'acum'}">${l}</button>`)}</div>
+      </div></div>
+    <div class="card-body"><div data-ann-body></div></div>
+  </section>`;
+}
+
+function bindAnnual(root, d) {
+  const sec = root.querySelector('#ct-annual');
+  if (!sec) return;
+  const body = sec.querySelector('[data-ann-body]');
+  const curYear = d.year.year;
+  const curMonth = Number(d.year.through.slice(0, 2));
+  let metric = 'billed', mode = 'acum';
+  const draw = () => {
+    const { svg, ys, colorOf, vals } = annualChart(d.annual, metric, mode, curYear, curMonth);
+    // Mesmo período (jan até o mês corrente) para comparar anos de forma justa
+    const ytd = yy => yy[metric].slice(0, curMonth).reduce((s, v) => s + v, 0);
+    const rows = [...d.annual].reverse();
+    body.innerHTML = html`
+      <ul class="ct-legend">${ys.map((yy, k) => html`<li><i class="ln-key" style="background:${raw(colorOf(yy, k))}"></i><b>${yy.year}</b>${yy.year === curYear ? html`<small>até ${MES[curMonth - 1].toLowerCase()}</small>` : ''}<span class="ct-leg-v">${moneyShort(yy.year === curYear ? ytd(yy) : yy.totals[metric])}</span></li>`)}
+        <li class="ct-leg-note">${MET[metric].label} ${MET[metric].note}${mode === 'acum' ? ' · acumulado no ano' : ''}</li></ul>
+      <div class="ct-chart-box">${raw(svg)}<div class="ct-tip" hidden></div></div>
+      <div class="table-wrap"><table class="data ct-table ct-ann-table"><thead><tr><th>Ano</th><th class="num">Medido</th><th class="num">Faturado</th><th class="num">Recebido</th>
+        <th class="num">${MET[metric].label} jan–${MES[curMonth - 1].toLowerCase()}</th><th class="num">Variação (mesmo período)</th></tr></thead>
+        <tbody>${rows.map(yy => {
+          const prev = d.annual.find(z => Number(z.year) === Number(yy.year) - 1);
+          const a = ytd(yy), b = prev ? ytd(prev) : 0;
+          const v = b ? Math.round(((a - b) / b) * 1000) / 10 : null;
+          return html`<tr class="${yy.year === curYear ? 'is-cur' : ''}"><td><b>${yy.year}</b>${yy.year === curYear ? html` <small class="muted">(parcial)</small>` : ''}</td>
+            <td class="num">${money(yy.totals.measured)}</td><td class="num">${money(yy.totals.billed)}</td><td class="num">${money(yy.totals.received)}</td>
+            <td class="num">${money(a)}</td><td class="num">${v === null ? '—' : html`<span class="ct-var ${v >= 0 ? 'is-up' : 'is-down'}">${v >= 0 ? '▲' : '▼'} ${String(Math.abs(v)).replace('.', ',')}%</span>`}</td></tr>`;
+        })}</tbody></table></div>`.toString();
+    // Linha-guia + dica: o mês sob o cursor, com o valor de cada ano
+    const box = body.querySelector('.ct-chart-box');
+    const tip = box.querySelector('.ct-tip');
+    const cross = box.querySelector('.g-cross');
+    const show = r => {
+      const i = Number(r.dataset.m);
+      const cx = Number(r.getAttribute('x')) + Number(r.getAttribute('width')) / 2;
+      cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
+      tip.replaceChildren();
+      const h = document.createElement('div'); h.className = 'ct-tip-h'; h.textContent = `${MES[i]}${mode === 'acum' ? ' · acumulado' : ''}`; tip.appendChild(h);
+      [...ys].reverse().forEach(yy => {
+        const k = ys.indexOf(yy);
+        const v = vals(yy)[i];
+        const row = document.createElement('div'); row.className = 'ct-tip-r';
+        const key = document.createElement('i'); key.className = 'ln'; key.style.background = colorOf(yy, k);
+        const b = document.createElement('b'); b.textContent = v === undefined ? '—' : money(v);
+        const l = document.createElement('span'); l.textContent = yy.year;
+        row.append(key, b, l); tip.appendChild(row);
+      });
+      tip.hidden = false;
+      const br = box.getBoundingClientRect(), rr = r.getBoundingClientRect();
+      tip.style.left = `${Math.min(br.width - tip.offsetWidth - 4, Math.max(4, rr.left - br.left + rr.width / 2 + 12))}px`;
+    };
+    box.querySelectorAll('.g-hit').forEach(r => { r.addEventListener('pointerenter', () => show(r)); r.addEventListener('focus', () => show(r)); });
+    box.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+  };
+  sec.querySelectorAll('[data-am]').forEach(b => b.addEventListener('click', () => { metric = b.dataset.am; sec.querySelectorAll('[data-am]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(); }));
+  sec.querySelectorAll('[data-av]').forEach(b => b.addEventListener('click', () => { mode = b.dataset.av; sec.querySelectorAll('[data-av]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(); }));
+  draw();
+}
+
 export async function list({ state, query, setQuery, render }) {
   denied(state);
   const months = query.get('meses') || '12';
@@ -170,6 +280,8 @@ export async function list({ state, query, setQuery, render }) {
           </div>
         </section>
 
+        ${annualSection(d)}
+
         <div class="ct-two">
           <section class="card">
             <div class="card-head"><h2>${icon('clock')}A receber por antiguidade</h2><span class="sub">dias desde a NF</span></div>
@@ -209,6 +321,7 @@ export async function list({ state, query, setQuery, render }) {
     mount(root) {
       root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.ctf, meses: months }); render(); }));
       root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery({ status: filter, meses: b.dataset.meses }); render(); }));
+      bindAnnual(root, d);
       // Dica do gráfico: mês + os três valores (valor em destaque, série em seguida)
       const box = root.querySelector('.ct-chart-box');
       const tip = box?.querySelector('.ct-tip');

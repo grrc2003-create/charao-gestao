@@ -1653,3 +1653,16 @@ body:not(.show-done) .clg:not(:has(.cli:not([data-done]))) { display: none; }
 
 .ct-dash { grid-template-columns: minmax(0, 1fr); }
 .ct-dash > *, .ct-two > *, .ct-hero > * { min-width: 0; }
+
+/* Comparativo anual */
+.ct-annual .card-head { flex-wrap: wrap; gap: 8px; }
+.ct-ann-ctrl { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.ct-dash i.ln-key { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
+.ct-leg-v { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ct-leg-note { color: var(--muted); font-size: 12px; margin-left: auto; }
+.ct-svg .g-cross { stroke: #9AA3AD; stroke-width: 1; }
+.ct-ann-table { margin-top: 10px; }
+.ct-ann-table tr.is-cur td { background: #FAF9F6; }
+.ct-var { font-weight: 700; font-size: 12.5px; }
+.ct-var.is-up { color: #1F7A4A; }
+.ct-var.is-down { color: #B42F2F; }

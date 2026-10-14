@@ -139,7 +139,7 @@ function readContract(body) {
     quantity: r4(num(x?.quantity, `Quantidade do item ${i + 1}`, { min: 0 })),
     additive: x?.additive ? 1 : 0,
   }));
-  if (!items.length) throw badRequest('Cadastre ao menos um item na planilha contratual.');
+  if (!items.length && body.items !== undefined) throw badRequest('Cadastre ao menos um item na planilha contratual.');
   return { d, items };
 }
 
@@ -161,7 +161,7 @@ function syncItems(contractId, items) {
 
 export function createContract(ctx, body, ip) {
   requireContracts(ctx.user);
-  const { d, items } = readContract(body);
+  const { d, items } = readContract({ items: [], ...body });
   return tx(() => {
     const n = one(`SELECT MAX(CAST(SUBSTR(code, 4) AS INTEGER)) AS n FROM contracts WHERE code LIKE 'CT-%'`)?.n || 0;
     const code = `CT-${String(n + 1).padStart(3, '0')}`;
@@ -450,8 +450,21 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   }
   const sev = { critical: 0, serious: 1, warning: 2 };
   actions.sort((a, b) => sev[a.severity] - sev[b.severity]);
+  // Comparativo anual: por ano, os 12 meses de medido (referência), faturado (NF) e recebido (pagamento)
+  const yearsSet = new Set([year]);
+  for (const m of ms) { yearsSet.add(m.ref_month.slice(0, 4)); if (m.nf_date) yearsSet.add(m.nf_date.slice(0, 4)); if (m.paid_date) yearsSet.add(m.paid_date.slice(0, 4)); }
+  const years = [...yearsSet].sort();
+  const annual = years.map(y => {
+    const mon = k => Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`).map(key => r2(k(key)));
+    const measured = mon(key => ms.filter(m => m.ref_month === key).reduce((s, m) => s + totalOf.get(m.id), 0));
+    const billed = mon(key => ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === key).reduce((s, m) => s + totalOf.get(m.id), 0));
+    const received = mon(key => ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === key).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0));
+    const tot = a => r2(a.reduce((s, v) => s + v, 0));
+    return { year: y, measured, billed, received, totals: { measured: tot(measured), billed: tot(billed), received: tot(received) } };
+  });
   return {
     months,
+    annual,
     year: { year, prev: prevYear, through: md, billed: billedIn(year), billed_prev: billedIn(prevYear), received: receivedIn(year), received_prev: receivedIn(prevYear), measured: measuredIn(year), measured_prev: measuredIn(prevYear) },
     aging,
     actions,

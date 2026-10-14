@@ -1121,6 +1121,7 @@ async function main() {
   let kCt = (await kAnaC('GET', `/contracts/${kCtId}`)).data;
   ok(kCt.code === 'CT-001' && kCt.bulletin_prefix === 'ORBE' && kCt.summary.value === 127000 && kCt.items[0].unit_price === 10000, `contrato cadastrado com itens e aditivo (valor ${kCt.summary.value})`);
   ok((await ricardo('GET', `/contracts/${kCtId}`)).status === 403, 'gestor sem liberação não vê o contrato');
+  ok((await kAnaC('PUT', `/contracts/${kCtId}`, { status: 'suspenso' })).data.status === 'suspenso' && (await kAnaC('PUT', `/contracts/${kCtId}`, { status: 'vigente' })).data.items.length === 2, 'muda a situação do contrato sem reenviar os itens');
   const kM1 = (await kAnaC('POST', `/contracts/${kCtId}/measurements`, { ref_month: '2026-01' })).data.id;
   ok((await kAnaC('POST', `/contracts/${kCtId}/measurements`, { ref_month: '2026-02' })).status === 400, 'só um rascunho por vez');
   let kMv = (await kAnaC('GET', `/measurements/${kM1}`)).data;
@@ -1144,6 +1145,8 @@ async function main() {
   ok(kMv.status === 'recebida' && kMv.paid_amount === 9841.05, 'recebimento registrado (valor do boletim)');
   const kDsh = (await kAnaC('GET', '/contracts/dashboard')).data;
   ok(kDsh.totals.value === 127000 && kDsh.totals.measured === 9841.05 && kDsh.totals.received === 9841.05 && kDsh.totals.drafts === 1 && kDsh.series.length === 12, 'faturamento global: contratado, medido, recebido e série mensal');
+  const kAnn = kDsh.annual.find(y => y.year === '2026');
+  ok(kAnn && kAnn.billed[1] === 9841.05 && kAnn.received[1] === 9841.05 && kAnn.measured[0] === 9841.05 && kAnn.totals.billed === 9841.05, 'comparativo anual: meses de medido (jan), faturado e recebido (fev)');
   ok((await kAnaC('POST', `/measurements/${kM2}/actions/delete`)).data.deleted, 'rascunho pode ser excluído');
   // Área restrita: tarefas só para liberados (inclusive administradores)
   const kArea = kDsh.area_id;

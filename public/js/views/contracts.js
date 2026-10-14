@@ -270,7 +270,10 @@ export async function list({ state, query, setQuery, render }) {
   const Y = d.year;
   const filter = query.get('status') || 'vigente';
   const shown = d.contracts.filter(c => filter === 'todos' || c.status === filter);
-  const port = { received: t.received, to_receive: t.to_receive, to_bill: t.to_bill, balance: t.balance };
+  // Carteira: só contratos vigentes (recebido + a receber + aguardando NF + saldo = contratado)
+  const vig = d.contracts.filter(c => c.status === 'vigente');
+  const vsum = k => vig.reduce((x, c) => x + (c.summary[k] || 0), 0);
+  const port = { received: vsum('received'), to_receive: vsum('to_receive'), to_bill: vsum('to_bill'), balance: vsum('balance') };
   const portTotal = port.received + port.to_receive + port.to_bill + Math.max(0, port.balance);
   const agingMax = Math.max(1, ...d.aging.map(a => a.total));
   const sumSeries = k => d.series.reduce((s, x) => s + x[k], 0);

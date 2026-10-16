@@ -7,6 +7,7 @@ import { today } from './metrics.js';
 import { defaultStageId } from './stages.js';
 import { saveImageFromDataUrl, isPdf, cleanFileName } from './files.js';
 import { insertTask } from './tasks.js';
+import { billedByMonth } from './contracts.js';
 
 export const CATEGORIES = ['Impostos', 'Folha de pagamento', 'Encargos e benefícios', 'Aluguel e condomínio', 'Fornecedores', 'Financiamentos e empréstimos', 'Seguros', 'Serviços e assinaturas', 'Contas de consumo', 'Outros'];
 export const FREQUENCIES = { mensal: 1, bimestral: 2, trimestral: 3, semestral: 6, anual: 12, unica: 0 };
@@ -283,6 +284,64 @@ export function syncFromTask(taskId, action, userId) {
 export function financeAssignees(ctx) {
   requireFinance(ctx.user);
   return all('SELECT id, name, job_title FROM users WHERE active = 1 AND can_finance = 1 ORDER BY name');
+}
+
+// ---------- Análise comparativa (mensal, trimestral, semestral, anual) ----------
+// Gastos por competência (mês de referência da parcela): valor pago, ou o previsto enquanto não pago.
+// Faturado: NFs emitidas no período (Contratos) — só para quem também tem a liberação de Contratos.
+const GRAN = {
+  mes: { months: 1, count: 12, label: (y, i) => `${MONTHS[i]}/${String(y).slice(2)}` },
+  tri: { months: 3, count: 8, label: (y, i) => `${i + 1}º TRI/${String(y).slice(2)}` },
+  sem: { months: 6, count: 6, label: (y, i) => `${i + 1}º SEM/${String(y).slice(2)}` },
+  ano: { months: 12, count: 5, label: y => String(y) },
+};
+export function financeAnalysis(ctx, granularity) {
+  requireFinance(ctx.user);
+  const g = GRAN[granularity] || GRAN.mes;
+  const key = granularity in GRAN ? granularity : 'mes';
+  const ref = today().slice(0, 7);
+  const bucketOf = ym => { const [y, m] = ym.split('-').map(Number); return `${y}-${Math.floor((m - 1) / g.months)}`; };
+  // Períodos: o atual e os anteriores (mais um ano para a comparação com o mesmo período do ano anterior)
+  const perYear = 12 / g.months;
+  const total = g.count + perYear;
+  const [cy, cm] = ref.split('-').map(Number);
+  let y = cy, i = Math.floor((cm - 1) / g.months);
+  const keys = [];
+  for (let k = 0; k < total; k++) { keys.unshift({ key: `${y}-${i}`, y, i }); i--; if (i < 0) { i = perYear - 1; y--; } }
+  const spend = new Map(), byCat = new Map();
+  // Só competências até o mês atual (parcelas futuras já geradas não entram na comparação)
+  for (const it of all(`SELECT i.ref_month, i.status, i.amount_expected, i.paid_amount, o.category FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id WHERE i.ref_month <= ?`, ref)) {
+    const b = bucketOf(it.ref_month);
+    const v = it.status === 'paga' ? (it.paid_amount ?? it.amount_expected) : it.amount_expected;
+    spend.set(b, r2((spend.get(b) || 0) + v));
+    const ck = `${b}|${it.category}`;
+    byCat.set(ck, r2((byCat.get(ck) || 0) + v));
+  }
+  const showBilled = !!ctx.user.can_contracts;
+  const billed = new Map();
+  if (showBilled) for (const [ym, v] of billedByMonth()) { const b = bucketOf(ym); billed.set(b, r2((billed.get(b) || 0) + v)); }
+  const pct = (a, b) => (b ? Math.round(((a - b) / b) * 1000) / 10 : null);
+  const all2 = keys.map(k => ({ key: k.key, label: g.label(k.y, k.i), spend: spend.get(k.key) || 0, billed: showBilled ? (billed.get(k.key) || 0) : null }));
+  let periods = all2.slice(perYear).map((p, idx) => {
+    const prev = all2[idx + perYear - 1];
+    const yoy = all2[idx];
+    const result = p.billed === null ? null : r2(p.billed - p.spend);
+    return {
+      ...p, partial: p.key === `${cy}-${Math.floor((cm - 1) / g.months)}`,
+      result, spend_ratio: p.billed ? Math.round((p.spend / p.billed) * 1000) / 10 : null,
+      spend_vs_prev: pct(p.spend, prev.spend), spend_vs_yoy: pct(p.spend, yoy.spend),
+      billed_vs_prev: p.billed === null ? null : pct(p.billed, prev.billed), billed_vs_yoy: p.billed === null ? null : pct(p.billed, yoy.billed),
+    };
+  });
+  // Sem dados no início da série: não mostra
+  while (periods.length > 1 && !periods[0].spend && !periods[0].billed) periods = periods.slice(1);
+  // Categorias: período atual x anterior x mesmo período do ano anterior
+  const cur = all2.at(-1), prev = all2.at(-2), yoy = all2[all2.length - 1 - perYear];
+  const cats = [...new Set([...byCat.keys()].map(k => k.split('|')[1]))].map(c => {
+    const v = k => byCat.get(`${k.key}|${c}`) || 0;
+    return { category: c, current: v(cur), previous: v(prev), last_year: v(yoy), vs_prev: pct(v(cur), v(prev)), vs_yoy: pct(v(cur), v(yoy)) };
+  }).filter(c => c.current || c.previous || c.last_year).sort((a, b) => b.current - a.current);
+  return { granularity: key, periods, categories: cats, current: cur.label, previous: prev.label, last_year: yoy.label, show_billed: showBilled };
 }
 
 // ---------- Visão do mês ----------

@@ -1,6 +1,6 @@
 // Tarefas financeiras (liberação por usuário): obrigações mensais/periódicas, parcelas Pendente → Paga,
 // calendário do mês, lista por vencimento e resumo por categoria.
-import { html, api, icon, fmtDate } from '../core.js';
+import { html, raw, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
 
@@ -117,6 +117,7 @@ export async function view({ state, query, setQuery, render }) {
         eyebrow: 'Acesso restrito · Gestão da Empresa',
         title: 'Tarefas financeiras',
         actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas do financeiro</a>` : ''}
+          <a class="btn btn-ghost" href="#/financeiro/analise">${icon('reports')}Análise comparativa</a>
           <a class="btn btn-ghost" href="#/financeiro/obrigacoes">${icon('settings')}Obrigações</a>
           <a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova obrigação</a>`,
       })}
@@ -251,6 +252,121 @@ export async function form({ params, state, navigate }) {
           navigate('/financeiro');
         } catch (ex) { err.textContent = ex.message; err.hidden = false; }
       });
+    },
+  };
+}
+
+// ---------- Análise comparativa (gastos x faturado) ----------
+const GRAN_L = [['mes', 'Mensal'], ['tri', 'Trimestral'], ['sem', 'Semestral'], ['ano', 'Anual']];
+const PREV_L = { mes: 'mês anterior', tri: 'trimestre anterior', sem: 'semestre anterior', ano: 'ano anterior' };
+const short = v => {
+  const a = Math.abs(v);
+  if (a >= 1e6) return `R$ ${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  if (a >= 1e3) return `R$ ${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: a >= 1e5 ? 0 : 1 })} mil`;
+  return money(v);
+};
+const niceMax = v => { if (v <= 0) return 1000; const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map(m => m * p).find(x => x >= v); };
+// Variação: gastos subindo = ruim (vermelho); faturado subindo = bom (verde). Sempre com seta + número.
+const varBadge = (v, upIsGood) => {
+  if (v === null || v === undefined) return html`<span class="fa-var">—</span>`;
+  const good = v === 0 ? null : (v > 0) === upIsGood;
+  return html`<span class="fa-var ${good === null ? '' : good ? 'is-good' : 'is-bad'}">${v > 0 ? '▲' : v < 0 ? '▼' : '='} ${String(Math.abs(v)).replace('.', ',')}%</span>`;
+};
+
+function analysisChart(periods, showBilled) {
+  const W = 760, H = 250, L = 72, R = 8, T = 16, B = 30;
+  const iw = W - L - R, ih = H - T - B;
+  const max = niceMax(Math.max(0, ...periods.flatMap(p => [p.spend, p.billed || 0])));
+  const band = iw / periods.length;
+  const nb = showBilled ? 2 : 1;
+  const bw = Math.min(22, (band - 12) / nb);
+  const y = v => T + ih - (v / max) * ih;
+  const col = (x, v, cls) => {
+    if (!v) return '';
+    const h = Math.max(1.5, (v / max) * ih), r = Math.min(4, h, bw / 2), yb = T + ih, yt = yb - h;
+    return `<path class="${cls}" d="M${x},${yb} V${yt + r} Q${x},${yt} ${x + r},${yt} H${x + bw - r} Q${x + bw},${yt} ${x + bw},${yt + r} V${yb} Z"/>`;
+  };
+  const step = periods.length > 8 ? 2 : 1;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  return `<svg viewBox="0 0 ${W} ${H}" class="ct-svg" role="img" aria-label="Gastos e faturado por período">
+    ${ticks.map(t => `<line class="g-grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="g-ytick" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${short(t)}</text>`).join('')}
+    ${periods.map((p, i) => {
+      const x0 = L + i * band + (band - (bw * nb + (nb - 1) * 2)) / 2;
+      return `<g class="g-month" data-i="${i}"><rect class="g-hit" x="${L + i * band}" y="${T}" width="${band}" height="${ih + B}" tabindex="0"/>
+        ${col(x0, p.spend, 'fa-spend')}${showBilled ? col(x0 + bw + 2, p.billed, 'fa-billed') : ''}
+        ${(periods.length - 1 - i) % step === 0 ? `<text class="g-xtick" x="${L + i * band + band / 2}" y="${H - 10}" text-anchor="middle">${p.label}${p.partial ? '*' : ''}</text>` : ''}</g>`;
+    }).join('')}
+    <line class="g-base" x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}"/>
+  </svg>`;
+}
+
+export async function analysis({ state, query, setQuery, render }) {
+  denied(state);
+  const por = query.get('por') || 'mes';
+  const a = await api('/finance/analysis', { query: { por } });
+  const P = a.periods;
+  const closed = P.filter(p => !p.partial);
+  const last = closed.at(-1) || P.at(-1);
+  const cur = P.at(-1);
+  const sb = a.show_billed;
+  const yoy = por !== 'ano'; // no anual, o período anterior já é o ano anterior
+  const card = (p, title) => html`<section class="card fa-card ${p.partial ? 'is-partial' : ''}">
+    <div class="fa-card-h"><span>${title}</span><b>${p.label}${p.partial ? ' (parcial)' : ''}</b></div>
+    <div class="fa-card-g">
+      <div><small><i class="k fa-spend-k"></i>Gastos</small><b>${money(p.spend)}</b><span>${varBadge(p.spend_vs_prev, false)} vs ${PREV_L[por]}</span>${yoy ? html`<span>${varBadge(p.spend_vs_yoy, false)} vs mesmo período do ano anterior</span>` : ''}</div>
+      ${sb ? html`<div><small><i class="k fa-billed-k"></i>Faturado</small><b>${money(p.billed)}</b><span>${varBadge(p.billed_vs_prev, true)} vs ${PREV_L[por]}</span>${yoy ? html`<span>${varBadge(p.billed_vs_yoy, true)} vs mesmo período do ano anterior</span>` : ''}</div>
+        <div><small>Resultado (faturado − gastos)</small><b class="${p.result < 0 ? 'is-neg' : 'is-pos'}">${money(p.result)}</b><span>Gastos = <b>${p.spend_ratio === null ? '—' : `${String(p.spend_ratio).replace('.', ',')}%`}</b> do faturado</span></div>` : ''}
+    </div></section>`;
+  return {
+    title: 'Análise financeira',
+    html: html`
+      ${pageHead({ back: { href: '#/financeiro', label: 'Tarefas financeiras' }, eyebrow: 'Gestão da Empresa', title: 'Análise comparativa',
+        sub: `Gastos por competência (valor pago, ou previsto enquanto não pago)${sb ? ' x faturado (NFs emitidas em Contratos)' : ''}.` })}
+      <div class="fin">
+        <div class="chips" role="group" aria-label="Periodicidade">${GRAN_L.map(([k, l]) => html`<button class="chip" data-por="${k}" aria-pressed="${por === k}">${l}</button>`)}</div>
+        <div class="fa-cards">${card(last, 'Último período fechado')}${cur !== last ? card(cur, 'Período atual') : ''}</div>
+        <section class="card"><div class="card-head"><h2>${icon('reports')}${sb ? 'Gastos x faturado' : 'Gastos'} por período</h2><span class="sub">* período em andamento</span></div>
+          <div class="card-body">
+            ${sb ? html`<ul class="ct-legend"><li><i class="k fa-spend-k"></i>Gastos</li><li><i class="k fa-billed-k"></i>Faturado</li></ul>` : ''}
+            <div class="ct-chart-box">${raw(analysisChart(P, sb))}<div class="ct-tip" hidden></div></div>
+            <div class="table-wrap"><table class="data ct-table fa-table"><thead><tr><th>Período</th><th class="num">Gastos</th><th class="num">vs anterior</th>${yoy ? html`<th class="num">vs ano anterior</th>` : ''}
+              ${sb ? html`<th class="num">Faturado</th><th class="num">vs anterior</th>${yoy ? html`<th class="num">vs ano anterior</th>` : ''}<th class="num">Resultado</th><th class="num">Gastos/Faturado</th>` : ''}</tr></thead>
+              <tbody>${[...P].reverse().map(p => html`<tr class="${p.partial ? 'is-cur' : ''}"><td><b>${p.label}</b>${p.partial ? html` <small class="muted">(parcial)</small>` : ''}</td>
+                <td class="num">${money(p.spend)}</td><td class="num">${varBadge(p.spend_vs_prev, false)}</td>${yoy ? html`<td class="num">${varBadge(p.spend_vs_yoy, false)}</td>` : ''}
+                ${sb ? html`<td class="num">${money(p.billed)}</td><td class="num">${varBadge(p.billed_vs_prev, true)}</td>${yoy ? html`<td class="num">${varBadge(p.billed_vs_yoy, true)}</td>` : ''}
+                  <td class="num ${p.result < 0 ? 'is-neg' : ''}">${money(p.result)}</td><td class="num">${p.spend_ratio === null ? '—' : `${String(p.spend_ratio).replace('.', ',')}%`}</td>` : ''}</tr>`)}</tbody></table></div>
+            ${!sb ? html`<p class="muted" style="font-size:12.5px;margin:10px 0 0">O faturado aparece para quem também tem a liberação de Contratos.</p>` : ''}
+          </div></section>
+        <section class="card"><div class="card-head"><h2>${icon('tasks')}Gastos por categoria</h2><span class="sub">${a.current} x ${a.previous}${yoy ? ` x ${a.last_year}` : ''}</span></div>
+          ${a.categories.length ? html`<div class="table-wrap"><table class="data ct-table fa-table"><thead><tr><th>Categoria</th><th class="num">${a.current}</th><th class="num">${a.previous}</th><th class="num">Variação</th>${yoy ? html`<th class="num">${a.last_year}</th><th class="num">Variação</th>` : ''}</tr></thead>
+            <tbody>${a.categories.map(c => html`<tr><td>${c.category}</td><td class="num"><b>${money(c.current)}</b></td><td class="num">${money(c.previous)}</td><td class="num">${varBadge(c.vs_prev, false)}</td>${yoy ? html`<td class="num">${money(c.last_year)}</td><td class="num">${varBadge(c.vs_yoy, false)}</td>` : ''}</tr>`)}</tbody></table></div>`
+            : html`<div class="card-body muted">Sem gastos nos períodos comparados.</div>`}
+        </section>
+      </div>`,
+    mount(root) {
+      root.querySelectorAll('[data-por]').forEach(b => b.addEventListener('click', () => { setQuery({ por: b.dataset.por }); render(); }));
+      const box = root.querySelector('.ct-chart-box');
+      const tip = box.querySelector('.ct-tip');
+      const show = g => {
+        const p = P[Number(g.dataset.i)];
+        box.querySelectorAll('.g-month.is-on').forEach(x => x.classList.remove('is-on'));
+        g.classList.add('is-on');
+        tip.replaceChildren();
+        const h = document.createElement('div'); h.className = 'ct-tip-h'; h.textContent = p.label + (p.partial ? ' (parcial)' : ''); tip.appendChild(h);
+        const rows = [['Gastos', p.spend, 'fa-spend'], ...(sb ? [['Faturado', p.billed, 'fa-billed'], ['Resultado', p.result, '']] : [])];
+        for (const [l, v, cls] of rows) {
+          const r = document.createElement('div'); r.className = 'ct-tip-r';
+          const k = document.createElement('i'); k.className = `ln ${cls}`;
+          const b = document.createElement('b'); b.textContent = money(v);
+          const s = document.createElement('span'); s.textContent = l;
+          r.append(k, b, s); tip.appendChild(r);
+        }
+        tip.hidden = false;
+        const br = box.getBoundingClientRect(), gr = g.querySelector('.g-hit').getBoundingClientRect();
+        tip.style.left = `${Math.min(br.width - tip.offsetWidth - 4, Math.max(4, gr.left - br.left + gr.width / 2 - tip.offsetWidth / 2))}px`;
+      };
+      box.querySelectorAll('.g-month').forEach(g => { g.addEventListener('pointerenter', () => show(g)); g.querySelector('.g-hit').addEventListener('focus', () => show(g)); });
+      box.addEventListener('pointerleave', () => { tip.hidden = true; box.querySelectorAll('.g-month.is-on').forEach(x => x.classList.remove('is-on')); });
     },
   };
 }

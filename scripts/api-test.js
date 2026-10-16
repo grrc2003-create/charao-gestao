@@ -1196,6 +1196,14 @@ async function main() {
   const fIt2 = (await fAna('GET', `/finance/obligations/${fOb2}`)).data.items.find(i => i.ref_month === fRef);
   await fAna('POST', `/tasks/${fIt2.task_id}/actions/conclude`, { start_date: '2020-01-01' });
   ok((await fAna('GET', `/finance/items/${fIt2.id}`)).data.status === 'paga', 'concluir a tarefa da parcela marca a parcela como paga');
+  // Análise comparativa: gastos x faturado por período, com variação
+  for (const [por, n] of [['mes', 12], ['tri', 8], ['sem', 6], ['ano', 5]]) {
+    const an = (await fAna('GET', `/finance/analysis?por=${por}`)).data;
+    ok(an.periods.length >= 1 && an.periods.length <= n && an.periods.at(-1).partial && an.show_billed && an.periods.at(-1).spend > 0, `análise ${por}: até ${n} períodos (sem os vazios do início), atual parcial, gastos e faturado`);
+  }
+  const anMes = (await fAna('GET', '/finance/analysis?por=mes')).data;
+  ok(anMes.categories.some(c => c.category === 'Aluguel e condomínio' && c.current === 3000), 'análise por categoria no período atual');
+  ok((await ricardo('GET', '/finance/analysis')).status === 403, 'análise financeira exige a liberação');
 
   // Sem responsável indicado: a tarefa/subtarefa fica com quem a criou
   const rpT = (await marcos('POST', '/tasks', { project_id: 1, title: 'Sem responsável indicado', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;

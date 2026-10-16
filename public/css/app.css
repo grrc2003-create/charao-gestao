@@ -1785,3 +1785,26 @@ tr.is-inactive td { opacity: .55; }
   .fin-row-val { grid-column: 2; grid-row: 1; }
   .fin-row-act { grid-column: 2; grid-row: 2; }
 }
+
+/* Análise comparativa (financeiro) */
+.fin { --fa-spend: #2a78d6; --fa-billed: #eb6834; }
+.fa-spend { fill: var(--fa-spend); background: var(--fa-spend); }
+.fa-billed { fill: var(--fa-billed); background: var(--fa-billed); }
+.fa-spend-k { background: var(--fa-spend); } .fa-billed-k { background: var(--fa-billed); }
+.fa-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.fa-card { padding: 16px 18px; display: grid; gap: 12px; }
+.fa-card.is-partial { background: #FBFAF7; }
+.fa-card-h { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.fa-card-h span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+.fa-card-h b { font-size: 16px; }
+.fa-card-g { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.fa-card-g > div { display: grid; gap: 3px; align-content: start; }
+.fa-card-g small { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.fa-card-g b { font-size: 22px; letter-spacing: -.01em; }
+.fa-card-g span { font-size: 12px; color: var(--muted); }
+.fa-card-g b.is-neg, .fa-table .is-neg { color: #B42F2F; }
+.fa-card-g b.is-pos { color: #1F7A4A; }
+.fa-var { font-weight: 700; font-size: 12.5px; white-space: nowrap; color: var(--muted); }
+.fa-var.is-good { color: #1F7A4A; }
+.fa-var.is-bad { color: #B42F2F; }
+.fa-table tr.is-cur td { background: #FAF9F6; }

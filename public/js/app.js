@@ -67,6 +67,7 @@ const routes = [
   ['/contratos/:id/editar', Contracts.form],
   ['/medicoes/:id', Contracts.measurement],
   ['/financeiro', Finance.view],
+  ['/financeiro/analise', Finance.analysis],
   ['/financeiro/obrigacoes', Finance.obligations],
   ['/financeiro/obrigacoes/nova', Finance.form],
   ['/financeiro/obrigacoes/:id/editar', Finance.form],

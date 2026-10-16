@@ -197,6 +197,7 @@ api.get('/api/meta', (req, res, { ctx }) => {
 // ---------- Tarefas financeiras (liberação por usuário) ----------
 api.get('/api/finance/month', (req, res, { ctx, query }) => send(res, 200, Finance.financeMonth(ctx, query.get('mes'))));
 api.get('/api/finance/assignees', (req, res, { ctx }) => send(res, 200, Finance.financeAssignees(ctx)));
+api.get('/api/finance/analysis', (req, res, { ctx, query }) => send(res, 200, Finance.financeAnalysis(ctx, query.get('por'))));
 api.get('/api/finance/obligations', (req, res, { ctx }) => send(res, 200, Finance.listObligations(ctx)));
 api.post('/api/finance/obligations', (req, res, { ctx, body }) => send(res, 201, { id: Finance.createObligation(ctx, body, clientIp(req)) }));
 api.get('/api/finance/obligations/:id', (req, res, { ctx, params }) => send(res, 200, Finance.getObligation(ctx, intOrNull(params.id))));

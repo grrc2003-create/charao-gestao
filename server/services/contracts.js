@@ -380,6 +380,16 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
   return action === 'delete' ? { deleted: true, contract_id: m.contract_id } : getMeasurement(ctx, id);
 }
 
+// Faturado por mês (pela data da NF) — usado na análise comparativa das Tarefas financeiras
+export function billedByMonth() {
+  const out = new Map();
+  for (const m of all(`SELECT * FROM measurements WHERE nf_date IS NOT NULL AND status IN ('faturada', 'recebida')`)) {
+    const k = m.nf_date.slice(0, 7);
+    out.set(k, r2((out.get(k) || 0) + measurementTotals(m).total));
+  }
+  return out;
+}
+
 // ---------- Faturamento global ----------
 export function contractsDashboard(ctx, { months = 12 } = {}) {
   requireContracts(ctx.user);

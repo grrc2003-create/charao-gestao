@@ -44,13 +44,13 @@ export async function list({ state }) {
 
 // Seções que o administrador libera por usuário
 const SECTION_GROUPS = [
-  ['Gestão de Obras', [['dashboard', 'Dashboard', 'visão geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Usuários', 'equipe e desempenho'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
+  ['Gestão de Obras', [['dashboard', 'Visão da empresa', 'dashboard geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Usuários (desempenho)', 'telas de desempenho das pessoas'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
   ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos']]],
-  ['Administração', [['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
+  ['Administração', [['cadastro_usuarios', 'Cadastro de usuários', 'criar, editar e liberar acessos'], ['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
 ];
 
 export async function form({ params, query, state, navigate, reloadMeta }) {
-  if (!state.meta.can.manage_users) throw new Error('Apenas administradores gerenciam usuários.');
+  if (!state.meta.can.manage_users) throw new Error('A seção Cadastro de usuários não está liberada para o seu usuário.');
   const editing = !!params.id;
   const [detail, users, projects] = await Promise.all([
     editing ? api(`/users/${params.id}`) : Promise.resolve(null),
@@ -60,6 +60,9 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
   const u = detail?.user || { role: 'colaborador', access_scope: 'projetos', project_ids: [], active: 1, is_external: query.get('perfil') === 'terceirizado' ? 1 : 0 };
   // Seções: as salvas, ou o padrão do perfil para um usuário novo
   const secSet = new Set(u.section_list || ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios']);
+  // Quem não é administrador só libera as seções que ele mesmo tem
+  const mySecs = new Set(state.meta.can.sections || []);
+  const isAdminMe = state.user.role === 'admin';
   const ext = !!u.is_external;
   const hadLogin = editing && !!u.login_enabled;
   // Líderes possíveis de terceirizado: qualquer usuário interno ativo
@@ -118,8 +121,14 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''} id="sec-fs"><legend>Seções liberadas</legend>
           <span class="hint">Marque as seções que esta pessoa pode abrir. O que não estiver marcado some do menu e fica bloqueado. A própria tela do usuário (com o Planejamento da semana) e as tarefas atribuídas a ela sempre abrem.</span>
           ${SECTION_GROUPS.map(([g, list]) => html`<div class="sec-group"><div class="sub-label">${g}</div>
-            <div class="checks sec-checks">${list.map(([k, l, hint]) => html`<label><input type="checkbox" name="section" value="${k}" ${secSet.has(k) ? 'checked' : ''}>${l}<span class="muted" style="font-size:12px">${hint}</span></label>`)}</div></div>`)}
-          <span class="hint">Contratos e Tarefas financeiras também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre a seção Usuários.</span>
+            <div class="checks sec-checks">${list.map(([k, l, hint]) => html`<label><input type="checkbox" name="section" value="${k}" ${secSet.has(k) ? 'checked' : ''} ${!isAdminMe && !mySecs.has(k) && !secSet.has(k) ? 'disabled' : ''}>${l}<span class="muted" style="font-size:12px">${hint}</span></label>`)}</div></div>`)}
+          <span class="hint">Contratos e Tarefas financeiras também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre o Cadastro de usuários.</span>
+          <div class="field" style="max-width:420px"><label for="home">Tela de entrada</label>
+            <select id="home" name="home">
+              <option value="pessoal" ${u.home !== 'empresa' ? 'selected' : ''}>Meu painel (dashboard da própria pessoa)</option>
+              <option value="empresa" ${u.home === 'empresa' ? 'selected' : ''}>Visão da empresa (dashboard geral)</option>
+            </select>
+            <span class="hint">Para travar a pessoa só no próprio painel, escolha “Meu painel” e desmarque a seção Visão da empresa.</span></div>
         </fieldset>
 
         ${editing ? html`<fieldset class="fieldset form"><legend>Situação</legend>

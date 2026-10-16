@@ -2,7 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { impactOfAssignee } from './dependencies.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
-import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf } from '../lib/permissions.js';
+import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf, requireSection } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend } from './metrics.js';
 import { listVisible, execWorkDaysAvg } from './tasks.js';
@@ -13,7 +13,7 @@ import { checklistDashboard } from './checklist.js';
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections, home';
 
 export function publicUser(ctx, u) {
   const out = { ...u, section_list: [...sectionsOf(u)] };
@@ -123,6 +123,7 @@ function readUserBody(body, { creating }) {
     can_contracts: body.can_contracts === true || body.can_contracts === 1 || body.can_contracts === '1' || body.can_contracts === 'on' ? 1 : 0,
     can_finance: body.can_finance === true || body.can_finance === 1 || body.can_finance === '1' || body.can_finance === 'on' ? 1 : 0,
     sections: Array.isArray(body.sections) ? JSON.stringify([...new Set(body.sections.filter(x => SECTIONS.includes(x)))]) : (body.sections ?? null),
+    home: body.home === 'pessoal' || body.home === 'empresa' ? body.home : null,
   };
   if (Array.isArray(body.sections)) {
     d.can_contracts = body.sections.includes('contratos') ? 1 : 0;
@@ -143,8 +144,22 @@ function assertNoManagerCycle(userId, managerId) {
   if (userId && teamIds(userId).has(managerId)) throw badRequest('Hierarquia inválida: o gestor escolhido é subordinado deste usuário.');
 }
 
+// Cadastro de usuários: seção própria (administradores sempre). Quem não é administrador não cria nem edita
+// administradores e só libera seções que ele mesmo tem.
+function requireCadastro(ctx, target = null, body = {}) {
+  requireSection(ctx.user, 'cadastro_usuarios');
+  if (isAdmin(ctx.user)) return;
+  if (target && target.role === 'admin') throw forbidden('Somente administradores alteram administradores.');
+  if (body.role === 'admin') throw forbidden('Somente administradores criam administradores.');
+  if (Array.isArray(body.sections)) {
+    const mine = sectionsOf(ctx.user);
+    const extra = body.sections.filter(s => !mine.has(s) && !(target && sectionsOf(target).has(s)));
+    if (extra.length) throw forbidden('Você só pode liberar as seções que você mesmo tem.');
+  }
+}
+
 export function createUser(ctx, body, ip) {
-  requireAdmin(ctx.user);
+  requireCadastro(ctx, null, body);
   if (body.role === 'terceirizado') {
     const { d, projectIds } = readExternalBody(body);
     if (d.login_enabled) validatePasswordStrength(body.password);
@@ -165,8 +180,8 @@ export function createUser(ctx, body, ip) {
   assertNoManagerCycle(null, d.manager_id);
   if (d.manager_id && one('SELECT is_external FROM users WHERE id = ?', d.manager_id)?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
   return tx(() => {
-    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, can_contracts, can_finance, sections, must_change_password)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.can_contracts, d.can_finance, Array.isArray(body.sections) ? d.sections : null);
+    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, can_contracts, can_finance, sections, home, must_change_password)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.can_contracts, d.can_finance, Array.isArray(body.sections) ? d.sections : null, d.home);
     const id = Number(r.lastInsertRowid);
     for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
     audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, projetos: projectIds, contratos: !!d.can_contracts, financeiro: !!d.can_finance }, ip);
@@ -175,7 +190,7 @@ export function createUser(ctx, body, ip) {
 }
 
 export function updateUser(ctx, id, body, ip) {
-  requireAdmin(ctx.user);
+  requireCadastro(ctx, one('SELECT * FROM users WHERE id = ?', id), body);
   const u = one('SELECT * FROM users WHERE id = ?', id);
   if (!u) throw notFound('Usuário não encontrado.');
   if (u.is_external) return updateExternal(ctx, u, body, ip);
@@ -194,8 +209,8 @@ export function updateUser(ctx, id, body, ip) {
     const newCt = secGiven || body.can_contracts !== undefined ? d.can_contracts : u.can_contracts;
     const newFin = secGiven || body.can_finance !== undefined ? d.can_finance : u.can_finance;
     const newSec = secGiven ? d.sections : u.sections;
-    run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, can_finance=?, sections=?, active=?, updated_at=datetime('now') WHERE id=?`,
-      d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, newCt, newFin, newSec, active, id);
+    run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, can_finance=?, sections=?, home=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, newCt, newFin, newSec, d.home, active, id);
     const finChanged = !!u.can_finance !== !!newFin;
     const secChanged = secGiven && (u.sections || JSON.stringify([...sectionsOf(u)])) !== newSec;
     const ctChanged = finChanged || secChanged || !!u.can_contracts !== !!newCt;
@@ -223,7 +238,7 @@ function ensureAnotherAdmin(exceptId) {
 }
 
 export function resetPassword(ctx, id, body, ip) {
-  requireAdmin(ctx.user);
+  requireCadastro(ctx, one('SELECT * FROM users WHERE id = ?', id));
   const target = one('SELECT id, login_enabled FROM users WHERE id = ?', id);
   if (!target) throw notFound();
   if (!target.login_enabled) throw badRequest('Este terceirizado não tem acesso ao sistema.');

@@ -1263,8 +1263,22 @@ async function main() {
   const secAna = (await fAna('GET', `/users/${kAnaId}`)).data.user;
   await fAna('PUT', `/users/${kAnaId}`, { ...secAna, sections: ['dashboard', 'contratos', 'financeiro'] });
   const secAna2 = await login('ana@charao.eng.br');
-  ok((await secAna2('GET', '/meta')).data.can.sections.includes('usuarios') && (await secAna2('GET', '/audit')).status === 403, 'administrador nunca perde Usuários; Auditoria pode ser desligada');
+  ok((await secAna2('GET', '/meta')).data.can.sections.includes('cadastro_usuarios') && (await secAna2('GET', '/audit')).status === 403, 'administrador nunca perde o Cadastro de usuários; Auditoria pode ser desligada');
+  ok((await secAna2('GET', '/meta')).data.can.home === 'pessoal', 'tela de entrada padrão: Meu painel');
   await secAna2('PUT', `/users/${kAnaId}`, { ...secAna, sections: ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'auditoria', 'configuracoes'] });
+  // Cadastro de usuários como seção própria (gestor liberado) e tela de entrada
+  const cuAna = await login('ana@charao.eng.br');
+  const cuR = (await cuAna('GET', '/users/2')).data.user;
+  ok((await ricardo('POST', '/users', { name: 'X', email: 'x@x.com', role: 'colaborador', password: 'Senha!2026x' })).status === 403, 'sem a seção Cadastro de usuários, o gestor não cadastra');
+  const cuPut = await cuAna('PUT', '/users/2', { ...cuR, sections: ['dashboard', 'usuarios', 'cadastro_usuarios'], home: 'empresa' });
+  const cuRic = await login('ricardo@charao.eng.br');
+  ok((await cuRic('GET', '/meta')).data.can.manage_users === true && (await cuRic('GET', '/meta')).data.can.home === 'empresa', 'gestor com Cadastro de usuários e entrada na Visão da empresa');
+  const cuNew = await cuRic('POST', '/users', { name: 'Novo Colab', email: 'novo.colab@charao.eng.br', role: 'colaborador', password: 'Senha!2026x', sections: ['usuarios', 'dashboard'] });
+  ok(cuNew.status === 201, 'gestor liberado cadastra usuário');
+  ok((await cuRic('POST', '/users', { name: 'Adm', email: 'adm2@charao.eng.br', role: 'admin', password: 'Senha!2026x' })).status === 403, 'quem não é administrador não cria administrador');
+  ok((await cuRic('POST', '/users', { name: 'Y', email: 'y2@charao.eng.br', role: 'colaborador', password: 'Senha!2026x', sections: ['auditoria'] })).status === 403, 'só libera seções que ele mesmo tem');
+  ok((await cuRic('PUT', `/users/${kAnaId}`, { name: 'Ana' })).status === 403, 'quem não é administrador não edita administrador');
+
 }
 
 main()

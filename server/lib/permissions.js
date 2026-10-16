@@ -125,7 +125,7 @@ export function canManageProject(ctx, projectId) {
 
 export function canSeeUser(ctx, userId) {
   const { user } = ctx;
-  return isAdmin(user) || user.id === userId || ctx.team.has(userId);
+  return isAdmin(user) || user.id === userId || ctx.team.has(userId) || hasSection(user, 'cadastro_usuarios');
 }
 
 // Dados pessoais (e-mail, telefone) só para admin, o próprio e o gestor direto/indireto
@@ -135,14 +135,14 @@ export function canSeePersonalData(ctx, userId) {
 
 // ---------- Seções liberadas por usuário ----------
 // Gestão de Obras · Gestão da Empresa · Administração. Sem lista salva, vale o padrão do perfil.
-export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'auditoria', 'configuracoes'];
-export const SECTION_LABEL = { dashboard: 'Dashboard', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários', relatorios: 'Relatórios',
-  contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'cadastro_usuarios', 'auditoria', 'configuracoes'];
+export const SECTION_LABEL = { dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários (desempenho)', relatorios: 'Relatórios',
+  contratos: 'Contratos', financeiro: 'Tarefas financeiras', cadastro_usuarios: 'Cadastro de usuários', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 export function defaultSections(u) {
   const s = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios'];
   if (u.can_contracts) s.push('contratos');
   if (u.can_finance) s.push('financeiro');
-  if (isAdmin(u)) s.push('auditoria');
+  if (isAdmin(u)) s.push('cadastro_usuarios', 'auditoria');
   if (isAdmin(u) || isManagerRole(u)) s.push('configuracoes');
   return s;
 }
@@ -154,7 +154,7 @@ export function sectionsOf(u) {
   // Contratos e Financeiro acompanham as liberações das áreas restritas
   if (u.can_contracts) set.add('contratos'); else set.delete('contratos');
   if (u.can_finance) set.add('financeiro'); else set.delete('financeiro');
-  if (isAdmin(u)) set.add('usuarios'); // administrador nunca perde o cadastro de usuários
+  if (isAdmin(u)) set.add('cadastro_usuarios'); // administrador nunca perde o cadastro de usuários
   return set;
 }
 export const hasSection = (u, k) => sectionsOf(u).has(k);

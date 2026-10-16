@@ -5,6 +5,7 @@ import './required.js';
 import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';
+import * as MyPanel from './views/my-panel.js';
 import * as Projects from './views/projects.js';
 import * as Project from './views/project.js';
 import * as Tasks from './views/tasks.js';
@@ -43,7 +44,9 @@ async function ensureLatestVersion() {
 }
 
 const routes = [
-  ['/', Dashboard.view],
+  ['/', () => ({ html: '' })],
+  ['/painel', MyPanel.view],
+  ['/empresa', Dashboard.view],
   ['/projetos', Projects.list],
   ['/projetos/novo', Projects.form],
   ['/projetos/:id', Project.view],
@@ -84,27 +87,27 @@ const routes = [
 });
 
 const ALL_NAV = [
-  ['/', 'Dashboard', 'dashboard', 'dashboard'],
+  ['/painel', 'Meu painel', 'user', null],
+  ['/empresa', 'Visão da empresa', 'dashboard', 'dashboard'],
   ['/projetos', 'Projetos', 'projects', 'projetos'],
   ['/tarefas', 'Tarefas', 'tasks', 'tarefas'],
   ['/usuarios', 'Usuários', 'users', 'usuarios'],
   ['/relatorios', 'Relatórios', 'reports', 'relatorios'],
 ];
 // Menu: só as seções liberadas para o usuário
-const sec = k => !state.meta?.can.sections || state.meta.can.sections.includes(k);
-const navItems = () => {
-  const list = ALL_NAV.filter(n => sec(n[3]));
-  // Sem Dashboard: o início passa a ser a própria tela do usuário (planejamento da semana)
-  if (!sec('dashboard') && state.user) list.unshift([`/usuarios/${state.user.id}`, 'Minha semana', 'calendar', null]);
-  return list;
-};
+const sec = k => !k || !state.meta?.can.sections || k.split('|').some(x => state.meta.can.sections.includes(x));
+const navItems = () => ALL_NAV.filter(n => sec(n[3]));
+// Tela de entrada: Meu painel ou Visão da empresa (definido no cadastro do usuário)
+const homePath = () => (state.meta?.can.home === 'empresa' && sec('dashboard') ? '/empresa' : '/painel');
 // Seção de cada tela (null = sempre liberada)
 function sectionOfPath(path) {
-  if (path === '/') return 'dashboard';
+  if (path === '/' || path === '/painel') return null;
+  if (path === '/empresa') return 'dashboard';
   if (path.startsWith('/projetos')) return 'projetos';
   if (path === '/tarefas' || path === '/tarefas/nova' || path.startsWith('/recorrencias')) return 'tarefas';
-  if (/^\/usuarios\/\d+$/.test(path)) return Number(path.split('/')[2]) === state.user?.id ? null : 'usuarios';
-  if (path.startsWith('/usuarios')) return 'usuarios';
+  if (/^\/usuarios\/\d+$/.test(path)) return Number(path.split('/')[2]) === state.user?.id ? null : 'usuarios|cadastro_usuarios';
+  if (path === '/usuarios/novo' || /^\/usuarios\/\d+\/editar$/.test(path)) return 'cadastro_usuarios';
+  if (path.startsWith('/usuarios')) return 'usuarios|cadastro_usuarios';
   if (path.startsWith('/relatorios') || path.startsWith('/imprimir/relatorio') || path.startsWith('/imprimir/campo')) return 'relatorios';
   if (path.startsWith('/contratos') || path.startsWith('/medicoes') || path.startsWith('/imprimir/medicao')) return 'contratos';
   if (path.startsWith('/financeiro')) return 'financeiro';
@@ -112,7 +115,7 @@ function sectionOfPath(path) {
   if (path === '/configuracoes') return 'configuracoes';
   return null;
 }
-const SECTION_NAME = { dashboard: 'Dashboard', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+const SECTION_NAME = { 'usuarios|cadastro_usuarios': 'Usuários', cadastro_usuarios: 'Cadastro de usuários', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 
 export function navigate(path, { replace = false } = {}) {
   const h = '#' + path;
@@ -195,9 +198,9 @@ export async function render() {
   const route = routes.find(r => r.re.test(path));
   if (!route) return navigate('/', { replace: true });
   // Seção não liberada: o início vai para a primeira tela permitida; as demais mostram o aviso
+  if (path === '/') return navigate(homePath(), { replace: true });
   const needs = sectionOfPath(path);
   if (needs && !sec(needs)) {
-    if (path === '/') return navigate(navItems()[0]?.[0] || `/usuarios/${state.user.id}`, { replace: true });
     if (!document.querySelector('.sidebar')) shell();
     markNav(path);
     document.getElementById('view').innerHTML = html`<div class="empty-state"><h2>Seção não liberada</h2><p>A seção <b>${SECTION_NAME[needs]}</b> não está liberada para o seu usuário. Fale com o administrador.</p><a class="btn btn-ghost" href="#${navItems()[0]?.[0] || '/'}">Ir para o início</a></div>`.toString();

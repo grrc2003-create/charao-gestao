@@ -185,7 +185,9 @@ api.get('/api/meta', (req, res, { ctx }) => {
     assignees: [...assignees.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
     managers: users.filter(u => all('SELECT 1 FROM users WHERE manager_id = ? LIMIT 1', u.id).length),
     can: {
-      manage_users: isAdmin(ctx.user),
+      manage_users: hasSection(ctx.user, 'cadastro_usuarios'),
+      // Tela de entrada: Meu painel ou Visão da empresa (se a seção estiver liberada)
+      home: ctx.user.home === 'empresa' && hasSection(ctx.user, 'dashboard') ? 'empresa' : 'pessoal',
       manage_projects: isAdmin(ctx.user) || isManagerRole(ctx.user),
       view_audit: hasSection(ctx.user, 'auditoria'),
       sections: [...sectionsOf(ctx.user)],
@@ -355,7 +357,7 @@ function fileHeaders(f) {
 
 // ---------- Usuários ----------
 api.get('/api/users', (req, res, { ctx }) => {
-  if (!hasSection(ctx.user, 'usuarios') && !hasSection(ctx.user, 'relatorios')) requireSection(ctx.user, 'usuarios');
+  if (!['usuarios', 'relatorios', 'cadastro_usuarios'].some(k => hasSection(ctx.user, k))) requireSection(ctx.user, 'usuarios');
   send(res, 200, Users.listUsers(ctx));
 });
 api.post('/api/users', (req, res, { ctx, body }) => send(res, 201, { id: Users.createUser(ctx, body, clientIp(req)) }));
@@ -366,7 +368,7 @@ api.get('/api/users/directory', (req, res, { ctx }) => {
 });
 api.get('/api/users/:id', (req, res, { ctx, params }) => {
   // A própria tela (planejamento da semana, indicadores) sempre abre; a de outras pessoas exige a seção Usuários
-  if (intOrNull(params.id) !== ctx.user.id) requireSection(ctx.user, 'usuarios');
+  if (intOrNull(params.id) !== ctx.user.id && !hasSection(ctx.user, 'cadastro_usuarios')) requireSection(ctx.user, 'usuarios');
   send(res, 200, Users.getUser(ctx, intOrNull(params.id)));
 });
 api.put('/api/users/:id', (req, res, { ctx, params, body }) => {

@@ -1812,3 +1812,20 @@ tr.is-inactive td { opacity: .55; }
 /* Seções liberadas (cadastro do usuário) */
 .sec-group { display: grid; gap: 6px; }
 .sec-checks label { align-items: baseline; }
+
+/* Meu painel: carga e situação por integrante da equipe */
+.tm-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto; gap: 14px; align-items: center; }
+.tm-name { display: grid; min-width: 0; }
+.tm-name small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-bar { display: grid; gap: 4px; min-width: 0; }
+.tm-bar small { color: var(--muted); font-size: 11.5px; }
+.tm-nums { display: grid; grid-template-columns: repeat(4, minmax(56px, auto)); gap: 4px 12px; text-align: right; }
+.tm-nums span { font-size: 11px; color: var(--muted); line-height: 1.2; }
+.tm-nums b { display: block; font-size: 15px; color: var(--ink); }
+.tm-nums .is-late b { color: var(--st-atrasada); }
+@media (max-width: 899px) {
+  .tm-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .tm-bar, .tm-nums { grid-column: 1 / -1; }
+  .tm-nums { text-align: left; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tm-row .chev { grid-row: 1; grid-column: 2; }
+}

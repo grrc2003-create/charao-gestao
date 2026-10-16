@@ -91,9 +91,9 @@ const ALL_NAV = [
   ['/empresa', 'Visão da empresa', 'dashboard', 'dashboard'],
   ['/projetos', 'Projetos', 'projects', 'projetos'],
   ['/tarefas', 'Tarefas', 'tasks', 'tarefas'],
-  ['/usuarios', 'Usuários', 'users', 'usuarios'],
   ['/relatorios', 'Relatórios', 'reports', 'relatorios'],
 ];
+const USERS_NAV = ['/usuarios', 'Usuários', 'users', 'usuarios|cadastro_usuarios'];
 // Menu: só as seções liberadas para o usuário
 const sec = k => !k || !state.meta?.can.sections || k.split('|').some(x => state.meta.can.sections.includes(x));
 const navItems = () => ALL_NAV.filter(n => sec(n[3]));
@@ -157,7 +157,8 @@ function shell() {
         ${state.meta?.can.contracts || state.meta?.can.finance ? html`<div class="sidebar-tag sidebar-group">Gestão da Empresa</div>` : ''}
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Tarefas financeiras</span></a>` : ''}
-        ${state.meta?.can.view_audit || state.meta?.can.manage_settings ? html`<hr class="sidebar-sep">` : ''}
+        ${sec(USERS_NAV[3]) || state.meta?.can.view_audit || state.meta?.can.manage_settings ? html`<hr class="sidebar-sep">` : ''}
+        ${sec(USERS_NAV[3]) ? html`<a href="#/usuarios" data-nav="/usuarios">${icon('users')}<span>Usuários</span></a>` : ''}
         ${state.meta?.can.view_audit ? html`<a href="#/auditoria" data-nav="/auditoria">${icon('shield')}<span>Auditoria</span></a>` : ''}
         ${state.meta?.can.manage_settings ? html`<a href="#/configuracoes" data-nav="/configuracoes">${icon('settings')}<span>Configurações</span></a>` : ''}
       </nav>
@@ -170,7 +171,7 @@ function shell() {
     </header>
     <main id="view" tabindex="-1"></main>
     <nav class="bottombar" aria-label="Navegação">
-      ${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
+      ${[...navItems(), ...(sec(USERS_NAV[3]) ? [USERS_NAV] : [])].map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
     </nav>`.toString();
 }
 

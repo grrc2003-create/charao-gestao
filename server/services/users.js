@@ -70,7 +70,7 @@ export function getUser(ctx, id) {
     team: teamMembers,
     team_summary: team.size ? summarize(teamTasks) : null,
     team_tasks: teamTasks,
-    can_edit: isAdmin(ctx.user),
+    can_edit: sectionsOf(ctx.user).has('cadastro_usuarios') && (isAdmin(ctx.user) || u.role !== 'admin'),
     // Planejamento da semana: projetos em que quem está vendo pode criar tarefas e que a pessoa da tela pode receber
     plan_projects: u.active ? all(`SELECT id, code, name FROM projects WHERE status NOT IN ('concluido','cancelado') ORDER BY kind = 'interno', code`)
       .filter(p => canCreateTaskIn(ctx, p.id) && userHasProjectAccess(id, p.id)) : [],

@@ -6,7 +6,8 @@ export async function list({ state }) {
   const users = await api('/users');
   const isAdmin = state.meta.can.manage_users;
   const byRole = r => users.filter(u => (r === 'terceirizado' ? u.is_external : !u.is_external && u.role === r));
-  const row = u => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">
+  const canEditRow = u => isAdmin && (state.user.role === 'admin' || u.role !== 'admin');
+  const row = u => html`<li><a class="row-link rank" href="#/usuarios/${u.id}${canEditRow(u) ? '/editar' : ''}">
     ${avatar(u.name)}
     <div class="grow">
       <div class="row-title">${u.name} <span class="pill ${u.is_external ? 'pill-ext' : u.role === 'admin' ? 'pill-orange' : u.role === 'gestor' || u.role === 'coordenador' ? '' : 'pill-sand'}">${roleLabel(u)}</span>
@@ -76,9 +77,11 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
     title: editing ? `Editar ${u.name}` : ext ? 'Novo terceirizado' : 'Novo usuário',
     html: html`
       ${pageHead({
-        back: { href: editing ? `#/usuarios/${u.id}` : '#/usuarios', label: editing ? u.name : 'Usuários' },
+        back: { href: '#/usuarios', label: 'Usuários' },
         eyebrow: 'Administração de acesso',
         title: editing ? (ext ? 'Editar terceirizado' : 'Editar usuário e permissões') : ext ? 'Novo terceirizado' : 'Novo usuário',
+        sub: editing ? u.name : '',
+        actions: editing ? html`<a class="btn btn-ghost" href="#/usuarios/${u.id}">${icon('dashboard')}Ver desempenho</a>` : '',
       })}
       <div class="notice ext-only" style="max-width:860px;margin-bottom:14px" ${ext ? '' : 'hidden'}>${icon('info')}<span id="ext-notice"></span></div>
       <form class="card card-pad form" id="user-form" novalidate style="max-width:860px">
@@ -206,7 +209,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           else id = (await api('/users', { method: 'POST', body: data })).id;
           await reloadMeta();
           toast(editing ? 'Usuário atualizado.' : 'Usuário criado.');
-          navigate(`/usuarios/${id}`);
+          navigate('/usuarios');
         } catch (ex) {
           err.textContent = ex.message;
           err.hidden = false;

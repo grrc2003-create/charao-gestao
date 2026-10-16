@@ -21,6 +21,7 @@ import * as Audit from './views/audit.js';
 import * as Settings from './views/settings.js';
 import * as Recurrences from './views/recurrences.js';
 import * as Contracts from './views/contracts.js';
+import * as Finance from './views/finance.js';
 import * as ReportMeasurement from './views/report-measurement.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
@@ -65,6 +66,10 @@ const routes = [
   ['/contratos/:id', Contracts.view],
   ['/contratos/:id/editar', Contracts.form],
   ['/medicoes/:id', Contracts.measurement],
+  ['/financeiro', Finance.view],
+  ['/financeiro/obrigacoes', Finance.obligations],
+  ['/financeiro/obrigacoes/nova', Finance.form],
+  ['/financeiro/obrigacoes/:id/editar', Finance.form],
   ['/conta', Account.view],
   ['/auditoria', Audit.view],
   ['/configuracoes', Settings.view],
@@ -122,8 +127,9 @@ function shell() {
       <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
       <div class="sidebar-tag">Gestão de Obras</div>
       <nav>${NAV.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
-        ${state.meta?.can.contracts ? html`<div class="sidebar-tag sidebar-group">Gestão da Empresa</div>
-          <a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
+        ${state.meta?.can.contracts || state.meta?.can.finance ? html`<div class="sidebar-tag sidebar-group">Gestão da Empresa</div>` : ''}
+        ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
+        ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Tarefas financeiras</span></a>` : ''}
         ${state.meta?.can.view_audit || state.meta?.can.manage_settings ? html`<hr class="sidebar-sep">` : ''}
         ${state.meta?.can.view_audit ? html`<a href="#/auditoria" data-nav="/auditoria">${icon('shield')}<span>Auditoria</span></a>` : ''}
         ${state.meta?.can.manage_settings ? html`<a href="#/configuracoes" data-nav="/configuracoes">${icon('settings')}<span>Configurações</span></a>` : ''}

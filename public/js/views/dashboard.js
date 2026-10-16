@@ -55,7 +55,7 @@ export async function view({ state }) {
         eyebrow: 'Visão geral da operação',
         title: `Olá, ${firstName}`,
         sub: `${plural(d.projects.filter(p => p.status === 'em_andamento').length, 'obra ativa', 'obras ativas')} · ${plural(s.total, 'tarefa visível', 'tarefas visíveis')} para o seu perfil${d.checklist_items ? ` (inclui ${d.checklist_items} ${d.checklist_items === 1 ? 'item' : 'itens'} de check-list, contados como subtarefas)` : ''}`,
-        actions: html`${state.meta.can.contracts ? html`<a class="btn btn-ghost" href="#/contratos">${icon('contract')}Contratos</a>` : ''}<a class="btn btn-ghost" href="#/relatorios">${icon('reports')}Relatórios</a><a class="btn btn-accent" href="#/tarefas/nova">${icon('plus')}Nova tarefa</a>`,
+        actions: html`${state.meta.can.contracts ? html`<a class="btn btn-ghost" href="#/contratos">${icon('contract')}Contratos</a>` : ''}${state.meta.can.finance ? html`<a class="btn btn-ghost" href="#/financeiro">${icon('wallet')}Financeiro</a>` : ''}<a class="btn btn-ghost" href="#/relatorios">${icon('reports')}Relatórios</a><a class="btn btn-accent" href="#/tarefas/nova">${icon('plus')}Nova tarefa</a>`,
       })}
       ${d.my_checklist?.length ? html`<section class="card section cl-alert">
         <div class="card-head"><h2>${icon('checklist')} Itens de check-list para você</h2><a class="sub" href="#/tarefas?tipo=checklist&assignee=me">Ver check-lists</a></div>

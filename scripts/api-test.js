@@ -442,7 +442,7 @@ async function main() {
   ok(/^INT-001-\d{5}$/.test(tIntD.code) && tIntD.project_kind === 'interno' && tIntD.stage_name === 'Financeiro', `tarefa interna com código próprio (${tIntD.code})`);
   const nInt = await ricardo('POST', '/projects', { kind: 'interno', name: 'Manutenção de frota' });
   const nIntD = (await ricardo('GET', `/projects/${nInt.data.id}`)).data;
-  ok(nInt.status === 201 && nIntD.code === 'INT-003' && nIntD.client === 'Charão Engenharia e Construção', 'nova área interna sem cliente (INT-003; INT-002 é a área restrita de Contratos)');
+  ok(nInt.status === 201 && nIntD.code === 'INT-004' && nIntD.client === 'Charão Engenharia e Construção', 'nova área interna sem cliente (INT-004; INT-002 Contratos e INT-003 Financeiro são áreas restritas)');
   ok((await ricardo('POST', '/projects', { name: 'Obra sem cliente' })).status === 400, 'obra continua exigindo cliente');
   await ricardo('PUT', `/projects/${nIntD.id}`, { kind: 'obra', name: 'Manutenção de frota' });
   ok((await ricardo('GET', `/projects/${nIntD.id}`)).data.kind === 'interno', 'tipo do projeto não muda na edição');
@@ -1158,6 +1158,44 @@ async function main() {
   ok((await ricardo('POST', '/tasks', { project_id: kArea, title: 'x', description: 'x', priority: 'media', proof_type: 'nenhuma' })).status === 403, 'sem liberação não cria tarefa na área restrita');
   ok((await kAnaC('POST', '/tasks', { project_id: kArea, title: 'y', description: 'x', assignee_id: (await ricardo('GET', '/auth/me')).data.user.id, priority: 'media', proof_type: 'nenhuma' })).status === 400, 'não atribui tarefa restrita a quem não é liberado');
   ok(!(await ricardo('GET', '/dashboard')).data.internal_areas.some(p => p.id === kArea), 'Dashboard de quem não é liberado não mostra a área restrita');
+
+  // ---------- Tarefas financeiras: liberação própria, parcelas pendente/paga e tarefas na área restrita ----------
+  ok((await kAnaC('GET', '/finance/month')).status === 403, 'sem a liberação própria, Tarefas financeiras ficam fechadas (mesmo com Contratos)');
+  const fAnaU = (await kAnaC('GET', `/users/${kAnaId}`)).data.user;
+  await kAnaC('PUT', `/users/${kAnaId}`, { ...fAnaU, can_contracts: true, can_finance: true });
+  const fAna = await login('ana@charao.eng.br');
+  ok((await fAna('GET', '/meta')).data.can.finance === true, 'liberado: menu Tarefas financeiras aparece');
+  const fRef = new Date().toISOString().slice(0, 7);
+  ok((await fAna('POST', '/finance/obligations', { title: 'X', amount: 10, assignee_id: (await ricardo('GET', '/auth/me')).data.user.id })).status === 400, 'responsável precisa ter a liberação financeira');
+  const fObId = (await fAna('POST', '/finance/obligations', { title: 'DAS Simples Nacional', category: 'Impostos', payee: 'Receita Federal', amount: '1.234,50', frequency: 'mensal', due_day: 20, start_month: fRef })).data.id;
+  let fMonth = (await fAna('GET', '/finance/month')).data;
+  const fIt = fMonth.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
+  ok(fIt && fIt.amount_expected === 1234.5 && fIt.due_date === `${fRef}-20` && fIt.status === 'pendente' && fIt.task_id, 'obrigação mensal gera a parcela do mês (vencimento dia 20, valor previsto) e a tarefa');
+  const fOb = (await fAna('GET', `/finance/obligations/${fObId}`)).data;
+  ok(fOb.items.length === 3, 'gera as parcelas até 2 meses à frente');
+  const fTask = (await fAna('GET', `/tasks/${fIt.task_id}`)).data;
+  ok(fTask.title.startsWith('DAS Simples Nacional —') && fTask.assignee_id === kAnaId && fTask.stage_name === 'Impostos', 'tarefa da parcela: título com o mês, responsável e classificação = categoria');
+  ok((await ricardo('GET', `/tasks/${fIt.task_id}`)).status === 404, 'sem liberação financeira, a tarefa da parcela não aparece');
+  ok((await fAna('GET', '/tasks')).data.some(t => t.id === fIt.task_id), 'liberado vê a tarefa da parcela na lista de Tarefas');
+  let fPaid = (await fAna('POST', `/finance/items/${fIt.id}/pay`, { paid_date: new Date().toISOString().slice(0, 10), paid_amount: '1.200,00', files: [{ data: tinyPng() }] })).data;
+  ok(fPaid.status === 'paga' && fPaid.paid_amount === 1200 && fPaid.files.length === 1, 'pagamento registrado com valor e comprovante');
+  ok((await fAna('GET', `/tasks/${fIt.task_id}`)).data.status === 'concluida', 'a tarefa da parcela fica concluída');
+  ok((await fAna('POST', `/finance/items/${fIt.id}/pay`, {})).status === 400, 'não paga duas vezes');
+  fPaid = (await fAna('POST', `/finance/items/${fIt.id}/unpay`)).data;
+  ok(fPaid.status === 'pendente' && (await fAna('GET', `/tasks/${fIt.task_id}`)).data.status === 'aberta', 'desfazer pagamento volta a parcela e a tarefa');
+  const fNext = fOb.items.find(i => i.ref_month !== fRef);
+  ok((await fAna('PUT', `/finance/items/${fNext.id}/amount`, { amount_expected: '1.500,00' })).data.amount_expected === 1500, 'ajusta o valor previsto de uma parcela');
+  await fAna('PUT', `/finance/obligations/${fObId}`, { due_day: 25 });
+  ok((await fAna('GET', `/finance/items/${fIt.id}`)).data.due_date === `${fRef}-25`, 'mudar o dia de vencimento atualiza as parcelas pendentes');
+  await fAna('PUT', `/finance/obligations/${fObId}`, { active: false });
+  ok((await fAna('GET', `/finance/obligations/${fObId}`)).data.items.length === 1, 'inativar remove as parcelas futuras pendentes (mantém a do mês)');
+  fMonth = (await fAna('GET', '/finance/month')).data;
+  ok(fMonth.totals.count >= 1 && fMonth.categories.some(c => c.category === 'Impostos'), 'visão do mês com totais e resumo por categoria');
+  // Concluir a tarefa pela tela de tarefas marca a parcela como paga
+  const fOb2 = (await fAna('POST', '/finance/obligations', { title: 'Aluguel do escritório', category: 'Aluguel e condomínio', amount: 3000, due_day: 5, start_month: fRef })).data.id;
+  const fIt2 = (await fAna('GET', `/finance/obligations/${fOb2}`)).data.items.find(i => i.ref_month === fRef);
+  await fAna('POST', `/tasks/${fIt2.task_id}/actions/conclude`, { start_date: '2020-01-01' });
+  ok((await fAna('GET', `/finance/items/${fIt2.id}`)).data.status === 'paga', 'concluir a tarefa da parcela marca a parcela como paga');
 
   // Sem responsável indicado: a tarefa/subtarefa fica com quem a criou
   const rpT = (await marcos('POST', '/tasks', { project_id: 1, title: 'Sem responsável indicado', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;

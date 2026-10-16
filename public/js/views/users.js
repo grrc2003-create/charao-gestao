@@ -106,9 +106,11 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <span class="hint" id="proj-hint"></span></div>
         </fieldset>
 
-        <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''}><legend>Contratos</legend>
+        <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''}><legend>Gestão da Empresa</legend>
           <label class="switch"><input type="checkbox" name="can_contracts" ${u.can_contracts ? 'checked' : ''}>Liberar a seção Contratos</label>
           <span class="hint">Contratos, medições (boletins) e faturamento global. As tarefas da área interna <b>Contratos (restrito)</b> só aparecem para quem tiver esta liberação — inclusive administradores.</span>
+          <label class="switch"><input type="checkbox" name="can_finance" ${u.can_finance ? 'checked' : ''}>Liberar Tarefas financeiras</label>
+          <span class="hint">Obrigações financeiras mensais/periódicas (impostos, folha, aluguel…). As tarefas da área <b>Financeiro (restrito)</b> só aparecem para quem tiver esta liberação.</span>
         </fieldset>
 
         ${editing ? html`<fieldset class="fieldset form"><legend>Situação</legend>
@@ -173,6 +175,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
         data.can_contracts = !!f.querySelector('[name=can_contracts]')?.checked && !f.querySelector('[name=can_contracts]').closest('[hidden]');
+        data.can_finance = !!f.querySelector('[name=can_finance]')?.checked && !f.querySelector('[name=can_finance]').closest('[hidden]');
         data.project_ids = [...f.querySelectorAll('[name=project]:checked')].map(c => Number(c.value));
         delete data.project;
         if (editing) data.active = f.querySelector('[name=active]').checked;

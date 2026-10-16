@@ -10,6 +10,7 @@ import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
 import { workingDaysBetween } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
+import { syncFromTask } from './finance.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
@@ -823,6 +824,7 @@ export function transition(ctx, id, action, body = {}) {
       default:
         throw badRequest('Ação desconhecida.');
     }
+    if (['approve', 'conclude', 'reopen'].includes(action)) syncFromTask(id, action, ctx.user.id);
   });
 }
 

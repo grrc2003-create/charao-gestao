@@ -17,6 +17,7 @@ import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
 import * as Contracts from './services/contracts.js';
+import * as Finance from './services/finance.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
@@ -28,7 +29,7 @@ import { all } from './db.js';
 
 migrate();
 bootstrap();
-if (one('SELECT COUNT(*) AS n FROM users').n) { Projects.ensureInternalArea(); Contracts.ensureContractsArea(); }
+if (one('SELECT COUNT(*) AS n FROM users').n) { Projects.ensureInternalArea(); Contracts.ensureContractsArea(); Finance.ensureFinanceArea(); }
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -188,9 +189,22 @@ api.get('/api/meta', (req, res, { ctx }) => {
       view_audit: isAdmin(ctx.user),
       manage_settings: canManageSettings(ctx.user),
       contracts: Contracts.canContracts(ctx.user),
+      finance: Finance.canFinance(ctx.user),
     },
   });
 });
+
+// ---------- Tarefas financeiras (liberação por usuário) ----------
+api.get('/api/finance/month', (req, res, { ctx, query }) => send(res, 200, Finance.financeMonth(ctx, query.get('mes'))));
+api.get('/api/finance/assignees', (req, res, { ctx }) => send(res, 200, Finance.financeAssignees(ctx)));
+api.get('/api/finance/obligations', (req, res, { ctx }) => send(res, 200, Finance.listObligations(ctx)));
+api.post('/api/finance/obligations', (req, res, { ctx, body }) => send(res, 201, { id: Finance.createObligation(ctx, body, clientIp(req)) }));
+api.get('/api/finance/obligations/:id', (req, res, { ctx, params }) => send(res, 200, Finance.getObligation(ctx, intOrNull(params.id))));
+api.put('/api/finance/obligations/:id', (req, res, { ctx, params, body }) => { Finance.updateObligation(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, Finance.getObligation(ctx, intOrNull(params.id))); });
+api.get('/api/finance/items/:id', (req, res, { ctx, params }) => send(res, 200, Finance.getItem(ctx, intOrNull(params.id))));
+api.post('/api/finance/items/:id/pay', (req, res, { ctx, params, body }) => send(res, 200, Finance.payItem(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/finance/items/:id/unpay', (req, res, { ctx, params }) => send(res, 200, Finance.unpayItem(ctx, intOrNull(params.id), clientIp(req))));
+api.put('/api/finance/items/:id/amount', (req, res, { ctx, params, body }) => send(res, 200, Finance.setItemAmount(ctx, intOrNull(params.id), body, clientIp(req))));
 
 // ---------- Contratos (liberação por usuário) ----------
 api.get('/api/contracts/dashboard', (req, res, { ctx, query }) => send(res, 200, Contracts.contractsDashboard(ctx, { months: query.get('meses') })));
@@ -356,7 +370,7 @@ api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
 api.get('/api/audit', (req, res, { user }) => {
   requireAdmin(user);
   // Registros de contratos só para quem tem a liberação
-  send(res, 200, listAudit().filter(a => user.can_contracts || !['contract', 'measurement'].includes(a.entity)));
+  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance')));
 });
 
 // ---------- Tarefas recorrentes ----------

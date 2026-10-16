@@ -10,21 +10,25 @@ export const isAdmin = u => u.role === 'admin';
 // Gestor e Coordenador têm as mesmas permissões de gestão
 export const isManagerRole = u => u.role === 'gestor' || u.role === 'coordenador';
 
-// Projetos restritos (área interna de Contratos): só para quem tem a liberação de Contratos
-export const restrictedProjectIds = () => new Set(all('SELECT id FROM projects WHERE restricted = 1').map(r => r.id));
-export const hiddenProjectIds = user => (user?.can_contracts ? new Set() : restrictedProjectIds());
+// Áreas internas restritas: 1 = Contratos (liberação can_contracts), 2 = Financeiro (liberação can_finance)
+const RESTRICTED_FLAG = { 1: 'can_contracts', 2: 'can_finance' };
+const restrictedRows = () => all('SELECT id, restricted FROM projects WHERE restricted > 0');
+const allowed = (user, r) => !!user?.[RESTRICTED_FLAG[r.restricted]];
+export const restrictedProjectIds = () => new Set(restrictedRows().map(r => r.id));
+export const hiddenProjectIds = user => new Set(restrictedRows().filter(r => !allowed(user, r)).map(r => r.id));
 
 // null = todos os projetos; Set = apenas os ids listados
 export function accessibleProjectIds(user) {
-  const restricted = restrictedProjectIds();
+  const restricted = restrictedRows();
+  const hidden = new Set(restricted.filter(r => !allowed(user, r)).map(r => r.id));
   if (isAdmin(user) || user.access_scope === 'total') {
-    if (!restricted.size || user.can_contracts) return null;
-    return new Set(all('SELECT id FROM projects WHERE restricted = 0').map(r => r.id));
+    if (!hidden.size) return null;
+    return new Set(all('SELECT id FROM projects').map(r => r.id).filter(id => !hidden.has(id)));
   }
   const ids = new Set(all('SELECT project_id FROM user_project_access WHERE user_id = ?', user.id).map(r => r.project_id));
   for (const r of all('SELECT id FROM projects WHERE lead_id = ?', user.id)) ids.add(r.id);
-  // Liberado em Contratos: acessa a área restrita; sem liberação, nunca
-  for (const id of restricted) { if (user.can_contracts) ids.add(id); else ids.delete(id); }
+  // Liberado: acessa a área restrita correspondente; sem liberação, nunca
+  for (const r of restricted) { if (hidden.has(r.id)) ids.delete(r.id); else ids.add(r.id); }
   return ids;
 }
 

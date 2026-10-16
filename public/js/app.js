@@ -147,9 +147,35 @@ export async function reloadMeta() {
   return state.meta;
 }
 
+// Celular: barra inferior com até 5 botões de rótulo curto; o restante fica em "Mais"
+const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Tarefas financeiras': 'Financeiro', 'Configurações': 'Ajustes' };
+function mobileNav() {
+  const c = state.meta?.can || {};
+  const all = [...navItems(),
+    ...(sec(USERS_NAV[3]) ? [USERS_NAV] : []),
+    ...(c.contracts ? [['/contratos', 'Contratos', 'contract']] : []),
+    ...(c.finance ? [['/financeiro', 'Tarefas financeiras', 'wallet']] : []),
+    ...(c.view_audit ? [['/auditoria', 'Auditoria', 'shield']] : []),
+    ...(c.manage_settings ? [['/configuracoes', 'Configurações', 'settings']] : [])];
+  return all.length <= 5 ? { bar: all, more: [] } : { bar: all.slice(0, 4), more: all.slice(4) };
+}
+function openMoreMenu(items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'sheet-backdrop';
+  wrap.innerHTML = html`<div class="sheet more-sheet" role="dialog" aria-modal="true" aria-label="Mais opções">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <header class="sheet-head"><h2>Mais</h2><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></header>
+    <nav class="more-list">${items.map(([href, label, ic]) => html`<a href="#${href}">${icon(ic)}<span>${label}</span>${icon('chevron')}</a>`)}</nav></div>`.toString();
+  document.body.appendChild(wrap);
+  document.body.classList.add('no-scroll');
+  const close = () => { wrap.classList.add('closing'); document.body.classList.remove('no-scroll'); setTimeout(() => wrap.remove(), 180); };
+  wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-close]') || e.target.closest('a')) close(); });
+}
+
 function shell() {
   const u = state.user;
   const app = document.getElementById('app');
+  const mob = mobileNav();
   app.innerHTML = html`
     <aside class="sidebar" aria-label="Navegação principal">
       <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
@@ -172,8 +198,10 @@ function shell() {
     </header>
     <main id="view" tabindex="-1"></main>
     <nav class="bottombar" aria-label="Navegação">
-      ${[...navItems(), ...(sec(USERS_NAV[3]) ? [USERS_NAV] : [])].map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
+      ${mob.bar.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${SHORT[label] || label}</span></a>`)}
+      ${mob.more.length ? html`<a href="#" data-more data-more-paths="${mob.more.map(m => m[0]).join(' ')}" role="button">${icon('more')}<span>Mais</span></a>` : ''}
     </nav>`.toString();
+  app.querySelector('[data-more]')?.addEventListener('click', e => { e.preventDefault(); openMoreMenu(mob.more); });
 }
 
 function markNav(path) {
@@ -183,6 +211,8 @@ function markNav(path) {
     a.classList.toggle('active', active);
     if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  const more = document.querySelector('[data-more]');
+  if (more) more.classList.toggle('active', more.dataset.morePaths.split(' ').some(n => path === n || path.startsWith(n + '/')));
 }
 
 let renderToken = 0;

@@ -1829,3 +1829,11 @@ tr.is-inactive td { opacity: .55; }
   .tm-nums { text-align: left; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .tm-row .chev { grid-row: 1; grid-column: 2; }
 }
+
+/* Barra inferior (celular): rótulos em uma linha; menu "Mais" */
+.bottombar a span { max-width: 100%; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.more-list { display: grid; padding: 4px 0 calc(8px + env(safe-area-inset-bottom)); }
+.more-list a { display: grid; grid-template-columns: 22px 1fr 16px; align-items: center; gap: 14px; padding: 14px 18px; color: var(--ink); font-weight: 550; border-top: 1px solid var(--line); }
+.more-list a:first-child { border-top: 0; }
+.more-list a:hover { text-decoration: none; background: var(--surface-2, rgba(0,0,0,.03)); }
+.more-list a svg:last-child { color: var(--muted); width: 16px; height: 16px; }

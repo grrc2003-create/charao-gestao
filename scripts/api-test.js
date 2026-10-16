@@ -1247,6 +1247,24 @@ async function main() {
   ok(pgClV.checklist.items.find(i => i.id === pgIa).progress_pct === 100 && pgClV.checklist.summary.progress === 50, 'item conforme conta 100%');
   ok((await marcos('POST', `/tasks/${pgCl}/items/${pgIa}/progress`, { progress: 20 })).status === 400, 'item resolvido não recebe avanço');
 
+  // ---------- Seções liberadas por usuário ----------
+  const secM = (await fAna('GET', '/users/4')).data.user;
+  ok(secM.section_list.includes('dashboard') && secM.section_list.includes('tarefas') && !secM.section_list.includes('auditoria'), 'sem lista salva: seções padrão do perfil');
+  await fAna('PUT', '/users/4', { ...secM, sections: ['tarefas', 'financeiro'] });
+  const secMarcos = await login('marcos@charao.eng.br');
+  const secMeta = (await secMarcos('GET', '/meta')).data;
+  ok(secMeta.can.sections.join(',') === 'tarefas,financeiro' && secMeta.can.finance === true, 'seções salvas: só Tarefas e Tarefas financeiras (liberação financeira espelhada)');
+  ok((await secMarcos('GET', '/dashboard')).status === 403 && (await secMarcos('GET', '/projects')).status === 403 && (await secMarcos('GET', '/reports')).status === 403, 'seções desligadas são bloqueadas no servidor');
+  ok((await secMarcos('GET', '/tasks')).status === 200 && (await secMarcos('GET', '/users/4')).status === 200 && (await secMarcos('GET', '/users/5')).status === 403, 'Tarefas liberada; a própria tela de usuário sempre abre, a de outros não');
+  ok((await secMarcos('GET', '/finance/month')).status === 200, 'Tarefas financeiras liberada pela lista de seções');
+  await fAna('PUT', '/users/4', { ...secM, sections: ['dashboard', 'projetos', 'usuarios', 'relatorios'] });
+  const secMarcos2 = await login('marcos@charao.eng.br');
+  ok((await secMarcos2('GET', '/tasks')).status === 403 && (await secMarcos2('GET', `/tasks/${(await secMarcos2('GET', '/users/4')).data.tasks[0].id}`)).status === 200, 'sem a seção Tarefas: some a lista, mas as próprias tarefas abrem');
+  const secAna = (await fAna('GET', `/users/${kAnaId}`)).data.user;
+  await fAna('PUT', `/users/${kAnaId}`, { ...secAna, sections: ['dashboard', 'contratos', 'financeiro'] });
+  const secAna2 = await login('ana@charao.eng.br');
+  ok((await secAna2('GET', '/meta')).data.can.sections.includes('usuarios') && (await secAna2('GET', '/audit')).status === 403, 'administrador nunca perde Usuários; Auditoria pode ser desligada');
+  await secAna2('PUT', `/users/${kAnaId}`, { ...secAna, sections: ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'auditoria', 'configuracoes'] });
 }
 
 main()

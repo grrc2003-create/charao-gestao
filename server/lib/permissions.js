@@ -133,8 +133,37 @@ export function canSeePersonalData(ctx, userId) {
   return canSeeUser(ctx, userId);
 }
 
-// Configurações gerais (ex.: justificativas de reagendamento): Gestor e Administrador
-export const canManageSettings = user => isAdmin(user) || isManagerRole(user);
+// ---------- Seções liberadas por usuário ----------
+// Gestão de Obras · Gestão da Empresa · Administração. Sem lista salva, vale o padrão do perfil.
+export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'auditoria', 'configuracoes'];
+export const SECTION_LABEL = { dashboard: 'Dashboard', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários', relatorios: 'Relatórios',
+  contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+export function defaultSections(u) {
+  const s = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios'];
+  if (u.can_contracts) s.push('contratos');
+  if (u.can_finance) s.push('financeiro');
+  if (isAdmin(u)) s.push('auditoria');
+  if (isAdmin(u) || isManagerRole(u)) s.push('configuracoes');
+  return s;
+}
+export function sectionsOf(u) {
+  if (!u) return new Set();
+  let list = null;
+  try { list = u.sections ? JSON.parse(u.sections) : null; } catch { list = null; }
+  const set = new Set(Array.isArray(list) ? list.filter(x => SECTIONS.includes(x)) : defaultSections(u));
+  // Contratos e Financeiro acompanham as liberações das áreas restritas
+  if (u.can_contracts) set.add('contratos'); else set.delete('contratos');
+  if (u.can_finance) set.add('financeiro'); else set.delete('financeiro');
+  if (isAdmin(u)) set.add('usuarios'); // administrador nunca perde o cadastro de usuários
+  return set;
+}
+export const hasSection = (u, k) => sectionsOf(u).has(k);
+export function requireSection(u, k) {
+  if (!hasSection(u, k)) throw forbidden(`A seção ${SECTION_LABEL[k]} não está liberada para o seu usuário.`);
+}
+
+// Configurações gerais: seção Configurações (padrão: Gestor e Administrador)
+export const canManageSettings = user => hasSection(user, 'configuracoes');
 export function requireSettingsManager(user) {
   if (!canManageSettings(user)) throw forbidden('Apenas gestores e administradores alteram as configurações.');
 }

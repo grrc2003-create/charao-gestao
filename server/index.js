@@ -10,7 +10,7 @@ import {
   checkLoginRate, registerLoginFailure, clearLoginFailures, hashPassword, validatePasswordStrength,
 } from './lib/auth.js';
 import { seedDemo } from './demo-data.js';
-import { accessContext, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole } from './lib/permissions.js';
+import { accessContext, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
@@ -130,6 +130,7 @@ api.post('/api/auth/password', (req, res, { user, body }) => {
 
 // ---------- Dashboard e metadados ----------
 api.get('/api/dashboard', (req, res, { ctx }) => {
+  requireSection(ctx.user, 'dashboard');
   const tasks = Tasks.listVisible(ctx);
   // Indicadores: cada item de check-list conta como uma subtarefa
   const clItems = Checklist.checklistItemsAsSubtasks(tasks);
@@ -186,7 +187,8 @@ api.get('/api/meta', (req, res, { ctx }) => {
     can: {
       manage_users: isAdmin(ctx.user),
       manage_projects: isAdmin(ctx.user) || isManagerRole(ctx.user),
-      view_audit: isAdmin(ctx.user),
+      view_audit: hasSection(ctx.user, 'auditoria'),
+      sections: [...sectionsOf(ctx.user)],
       manage_settings: canManageSettings(ctx.user),
       contracts: Contracts.canContracts(ctx.user),
       finance: Finance.canFinance(ctx.user),
@@ -219,14 +221,14 @@ api.put('/api/measurements/:id', (req, res, { ctx, params, body }) => send(res, 
 api.post('/api/measurements/:id/actions/:action', (req, res, { ctx, params, body }) => send(res, 200, Contracts.measurementAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 
 // ---------- Projetos ----------
-api.get('/api/projects', (req, res, { ctx }) => send(res, 200, Projects.listProjects(ctx)));
+api.get('/api/projects', (req, res, { ctx }) => { requireSection(ctx.user, 'projetos'); send(res, 200, Projects.listProjects(ctx)); });
 // Ao salvar a obra com estado/município, os feriados estaduais e municipais são buscados na internet
 api.post('/api/projects', async (req, res, { ctx, body }) => {
   const id = Projects.createProject(ctx, body, clientIp(req));
   const holidays = body.uf ? await Calendar.syncProjectHolidays(id, ctx.user.id) : null;
   send(res, 201, { id, holidays });
 });
-api.get('/api/projects/:id', (req, res, { ctx, params }) => send(res, 200, Projects.getProject(ctx, intOrNull(params.id))));
+api.get('/api/projects/:id', (req, res, { ctx, params }) => { requireSection(ctx.user, 'projetos'); send(res, 200, Projects.getProject(ctx, intOrNull(params.id))); });
 api.put('/api/projects/:id', async (req, res, { ctx, params, body }) => {
   const id = intOrNull(params.id);
   const before = one('SELECT uf, ibge_code, holidays_synced_at FROM projects WHERE id = ?', id);
@@ -260,7 +262,7 @@ api.delete('/api/dependencies/:id', (req, res, { ctx, params }) => { Deps.remove
 api.get('/api/projects/:id/assignees', (req, res, { ctx, params }) => send(res, 200, Projects.projectAssignees(ctx, intOrNull(params.id))));
 
 // ---------- Tarefas ----------
-api.get('/api/tasks', (req, res, { ctx, query }) => send(res, 200, Tasks.filterTasks(ctx, Tasks.taskFilters(k => query.getAll(k)))));
+api.get('/api/tasks', (req, res, { ctx, query }) => { requireSection(ctx.user, 'tarefas'); send(res, 200, Tasks.filterTasks(ctx, Tasks.taskFilters(k => query.getAll(k)))); });
 api.post('/api/tasks', (req, res, { ctx, body }) => send(res, 201, { id: Tasks.createTask(ctx, body) }));
 api.get('/api/tasks/:id', (req, res, { ctx, params }) => send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))));
 api.patch('/api/tasks/:id', (req, res, { ctx, params, body }) => {
@@ -352,14 +354,21 @@ function fileHeaders(f) {
 }
 
 // ---------- Usuários ----------
-api.get('/api/users', (req, res, { ctx }) => send(res, 200, Users.listUsers(ctx)));
+api.get('/api/users', (req, res, { ctx }) => {
+  if (!hasSection(ctx.user, 'usuarios') && !hasSection(ctx.user, 'relatorios')) requireSection(ctx.user, 'usuarios');
+  send(res, 200, Users.listUsers(ctx));
+});
 api.post('/api/users', (req, res, { ctx, body }) => send(res, 201, { id: Users.createUser(ctx, body, clientIp(req)) }));
 // Diretório mínimo (nome/cargo) para seleção de responsáveis/equipe — sem dados pessoais
 api.get('/api/users/directory', (req, res, { ctx }) => {
   if (!isAdmin(ctx.user) && !isManagerRole(ctx.user)) throw forbidden();
   send(res, 200, all(`SELECT id, name, job_title, role, access_scope, active, is_external, company FROM users WHERE active = 1 ORDER BY is_external, name`));
 });
-api.get('/api/users/:id', (req, res, { ctx, params }) => send(res, 200, Users.getUser(ctx, intOrNull(params.id))));
+api.get('/api/users/:id', (req, res, { ctx, params }) => {
+  // A própria tela (planejamento da semana, indicadores) sempre abre; a de outras pessoas exige a seção Usuários
+  if (intOrNull(params.id) !== ctx.user.id) requireSection(ctx.user, 'usuarios');
+  send(res, 200, Users.getUser(ctx, intOrNull(params.id)));
+});
 api.put('/api/users/:id', (req, res, { ctx, params, body }) => {
   Users.updateUser(ctx, intOrNull(params.id), body, clientIp(req));
   send(res, 200, { ok: true });
@@ -369,7 +378,7 @@ api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
   send(res, 200, { ok: true });
 });
 api.get('/api/audit', (req, res, { user }) => {
-  requireAdmin(user);
+  requireSection(user, 'auditoria');
   // Registros de contratos só para quem tem a liberação
   send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance')));
 });
@@ -407,7 +416,7 @@ api.put('/api/settings/stage-templates', (req, res, { ctx, body }) => send(res, 
 
 // ---------- Relatórios ----------
 api.get('/api/gantt', (req, res, { ctx, query }) => send(res, 200, Reports.ganttFor(ctx, Object.fromEntries(query))));
-api.get('/api/reports', (req, res, { ctx, query }) => send(res, 200, Reports.buildReport(ctx, Object.fromEntries(query))));
+api.get('/api/reports', (req, res, { ctx, query }) => { requireSection(ctx.user, 'relatorios'); send(res, 200, Reports.buildReport(ctx, Object.fromEntries(query))); });
 api.get('/api/field-list', (req, res, { ctx, query }) => send(res, 200, Reports.fieldList(ctx, Object.fromEntries(query))));
 
 // ---------- Infra ----------

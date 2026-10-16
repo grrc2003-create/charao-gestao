@@ -83,13 +83,36 @@ const routes = [
   return { re, keys, view, opts };
 });
 
-const NAV = [
-  ['/', 'Dashboard', 'dashboard'],
-  ['/projetos', 'Projetos', 'projects'],
-  ['/tarefas', 'Tarefas', 'tasks'],
-  ['/usuarios', 'Usuários', 'users'],
-  ['/relatorios', 'Relatórios', 'reports'],
+const ALL_NAV = [
+  ['/', 'Dashboard', 'dashboard', 'dashboard'],
+  ['/projetos', 'Projetos', 'projects', 'projetos'],
+  ['/tarefas', 'Tarefas', 'tasks', 'tarefas'],
+  ['/usuarios', 'Usuários', 'users', 'usuarios'],
+  ['/relatorios', 'Relatórios', 'reports', 'relatorios'],
 ];
+// Menu: só as seções liberadas para o usuário
+const sec = k => !state.meta?.can.sections || state.meta.can.sections.includes(k);
+const navItems = () => {
+  const list = ALL_NAV.filter(n => sec(n[3]));
+  // Sem Dashboard: o início passa a ser a própria tela do usuário (planejamento da semana)
+  if (!sec('dashboard') && state.user) list.unshift([`/usuarios/${state.user.id}`, 'Minha semana', 'calendar', null]);
+  return list;
+};
+// Seção de cada tela (null = sempre liberada)
+function sectionOfPath(path) {
+  if (path === '/') return 'dashboard';
+  if (path.startsWith('/projetos')) return 'projetos';
+  if (path === '/tarefas' || path === '/tarefas/nova' || path.startsWith('/recorrencias')) return 'tarefas';
+  if (/^\/usuarios\/\d+$/.test(path)) return Number(path.split('/')[2]) === state.user?.id ? null : 'usuarios';
+  if (path.startsWith('/usuarios')) return 'usuarios';
+  if (path.startsWith('/relatorios') || path.startsWith('/imprimir/relatorio') || path.startsWith('/imprimir/campo')) return 'relatorios';
+  if (path.startsWith('/contratos') || path.startsWith('/medicoes') || path.startsWith('/imprimir/medicao')) return 'contratos';
+  if (path.startsWith('/financeiro')) return 'financeiro';
+  if (path === '/auditoria') return 'auditoria';
+  if (path === '/configuracoes') return 'configuracoes';
+  return null;
+}
+const SECTION_NAME = { dashboard: 'Dashboard', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 
 export function navigate(path, { replace = false } = {}) {
   const h = '#' + path;
@@ -127,7 +150,7 @@ function shell() {
     <aside class="sidebar" aria-label="Navegação principal">
       <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
       <div class="sidebar-tag">Gestão de Obras</div>
-      <nav>${NAV.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
+      <nav>${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
         ${state.meta?.can.contracts || state.meta?.can.finance ? html`<div class="sidebar-tag sidebar-group">Gestão da Empresa</div>` : ''}
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Tarefas financeiras</span></a>` : ''}
@@ -144,7 +167,7 @@ function shell() {
     </header>
     <main id="view" tabindex="-1"></main>
     <nav class="bottombar" aria-label="Navegação">
-      ${NAV.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
+      ${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
     </nav>`.toString();
 }
 
@@ -171,6 +194,15 @@ export async function render() {
   const { path, query } = parseHash();
   const route = routes.find(r => r.re.test(path));
   if (!route) return navigate('/', { replace: true });
+  // Seção não liberada: o início vai para a primeira tela permitida; as demais mostram o aviso
+  const needs = sectionOfPath(path);
+  if (needs && !sec(needs)) {
+    if (path === '/') return navigate(navItems()[0]?.[0] || `/usuarios/${state.user.id}`, { replace: true });
+    if (!document.querySelector('.sidebar')) shell();
+    markNav(path);
+    document.getElementById('view').innerHTML = html`<div class="empty-state"><h2>Seção não liberada</h2><p>A seção <b>${SECTION_NAME[needs]}</b> não está liberada para o seu usuário. Fale com o administrador.</p><a class="btn btn-ghost" href="#${navItems()[0]?.[0] || '/'}">Ir para o início</a></div>`.toString();
+    return;
+  }
   const params = {};
   const m = route.re.exec(path);
   route.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));

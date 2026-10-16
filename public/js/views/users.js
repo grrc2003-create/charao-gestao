@@ -42,6 +42,13 @@ export async function list({ state }) {
   };
 }
 
+// Seções que o administrador libera por usuário
+const SECTION_GROUPS = [
+  ['Gestão de Obras', [['dashboard', 'Dashboard', 'visão geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Usuários', 'equipe e desempenho'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
+  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos']]],
+  ['Administração', [['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
+];
+
 export async function form({ params, query, state, navigate, reloadMeta }) {
   if (!state.meta.can.manage_users) throw new Error('Apenas administradores gerenciam usuários.');
   const editing = !!params.id;
@@ -51,6 +58,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
     api('/projects'),
   ]);
   const u = detail?.user || { role: 'colaborador', access_scope: 'projetos', project_ids: [], active: 1, is_external: query.get('perfil') === 'terceirizado' ? 1 : 0 };
+  // Seções: as salvas, ou o padrão do perfil para um usuário novo
+  const secSet = new Set(u.section_list || ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios']);
   const ext = !!u.is_external;
   const hadLogin = editing && !!u.login_enabled;
   // Líderes possíveis de terceirizado: qualquer usuário interno ativo
@@ -106,11 +115,11 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <span class="hint" id="proj-hint"></span></div>
         </fieldset>
 
-        <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''}><legend>Gestão da Empresa</legend>
-          <label class="switch"><input type="checkbox" name="can_contracts" ${u.can_contracts ? 'checked' : ''}>Liberar a seção Contratos</label>
-          <span class="hint">Contratos, medições (boletins) e faturamento global. As tarefas da área interna <b>Contratos (restrito)</b> só aparecem para quem tiver esta liberação — inclusive administradores.</span>
-          <label class="switch"><input type="checkbox" name="can_finance" ${u.can_finance ? 'checked' : ''}>Liberar Tarefas financeiras</label>
-          <span class="hint">Obrigações financeiras mensais/periódicas (impostos, folha, aluguel…). As tarefas da área <b>Financeiro (restrito)</b> só aparecem para quem tiver esta liberação.</span>
+        <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''} id="sec-fs"><legend>Seções liberadas</legend>
+          <span class="hint">Marque as seções que esta pessoa pode abrir. O que não estiver marcado some do menu e fica bloqueado. A própria tela do usuário (com o Planejamento da semana) e as tarefas atribuídas a ela sempre abrem.</span>
+          ${SECTION_GROUPS.map(([g, list]) => html`<div class="sec-group"><div class="sub-label">${g}</div>
+            <div class="checks sec-checks">${list.map(([k, l, hint]) => html`<label><input type="checkbox" name="section" value="${k}" ${secSet.has(k) ? 'checked' : ''}>${l}<span class="muted" style="font-size:12px">${hint}</span></label>`)}</div></div>`)}
+          <span class="hint">Contratos e Tarefas financeiras também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre a seção Usuários.</span>
         </fieldset>
 
         ${editing ? html`<fieldset class="fieldset form"><legend>Situação</legend>
@@ -174,8 +183,9 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
-        data.can_contracts = !!f.querySelector('[name=can_contracts]')?.checked && !f.querySelector('[name=can_contracts]').closest('[hidden]');
-        data.can_finance = !!f.querySelector('[name=can_finance]')?.checked && !f.querySelector('[name=can_finance]').closest('[hidden]');
+        // Seções liberadas (usuários internos); terceirizados seguem o padrão
+        if (!f.querySelector('#sec-fs')?.hidden) data.sections = [...f.querySelectorAll('[name=section]:checked')].map(c => c.value);
+        delete data.section;
         data.project_ids = [...f.querySelectorAll('[name=project]:checked')].map(c => Number(c.value));
         delete data.project;
         if (editing) data.active = f.querySelector('[name=active]').checked;

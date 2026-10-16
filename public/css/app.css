@@ -1808,3 +1808,7 @@ tr.is-inactive td { opacity: .55; }
 .fa-var.is-good { color: #1F7A4A; }
 .fa-var.is-bad { color: #B42F2F; }
 .fa-table tr.is-cur td { background: #FAF9F6; }
+
+/* Seções liberadas (cadastro do usuário) */
+.sec-group { display: grid; gap: 6px; }
+.sec-checks label { align-items: baseline; }

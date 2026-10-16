@@ -2,7 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { impactOfAssignee } from './dependencies.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
-import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess } from '../lib/permissions.js';
+import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend } from './metrics.js';
 import { listVisible, execWorkDaysAvg } from './tasks.js';
@@ -13,10 +13,11 @@ import { checklistDashboard } from './checklist.js';
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections';
 
 export function publicUser(ctx, u) {
-  const out = { ...u };
+  const out = { ...u, section_list: [...sectionsOf(u)] };
+  delete out.sections;
   delete out.password_hash;
   if (isPlaceholderEmail(out.email)) out.email = null;
   if (!canSeePersonalData(ctx, u.id)) { delete out.email; delete out.phone; }
@@ -121,7 +122,12 @@ function readUserBody(body, { creating }) {
     // Liberação da seção Contratos (e das tarefas da área restrita)
     can_contracts: body.can_contracts === true || body.can_contracts === 1 || body.can_contracts === '1' || body.can_contracts === 'on' ? 1 : 0,
     can_finance: body.can_finance === true || body.can_finance === 1 || body.can_finance === '1' || body.can_finance === 'on' ? 1 : 0,
+    sections: Array.isArray(body.sections) ? JSON.stringify([...new Set(body.sections.filter(x => SECTIONS.includes(x)))]) : (body.sections ?? null),
   };
+  if (Array.isArray(body.sections)) {
+    d.can_contracts = body.sections.includes('contratos') ? 1 : 0;
+    d.can_finance = body.sections.includes('financeiro') ? 1 : 0;
+  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) throw badRequest('E-mail inválido.');
   if (d.role === 'admin') d.access_scope = 'total';
   const projectIds = [...new Set((Array.isArray(body.project_ids) ? body.project_ids : []).map(intOrNull).filter(Boolean))];
@@ -159,8 +165,8 @@ export function createUser(ctx, body, ip) {
   assertNoManagerCycle(null, d.manager_id);
   if (d.manager_id && one('SELECT is_external FROM users WHERE id = ?', d.manager_id)?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
   return tx(() => {
-    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, can_contracts, can_finance, must_change_password)
-      VALUES (?,?,?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.can_contracts, d.can_finance);
+    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, can_contracts, can_finance, sections, must_change_password)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.can_contracts, d.can_finance, Array.isArray(body.sections) ? d.sections : null);
     const id = Number(r.lastInsertRowid);
     for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
     audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, projetos: projectIds, contratos: !!d.can_contracts, financeiro: !!d.can_finance }, ip);
@@ -184,11 +190,15 @@ export function updateUser(ctx, id, body, ip) {
   if (!active && id === ctx.user.id) throw badRequest('Você não pode desativar o próprio usuário.');
   if (u.role === 'admin' && !active) ensureAnotherAdmin(id);
   tx(() => {
-    run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, can_finance=?, active=?, updated_at=datetime('now') WHERE id=?`,
-      d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, body.can_contracts === undefined ? u.can_contracts : d.can_contracts,
-      body.can_finance === undefined ? u.can_finance : d.can_finance, active, id);
-    const finChanged = body.can_finance !== undefined && !!u.can_finance !== !!d.can_finance;
-    const ctChanged = finChanged || (body.can_contracts !== undefined && !!u.can_contracts !== !!d.can_contracts);
+    const secGiven = Array.isArray(body.sections);
+    const newCt = secGiven || body.can_contracts !== undefined ? d.can_contracts : u.can_contracts;
+    const newFin = secGiven || body.can_finance !== undefined ? d.can_finance : u.can_finance;
+    const newSec = secGiven ? d.sections : u.sections;
+    run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, can_finance=?, sections=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, newCt, newFin, newSec, active, id);
+    const finChanged = !!u.can_finance !== !!newFin;
+    const secChanged = secGiven && (u.sections || JSON.stringify([...sectionsOf(u)])) !== newSec;
+    const ctChanged = finChanged || secChanged || !!u.can_contracts !== !!newCt;
     const before = all('SELECT project_id FROM user_project_access WHERE user_id = ?', id).map(r => r.project_id).sort();
     if (body.project_ids !== undefined) {
       run('DELETE FROM user_project_access WHERE user_id = ?', id);
@@ -197,8 +207,9 @@ export function updateUser(ctx, id, body, ip) {
     const permChanged = ctChanged || u.role !== d.role || u.access_scope !== d.access_scope || (body.project_ids !== undefined && before.join() !== [...projectIds].sort().join());
     audit(ctx.user.id, 'user', id, permChanged ? 'Permissões alteradas' : 'Usuário atualizado', {
       perfil: `${u.role} → ${d.role}`, escopo: `${u.access_scope} → ${d.access_scope}`, projetos: projectIds, ativo: !!active,
-      ...(body.can_contracts !== undefined && !!u.can_contracts !== !!d.can_contracts ? { contratos: d.can_contracts ? 'liberado' : 'retirado' } : {}),
-      ...(finChanged ? { financeiro: d.can_finance ? 'liberado' : 'retirado' } : {}),
+      ...(!!u.can_contracts !== !!newCt ? { contratos: newCt ? 'liberado' : 'retirado' } : {}),
+      ...(secChanged ? { secoes: JSON.parse(newSec) } : {}),
+      ...(finChanged ? { financeiro: newFin ? 'liberado' : 'retirado' } : {}),
       gestor: d.manager_id,
     }, ip);
     // Encerra sessões ao desativar ou ao reduzir permissões, forçando novo login

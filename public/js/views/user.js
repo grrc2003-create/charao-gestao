@@ -78,7 +78,7 @@ export async function view({ params, query, setQuery, render, state, panel = fal
             </div>
           </div>
           <div class="page-actions" style="align-self:flex-start">
-            ${d.can_edit ? html`<a class="btn btn-ghost btn-sm" href="#/usuarios/${u.id}/editar">${icon('edit')}Editar</a>` : ''}
+            ${d.can_edit && !panel ? html`<a class="btn btn-ghost btn-sm" href="#/usuarios/${u.id}/editar">${icon('edit')}Editar</a>` : ''}
             ${isMe ? html`<a class="btn btn-ghost btn-sm" href="#/conta">${icon('key')}Minha conta</a>` : ''}
           </div>
         </div>

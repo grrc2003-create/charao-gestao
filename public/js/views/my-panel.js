@@ -81,7 +81,7 @@ export async function view({ state, query, setQuery, render }) {
         title: `Olá, ${first}`,
         sub: `${open.length} tarefa(s) em aberto · ${late.length} atrasada(s) · ${soon.length} vencendo em 7 dias${team.length ? ` · equipe de ${team.length}` : ''}`,
         actions: html`${sec('dashboard') ? html`<a class="btn btn-ghost" href="#/empresa">${icon('dashboard')}Visão da empresa</a>` : ''}
-          <a class="btn btn-ghost" href="#/usuarios/${me.id}">${icon('user')}Meu desempenho completo</a>`,
+          <a class="btn btn-ghost" href="#/painel/desempenho">${icon('user')}Meu desempenho completo</a>`,
       })}
       <div class="kpis kpis-6">
         ${kpi({ label: 'Em aberto', value: open.length, color: '#2A3D50', foot: `${s.in_progress} em andamento` })}

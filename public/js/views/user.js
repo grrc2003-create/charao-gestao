@@ -7,9 +7,13 @@ import { readOrg, saveOrg, orgControl } from './periods.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { weekPlanSection, bindWeekPlan } from './week-plan.js';
 
-export async function view({ params, query, setQuery, render, state }) {
+// Meu desempenho completo: a mesma tela, aberta dentro do Meu painel (sem passar pela seção Usuários)
+export const myPerformance = ctx => view({ ...ctx, params: { id: ctx.state.user.id }, panel: true });
+
+export async function view({ params, query, setQuery, render, state, panel = false }) {
   const d = await api(`/users/${params.id}`);
   const u = d.user;
+  const base = panel ? '/painel/desempenho' : `/usuarios/${u.id}`;
   const s = d.stats;
   const org = readOrg(query);
   const tab = query.get('tab') || 'tarefas';
@@ -56,7 +60,7 @@ export async function view({ params, query, setQuery, render, state }) {
     title: u.name,
     html: html`
       ${pageHead({
-        back: { href: '#/usuarios', label: 'Usuários' },
+        back: panel ? { href: '#/painel', label: 'Meu painel' } : { href: '#/usuarios', label: 'Usuários' },
         title: '',
       })}
       <section class="card card-pad">
@@ -106,7 +110,7 @@ export async function view({ params, query, setQuery, render, state }) {
 
       <div class="grid grid-dash section">
         <section class="card"><div class="card-head"><h2>Distribuição das tarefas</h2></div>
-          <div class="card-body">${donut(s.by_status, { linkBase: `#/usuarios/${u.id}`, size: 150 })}</div></section>
+          <div class="card-body">${donut(s.by_status, { linkBase: `#${base}`, size: 150 })}</div></section>
         <section class="card"><div class="card-head"><h2>${icon('info')}Resumo do comportamento operacional</h2></div>
           <div class="card-body"><ul class="behavior">${s.behavior.map(b => html`<li>${b}</li>`)}</ul>
           ${d.team_summary ? html`<hr class="divider"><div class="sub-label">Visão de gestor</div>
@@ -137,7 +141,7 @@ export async function view({ params, query, setQuery, render, state }) {
       root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab, semana: week }); render(); }));
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: 'tarefas', status: b.dataset.st, org, semana: week }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => { saveOrg(b.dataset.org); setQuery({ tab, status: st, org: b.dataset.org, semana: week }); render(); }));
-      root.querySelectorAll(`a[href^="#/usuarios/${u.id}?status="]`).forEach(a => a.addEventListener('click', e => {
+      root.querySelectorAll(`a[href^="#${base}?status="]`).forEach(a => a.addEventListener('click', e => {
         e.preventDefault();
         setQuery({ tab: 'tarefas', status: new URLSearchParams(a.getAttribute('href').split('?')[1]).get('status') });
         render();

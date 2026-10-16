@@ -46,6 +46,7 @@ async function ensureLatestVersion() {
 const routes = [
   ['/', () => ({ html: '' })],
   ['/painel', MyPanel.view],
+  ['/painel/desempenho', User.myPerformance],
   ['/empresa', Dashboard.view],
   ['/projetos', Projects.list],
   ['/projetos/novo', Projects.form],

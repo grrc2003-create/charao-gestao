@@ -1573,6 +1573,31 @@ async function main() {
   const foRe = (await fo('POST', `/payroll/months/${foM.id}/reopen`)).data;
   ok(foRe.status === 'aberta' && !(await fo('GET', '/finance/obligations')).data.some(o => o.title === 'Folha 10/2026 — Camila Rocha') && foRe.entries.find(e => e.person_id === foP1.id).calc.base === 1085.71, 'reabrir remove os pagamentos pendentes e volta a calcular com os dados atuais');
   ok((await fo('POST', '/payroll/months', { ref: '2026-10' })).status === 400, 'uma folha por mês');
+  // Folha pré-lançada em Tarefas financeiras (valor estimado, corrigido no fechamento)
+  const ffOb = (await fo('POST', '/finance/obligations', { title: 'Folha estagiários', category: 'Folha de pagamento', amount: 4000, variable: true, repeat_last: true, frequency: 'mensal', due_day: 5, start_month: '2026-11' })).data;
+  const ffObD = (await fo('GET', `/finance/obligations/${ffOb.id || ffOb}`)).data;
+  const ffNov = ffObD.items.find(i => i.ref_month === '2026-11');
+  ok(ffObD.repeat_last === 1 && ffNov && ffNov.estimated === 1 && ffNov.amount_expected === 4000, 'folha pré-lançada nasce com valor estimado');
+  ok((await fo('PUT', `/finance/items/${ffNov.id}/amount`, { use_previous: true })).status === 400, 'sem mês anterior, não copia valor');
+  await fo('PUT', `/finance/items/${ffNov.id}/amount`, { amount_expected: 4200, estimated: true });
+  const ffDec = (await fo('GET', `/finance/obligations/${ffObD.id}`)).data.items.find(i => i.ref_month === '2026-12');
+  if (ffDec) {
+    await fo('PUT', `/finance/items/${ffDec.id}/amount`, { amount_expected: 1, estimated: true });
+    ok((await fo('PUT', `/finance/items/${ffDec.id}/amount`, { use_previous: true })).data.amount_expected === 4200, 'opção de usar o valor do mês anterior');
+  }
+  ok((await fo('POST', '/payroll/months', { ref: '2026-11' })).status === 400, 'nova folha exige escolher a folha pré-lançada');
+  const ffM = (await fo('POST', '/payroll/months', { ref: '2026-11', finance_item_id: ffNov.id })).data;
+  ok(ffM.finance_item?.id === ffNov.id && ffM.pay_date === ffNov.due_date && !(await fo('GET', '/payroll/months')).data.finance_candidates.some(c => c.id === ffNov.id), 'folha vinculada à parcela pré-lançada (que deixa de ser opção para outras folhas)');
+  const ffClosed = (await fo('POST', `/payroll/months/${ffM.id}/close`)).data;
+  const ffItem = (await fo('GET', `/finance/items/${ffNov.id}`)).data;
+  const ffOther = (await fo('POST', '/payroll/months', { ref: '2027-02', finance_item_id: 'nenhuma' })).data;
+  ok((await fo('POST', '/payroll/months', { ref: '2027-03', finance_item_id: ffNov.id })).status === 400 && (await fo('PUT', `/payroll/months/${ffOther.id}`, { finance_item_id: ffNov.id })).status === 400, 'duas folhas não podem usar a mesma folha pré-lançada');
+  await fo('DELETE', `/payroll/months/${ffOther.id}`);
+  ok(ffClosed.corrected && ffClosed.generated === 0 && ffClosed.entries.every(e => !e.obligation_id) && ffItem.amount_expected === ffClosed.totals.total && ffItem.estimated === 0, 'fechar corrige o valor da folha pré-lançada (sem pagamentos por pessoa)');
+  const ffRe = (await fo('POST', `/payroll/months/${ffM.id}/reopen`)).data;
+  const ffItem2 = (await fo('GET', `/finance/items/${ffNov.id}`)).data;
+  ok(ffRe.status === 'aberta' && ffItem2.amount_expected === 4200 && ffItem2.estimated === 1, 'reabrir volta a parcela ao valor estimado');
+  ok((await fo('POST', '/payroll/months', { ref: '2027-01', finance_item_id: 'nenhuma' })).status === 201, 'sem folha pré-lançada: “Nenhuma” gera pagamentos por pessoa');
 
 }
 

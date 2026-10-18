@@ -77,15 +77,22 @@ function taskDescription(o, amount) {
   return [`Obrigação financeira · ${o.category}${o.payee ? ` · ${o.payee}` : ''}`, `Valor previsto: ${brl(amount)}${o.variable ? ' (valor variável)' : ''}`, 'Registre o pagamento em Tarefas financeiras (data, valor e comprovante).', o.notes || ''].filter(Boolean).join('\n');
 }
 
+// Valor da parcela anterior da mesma obrigação (pago, se houver; senão o previsto)
+export function previousAmount(obligationId, ref) {
+  const it = one('SELECT amount_expected, paid_amount, status FROM finance_items WHERE obligation_id = ? AND ref_month < ? ORDER BY ref_month DESC LIMIT 1', obligationId, ref);
+  return it ? r2(it.status === 'paga' && it.paid_amount != null ? it.paid_amount : it.amount_expected) : null;
+}
+
 function createItem(o, ref, userId) {
   const area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId());
   const due = dueOf(ref, o.due_day);
-  const r = run('INSERT INTO finance_items (obligation_id, ref_month, due_date, amount_expected) VALUES (?,?,?,?)', o.id, ref, due, o.amount);
+  const amount = o.variable && o.repeat_last ? previousAmount(o.id, ref) ?? o.amount : o.amount;
+  const r = run('INSERT INTO finance_items (obligation_id, ref_month, due_date, amount_expected, estimated) VALUES (?,?,?,?,?)', o.id, ref, due, amount, o.variable ? 1 : 0);
   const itemId = Number(r.lastInsertRowid);
   const assignee = o.assignee_id && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', o.assignee_id) ? o.assignee_id : null;
   const taskId = insertTask({
     project: area,
-    data: { task_type: 'tarefa', title: taskTitle(o, ref), description: taskDescription(o, o.amount), field_summary: null, notes: null, due_date: due, start_date: due, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
+    data: { task_type: 'tarefa', title: taskTitle(o, ref), description: taskDescription(o, amount), field_summary: null, notes: null, due_date: due, start_date: due, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
     stageInput: stageFor(area.id, o.category),
     creatorId: userId || o.created_by,
   });
@@ -127,6 +134,7 @@ function readObligation(body) {
     payee: str(body.payee, { max: 160, label: 'Favorecido' }),
     amount: r2(num(body.amount, 'Valor previsto')),
     variable: body.variable === true || body.variable === 1 || body.variable === '1' || body.variable === 'on' ? 1 : 0,
+    repeat_last: body.repeat_last === true || body.repeat_last === 1 || body.repeat_last === '1' || body.repeat_last === 'on' ? 1 : 0,
     frequency: oneOf(body.frequency, Object.keys(FREQUENCIES), 'Periodicidade', 'mensal'),
     due_day: intOrNull(body.due_day) || 10,
     start_month: /^\d{4}-\d{2}$/.test(String(body.start_month || '')) ? body.start_month : today().slice(0, 7),
@@ -164,8 +172,8 @@ export function createObligation(ctx, body, ip) {
   const d = readObligation(body);
   if (!d.assignee_id) d.assignee_id = ctx.user.id; // sem responsável: quem cadastrou
   const id = tx(() => {
-    const r = run(`INSERT INTO finance_obligations (title, category, payee, amount, variable, frequency, due_day, start_month, end_month, assignee_id, notes, active, created_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.title, d.category, d.payee, d.amount, d.variable, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, ctx.user.id);
+    const r = run(`INSERT INTO finance_obligations (title, category, payee, amount, variable, repeat_last, frequency, due_day, start_month, end_month, assignee_id, notes, active, created_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.title, d.category, d.payee, d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, ctx.user.id);
     const nid = Number(r.lastInsertRowid);
     audit(ctx.user.id, 'finance', nid, 'Obrigação financeira cadastrada', { descricao: d.title, categoria: d.category, valor: d.amount, periodicidade: FREQ_LABEL[d.frequency], vencimento: `dia ${d.due_day}` }, ip);
     return nid;
@@ -181,8 +189,8 @@ export function updateObligation(ctx, id, body, ip) {
   const d = readObligation({ ...o, ...body });
   const cur = today().slice(0, 7);
   tx(() => {
-    run(`UPDATE finance_obligations SET title=?, category=?, payee=?, amount=?, variable=?, frequency=?, due_day=?, start_month=?, end_month=?, assignee_id=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
-      d.title, d.category, d.payee, d.amount, d.variable, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, id);
+    run(`UPDATE finance_obligations SET title=?, category=?, payee=?, amount=?, variable=?, repeat_last=?, frequency=?, due_day=?, start_month=?, end_month=?, assignee_id=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.title, d.category, d.payee, d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, id);
     const no = { ...o, ...d, id };
     // Parcelas pendentes do mês atual em diante acompanham a obrigação (valor, vencimento, responsável e título da tarefa)
     const area = financeAreaId();
@@ -206,6 +214,17 @@ export function createObligationInternal(userId, d) {
     VALUES (?,?,?,?,0,'unica',?,?,?,?,?,1,?)`, d.title, d.category || 'Folha de pagamento', d.payee || null, r2(d.amount), d.due_day, d.month, d.month, assignee, d.notes || null, userId).lastInsertRowid);
   createItem(one('SELECT * FROM finance_obligations WHERE id = ?', id), d.month, userId);
   return id;
+}
+// Folha: corrige (ou restaura) o valor da parcela pré-lançada e registra na tarefa
+export function setItemAmountInternal(itemId, amount, userId, { estimated = 0, history, extra } = {}) {
+  const it = one('SELECT * FROM finance_items WHERE id = ?', itemId);
+  if (!it) return;
+  run('UPDATE finance_items SET amount_expected = ?, estimated = ? WHERE id = ?', r2(amount), estimated, itemId);
+  if (it.task_id) {
+    const o = one('SELECT * FROM finance_obligations WHERE id = ?', it.obligation_id);
+    run('UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?', [taskDescription(o, r2(amount)), extra].filter(Boolean).join('\n\n'), new Date().toISOString(), it.task_id);
+    if (history) taskHistory(it.task_id, userId, history, `${brl(it.amount_expected)} → ${brl(amount)}`);
+  }
 }
 // Algum pagamento já registrado? (a folha só reabre se nada foi pago)
 export const obligationPaid = id => !!one(`SELECT 1 FROM finance_items WHERE obligation_id = ? AND status = 'paga' LIMIT 1`, id);
@@ -237,7 +256,7 @@ export function payItem(ctx, id, body, ip) {
   const files = Array.isArray(body.files) ? body.files.slice(0, 5) : [];
   const now = new Date().toISOString();
   tx(() => {
-    run(`UPDATE finance_items SET status = 'paga', paid_date = ?, paid_amount = ?, notes = ?, paid_by = ? WHERE id = ?`, pd, amount, str(body.notes, { max: 1000, label: 'Observação' }) || it.notes, ctx.user.id, id);
+    run(`UPDATE finance_items SET status = 'paga', estimated = 0, paid_date = ?, paid_amount = ?, notes = ?, paid_by = ? WHERE id = ?`, pd, amount, str(body.notes, { max: 1000, label: 'Observação' }) || it.notes, ctx.user.id, id);
     if (it.task_id) {
       for (const f of files) {
         const s = saveImageFromDataUrl(f.data);
@@ -271,9 +290,11 @@ export function unpayItem(ctx, id, ip) {
 export function setItemAmount(ctx, id, body, ip) {
   const it = loadItem(ctx, id);
   if (it.status === 'paga') throw badRequest('Parcela paga: desfaça o pagamento para alterar o valor previsto.');
-  const amount = r2(num(body.amount_expected, 'Valor previsto'));
+  const amount = body.use_previous ? previousAmount(it.obligation_id, it.ref_month) : r2(num(body.amount_expected, 'Valor previsto'));
+  if (amount == null) throw badRequest('Não há parcela anterior desta obrigação.');
+  const estimated = body.estimated === undefined ? it.estimated : body.estimated === true || body.estimated === 1 || body.estimated === '1' || body.estimated === 'on' ? 1 : 0;
   tx(() => {
-    run('UPDATE finance_items SET amount_expected = ? WHERE id = ?', amount, id);
+    run('UPDATE finance_items SET amount_expected = ?, estimated = ? WHERE id = ?', amount, estimated, id);
     if (it.task_id) {
       const o = one('SELECT * FROM finance_obligations WHERE id = ?', it.obligation_id);
       run('UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?', taskDescription(o, amount), new Date().toISOString(), it.task_id);
@@ -371,7 +392,8 @@ export function financeMonth(ctx, ym) {
   generateItems(ctx.user.id);
   const ref = today();
   const month = /^\d{4}-\d{2}$/.test(String(ym || '')) ? ym : ref.slice(0, 7);
-  const rows = all(`SELECT i.*, o.title, o.category, o.payee, o.variable, o.frequency, u.name AS assignee_name, t.code AS task_code
+  const rows = all(`SELECT i.*, o.title, o.category, o.payee, o.variable, o.repeat_last, o.frequency, u.name AS assignee_name, t.code AS task_code,
+      (SELECT pm.ref FROM payroll_months pm WHERE pm.finance_item_id = i.id) AS payroll_ref
     FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
     LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN users u ON u.id = t.assignee_id
     WHERE i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ?) ORDER BY i.due_date, o.title`, month, ref);
@@ -380,7 +402,7 @@ export function financeMonth(ctx, ym) {
     const days = Math.round((Date.parse(it.due_date) - Date.parse(ref)) / 86400e3);
     return { ...it, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : late ? 'atrasada' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
   };
-  const items = rows.map(decorate);
+  const items = rows.map(decorate).map(it => ({ ...it, previous_amount: it.variable ? previousAmount(it.obligation_id, it.ref_month) : null }));
   const inMonth = items.filter(i => i.ref_month === month);
   const sum = (arr, f) => r2(arr.reduce((s, i) => s + f(i), 0));
   const cats = new Map();

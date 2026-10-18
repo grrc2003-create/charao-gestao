@@ -48,13 +48,23 @@ async function unpayFlow(it, done) {
   try { await api(`/finance/items/${it.id}/unpay`, { method: 'POST' }); toast('Pagamento desfeito.'); done(); } catch (e) { toast(e.message, 'err'); }
 }
 async function amountFlow(it, done) {
+  const prev = it.previous_amount;
   const r = await sheet({
     title: `Valor previsto · ${it.title}`, submitLabel: 'Salvar',
-    body: html`<div class="field"><label class="req" for="fa-v">Valor previsto desta parcela (R$)</label><input id="fa-v" name="amount_expected" required inputmode="decimal" value="${String(it.amount_expected).replace('.', ',')}"></div>`,
-    onSubmit: d => api(`/finance/items/${it.id}/amount`, { method: 'PUT', body: { amount_expected: parseNum(d.amount_expected) } }),
+    body: html`<div class="field"><label class="req" for="fa-v">Valor previsto desta parcela (R$)</label><input type="text" id="fa-v" name="amount_expected" required inputmode="decimal" value="${String(it.amount_expected).replace('.', ',')}">
+        ${prev != null ? html`<button type="button" class="btn btn-ghost btn-sm fin-prev" data-prev="${String(prev).replace('.', ',')}">${icon('history')}Usar o valor do mês anterior (${money(prev)})</button>` : ''}</div>
+      <label class="switch"><input type="checkbox" name="estimated" ${it.estimated ? 'checked' : ''}>Valor estimado (será corrigido depois${it.category === 'Folha de pagamento' ? ' pela Folha (Administrativa)' : ''})</label>`,
+    onSubmit: (d, form) => api(`/finance/items/${it.id}/amount`, { method: 'PUT', body: { amount_expected: parseNum(d.amount_expected), estimated: form.querySelector('[name=estimated]').checked } }),
   });
   if (r) { toast('Valor atualizado.'); done(); }
 }
+// Botão "Usar o valor do mês anterior" dentro da folha de ajuste
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('.fin-prev');
+  if (!b) return;
+  const input = b.closest('.field')?.querySelector('input[name=amount_expected]');
+  if (input) { input.value = b.dataset.prev; input.focus(); }
+});
 
 // ---------- Visão do mês ----------
 export async function view({ state, query, setQuery, render }) {
@@ -100,7 +110,7 @@ export async function view({ state, query, setQuery, render }) {
   const row = i => html`<li class="fin-row ${SIT[i.situation].cls}">
     <div class="fin-row-main"><b>${i.title}</b><small>${i.category}${i.payee ? ` · ${i.payee}` : ''} · ${i.frequency_label}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></div>
     <div class="fin-row-due"><span>${fmtDate(i.due_date)}</span>${sitBadge(i.situation)}</div>
-    <div class="fin-row-val"><b>${money(i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected)}</b>${i.status === 'paga' ? html`<small>pago em ${fmtDate(i.paid_date)}</small>` : i.variable ? html`<small>valor variável</small>` : ''}</div>
+    <div class="fin-row-val"><b>${money(i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected)}</b>${i.status === 'paga' ? html`<small>pago em ${fmtDate(i.paid_date)}</small>` : i.estimated ? html`<small class="fin-est">valor estimado</small>` : i.variable ? html`<small>valor variável</small>` : ''}${i.payroll_ref ? html`<small>Folha ${i.payroll_ref.slice(5, 7)}/${i.payroll_ref.slice(0, 4)} vinculada</small>` : ''}</div>
     <div class="fin-row-act">
       ${i.status === 'pendente' ? html`<button type="button" class="btn btn-success btn-sm" data-pay="${i.id}">${icon('check')}Pagar</button>
         <button type="button" class="icon-btn" data-amount="${i.id}" title="Ajustar o valor previsto" aria-label="Ajustar valor">${icon('edit')}</button>`
@@ -211,18 +221,19 @@ export async function form({ params, state, navigate }) {
     html: html`
       ${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: editing ? 'Editar obrigação' : 'Nova obrigação financeira' })}
       <form class="card card-pad form" id="fo-form" novalidate style="max-width:760px">
-        <div class="field"><label class="req" for="title">Descrição</label><input id="title" name="title" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: DAS Simples Nacional, Aluguel do escritório, Folha de pagamento"></div>
+        <div class="field"><label class="req" for="title">Descrição</label><input type="text" id="title" name="title" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: DAS Simples Nacional, Aluguel do escritório, Folha de pagamento"></div>
         <div class="form-row">
-          <div class="field"><label for="category">Categoria</label><input id="category" name="category" list="fo-cats" maxlength="60" value="${v.category || ''}" placeholder="Escolha ou digite">
+          <div class="field"><label for="category">Categoria</label><input type="text" id="category" name="category" list="fo-cats" maxlength="60" value="${v.category || ''}" placeholder="Escolha ou digite">
             <datalist id="fo-cats">${meta.category_options.map(c => html`<option value="${c}"></option>`)}</datalist></div>
-          <div class="field"><label for="payee">Favorecido</label><input id="payee" name="payee" maxlength="160" value="${v.payee || ''}" placeholder="Órgão, fornecedor, banco…"></div>
+          <div class="field"><label for="payee">Favorecido</label><input type="text" id="payee" name="payee" maxlength="160" value="${v.payee || ''}" placeholder="Órgão, fornecedor, banco…"></div>
         </div>
         <div class="form-row form-row-3">
-          <div class="field"><label class="req" for="amount">Valor previsto (R$)</label><input id="amount" name="amount" required inputmode="decimal" value="${v.amount !== undefined ? String(v.amount).replace('.', ',') : ''}" placeholder="0,00"></div>
+          <div class="field"><label class="req" for="amount">Valor previsto (R$)</label><input type="text" id="amount" name="amount" required inputmode="decimal" value="${v.amount !== undefined ? String(v.amount).replace('.', ',') : ''}" placeholder="0,00"></div>
           <div class="field"><label for="frequency">Periodicidade</label><select id="frequency" name="frequency">${Object.entries(FREQ).map(([k, l]) => opt(k, l, v.frequency))}</select></div>
           <div class="field"><label class="req" for="due_day">Dia do vencimento</label><input id="due_day" name="due_day" type="number" min="1" max="31" required value="${v.due_day}"></div>
         </div>
         <label class="switch"><input type="checkbox" name="variable" ${v.variable ? 'checked' : ''}>Valor variável (ajusto o valor de cada parcela)</label>
+        <label class="switch fin-repeat" ${v.variable ? '' : 'hidden'}><input type="checkbox" name="repeat_last" ${v.repeat_last ? 'checked' : ''}>Estimar cada parcela com o valor do mês anterior (ex.: folha de pagamento, corrigida no fechamento da Folha)</label>
         <div class="form-row form-row-3">
           <div class="field"><label class="req" for="start_month">Início</label><input id="start_month" name="start_month" type="month" required value="${v.start_month}"></div>
           <div class="field"><label for="end_month">Término (opcional)</label><input id="end_month" name="end_month" type="month" value="${v.end_month || ''}"></div>
@@ -237,10 +248,12 @@ export async function form({ params, state, navigate }) {
       </form>`,
     mount(root) {
       const f = root.querySelector('#fo-form');
+      f.variable.addEventListener('change', () => { f.querySelector('.fin-repeat').hidden = !f.variable.checked; });
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
         data.variable = f.variable.checked;
+        data.repeat_last = f.variable.checked && f.repeat_last.checked;
         if (editing) data.active = f.active.checked;
         data.amount = parseNum(data.amount);
         const err = f.querySelector('.form-error');

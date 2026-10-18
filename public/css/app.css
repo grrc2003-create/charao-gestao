@@ -2309,3 +2309,11 @@ tr.is-inactive td { opacity: .55; }
   .pf-kpis .pf-kt { grid-column: 1 / -1; }
   .pf-params { grid-template-columns: 1fr; }
 }
+
+/* Folha ↔ Tarefas financeiras */
+.pf-pform .pf-fin { flex: 2 1 260px; }
+.pf-link { grid-column: 1 / -1; display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--ink-2); background: #E5F4EC; border-radius: var(--radius-sm); padding: 8px 12px; }
+.pf-link svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.pf-link-none { background: var(--navy-50); }
+.fin-est { color: #A86F0E; font-weight: 600; }
+.fin-prev { margin-top: 6px; }

@@ -400,3 +400,9 @@
 .pd-kpis b { display: block; font-size: 22pt; color: #F26B21; }
 .pd-kpis span { font-size: 9.5pt; color: #46535F; }
 @media screen and (max-width: 700px) { .pd-grid, .pd-kpis { grid-template-columns: 1fr; } .pd-cover { min-height: 0; padding: 20px 12px; } }
+
+/* Manual de processos: cada processo sempre começa em página nova (inclusive navegadores sem break-before) */
+@media print {
+  .r-break, .pd-new { page-break-before: always; break-before: page; }
+  .pd-head, .pd-obj { page-break-after: avoid; break-after: avoid; }
+}

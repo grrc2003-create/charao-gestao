@@ -4,11 +4,11 @@ import { html, api, fmtDate, todayISO } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { respColors, richText, LINK_KIND } from './processes.js';
 
-function processDoc(p, { first = false } = {}) {
+function processDoc(p, { first = false, header = '' } = {}) {
   const c = p.content;
   const colors = respColors(c.steps);
   const box = (label, body) => (body ? html`<div class="pd-box avoid"><div class="r-lbl">${label}</div>${body}</div>` : '');
-  return html`<section class="pd ${first ? '' : 'r-break'}">
+  return html`<section class="pd ${first ? '' : 'r-break pd-new'}">${header}
     <div class="pd-head">
       <div><div class="r-kicker">${p.code}${c.area ? ` · ${c.area}` : ''}</div><h1>${c.title}</h1></div>
       ${c.frequency ? html`<div class="pd-freq"><small>Frequência</small>${c.frequency}</div>` : ''}
@@ -78,7 +78,7 @@ export async function manual() {
           <table class="r-table pd-map"><thead><tr><th>Código</th><th>Processo</th><th>Área</th><th>Frequência</th><th>Objetivo</th></tr></thead>
             <tbody>${processes.map(p => html`<tr><td class="mono nowrap">${p.code}</td><td><b>${p.content.title}</b></td><td class="small">${p.content.area || ''}</td><td class="small nowrap">${p.content.frequency || ''}</td><td class="small">${p.content.objective}</td></tr>`)}</tbody></table>
         </section>
-        ${processes.map(p => processDoc(p))}
+        ${processes.map(p => processDoc(p, { header: docHeader('Manual de processos') }))}
         <section class="r-break pd-summary">${docHeader('Resumo')}
           <div class="pd-kpis">
             <div><b>${processes.length}</b><span>processos documentados</span></div>

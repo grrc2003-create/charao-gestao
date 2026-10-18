@@ -77,7 +77,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
     title: editing ? `Editar ${u.name}` : ext ? 'Novo terceirizado' : 'Novo usuário',
     html: html`
       ${pageHead({
-        back: { href: '#/usuarios', label: 'Usuários' },
+        back: state.meta.can.sections?.includes('equipe') ? { href: '#/equipe/cadastro', label: 'Cadastro da Equipe' } : { href: '#/usuarios', label: 'Usuários' },
         eyebrow: 'Administração de acesso',
         title: editing ? (ext ? 'Editar terceirizado' : 'Editar usuário e permissões') : ext ? 'Novo terceirizado' : 'Novo usuário',
         sub: editing ? u.name : '',
@@ -210,7 +210,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           else id = (await api('/users', { method: 'POST', body: data })).id;
           await reloadMeta();
           toast(editing ? 'Usuário atualizado.' : 'Usuário criado.');
-          navigate('/usuarios');
+          navigate(state.meta.can.sections?.includes('equipe') ? '/equipe/cadastro' : '/usuarios');
         } catch (ex) {
           err.textContent = ex.message;
           err.hidden = false;

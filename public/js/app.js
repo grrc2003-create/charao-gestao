@@ -112,6 +112,8 @@ const ALL_NAV = [
   ['/relatorios', 'Relatórios', 'reports', 'relatorios'],
 ];
 const USERS_NAV = ['/usuarios', 'Usuários', 'users', 'usuarios|cadastro_usuarios'];
+// Com a Gestão da Equipe liberada, as pessoas são acessadas pelo Cadastro da Equipe (Usuários sai do menu)
+const showUsersNav = () => sec(USERS_NAV[3]) && !sec('equipe');
 // Menu: só as seções liberadas para o usuário
 const sec = k => !k || !state.meta?.can.sections || k.split('|').some(x => state.meta.can.sections.includes(x));
 const navItems = () => ALL_NAV.filter(n => sec(n[3]));
@@ -170,7 +172,7 @@ const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Tarefas
 function mobileNav() {
   const c = state.meta?.can || {};
   const all = [...navItems(),
-    ...(sec(USERS_NAV[3]) ? [USERS_NAV] : []),
+    ...(showUsersNav() ? [USERS_NAV] : []),
     ...(c.contracts ? [['/contratos', 'Contratos', 'contract']] : []),
     ...(c.finance ? [['/financeiro', 'Tarefas financeiras', 'wallet']] : []),
     ...(sec('equipe') ? [['/equipe/organograma', 'Organograma', 'team'], ['/equipe/ferias', 'Férias', 'calendar'], ['/equipe/cadastro', 'Cadastro da Equipe', 'user']] : []),
@@ -207,8 +209,8 @@ function shell() {
           <a href="#/equipe/organograma" data-nav="/equipe/organograma">${icon('team')}<span>Organograma</span></a>
           <a href="#/equipe/ferias" data-nav="/equipe/ferias">${icon('calendar')}<span>Férias</span></a>
           <a href="#/equipe/cadastro" data-nav="/equipe/cadastro">${icon('user')}<span>Cadastro da Equipe</span></a>` : ''}
-        ${sec(USERS_NAV[3]) || state.meta?.can.view_audit || state.meta?.can.manage_settings ? html`<hr class="sidebar-sep">` : ''}
-        ${sec(USERS_NAV[3]) ? html`<a href="#/usuarios" data-nav="/usuarios">${icon('users')}<span>Usuários</span></a>` : ''}
+        ${showUsersNav() || state.meta?.can.view_audit || state.meta?.can.manage_settings ? html`<hr class="sidebar-sep">` : ''}
+        ${showUsersNav() ? html`<a href="#/usuarios" data-nav="/usuarios">${icon('users')}<span>Usuários</span></a>` : ''}
         ${state.meta?.can.view_audit ? html`<a href="#/auditoria" data-nav="/auditoria">${icon('shield')}<span>Auditoria</span></a>` : ''}
         ${state.meta?.can.manage_settings ? html`<a href="#/configuracoes" data-nav="/configuracoes">${icon('settings')}<span>Configurações</span></a>` : ''}
       </nav>

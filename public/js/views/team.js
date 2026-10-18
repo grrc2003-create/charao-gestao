@@ -173,7 +173,7 @@ export async function org({ state, render }) {
 
 // ---------- Cadastro da Equipe ----------
 const FILTERS = [['', 'Todos'], ['pendentes', 'Função não detalhada'], ['sem_acesso', 'Sem acesso ao sistema'], ['terceirizados', 'Terceirizados'], ['sem_admissao', 'Sem data de admissão'], ['inativos', 'Inativos']];
-export async function list({ query, setQuery }) {
+export async function list({ query, setQuery, state }) {
   const data = await api('/team');
   const f = query.get('f') || '';
   const match = p => (f === 'inativos' ? !p.active : p.active) && (!f || f === 'inativos'
@@ -192,7 +192,10 @@ export async function list({ query, setQuery }) {
       ${pageHead({
         eyebrow: 'Gestão da Equipe', title: 'Cadastro da Equipe',
         sub: 'Função e responsabilidades de cada pessoa, setor e admissão. Acesso e permissões ficam no Cadastro de usuários.',
-        actions: html`<a class="btn btn-ghost" href="#/equipe/organograma">${icon('team')}Organograma</a><a class="btn btn-primary" href="#/equipe/cadastro/novo">${icon('plus')}Nova pessoa (sem acesso)</a>`,
+        actions: html`<a class="btn btn-ghost" href="#/equipe/organograma">${icon('team')}Organograma</a>
+          ${state.meta.can.manage_users ? html`<a class="btn btn-ghost" href="#/usuarios/novo?perfil=terceirizado">${icon('plus')}Novo terceirizado</a>
+            <a class="btn btn-ghost" href="#/usuarios/novo">${icon('key')}Novo usuário (com acesso)</a>` : ''}
+          <a class="btn btn-primary" href="#/equipe/cadastro/novo">${icon('plus')}Nova pessoa (sem acesso)</a>`,
       })}
       <div class="kpis kpis-4">
         ${kpi({ label: 'Pessoas ativas', value: act.length, color: '#2A3D50', foot: `${act.filter(p => p.is_external).length} terceirizado(s)` })}
@@ -208,7 +211,7 @@ export async function list({ query, setQuery }) {
           <div class="grow"><div class="row-title">${p.name}</div>
             <div class="row-meta"><span class="${p.missing_function ? 'late' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</span><span>${roleOf(p)}</span>
               ${p.manager_name ? html`<span>${p.is_external ? 'Líder' : 'Gestor'}: ${p.manager_name}</span>` : ''}${p.admission_date ? html`<span>admissão ${fmtDate(p.admission_date)}</span>` : ''}</div></div>
-          <div class="tm-pills">${!p.login_enabled ? html`<span class="org-tag">Sem acesso</span>` : ''}${p.vacation_summary && p.vacation_summary.status !== 'concluido' && p.vacation_summary.status !== 'disponivel' ? vacPill(p.vacation_summary.status) : ''}</div>
+          <div class="tm-pills">${!p.login_enabled ? html`<span class="org-tag">Sem acesso</span>` : html`<span class="org-tag">${roleOf(p)}</span>`}${p.vacation_summary && p.vacation_summary.status !== 'concluido' && p.vacation_summary.status !== 'disponivel' ? vacPill(p.vacation_summary.status) : ''}</div>
           <span class="chev">${icon('chevron')}</span></a></li>`)}</ul></section>`)}
       ${!shown.length ? html`<p class="muted">Ninguém neste filtro.</p>` : ''}`,
     mount(root, ctx) {

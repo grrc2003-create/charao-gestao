@@ -1374,6 +1374,63 @@ async function main() {
   ok((await rgAna('PUT', '/settings/record-types', { types: rgT2.map(t => (t.name === 'Definição' ? { ...t, behavior: 'nota' } : t)) })).status === 400, 'tipo com registros não troca de comportamento');
   ok((await rgMar('PUT', '/settings/record-types', { types: rgT2 })).status === 403, 'sem Configurações não altera os tipos');
 
+  // ---------- Gestão da Equipe: organograma, cadastro e férias (CLT) ----------
+  console.log('Gestão da Equipe');
+  const eqAna0 = await login('ana@charao.eng.br');
+  const eqAnaU = (await eqAna0('GET', `/users/${kAnaId}`)).data.user;
+  await eqAna0('PUT', `/users/${kAnaId}`, { ...eqAnaU, sections: [...eqAnaU.section_list, 'equipe'] });
+  const eqAna = await login('ana@charao.eng.br');
+  const eqRic = await login('ricardo@charao.eng.br');
+  const eqMar = await login('marcos@charao.eng.br');
+  const eqOrg = await eqAna('GET', '/team/org');
+  ok(eqOrg.status === 200 && eqOrg.data.people.some(p => p.id === 4 && p.manager_id === 2) && 'missing_function' in eqOrg.data.people[0], 'organograma traz a hierarquia (gestor de cada pessoa)');
+  ok((await eqRic('GET', '/team/org')).status === 403 && (await eqRic('GET', '/vacations/overview')).status === 403, 'sem a liberação Gestão da Equipe, não abre organograma nem férias da empresa');
+  ok((await eqAna('POST', '/team', { name: 'João Servente', job_title: 'Servente' })).status === 400, 'cadastro da equipe exige responsabilidades');
+  const eqNew = await eqAna('POST', '/team', { name: 'João Servente', job_title: 'Servente de obras', responsibilities: 'Apoio aos pedreiros, limpeza e organização do canteiro.', department: 'Obras', manager_id: 4, admission_date: new Date(Date.now() - 100 * 86400e3).toISOString().slice(0, 10) });
+  ok(eqNew.status === 201 && eqNew.data.login_enabled === 0 && eqNew.data.manager_id === 4, 'pessoa sem acesso ao sistema cadastrada na equipe');
+  ok((await eqAna('GET', '/users')).data.some(u => u.id === eqNew.data.id && !u.login_enabled), 'pessoa sem acesso aparece nos usuários como sem login');
+  // Função e responsabilidades obrigatórias também ao editar quem já é usuário
+  ok((await eqAna('PUT', '/team/4', { job_title: 'Mestre de Obras', responsibilities: '' })).status === 400, 'editar sem responsabilidades é bloqueado');
+  const eqRef = new Date(); const eqIso = d => d.toISOString().slice(0, 10);
+  const eqAdm = eqIso(new Date(eqRef.getTime() - 450 * 86400e3));
+  const eqM = await eqAna('PUT', '/team/4', { job_title: 'Mestre de Obras', responsibilities: 'Coordena as equipes de campo, confere a execução e organiza o canteiro.', department: 'Obras', admission_date: eqAdm, manager_id: 2 });
+  ok(eqM.status === 200 && eqM.data.responsibilities.startsWith('Coordena') && !eqM.data.missing_function, 'cadastro da equipe salva função, responsabilidades e admissão');
+  // Organograma: mover gestor (com proteção contra ciclo)
+  ok((await eqAna('PUT', '/team/2/manager', { manager_id: 4 })).status === 400, 'organograma impede ciclo na hierarquia');
+  const eqMv = await eqAna('PUT', `/team/${eqNew.data.id}/manager`, { manager_id: 2 });
+  ok(eqMv.status === 200 && eqMv.data.people.find(p => p.id === eqNew.data.id).manager_id === 2, 'arrastar no organograma troca o gestor');
+  // Férias: períodos e saldo
+  const eqMe = (await eqMar('GET', '/vacations/me')).data;
+  ok(eqMe.periods.length >= 2 && eqMe.summary.available === 30 && eqMe.periods.some(p => !p.acquired), 'férias: período aquisitivo completo com 30 dias e o atual em aquisição');
+  // Início válido: segunda-feira daqui a ~60 dias (sem feriado nos 2 dias seguintes)
+  let eqSt = new Date(eqRef.getTime() + 60 * 86400e3);
+  while (eqSt.getUTCDay() !== 1) eqSt = new Date(eqSt.getTime() + 86400e3);
+  let eqPv = (await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 10 })).data;
+  for (let k = 0; !eqPv.ok && /feriado/.test(eqPv.error || '') && k < 6; k++) { eqSt = new Date(eqSt.getTime() + 7 * 86400e3); eqPv = (await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 10 })).data; }
+  ok(eqPv.ok && eqPv.end_date && eqPv.period.balance_after === 20, 'prévia calcula o término e o saldo restante');
+  const eqFri = new Date(eqSt.getTime() - 3 * 86400e3);
+  const eqPvFri = (await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqFri), days: 10 })).data;
+  ok(!eqPvFri.ok && /repouso|domingo/.test(eqPvFri.error), 'CLT: não começa nos 2 dias antes do repouso semanal');
+  ok(!(await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 4 })).data.ok, 'CLT: cada parte com no mínimo 5 dias');
+  ok(/Sobrariam/.test((await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 27 })).data.error || ''), 'CLT: não deixa sobra menor que 5 dias');
+  const eqReq = await eqMar('POST', '/vacations', { start_date: eqIso(eqSt), days: 10, note: 'Viagem em família' });
+  ok(eqReq.status === 201 && eqReq.data.status === 'solicitada', 'a própria pessoa solicita as férias');
+  const eqSt2 = new Date(eqSt.getTime() + 21 * 86400e3);
+  const eqPv2 = (await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt2), days: 10 })).data;
+  ok(!eqPv2.ok && /14 dias/.test(eqPv2.error || ''), 'CLT: uma das partes precisa ter ao menos 14 dias');
+  ok((await eqMar('POST', `/vacations/${eqReq.data.id}/approve`)).status === 403, 'quem solicita não aprova as próprias férias');
+  const eqRicMe = (await eqRic('GET', '/vacations/me')).data;
+  ok(eqRicMe.approvals.some(v => v.id === eqReq.data.id), 'gestor direto vê a solicitação para aprovar no Meu painel');
+  ok((await eqRic('POST', `/vacations/${eqReq.data.id}/approve`)).status === 200 && (await eqMar('GET', '/vacations/me')).data.summary.available === 20, 'gestor aprova e o saldo cai para 20 dias');
+  const eqOv = (await eqAna('GET', '/vacations/overview')).data;
+  ok(eqOv.people.some(p => p.id === 4 && p.vacations.length) && 'expiring' in eqOv.kpis, 'férias da empresa: visão geral do ano');
+  const eqLaunch = await eqAna('POST', '/vacations', { user_id: eqNew.data.id, start_date: eqIso(new Date(eqSt.getTime() + 35 * 86400e3)), days: 30 });
+  ok(eqLaunch.status === 400 && /ainda não completou|período aquisitivo/.test(eqLaunch.data.error), 'sem período aquisitivo completo não há férias');
+  // Liberar acesso de quem foi cadastrado sem login
+  const eqU = (await eqAna('GET', `/users/${eqNew.data.id}`)).data.user;
+  const eqGrant = await eqAna('PUT', `/users/${eqNew.data.id}`, { ...eqU, email: 'joao.servente@charao.eng.br', password: 'Servente!2026', sections: ['tarefas'] });
+  ok(eqGrant.status === 200 && (await client()('POST', '/auth/login', { email: 'joao.servente@charao.eng.br', password: 'Servente!2026' })).status === 200, 'Cadastro de usuários libera o acesso de quem não tinha login');
+
 }
 
 main()

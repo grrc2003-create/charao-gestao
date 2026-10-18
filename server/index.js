@@ -24,6 +24,8 @@ import * as Recurrences from './services/recurrences.js';
 import * as Checklist from './services/checklist.js';
 import * as Records from './services/records.js';
 import { projectHistory } from './services/history.js';
+import * as Team from './services/team.js';
+import * as Vacations from './services/vacations.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
@@ -199,6 +201,20 @@ api.get('/api/meta', (req, res, { ctx }) => {
     },
   });
 });
+
+// ---------- Gestão da Equipe: organograma, cadastro da equipe e férias ----------
+api.get('/api/team/org', (req, res, { ctx, query }) => send(res, 200, Team.orgChart(ctx, { inactive: query.get('inativos') === '1' })));
+api.put('/api/team/:id/manager', (req, res, { ctx, params, body }) => send(res, 200, Team.moveManager(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/team', (req, res, { ctx }) => send(res, 200, Team.listTeam(ctx)));
+api.post('/api/team', (req, res, { ctx, body }) => send(res, 201, Team.createMember(ctx, body, clientIp(req))));
+api.get('/api/team/:id', (req, res, { ctx, params }) => send(res, 200, Team.getMember(ctx, intOrNull(params.id))));
+api.put('/api/team/:id', (req, res, { ctx, params, body }) => send(res, 200, Team.updateMember(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/vacations/me', (req, res, { ctx }) => send(res, 200, Vacations.myVacations(ctx)));
+api.get('/api/vacations/overview', (req, res, { ctx, query }) => send(res, 200, Vacations.vacationsOverview(ctx, query.get('ano'))));
+api.get('/api/vacations/user/:id', (req, res, { ctx, params }) => send(res, 200, Vacations.userVacations(ctx, intOrNull(params.id))));
+api.post('/api/vacations/preview', (req, res, { ctx, body }) => send(res, 200, Vacations.previewVacation(ctx, body)));
+api.post('/api/vacations', (req, res, { ctx, body }) => send(res, 201, Vacations.requestVacation(ctx, body, clientIp(req))));
+api.post('/api/vacations/:id/:action', (req, res, { ctx, params, body }) => send(res, 200, Vacations.vacationAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 
 // ---------- Registros do projeto (observações, definições, atas, pendências…) ----------
 const recSec = ctx => requireSection(ctx.user, 'projetos');

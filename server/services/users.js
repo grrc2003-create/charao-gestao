@@ -13,7 +13,7 @@ import { checklistDashboard } from './checklist.js';
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections, home';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections, home, department, admission_date, responsibilities';
 
 export function publicUser(ctx, u) {
   const out = { ...u, section_list: [...sectionsOf(u)] };
@@ -78,8 +78,8 @@ export function getUser(ctx, id) {
 }
 
 // Terceirizado: sem login (senha inutilizável), e-mail opcional (só contato), líder interno obrigatório.
-const NO_LOGIN = '!sem-login';
-const placeholderEmail = () => `terceirizado-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@sem-login.charao`;
+export const NO_LOGIN = '!sem-login';
+export const placeholderEmail = () => `terceirizado-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@sem-login.charao`;
 export const isPlaceholderEmail = e => /@sem-login\.charao$/.test(e || '');
 
 // login: acesso ao sistema (regras de Colaborador). Sem login: e-mail opcional, líder conduz as tarefas.
@@ -137,7 +137,7 @@ function readUserBody(body, { creating }) {
   return { d, projectIds };
 }
 
-function assertNoManagerCycle(userId, managerId) {
+export function assertNoManagerCycle(userId, managerId) {
   if (!managerId) return;
   if (managerId === userId) throw badRequest('Um usuário não pode ser gestor de si mesmo.');
   if (!one('SELECT id FROM users WHERE id = ?', managerId)) throw badRequest('Gestor inválido.');
@@ -196,7 +196,14 @@ export function updateUser(ctx, id, body, ip) {
   if (u.is_external) return updateExternal(ctx, u, body, ip);
   if (body.role === 'terceirizado') throw badRequest('Um usuário interno não pode ser convertido em terceirizado. Cadastre um novo terceirizado.');
   if (body.manager_id && one('SELECT is_external FROM users WHERE id = ?', intOrNull(body.manager_id))?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
-  const { d, projectIds } = readUserBody({ ...u, ...body }, { creating: false });
+  // Pessoa sem acesso (cadastrada na Gestão da Equipe): o acesso é liberado informando e-mail e senha provisória
+  const noLogin = !u.login_enabled;
+  const grant = noLogin && !!body.password;
+  const { d, projectIds } = readUserBody({ ...u, ...body, email: grant || (body.email && !isPlaceholderEmail(body.email)) ? body.email : u.email }, { creating: false });
+  if (grant) {
+    if (isPlaceholderEmail(d.email)) throw badRequest('Informe o e-mail (login) para liberar o acesso.');
+    validatePasswordStrength(body.password);
+  }
   const dup = one('SELECT id FROM users WHERE email = ? AND id <> ?', d.email, id);
   if (dup) throw badRequest('Já existe um usuário com este e-mail.');
   assertNoManagerCycle(id, d.manager_id);
@@ -211,6 +218,10 @@ export function updateUser(ctx, id, body, ip) {
     const newSec = secGiven ? d.sections : u.sections;
     run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, can_finance=?, sections=?, home=?, active=?, updated_at=datetime('now') WHERE id=?`,
       d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, newCt, newFin, newSec, d.home, active, id);
+    if (grant) {
+      run(`UPDATE users SET login_enabled = 1, password_hash = ?, must_change_password = 1 WHERE id = ?`, hashPassword(body.password), id);
+      audit(ctx.user.id, 'user', id, 'Acesso ao sistema liberado', { email: d.email }, ip);
+    }
     const finChanged = !!u.can_finance !== !!newFin;
     const secChanged = secGiven && (u.sections || JSON.stringify([...sectionsOf(u)])) !== newSec;
     const ctChanged = finChanged || secChanged || !!u.can_contracts !== !!newCt;
@@ -241,7 +252,7 @@ export function resetPassword(ctx, id, body, ip) {
   requireCadastro(ctx, one('SELECT * FROM users WHERE id = ?', id));
   const target = one('SELECT id, login_enabled FROM users WHERE id = ?', id);
   if (!target) throw notFound();
-  if (!target.login_enabled) throw badRequest('Este terceirizado não tem acesso ao sistema.');
+  if (!target.login_enabled) throw badRequest('Esta pessoa não tem acesso ao sistema.');
   validatePasswordStrength(body.password);
   run(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = datetime('now') WHERE id = ?`, hashPassword(body.password), id);
   destroyUserSessions(id);

@@ -135,14 +135,14 @@ export function canSeePersonalData(ctx, userId) {
 
 // ---------- Seções liberadas por usuário ----------
 // Gestão de Obras · Gestão da Empresa · Administração. Sem lista salva, vale o padrão do perfil.
-export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'equipe', 'cadastro_usuarios', 'processos', 'auditoria', 'configuracoes'];
+export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'equipe', 'cadastro_usuarios', 'processos', 'folha', 'auditoria', 'configuracoes'];
 export const SECTION_LABEL = { dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios',
-  contratos: 'Contratos', financeiro: 'Tarefas financeiras', equipe: 'Organograma e Férias', cadastro_usuarios: 'Cadastro da Equipe', processos: 'Processos da Empresa (edição)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+  contratos: 'Contratos', financeiro: 'Tarefas financeiras', equipe: 'Organograma e Férias', cadastro_usuarios: 'Cadastro da Equipe', processos: 'Processos da Empresa (edição)', folha: 'Folha (Administrativa)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 export function defaultSections(u) {
   const s = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios'];
   if (u.can_contracts) s.push('contratos');
   if (u.can_finance) s.push('financeiro');
-  if (isAdmin(u)) s.push('equipe', 'cadastro_usuarios', 'processos', 'auditoria');
+  if (isAdmin(u)) s.push('equipe', 'cadastro_usuarios', 'processos', 'folha', 'auditoria');
   if (isAdmin(u) || isManagerRole(u)) s.push('configuracoes');
   if (isManagerRole(u)) s.push('processos'); // gestor e coordenador criam processos (publicação: administrador)
   return s;

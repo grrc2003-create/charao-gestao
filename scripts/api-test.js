@@ -1537,6 +1537,43 @@ async function main() {
   const prP1b = (await prAna('POST', '/processes/1/publicar', {})).data;
   ok(prP1b.version === 2 && prP1b.owner_id === 3 && (await prFel('GET', '/processes/1')).data.content.title === 'RDO (revisado)', 'na aprovação valem o novo conteúdo e o novo responsável');
 
+  // ---------- Folha (Administrativa) ----------
+  const fpAnaU = (await prAna('GET', '/users/1')).data.user;
+  await prAna('PUT', '/users/1', { ...fpAnaU, sections: [...fpAnaU.section_list, 'folha'] });
+  const fo = await login('ana@charao.eng.br');
+  ok((await prFel('GET', '/payroll/months')).status === 403 && !(await prFel('GET', '/meta')).data.can.payroll && (await fo('GET', '/meta')).data.can.payroll, 'Folha: só quem tem a seção');
+  const allVt = { 1: { vt: 1 }, 2: { vt: 1 }, 3: { vt: 1 }, 4: { vt: 1 }, 5: { vt: 1 } };
+  const foP1 = (await fo('POST', '/payroll/people', { user_id: 6, company: 'charao', kind: 'estagio', monthly_value: '900', shift: '08:00 às 12:00', schedule: allVt, pix: 'chave-teste', start_date: '2026-01-01' })).data;
+  const foP2 = (await fo('POST', '/payroll/people', { user_id: 8, company: 'lus', kind: 'estagio', monthly_value: 900, schedule: { 2: { vr: 1 }, 4: { vr: 1 }, 5: { vr: 1 } } })).data;
+  const foP3 = (await fo('POST', '/payroll/people', { user_id: 7, kind: 'profissional', monthly_value: 3000, schedule: allVt })).data;
+  ok(foP1.id && foP2.company_name.startsWith('Ludimila') && foP3.kind === 'profissional', 'pessoas incluídas na folha (empresa e tipo)');
+  ok((await fo('POST', '/payroll/people', { user_id: 6, monthly_value: 1 })).status === 400, 'a mesma pessoa não entra duas vezes');
+  const foM = (await fo('POST', '/payroll/months', { ref: '2026-10', vt_fare: 5.9, vr_daily: 22 })).data;
+  const foE = id => foM.entries.find(e => e.person_id === id);
+  // Setembro/2026: 22 dias de seg a sex, menos o feriado de 7/9 = 21. Outubro/2026: 22, menos 12/10 = 21.
+  ok(foM.business_days === 21 && foM.benefit_days === 21 && foM.entries.length >= 3, 'dias úteis pelo calendário da empresa (com feriados)');
+  ok(foE(foP1.id).calc.base === 900 && foE(foP1.id).calc.vt_days === 21 && foE(foP1.id).calc.vt === 247.8 && foE(foP1.id).calc.vr === 0, 'bolsa integral e VT = dias da escala × 2 × tarifa');
+  ok(foE(foP2.id).calc.vt === 0 && foE(foP2.id).calc.vr === foE(foP2.id).calc.vr_days * 22 && foE(foP2.id).calc.vr_days === 14, 'VR só nos dias marcados (ter, qui, sex)');
+  ok(foE(foP3.id).calc.vt === 0 && foE(foP3.id).calc.vr === 0 && foE(foP3.id).calc.total === 3000, 'profissional: valor proporcional, sem VT/VR');
+  const foM2 = (await fo('PUT', `/payroll/entries/${foE(foP1.id).id}`, { absences: 2, ho_days: 3, reimbursement: '821.38', reimbursement_note: 'Material', vt_adjust: 10 })).data;
+  const foC = foM2.entries.find(e => e.person_id === foP1.id).calc;
+  ok(foC.worked_days === 19 && foC.base === 814.29 && foC.ho_discount === 35.4 && foC.vt === 222.4 && foC.total === 1858.07, 'faltas descontam a bolsa; home office desconta o VT; reembolso e diferença somam');
+  ok((await fo('PUT', `/payroll/entries/${foE(foP1.id).id}`, { start_date: '2026-10-02' })).status === 400, 'período trabalhado precisa estar no mês da bolsa');
+  const foClosed = (await fo('POST', `/payroll/months/${foM.id}/close`)).data;
+  ok(foClosed.status === 'fechada' && foClosed.generated === foClosed.entries.filter(e => e.calc.total > 0).length && foClosed.entries.every(e => e.obligation_id), 'fechar a folha gera um pagamento por pessoa em Tarefas financeiras');
+  ok((await fo('PUT', `/payroll/entries/${foE(foP1.id).id}`, { absences: 0 })).status === 400, 'folha fechada não aceita alteração');
+  await fo('PUT', `/payroll/people/${foP1.id}`, { ...foP1, monthly_value: 1200 });
+  ok((await fo('GET', `/payroll/months/${foM.id}`)).data.entries.find(e => e.person_id === foP1.id).calc.base === 814.29, 'folha fechada mantém os valores congelados');
+  const foOb = (await fo('GET', '/finance/obligations')).data.find(o => o.title === 'Folha 10/2026 — Camila Rocha');
+  ok(foOb && foOb.amount === 1858.07 && foOb.category === 'Folha de pagamento', 'pagamento gerado com o total e a categoria Folha');
+  const foItem = (await fo('GET', `/finance/obligations/${foOb.id}`)).data.items[0];
+  await fo('POST', `/finance/items/${foItem.id}/pay`, { paid_date: '2026-10-05', paid_amount: 1858.07 });
+  ok((await fo('POST', `/payroll/months/${foM.id}/reopen`)).status === 400, 'com pagamento registrado, a folha não reabre');
+  await fo('POST', `/finance/items/${foItem.id}/unpay`);
+  const foRe = (await fo('POST', `/payroll/months/${foM.id}/reopen`)).data;
+  ok(foRe.status === 'aberta' && !(await fo('GET', '/finance/obligations')).data.some(o => o.title === 'Folha 10/2026 — Camila Rocha') && foRe.entries.find(e => e.person_id === foP1.id).calc.base === 1085.71, 'reabrir remove os pagamentos pendentes e volta a calcular com os dados atuais');
+  ok((await fo('POST', '/payroll/months', { ref: '2026-10' })).status === 400, 'uma folha por mês');
+
 }
 
 main()

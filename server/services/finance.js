@@ -199,6 +199,27 @@ export function updateObligation(ctx, id, body, ip) {
   generateItems(ctx.user.id);
 }
 
+// ---------- Uso interno (Folha): obrigação única por pessoa, sem exigir a liberação do Financeiro ----------
+export function createObligationInternal(userId, d) {
+  const assignee = d.assignee_id && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', d.assignee_id) ? d.assignee_id : null;
+  const id = Number(run(`INSERT INTO finance_obligations (title, category, payee, amount, variable, frequency, due_day, start_month, end_month, assignee_id, notes, active, created_by)
+    VALUES (?,?,?,?,0,'unica',?,?,?,?,?,1,?)`, d.title, d.category || 'Folha de pagamento', d.payee || null, r2(d.amount), d.due_day, d.month, d.month, assignee, d.notes || null, userId).lastInsertRowid);
+  createItem(one('SELECT * FROM finance_obligations WHERE id = ?', id), d.month, userId);
+  return id;
+}
+// Algum pagamento já registrado? (a folha só reabre se nada foi pago)
+export const obligationPaid = id => !!one(`SELECT 1 FROM finance_items WHERE obligation_id = ? AND status = 'paga' LIMIT 1`, id);
+export function removeObligationInternal(id, userId, reason) {
+  for (const it of all('SELECT * FROM finance_items WHERE obligation_id = ?', id)) {
+    if (!it.task_id) continue;
+    run(`UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ? AND cancelled_at IS NULL`,
+      new Date().toISOString(), userId, reason, new Date().toISOString(), it.task_id);
+    taskHistory(it.task_id, userId, 'Tarefa cancelada', reason);
+  }
+  run('DELETE FROM finance_items WHERE obligation_id = ?', id);
+  run('DELETE FROM finance_obligations WHERE id = ?', id);
+}
+
 // ---------- Parcelas ----------
 function loadItem(ctx, id) {
   requireFinance(ctx.user);

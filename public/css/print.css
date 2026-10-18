@@ -416,3 +416,18 @@
   .pd-sheet + .pd-sheet { page-break-before: always; break-before: page; }
 }
 .pd-box .r-p { text-align: left; }
+
+/* Recibo da Folha */
+.rc-head { display: flex; align-items: center; gap: 18px; }
+.rc-logo { height: 70px; width: auto; max-width: 60mm; object-fit: contain; }
+.rc-title h1 { margin: 2px 0 0; }
+.rc-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin-bottom: 12px; }
+.rc-info dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 9.5pt; }
+.rc-info dt { color: #6E7A86; font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; padding-top: 2px; }
+.rc-info dd { margin: 0; }
+.rc-table tfoot td { border-top: 2px solid #2A3D50; padding-top: 6px; font-size: 11pt; }
+.rc-neg { color: #C0392B; }
+.rc-sign { display: grid; grid-template-columns: 2fr 1fr; gap: 30px; margin-top: 40px; font-size: 9pt; color: #46535F; }
+.rc-sign span { display: block; border-top: 1px solid #46535F; margin-bottom: 4px; }
+.rc-foot { margin-top: 18px; }
+@media screen and (max-width: 700px) { .rc-info { grid-template-columns: 1fr; } .rc-head { flex-wrap: wrap; } }

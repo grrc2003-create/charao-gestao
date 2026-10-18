@@ -197,6 +197,14 @@ function calendarFor(projectId, from, to, userId = null) {
 }
 export function isWorkingDay(projectId, d, userId = null) { return calendarFor(projectId, d, d, userId)(d); }
 
+// Lista dos dias úteis entre início e término (inclusive), no calendário da empresa/obra (e férias da pessoa, se informada)
+export function workingDaysList(projectId, start, end, userId = null) {
+  if (!start || !end || end < start) return [];
+  const isWork = calendarFor(projectId, start, end, userId);
+  const out = [];
+  for (let d = start; d <= end; d = addDaysISO(d, 1)) if (isWork(d)) out.push(d);
+  return out;
+}
 // Dias úteis entre início e término (inclusive)
 export function workingDaysBetween(projectId, start, end, userId = null) {
   if (!start || !end || end < start) return null;

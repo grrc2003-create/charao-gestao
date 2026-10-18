@@ -65,21 +65,21 @@ export async function manual() {
   return {
     title: 'Manual de Processos',
     html: html`${printToolbar({ back: '#/processos', title: 'Manual de Processos da Empresa' })}
-      <div class="doc-stage"><article class="doc a4 pd-doc">
+      <div class="doc-stage pd-stage"><article class="doc a4 pd-doc pd-sheet">
         <section class="pd-cover">
           <img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="pd-cover-logo">
           <div class="r-kicker">Documento interno</div>
           <h1>Mapa de Processos</h1>
           <p class="pd-cover-sub">${processes.length} processo(s) documentado(s): responsáveis, fluxo de etapas, pontos de controle e indicadores.</p>
           <p class="muted">Versão de ${fmtDate(todayISO())}</p>
-        </section>
-        <section class="r-break">${docHeader('Mapa de processos')}
+        </section></article>
+        <article class="doc a4 pd-doc pd-sheet"><section>${docHeader('Mapa de processos')}
           <h3 class="r-h">Os ${processes.length} processos</h3>
           <table class="r-table pd-map"><thead><tr><th>Código</th><th>Processo</th><th>Área</th><th>Frequência</th><th>Objetivo</th></tr></thead>
             <tbody>${processes.map(p => html`<tr><td class="mono nowrap">${p.code}</td><td><b>${p.content.title}</b></td><td class="small">${p.content.area || ''}</td><td class="small nowrap">${p.content.frequency || ''}</td><td class="small">${p.content.objective}</td></tr>`)}</tbody></table>
-        </section>
-        ${processes.map(p => processDoc(p, { header: docHeader('Manual de processos') }))}
-        <section class="r-break pd-summary">${docHeader('Resumo')}
+        </section></article>
+        ${processes.map(p => html`<article class="doc a4 pd-doc pd-sheet">${processDoc(p, { first: true, header: docHeader('Manual de processos') })}</article>`)}
+        <article class="doc a4 pd-doc pd-sheet"><section class="pd-summary">${docHeader('Resumo')}
           <div class="pd-kpis">
             <div><b>${processes.length}</b><span>processos documentados</span></div>
             <div><b>${areas.length}</b><span>áreas: ${areas.join(', ')}</span></div>

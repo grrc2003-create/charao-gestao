@@ -406,3 +406,13 @@
   .r-break, .pd-new { page-break-before: always; break-before: page; }
   .pd-head, .pd-obj { page-break-after: avoid; break-after: avoid; }
 }
+
+/* Manual: uma folha A4 por página (na tela, folhas separadas; na impressão, cada folha em página nova) */
+.pd-stage { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.pd-stage .pd-sheet { margin: 0; }
+@media screen and (max-width: 900px) { .pd-stage { gap: 14px; } }
+@media print {
+  .pd-stage { display: block; }
+  .pd-sheet + .pd-sheet { page-break-before: always; break-before: page; }
+}
+.pd-box .r-p { text-align: left; }

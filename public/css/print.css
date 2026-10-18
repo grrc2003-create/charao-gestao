@@ -359,3 +359,11 @@
 .rg-ic.rg-ic-sm svg { width: 11px; height: 11px; }
 .rg-ic.rg-ic-xs { width: 14px; height: 14px; }
 .rg-ic.rg-ic-xs svg { width: 8.5px; height: 8.5px; }
+
+/* Organograma (A4 paisagem) */
+.org-doc { width: 297mm; min-height: 210mm; padding: 10mm 10mm 12mm; page: paisagem; }
+@media (max-width: 1100px) { .org-doc { width: 100%; min-height: 0; padding: 14px; } }
+@media print { .org-doc { width: auto; min-height: 0; padding: 0; } }
+.org-print { overflow: hidden; margin-top: 10px; }
+.org-print .org-tree { transform: scale(var(--z, 1)); transform-origin: top left; }
+.org-print .org-card { cursor: default; box-shadow: none; }

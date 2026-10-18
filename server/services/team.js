@@ -27,7 +27,7 @@ function person(u, load, vac, ctx) {
   return {
     id: u.id, name: u.name, job_title: u.job_title, department: u.department, responsibilities: u.responsibilities, role: u.role,
     is_external: u.is_external, company: u.company, login_enabled: u.login_enabled, active: u.active, manager_id: u.manager_id,
-    admission_date: u.admission_date, phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
+    admission_date: u.admission_date, vacation_since: u.vacation_since, phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
     email: isPlaceholderEmail(u.email) ? null : u.email,
     missing_function: missingFunction(u),
     load: { open: l.open || 0, late: l.late || 0, review: l.review || 0 },
@@ -123,6 +123,7 @@ function readMember(body, { creating, current }) {
     responsibilities: str(body.responsibilities, { max: 4000, required: true, label: 'Responsabilidades' }),
     department: str(body.department, { max: 80, label: 'Setor' }),
     admission_date: date(body.admission_date, 'Data de admissão'),
+    vacation_since: date(body.vacation_since, 'Férias controladas a partir de'),
     manager_id: intOrNull(body.manager_id),
   };
   if (d.responsibilities && d.responsibilities.length < 10) throw badRequest('Detalhe as responsabilidades (o que a pessoa faz na empresa).');
@@ -143,8 +144,8 @@ export function createMember(ctx, body, ip) {
     if (!m || !m.active || m.is_external) throw badRequest('Gestor inválido.');
   }
   const id = tx(() => {
-    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date)
-      VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date);
+    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since)
+      VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since);
     const nid = Number(r.lastInsertRowid);
     audit(ctx.user.id, 'user', nid, 'Pessoa cadastrada na Gestão da Equipe (sem acesso ao sistema)', { nome: d.name, funcao: d.job_title }, ip);
     return nid;
@@ -165,8 +166,8 @@ export function updateMember(ctx, id, body, ip) {
   }
   assertNoManagerCycle(id, d.manager_id);
   tx(() => {
-    run(`UPDATE users SET job_title = ?, responsibilities = ?, department = ?, admission_date = ?, manager_id = ?, updated_at = datetime('now') WHERE id = ?`,
-      d.job_title, d.responsibilities, d.department, d.admission_date, d.manager_id, id);
+    run(`UPDATE users SET job_title = ?, responsibilities = ?, department = ?, admission_date = ?, vacation_since = ?, manager_id = ?, updated_at = datetime('now') WHERE id = ?`,
+      d.job_title, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.manager_id, id);
     if (!u.login_enabled) {
       const active = body.active === undefined ? u.active : body.active ? 1 : 0;
       run('UPDATE users SET name = ?, phone = ?, active = ? WHERE id = ?', d.name, d.phone, active, id);

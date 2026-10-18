@@ -15,7 +15,7 @@ export async function list({ state }) {
       <div class="row-meta"><span>${u.job_title || '—'}</span>${u.company ? html`<span>${u.company}</span>` : ''}
         ${u.manager_name ? html`<span>${u.is_external ? 'Líder' : 'Gestor'}: ${u.manager_name}</span>` : ''}
         ${u.team_size ? html`<span>${u.team_size} na equipe</span>` : ''}
-        ${isAdmin ? html`<span>${u.is_external && !u.login_enabled ? 'Sem login' : u.access_scope === 'total' ? 'Acesso total' : u.access_scope === 'proprias' ? 'Só tarefas próprias' : 'Acesso por projeto'}</span>` : ''}</div>
+        ${isAdmin ? html`<span>${!u.login_enabled ? 'Sem acesso ao sistema' : u.access_scope === 'total' ? 'Acesso total' : u.access_scope === 'proprias' ? 'Só tarefas próprias' : 'Acesso por projeto'}</span>` : ''}</div>
     </div>
     <div class="rank-metrics">
       <div class="ok"><b>${fmtPct(u.stats.on_time_pct)}</b>no prazo</div>
@@ -46,7 +46,7 @@ export async function list({ state }) {
 // Seções que o administrador libera por usuário
 const SECTION_GROUPS = [
   ['Gestão de Obras', [['dashboard', 'Visão da empresa', 'dashboard geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Usuários (desempenho)', 'telas de desempenho das pessoas'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
-  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos']]],
+  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos'], ['equipe', 'Gestão da Equipe', 'organograma, férias e cadastro da equipe']]],
   ['Administração', [['cadastro_usuarios', 'Cadastro de usuários', 'criar, editar e liberar acessos'], ['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
 ];
 
@@ -96,7 +96,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <div class="field"><label for="phone">Telefone</label><input id="phone" name="phone" type="tel" maxlength="40" value="${u.phone || ''}"></div>
           </div>
           <label class="switch ext-only" ${ext ? '' : 'hidden'}><input type="checkbox" name="login_enabled" id="login_enabled" ${hadLogin ? 'checked' : ''}>Dar acesso ao sistema (login) — passa a seguir as regras de Colaborador</label>
-          ${!editing || (ext && !hadLogin) ? html`<div class="field" id="pw-field"><label class="req" for="password">Senha provisória</label><input id="password" name="password" type="password" minlength="8" autocomplete="new-password">
+          ${editing && !ext && !hadLogin ? html`<div class="notice">${icon('key')}<span>Esta pessoa ainda <b>não tem acesso ao sistema</b> (cadastrada na Gestão da Equipe). Para liberar, informe o e-mail (login) e uma senha provisória.</span></div>` : ''}
+          ${!editing || !hadLogin ? html`<div class="field" id="pw-field"><label class="${editing && !ext ? '' : 'req'}" for="password">Senha provisória</label><input id="password" name="password" type="password" minlength="8" autocomplete="new-password">
             <span class="hint">Mínimo de 8 caracteres com letras e números. O usuário deverá trocá-la no primeiro acesso.</span></div>` : ''}
         </fieldset>
 
@@ -136,7 +137,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
 
         ${editing ? html`<fieldset class="fieldset form"><legend>Situação</legend>
           <label class="switch"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}>Usuário ativo (pode fazer login)</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap" ${ext && !hadLogin ? 'hidden' : ''}><button type="button" class="btn btn-ghost btn-sm" id="reset-pw">${icon('key')}Redefinir senha</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" ${!hadLogin ? 'hidden' : ''}><button type="button" class="btn btn-ghost btn-sm" id="reset-pw">${icon('key')}Redefinir senha</button></div>
           <span class="hint">Alterar permissões ou desativar encerra as sessões ativas do usuário. Último acesso: ${fmtDateTime(u.last_login_at)}</span>
         </fieldset>` : ''}
 

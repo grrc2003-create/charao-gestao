@@ -3,6 +3,7 @@
 ALTER TABLE users ADD COLUMN responsibilities TEXT;   -- o que a pessoa faz na empresa (obrigatório no Cadastro da Equipe)
 ALTER TABLE users ADD COLUMN department TEXT;         -- setor / departamento
 ALTER TABLE users ADD COLUMN admission_date TEXT;     -- data de admissão (base dos períodos aquisitivos de férias)
+ALTER TABLE users ADD COLUMN vacation_since TEXT;     -- férias controladas no sistema a partir desta data (períodos anteriores: quitados)
 
 CREATE TABLE vacations (
   id            INTEGER PRIMARY KEY,

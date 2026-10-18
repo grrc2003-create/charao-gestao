@@ -36,6 +36,11 @@ export function periodsOf(u, ref = today()) {
     const used = list.filter(v => v.status === 'aprovada').reduce((n, v) => n + v.days, 0);
     const pending = list.filter(v => v.status === 'solicitada').reduce((n, v) => n + v.days, 0);
     const acquired = end < ref;
+    // Períodos encerrados antes do controle no sistema: considerados quitados (férias tiradas fora do sistema)
+    if (u.vacation_since && end < u.vacation_since && !list.length) {
+      out.push({ start, end, concession_end: concessionEnd, acquired: true, used: 0, pending: 0, balance: 0, status: 'quitado', fractions: 0 });
+      continue;
+    }
     const balance = acquired ? DIREITO - used - pending : 0;
     const status = !acquired ? 'em_aquisicao' : balance <= 0 ? 'concluido'
       : concessionEnd < ref ? 'vencida' : daysBetween(ref, concessionEnd) <= 60 ? 'vencendo' : 'disponivel';
@@ -94,7 +99,7 @@ function check(target, startIn, daysIn, { allowPast = false, excludeId = null } 
   const clash = one(`SELECT start_date, end_date FROM vacations WHERE user_id = ? AND ${LIVE} AND id <> ? AND start_date <= ? AND end_date >= ?`, target.id, excludeId || 0, end, start);
   if (clash) throw badRequest(`Já existem férias de ${fmtD(clash.start_date)} a ${fmtD(clash.end_date)} neste intervalo.`);
   // Período aquisitivo: o mais antigo já adquirido, com saldo, que comporte este pedido pelas regras de fracionamento
-  const ps = periodsOf(target, ref).filter(p => p.acquired && start > p.end);
+  const ps = periodsOf(target, ref).filter(p => p.acquired && p.status !== 'quitado' && start > p.end);
   let firstErr = null;
   for (const p of ps) {
     const list = all(`SELECT days FROM vacations WHERE user_id = ? AND period_start = ? AND ${LIVE} AND id <> ?`, target.id, p.start, excludeId || 0);

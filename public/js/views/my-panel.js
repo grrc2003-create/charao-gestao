@@ -5,12 +5,13 @@ import { pageHead, kpi, execKpis, userRankRow, stackBar, bindCommon, STATUS_COLO
 import { deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { weekPlanSection, bindWeekPlan } from './week-plan.js';
+import { myVacationCard, bindMyVacationCard } from './vacation-ui.js';
 
 const dec = v => String(v ?? '—').replace('.', ',');
 
 export async function view({ state, query, setQuery, render }) {
   const me = state.user;
-  const d = await api(`/users/${me.id}`);
+  const [d, vac] = await Promise.all([api(`/users/${me.id}`), api('/vacations/me').catch(() => null)]);
   const s = d.stats;
   const first = me.name.split(' ')[0];
   const can = state.meta.can;
@@ -99,11 +100,13 @@ export async function view({ state, query, setQuery, render }) {
         <section class="card"><div class="card-head"><h2>${icon('calendar')}Próximos 7 dias</h2><span class="sub">${soon.length}</span></div>
           ${soon.length ? html`<ul class="rows">${soon.slice(0, 8).map(t => taskRow(t))}</ul>` : html`<div class="card-body muted">Nada vencendo nos próximos dias.</div>`}</section>
       </div>
+      ${vac ? myVacationCard(vac, me) : ''}
       ${checklistSection(d.checklists || [], { title: 'Meus check-lists', linkAll: '' })}
       ${teamSection}`,
     mount(root) {
       bindCommon(root);
       bindChecklistCards(root);
+      if (vac) bindMyVacationCard(root, vac, render);
       bindWeekPlan(root, { d, user: d.user, meta: state.meta, week, render, setWeek: w => setQuery({ semana: w }) });
     },
   };

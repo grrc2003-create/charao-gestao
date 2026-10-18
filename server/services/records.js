@@ -303,13 +303,13 @@ function addFiles(ctx, recordId, files) {
 const openProject = p => !['concluido', 'cancelado'].includes(p.status);
 
 // Tarefa gerada por um registro: entra no projeto com a origem anotada
-function createTaskFrom(ctx, project, { title, description, assignee_id, due_date, recordId, label }) {
+function createTaskFrom(ctx, project, { title, description, assignee_id, due_date, start_date = null, recordId, label }) {
   if (!openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas. Reabra o projeto para gerar tarefas a partir dos registros.');
   const assignee = assignee_id || ctx.user.id;
   if (!userHasProjectAccess(assignee, project.id)) throw badRequest('O responsável escolhido não tem acesso a este projeto.');
   const taskId = insertTask({
     project,
-    data: { task_type: 'tarefa', title: title.slice(0, 160), description, field_summary: null, notes: null, due_date, start_date: null, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
+    data: { task_type: 'tarefa', title: title.slice(0, 160), description, field_summary: null, notes: null, due_date, start_date: start_date && (!due_date || start_date <= due_date) ? start_date : null, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
     stageInput: null,
     creatorId: ctx.user.id,
     ctx,
@@ -323,7 +323,7 @@ function createTaskFrom(ctx, project, { title, description, assignee_id, due_dat
 function openPendencia(ctx, project, r) {
   if (r.task_id) return;
   const desc = `${r.body || r.title}\n\nOrigem: ${r.code || r.type_name} — ${r.title} (${fmtD(r.record_date)})${r.decided_by ? ` · solicitado por ${r.decided_by}` : ''}.`;
-  const taskId = createTaskFrom(ctx, project, { title: r.title, description: desc, assignee_id: r.assignee_id, due_date: r.due_date, recordId: r.id, label: `${r.code || r.type_name} · ${r.title}` });
+  const taskId = createTaskFrom(ctx, project, { title: r.title, description: desc, assignee_id: r.assignee_id, due_date: r.due_date, start_date: r.record_date, recordId: r.id, label: `${r.code || r.type_name} · ${r.title}` });
   run('UPDATE project_records SET task_id = ? WHERE id = ?', taskId, r.id);
 }
 
@@ -355,7 +355,7 @@ function processItems(ctx, project, ata, items) {
     }
     if (i.kind === 'demanda' && !i.task_id) {
       const desc = `${i.text}\n\nDemanda da ${ata.code || 'ata'} — ${ata.title} (reunião de ${fmtD(ata.record_date)}), item ${i.seq}${i.addendum ? ' (adendo)' : ''}.`;
-      const taskId = createTaskFrom(ctx, project, { title: i.text.split(/\r?\n/)[0], description: desc, assignee_id: i.assignee_id, due_date: i.due_date, recordId: ata.id,
+      const taskId = createTaskFrom(ctx, project, { title: i.text.split(/\r?\n/)[0], description: desc, assignee_id: i.assignee_id, due_date: i.due_date, start_date: i.addendum ? today() : ata.record_date, recordId: ata.id,
         label: `${ata.code || 'Ata'} · item ${i.seq}` });
       run('UPDATE record_items SET task_id = ? WHERE id = ?', taskId, i.id);
       tasks++;

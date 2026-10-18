@@ -376,24 +376,24 @@ export async function form({ params, query, state, navigate }) {
       ${approvalNote && !editing ? html`<div class="notice" style="max-width:860px;margin-bottom:14px">${icon('info')}<span>Este tipo exige aprovação: o registro fica <b>Aguardando aprovação</b> até um gestor ou administrador aprovar${b === 'pendencia' ? ' (a tarefa é criada na aprovação)' : ''}.</span></div>` : ''}
       <form class="card card-pad form" id="rg-form" novalidate style="max-width:860px">
         <div class="field"><label class="req" for="rg-title">${b === 'reuniao' ? 'Assunto da reunião' : 'Título'}</label>
-          <input id="rg-title" name="title" maxlength="160" required value="${r.title}" placeholder="${b === 'decisao' ? 'Ex.: Piso do térreo — porcelanato 90×90 cinza' : b === 'reuniao' ? 'Ex.: Reunião de alinhamento de acabamentos' : b === 'pendencia' ? 'Ex.: Instalar ponto extra de tomada na sala' : 'Ex.: Acesso de caminhões só após as 8h'}"></div>
+          <input type="text" id="rg-title" name="title" maxlength="160" required value="${r.title}" placeholder="${b === 'decisao' ? 'Ex.: Piso do térreo — porcelanato 90×90 cinza' : b === 'reuniao' ? 'Ex.: Reunião de alinhamento de acabamentos' : b === 'pendencia' ? 'Ex.: Instalar ponto extra de tomada na sala' : 'Ex.: Acesso de caminhões só após as 8h'}"></div>
         <div class="form-row">
           <div class="field"><label class="req" for="rg-date">${b === 'reuniao' ? 'Data da reunião' : 'Data do registro'}</label><input id="rg-date" name="record_date" type="date" max="${todayISO()}" required value="${r.record_date}">
             <span class="hint">Quando aconteceu. É a data que aparece no Gantt e na história.</span></div>
           ${b === 'reuniao' ? html`<div class="field"><label for="rg-time">Horário</label><input id="rg-time" name="meeting_time" type="time" value="${r.meeting_time || ''}"></div>`
-            : html`<div class="field"><label for="rg-origin">Origem</label><input id="rg-origin" name="origin" list="rg-origins" maxlength="160" value="${r.origin || ''}" placeholder="Reunião, e-mail, obra, cliente…">
+            : html`<div class="field"><label for="rg-origin">Origem</label><input type="text" id="rg-origin" name="origin" list="rg-origins" maxlength="160" value="${r.origin || ''}" placeholder="Reunião, e-mail, obra, cliente…">
               <datalist id="rg-origins">${ORIGINS.map(o => html`<option value="${o}">`)}</datalist></div>`}
         </div>
         ${b === 'reuniao' ? html`<div class="form-row">
-            <div class="field"><label for="rg-loc">Local</label><input id="rg-loc" name="location" maxlength="160" value="${r.location || ''}" placeholder="Canteiro, escritório, online…"></div>
-            <div class="field"><label for="rg-origin2">Origem / convocação</label><input id="rg-origin2" name="origin" maxlength="160" value="${r.origin || ''}" placeholder="Ex.: reunião mensal, pedido do cliente"></div></div>
+            <div class="field"><label for="rg-loc">Local</label><input type="text" id="rg-loc" name="location" maxlength="160" value="${r.location || ''}" placeholder="Canteiro, escritório, online…"></div>
+            <div class="field"><label for="rg-origin2">Origem / convocação</label><input type="text" id="rg-origin2" name="origin" maxlength="160" value="${r.origin || ''}" placeholder="Ex.: reunião mensal, pedido do cliente"></div></div>
           <div class="field"><label for="rg-part">Participantes</label>
             <textarea id="rg-part" name="participants" rows="4" placeholder="Um por linha: Nome - Empresa&#10;Ricardo Menezes - Charão&#10;Carlos Souza - Incorporadora Horizonte">${r.participants.map(x => `${x.name}${x.company ? ` - ${x.company}` : ''}`).join('\n')}</textarea>
             <span class="hint">Lista de nomes (um por linha). Use “Nome - Empresa” para indicar a empresa.</span></div>
           <div class="field"><label for="rg-agenda">Pauta</label><textarea id="rg-agenda" name="agenda" rows="3" maxlength="5000">${r.agenda || ''}</textarea></div>` : ''}
         <div class="field"><label for="rg-body">${b === 'reuniao' ? 'Resumo da reunião' : 'Descrição'}</label><textarea id="rg-body" name="body" rows="${b === 'reuniao' ? 4 : 5}" maxlength="20000">${r.body || ''}</textarea></div>
         ${b !== 'reuniao' ? html`<div class="field"><label for="rg-by">${b === 'pendencia' ? 'Solicitante' : b === 'decisao' ? 'Quem definiu' : 'Informado por'}</label>
-          <input id="rg-by" name="decided_by" maxlength="160" value="${r.decided_by || ''}" placeholder="${b === 'pendencia' ? 'Ex.: Cliente — Sr. Carlos' : 'Ex.: Cliente, projetista, fiscalização…'}"></div>` : ''}
+          <input type="text" id="rg-by" name="decided_by" maxlength="160" value="${r.decided_by || ''}" placeholder="${b === 'pendencia' ? 'Ex.: Cliente — Sr. Carlos' : 'Ex.: Cliente, projetista, fiscalização…'}"></div>` : ''}
         ${b === 'pendencia' && !(editing && r.task_id) ? html`<fieldset class="fieldset form"><legend>Tarefa gerada automaticamente</legend>
           <div class="form-row">
             <div class="field"><label for="rg-ass">Responsável</label><select id="rg-ass" name="assignee_id"><option value="">Quem registrar (${state.user.name})</option>

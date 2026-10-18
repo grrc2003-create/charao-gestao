@@ -368,7 +368,7 @@ table.data .t-sub { font-size: 12px; color: var(--muted); }
 .field > label, .field > .label { font-size: 13px; font-weight: 620; color: var(--ink-2); }
 .field .hint, .fieldset > .hint { font-size: 12px; color: var(--muted); }
 .req::after { content: " *"; color: var(--st-atrasada); }
-input[type=text], input[type=email], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=search], input[type=number], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=date], input[type=month], input[type=time], input[type=tel], input[type=search], input[type=number], select, textarea {
   width: 100%; font: inherit; font-size: 15px; color: var(--ink); background: var(--surface);
   border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; min-height: 44px;
 }

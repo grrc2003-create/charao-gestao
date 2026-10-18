@@ -14,6 +14,8 @@ const dm = d => fmtD(d).slice(0, 5);
 const pctTxt = v => (v === null || v === undefined ? '—' : `${String(v).replace('.', ',')}%`);
 const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
 const joinPt = list => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} e ${list.at(-1)}`);
+const endDot = t => `${String(t).trim().replace(/[.!?…:;,]+$/, '')}.`;
+const lowerFirst = t => t.charAt(0).toLowerCase() + t.slice(1);
 const STATUS_PROJ = { planejamento: 'em planejamento', em_andamento: 'em andamento', pausado: 'pausado', concluido: 'concluído', cancelado: 'cancelado' };
 
 export function projectHistory(ctx, id) {
@@ -73,7 +75,7 @@ export function projectHistory(ctx, id) {
     const evs = events.filter(e => inM(e.date));
     const par = [];
     const projEvents = evs.filter(e => e.kind === 'projeto');
-    if (projEvents.length) par.push(`${projEvents.map(e => `${e.title} em ${fmtD(e.date)}`).join('; ')}.`);
+    if (projEvents.length) par.push(endDot(projEvents.map((e, k) => `${k ? lowerFirst(e.title) : e.title} em ${fmtD(e.date)}`).join('; ')));
     if (created.length || done.length) {
       par.push(`Em ${monthLabel(ym)}, ${created.length ? `${plural(created.length, 'tarefa foi aberta', 'tarefas foram abertas')}` : 'nenhuma tarefa nova foi aberta'}`
         + `${done.length ? ` e ${plural(done.length, 'foi concluída', 'foram concluídas')}${done.length ? ` (${onTime === done.length ? 'todas no prazo' : `${onTime} no prazo, ${done.length - onTime} com atraso`})` : ''}` : ', sem conclusões no período'}.`);
@@ -91,12 +93,16 @@ export function projectHistory(ctx, id) {
         par.push(`Em ${dm(r.record_date)}, foi realizada a reunião ${r.code || ''} — “${r.title}”${r.location ? `, em ${r.location}` : ''}${names.length ? `, com ${joinPt(names)}${r.participants.length > 6 ? ' e outros' : ''}` : ''}.`
           + (c.definicao || c.demanda ? ` Dela saíram ${joinPt([c.definicao ? plural(c.definicao, 'definição', 'definições') : '', c.demanda ? `${plural(c.demanda, 'demanda encaminhada', 'demandas encaminhadas')} como tarefa` : ''].filter(Boolean))}.` : ''));
       } else if (r.behavior === 'decisao') {
-        par.push(`${dm(r.record_date)} — ${r.type_name}${r.code ? ` ${r.code}` : ''}: ficou definido “${r.title}”${r.decided_by ? ` (por ${r.decided_by})` : ''}${r.replaces_code ? `, substituindo ${r.replaces_code}` : ''}${r.status === 'substituida' ? `; depois substituída por ${r.replaced_by_code}` : ''}${r.status === 'aguardando_aprovacao' ? ' — aguardando aprovação' : ''}.`);
+        const pending = r.status === 'aguardando_aprovacao';
+        par.push(`${dm(r.record_date)} — ${r.type_name}${r.code ? ` ${r.code}` : ''}: ${pending ? 'foi proposto' : 'ficou definido'} “${r.title}”`
+          + `${r.source_code ? ` na reunião ${r.source_code}` : r.decided_by ? ` (por ${r.decided_by})` : ''}${r.replaces_code ? `, substituindo ${r.replaces_code}` : ''}`
+          + `${r.status === 'substituida' ? `; depois substituída por ${r.replaced_by_code}` : ''}${pending ? ' — aguardando aprovação' : ''}.`);
       } else if (r.behavior === 'pendencia') {
         const st = { resolvida: 'já resolvida', atrasada: 'em atraso', aberta: 'em aberto', aguardando_aprovacao: 'aguardando aprovação', cancelada: 'cancelada' }[r.eff_status] || '';
         par.push(`${dm(r.record_date)} — ${r.type_name}${r.code ? ` ${r.code}` : ''}: “${r.title}”${r.decided_by ? `, solicitada por ${r.decided_by}` : ''}${r.assignee_name ? `, encaminhada a ${r.assignee_name}` : ''}${r.due_date ? ` com prazo em ${fmtD(r.due_date)}` : ''}${st ? ` — ${st}` : ''}.`);
       } else {
-        par.push(`${dm(r.record_date)} — ${r.type_name}${r.code ? ` ${r.code}` : ''}: ${r.title}${r.body ? `. ${r.body.split(/\r?\n/)[0].slice(0, 220)}${r.body.length > 220 ? '…' : ''}` : ''}${/[.!?]$/.test(r.title) ? '' : '.'}`);
+        const first = r.body ? r.body.split(/\r?\n/)[0] : '';
+        par.push(`${dm(r.record_date)} — ${r.type_name}${r.code ? ` ${r.code}` : ''}: ${endDot(r.title)}${first ? ` ${first.length > 220 ? `${first.slice(0, 220)}…` : endDot(first)}` : ''}`);
       }
     }
     if (rs.length) {

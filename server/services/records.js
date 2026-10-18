@@ -6,7 +6,7 @@ import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/ht
 import { isAdmin, isManagerRole, canAccessProject, canManageProject, canManageSettings, userHasProjectAccess } from '../lib/permissions.js';
 import { audit, taskHistory } from './audit.js';
 import { today, effectiveStatus, localDate } from './metrics.js';
-import { insertTask } from './tasks.js';
+import { insertTask, listVisible, loadVisible } from './tasks.js';
 import { saveImageFromDataUrl, cleanFileName, isPdf, deleteStored } from './files.js';
 
 export const BEHAVIORS = ['nota', 'decisao', 'reuniao', 'pendencia'];
@@ -170,6 +170,8 @@ function shape(ctx, r, { full = false } = {}) {
     out.files = all(`SELECT f.id, f.mime, f.size, f.caption, f.original_name, f.created_at, f.uploaded_by, u.name AS uploaded_by_name
       FROM record_files f LEFT JOIN users u ON u.id = f.uploaded_by WHERE f.record_id = ? ORDER BY f.id`, r.id);
     out.derived = all(`SELECT r2.id, r2.code, r2.title, r2.status FROM project_records r2 WHERE r2.source_record_id = ? ORDER BY r2.id`, r.id);
+    out.linked_tasks = linkedTasksOf(ctx, r.id);
+    out.can.link = r.status !== 'cancelada';
     // Cadeia de definições (substituídas → atual)
     if (r.behavior === 'decisao') {
       const chain = [];
@@ -403,6 +405,7 @@ export function createRecord(ctx, projectId, body, ip) {
     const rid = Number(r.lastInsertRowid);
     if (items.length) insertItemsFor(ctx, rid, items);
     addFiles(ctx, rid, body.files);
+    if (Array.isArray(body.task_ids)) setLinks(ctx, { id: rid, project_id: project.id, code, title: d.title, type_name: type.name }, body.task_ids);
     const full = one(`${BASE} WHERE r.id = ?`, rid);
     if (status === 'vigente') applyReplace(full);
     if (status === 'aberta') openPendencia(ctx, project, full);
@@ -431,6 +434,7 @@ export function updateRecord(ctx, id, body, ip) {
       insertItemsFor(ctx, id, readItemsIn(body.items, project.id));
     }
     addFiles(ctx, id, body.files);
+    if (Array.isArray(body.task_ids)) setLinks(ctx, r, body.task_ids);
     audit(ctx.user.id, 'record', id, 'Registro editado', { codigo: r.code, titulo: d.title }, ip);
     if (r.behavior === 'reuniao' && r.status === 'rascunho' && body.emit) emitInternal(ctx, project, one(`${BASE} WHERE r.id = ?`, id), ip);
   });
@@ -521,6 +525,63 @@ export function recordFileForUser(ctx, fileId) {
   if (!f) throw notFound('Arquivo não encontrado.');
   loadRecord(ctx, f.record_id);
   return f;
+}
+
+// ---------- Vínculos com tarefas existentes ----------
+const recLabel = r => `${r.code || r.type_name} · ${r.title}`;
+function linkableTask(ctx, r, taskId) {
+  const t = loadVisible(ctx, taskId);
+  if (t.project_id !== r.project_id) throw badRequest('A tarefa precisa ser do mesmo projeto do registro.');
+  return t;
+}
+function addLink(ctx, r, t) {
+  const res = run('INSERT OR IGNORE INTO record_task_links (record_id, task_id, created_by) VALUES (?,?,?)', r.id, t.id, ctx.user.id);
+  if (res.changes) taskHistory(t.id, ctx.user.id, 'Registro do projeto vinculado', recLabel(r));
+}
+function removeLink(ctx, r, taskId) {
+  const res = run('DELETE FROM record_task_links WHERE record_id = ? AND task_id = ?', r.id, taskId);
+  if (res.changes) taskHistory(taskId, ctx.user.id, 'Vínculo com registro removido', recLabel(r));
+}
+// Substitui o conjunto de tarefas vinculadas (somente as que a pessoa enxerga são alteradas)
+function setLinks(ctx, r, ids) {
+  const want = new Set(ids.map(intOrNull).filter(Boolean).slice(0, 100));
+  for (const id of want) addLink(ctx, r, linkableTask(ctx, r, id));
+  const visible = new Set(listVisible(ctx, 'WHERE t.project_id = ?', r.project_id).map(t => t.id));
+  for (const l of all('SELECT task_id FROM record_task_links WHERE record_id = ?', r.id)) if (!want.has(l.task_id) && visible.has(l.task_id)) removeLink(ctx, r, l.task_id);
+}
+const taskBrief = t => ({ id: t.id, code: t.code, title: t.title, eff_status: t.eff_status, assignee_name: t.assignee_name, due_date: t.due_date, parent_code: t.parent_code });
+function linkedTasksOf(ctx, recordId) {
+  const ids = all('SELECT task_id FROM record_task_links WHERE record_id = ?', recordId).map(x => x.task_id);
+  if (!ids.length) return [];
+  return listVisible(ctx, `WHERE t.id IN (${ids.map(() => '?').join(',')})`, ...ids).map(taskBrief);
+}
+// Tarefas do projeto que podem ser vinculadas
+export function linkableTasks(ctx, projectId) {
+  projectFor(ctx, projectId);
+  return listVisible(ctx, 'WHERE t.project_id = ?', projectId).map(taskBrief).sort((a, b) => a.code.localeCompare(b.code));
+}
+function checkLinkRecord(r) {
+  if (r.status === 'cancelada') throw badRequest('Registro cancelado não recebe vínculos.');
+}
+export function linkRecordTask(ctx, recordId, taskId) {
+  const r = loadRecord(ctx, recordId);
+  checkLinkRecord(r);
+  tx(() => addLink(ctx, r, linkableTask(ctx, r, taskId)));
+}
+export function unlinkRecordTask(ctx, recordId, taskId) {
+  const r = loadRecord(ctx, recordId);
+  loadVisible(ctx, taskId);
+  tx(() => removeLink(ctx, r, taskId));
+}
+// Registros vinculados a uma tarefa (e o que a gerou), para a tela da tarefa
+export function recordsOfTask(ctx, taskId, originId) {
+  const ids = all('SELECT record_id FROM record_task_links WHERE task_id = ?', taskId).map(x => x.record_id);
+  const all_ = [...new Set([...(originId ? [originId] : []), ...ids])];
+  if (!all_.length) return [];
+  return all(`${BASE} WHERE r.id IN (${all_.map(() => '?').join(',')}) ORDER BY r.record_date DESC, r.id DESC`, ...all_)
+    .filter(r => typeVisible(ctx, r) && canAccessProject(ctx.user, r.project_id, ctx.projects))
+    .map(r => ({ id: r.id, project_id: r.project_id, code: r.code, title: r.title, record_date: r.record_date, type_name: r.type_name, type_icon: r.type_icon, color: r.color,
+      eff_status: effStatus(r), origin: r.id === originId, linked: ids.includes(r.id) }));
 }
 
 // Origem de uma tarefa (exibida na tela da tarefa)

@@ -6,6 +6,8 @@ import { replaceNextRoute } from '../navhist.js';
 import { pctBar, progressSheet, bindProgressSheet, startField, doneDateField } from './progress-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
+import { recordPickItem, pickSheet, chooseType, recStatus } from './records.js';
+import { recBadge } from './record-icons.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
   : t.days_to_due === 0 ? 'Vence hoje' : t.days_to_due === 1 ? 'Vence amanhã' : `Faltam ${t.days_to_due} dias`;
@@ -267,6 +269,18 @@ function build(t, ctx) {
 
       ${subtasksBlock}
 
+      ${recSecOk(ctx) ? html`<section class="card block" id="task-records" aria-labelledby="blk-recs">
+        <header class="block-head"><span class="step" style="background:var(--navy)">${icon('note')}</span><h2 id="blk-recs">Registros do projeto</h2>
+          <span class="right muted" style="font-size:12px">${t.records.length} vinculado(s)</span></header>
+        ${t.records.length ? html`<ul class="rows">${t.records.map(r => html`<li class="rg-link-row"><a class="row-link" href="#/projetos/${r.project_id}/registros/${r.id}">${recBadge(r.type_icon, r.color)}
+            <div class="grow"><div class="row-title">${r.title}</div><div class="row-meta"><span>${r.code ? `${r.code} · ` : ''}${r.type_name}</span><span>${fmtDate(r.record_date)}</span>
+              ${r.origin ? html`<span class="rg-origin-tag">gerou esta tarefa</span>` : ''}</div></div>${recStatus(r.eff_status)}</a>
+            ${r.linked ? html`<button type="button" class="icon-btn" data-runlink="${r.id}" aria-label="Desvincular registro" title="Desvincular">✕</button>` : ''}</li>`)}</ul>`
+          : html`<div class="block-body muted" style="font-size:13.5px">Nenhum registro vinculado. Vincule atas, definições, solicitações ou ocorrências relacionadas a esta tarefa.</div>`}
+        ${!t.cancelled_at ? html`<div class="block-body rg-task-acts"><button type="button" class="btn btn-ghost btn-sm" data-rlink>${icon('plus')}Vincular registro existente</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-rnew>${icon('note')}Novo registro vinculado</button></div>` : ''}
+      </section>` : ''}
+
       ${t.reschedules.length ? html`<section class="card block" id="resched" aria-labelledby="blk-resched">
         <header class="block-head"><span class="step" style="background:var(--orange-700)">${icon('reschedule')}</span><h2 id="blk-resched">Reagendamentos</h2>
           <span class="right muted" style="font-size:12px">${t.reschedules.length}x · prazo original ${fmtDate(t.original_due)}</span></header>
@@ -297,6 +311,9 @@ function build(t, ctx) {
   };
 }
 
+// Registros do projeto ficam na seção Projetos
+const recSecOk = ctx => !ctx.state?.meta?.can.sections || ctx.state.meta.can.sections.includes('projetos');
+
 function mount(root, t, ctx) {
   bindDoneToggle(root);
   const refresh = updated => {
@@ -315,6 +332,21 @@ function mount(root, t, ctx) {
       toast(e.message, 'err');
     }
   };
+  // Registros do projeto: vincular, desvincular e criar já vinculado
+  root.querySelector('[data-rlink]')?.addEventListener('click', async () => {
+    try {
+      const data = await api(`/projects/${t.project_id}/records`);
+      const have = new Set(t.records.map(r => r.id));
+      const list = data.records.filter(r => !have.has(r.id) && r.status !== 'cancelada');
+      const id = await pickSheet({ title: 'Vincular registro', empty: 'Não há registros neste projeto para vincular.', items: list.map(recordPickItem) });
+      if (id) run(() => api(`/tasks/${t.id}/record-links`, { method: 'POST', body: { record_id: id } }), 'Registro vinculado.');
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  root.querySelector('[data-rnew]')?.addEventListener('click', async () => {
+    try { chooseType(await api(`/projects/${t.project_id}/records`), ctx.navigate, `&tarefa=${t.id}`); } catch (e) { toast(e.message, 'err'); }
+  });
+  root.querySelectorAll('[data-runlink]').forEach(b => b.addEventListener('click', () =>
+    run(() => api(`/tasks/${t.id}/record-links/${b.dataset.runlink}`, { method: 'DELETE' }), 'Vínculo removido.')));
   const upload = async kind => {
     const files = await pickAttachments();
     if (files) await uploadFiles(kind, files);

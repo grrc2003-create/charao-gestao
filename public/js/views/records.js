@@ -47,20 +47,50 @@ function recordRow(r, pid) {
 }
 
 // Escolha do tipo ao criar um registro
-export function chooseType(data, navigate) {
+export function chooseType(data, navigate, extra = '') {
   const types = data.types.filter(t => data.creatable.includes(t.id));
   const wrap = document.createElement('div');
   wrap.className = 'sheet-backdrop';
   wrap.innerHTML = html`<div class="sheet" role="dialog" aria-modal="true" aria-label="Novo registro">
     <div class="sheet-grip" aria-hidden="true"></div>
     <header class="sheet-head"><h2>Novo registro</h2><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></header>
-    <nav class="more-list rg-choose">${types.map(t => html`<a href="#/projetos/${data.project.id}/registros/novo?tipo=${t.id}">${recBadge(t.icon, t.color)}
+    <nav class="more-list rg-choose">${types.map(t => html`<a href="#/projetos/${data.project.id}/registros/novo?tipo=${t.id}${extra}">${recBadge(t.icon, t.color)}
       <span><b>${t.name}</b><small>${BEH[t.behavior]}${t.requires_approval ? ' · exige aprovação' : ''}${t.internal ? ' · interno' : ''}</small></span>${icon('chevron')}</a>`)}</nav></div>`.toString();
   document.body.appendChild(wrap);
   document.body.classList.add('no-scroll');
   const close = () => { wrap.classList.add('closing'); document.body.classList.remove('no-scroll'); setTimeout(() => wrap.remove(), 180); };
   wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-close]') || e.target.closest('a')) close(); });
 }
+
+// Seleção com busca (tarefa ou registro a vincular)
+export function pickSheet({ title, empty, items }) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet-backdrop';
+    wrap.innerHTML = html`<div class="sheet" role="dialog" aria-modal="true" aria-label="${title}">
+      <div class="sheet-grip" aria-hidden="true"></div>
+      <header class="sheet-head"><h2>${title}</h2><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></header>
+      <div class="sheet-body"><input type="search" class="pick-q" placeholder="Buscar por código ou título…" aria-label="Buscar">
+        ${items.length ? html`<ul class="pick-list">${items.map(it => html`<li data-text="${it.text.toLowerCase()}"><button type="button" class="pick-it" data-pick="${it.id}">${it.html}</button></li>`)}</ul>`
+          : html`<p class="muted">${empty}</p>`}</div></div>`.toString();
+    document.body.appendChild(wrap);
+    document.body.classList.add('no-scroll');
+    let done = false;
+    const close = v => { if (done) return; done = true; wrap.classList.add('closing'); document.body.classList.remove('no-scroll'); setTimeout(() => wrap.remove(), 180); resolve(v); };
+    wrap.addEventListener('click', e => {
+      if (e.target === wrap || e.target.closest('[data-close]')) close(null);
+      const b = e.target.closest('[data-pick]');
+      if (b) close(Number(b.dataset.pick));
+    });
+    const q = wrap.querySelector('.pick-q');
+    q.addEventListener('input', () => { const v = q.value.trim().toLowerCase(); wrap.querySelectorAll('.pick-list li').forEach(li => { li.hidden = !!v && !li.dataset.text.includes(v); }); });
+    setTimeout(() => q.focus(), 60);
+  });
+}
+const taskPickItem = t => ({ id: t.id, text: `${t.code} ${t.title} ${t.assignee_name || ''}`,
+  html: html`<span class="mono muted">${t.code}</span><span class="grow"><b>${t.parent_code ? '↳ ' : ''}${t.title}</b><small>${t.assignee_name || 'Sem responsável'}${t.due_date ? ` · prazo ${fmtDate(t.due_date)}` : ''}</small></span>${taskStatus(t.eff_status)}` });
+export const recordPickItem = r => ({ id: r.id, text: `${r.code || ''} ${r.title} ${r.type_name}`,
+  html: html`${recBadge(r.type_icon, r.color)}<span class="grow"><b>${r.title}</b><small>${r.code ? `${r.code} · ` : ''}${r.type_name} · ${fmtDate(r.record_date)}</small></span>${recStatus(r.eff_status)}` });
 
 // ---------- Card na tela do projeto ----------
 export function recordsCard(data) {
@@ -250,6 +280,14 @@ export async function detail({ params, navigate, render }) {
           ${c.addendum ? html`<div class="card-body"><button type="button" class="btn btn-ghost btn-sm" data-act="addendum">${icon('plus')}Incluir adendo</button>
             <span class="muted" style="font-size:12.5px;margin-left:8px">A ata emitida não é alterada: novos itens entram como adendo e geram as definições e tarefas.</span></div>` : ''}
         </section>` : ''}
+      <section class="card section" id="rg-links"><div class="card-head"><h2>${icon('tasks')}Tarefas vinculadas</h2><span class="sub">${r.linked_tasks.length}</span></div>
+        ${r.linked_tasks.length ? html`<ul class="rows">${r.linked_tasks.map(t => html`<li class="rg-link-row"><a class="row-link" href="#/tarefas/${t.id}"><div class="grow">
+            <div class="row-title"><span class="mono muted" style="font-size:12px">${t.code}</span> ${t.parent_code ? '↳ ' : ''}${t.title}</div>
+            <div class="row-meta"><span>${t.assignee_name || 'Sem responsável'}</span>${t.due_date ? html`<span>prazo ${fmtDate(t.due_date)}</span>` : ''}</div></div>${taskStatus(t.eff_status)}</a>
+            ${c.link ? html`<button type="button" class="icon-btn" data-unlink="${t.id}" aria-label="Desvincular ${t.code}" title="Desvincular">✕</button>` : ''}</li>`)}</ul>`
+          : html`<div class="card-body muted" style="font-size:13.5px">Nenhuma tarefa vinculada. Vincule as tarefas do projeto relacionadas a este registro — o vínculo aparece também na tarefa.</div>`}
+        ${c.link ? html`<div class="card-body" style="padding-top:${r.linked_tasks.length ? '12px' : '0'}"><button type="button" class="btn btn-ghost btn-sm" data-link-task>${icon('plus')}Vincular tarefa</button></div>` : ''}
+      </section>
       ${r.history_chain?.length ? html`<section class="card section"><div class="card-head"><h2>${icon('history')}Histórico desta definição</h2><span class="sub">versões anteriores</span></div>
         <ul class="rows">${r.history_chain.map(x => html`<li><a class="row-link" href="${recHref(pid, x.id)}"><div class="grow"><div class="row-title is-off">${x.title}</div>
           <div class="row-meta"><span class="mono">${x.code || ''}</span><span>${fmtDate(x.record_date)}</span></div></div>${recStatus(x.status)}</a></li>`)}</ul></section>` : ''}
@@ -296,6 +334,20 @@ export async function detail({ params, navigate, render }) {
             if (res) { toast('Adendo incluído.'); render(); }
           }
         } catch (e) { toast(e.message, 'error'); }
+      }));
+      root.querySelector('[data-link-task]')?.addEventListener('click', async () => {
+        try {
+          const linked = new Set(r.linked_tasks.map(t => t.id));
+          const tasks = (await api(`/projects/${pid}/record-tasks`)).filter(t => !linked.has(t.id));
+          const id = await pickSheet({ title: 'Vincular tarefa', empty: 'Não há outras tarefas neste projeto.', items: tasks.map(taskPickItem) });
+          if (!id) return;
+          await api(`/records/${r.id}/links`, { method: 'POST', body: { task_id: id } });
+          toast('Tarefa vinculada.');
+          render();
+        } catch (e) { toast(e.message, 'error'); }
+      });
+      root.querySelectorAll('[data-unlink]').forEach(b => b.addEventListener('click', async () => {
+        try { await api(`/records/${r.id}/links/${b.dataset.unlink}`, { method: 'DELETE' }); toast('Vínculo removido.'); render(); } catch (e) { toast(e.message, 'error'); }
       }));
       root.querySelectorAll('[data-rmf]').forEach(b => b.addEventListener('click', async () => {
         if (!(await confirmSheet('Remover anexo', 'O arquivo será removido deste registro.', 'Remover', true))) return;
@@ -356,12 +408,14 @@ document.addEventListener('click', e => {
 export async function form({ params, query, state, navigate }) {
   const pid = Number(params.id);
   const editing = !!params.rid;
-  const [data, users, rec] = await Promise.all([api(`/projects/${pid}/records`), api(`/projects/${pid}/assignees`), editing ? api(`/records/${params.rid}`) : null]);
+  const [data, users, rec, ptasks] = await Promise.all([api(`/projects/${pid}/records`), api(`/projects/${pid}/assignees`), editing ? api(`/records/${params.rid}`) : null,
+    api(`/projects/${pid}/record-tasks`).catch(() => [])]);
   const type = data.types.find(t => t.id === (rec ? rec.type_id : Number(query.get('tipo'))));
   if (!type) throw new Error('Escolha o tipo de registro.');
   if (!editing && !data.creatable.includes(type.id)) throw new Error('Você não pode criar registros deste tipo.');
   const r = rec || { title: '', body: '', record_date: todayISO(), origin: '', decided_by: '', pinned: 0, replaces_id: Number(query.get('substitui')) || null, participants: [], items: [] };
   const b = type.behavior;
+  const linkedSet = new Set(rec ? rec.linked_tasks.map(t => t.id) : [Number(query.get('tarefa'))].filter(Boolean));
   const vig = data.records.filter(x => x.behavior === 'decisao' && x.status === 'vigente' && x.id !== r.id);
   const approvalNote = type.requires_approval && state.user.role !== 'admin';
   const p = data.project;
@@ -369,7 +423,7 @@ export async function form({ params, query, state, navigate }) {
     title: editing ? 'Editar registro' : `Novo registro · ${type.name}`,
     html: html`
       ${pageHead({
-        back: { href: editing ? recHref(pid, r.id) : `#/projetos/${pid}/registros`, label: editing ? (r.code || r.title) : 'Registros do projeto' },
+        back: { href: editing ? recHref(pid, r.id) : query.get('tarefa') ? `#/tarefas/${query.get('tarefa')}` : `#/projetos/${pid}/registros`, label: editing ? (r.code || r.title) : query.get('tarefa') ? 'Tarefa' : 'Registros do projeto' },
         eyebrow: `${p.code} · ${type.name}`,
         title: editing ? 'Editar registro' : `Novo registro: ${type.name}`,
         sub: `${p.name} · ${BEH[b]}`,
@@ -410,12 +464,19 @@ export async function form({ params, query, state, navigate }) {
           <span class="hint">Informação: apenas registro · Definição: passa a valer no projeto · Demanda: vira uma tarefa com responsável e prazo. Definições e tarefas são criadas quando a ata é emitida.</span>
           <ul class="rg-items-edit" id="rg-items">${(r.items?.length ? r.items : [{ kind: 'info' }]).map(i => itemEditor(i, users))}</ul>
           <button type="button" class="btn btn-ghost btn-sm" id="rg-add-item">${icon('plus')}Adicionar item</button></fieldset>` : ''}
+        <fieldset class="fieldset form"><legend>Tarefas vinculadas (opcional)</legend>
+          <span class="hint">Ligue este registro a tarefas já existentes do projeto. O vínculo aparece na tela da tarefa.</span>
+          ${linkedSet.size ? html`<div class="rg-linked-sel">${ptasks.filter(t => linkedSet.has(t.id)).map(t => html`<span class="pill pill-sand">${t.code} · ${t.title}</span>`)}</div>` : ''}
+          <input type="search" id="rg-tq" placeholder="Buscar tarefa por código ou título…" aria-label="Buscar tarefa">
+          <ul class="rg-tlist">${ptasks.map(t => html`<li data-text="${`${t.code} ${t.title}`.toLowerCase()}"><label><input type="checkbox" name="task_link" value="${t.id}" ${linkedSet.has(t.id) ? 'checked' : ''}>
+            <span class="mono muted">${t.code}</span><span class="grow">${t.parent_code ? '↳ ' : ''}${t.title}</span>${taskStatus(t.eff_status)}</label></li>`)}</ul>
+        </fieldset>
         <div class="field"><label for="rg-files">Anexos (fotos ou PDF)</label><input id="rg-files" type="file" accept="image/*,application/pdf,.pdf" multiple>
           <span class="hint">Até 10 por vez · PDF até 8 MB. ${b === 'reuniao' ? 'Ex.: lista de presença, apresentação.' : ''}</span></div>
         <label class="switch"><input type="checkbox" name="pinned" ${r.pinned ? 'checked' : ''}>Fixar no topo dos registros do projeto</label>
         <div class="form-error" hidden></div>
         <div class="form-actions">
-          <a class="btn btn-ghost" href="${editing ? recHref(pid, r.id) : `#/projetos/${pid}/registros`}">Cancelar</a>
+          <a class="btn btn-ghost" href="${editing ? recHref(pid, r.id) : query.get('tarefa') ? `#/tarefas/${query.get('tarefa')}` : `#/projetos/${pid}/registros`}">Cancelar</a>
           ${b === 'reuniao' ? html`<button type="submit" class="btn btn-ghost" data-mode="draft">${icon('check')}Salvar rascunho</button><button type="submit" class="btn btn-primary" data-mode="emit">${icon('send')}Salvar e emitir</button>`
             : html`<button type="submit" class="btn btn-primary">${icon('check')}${editing ? 'Salvar' : 'Registrar'}</button>`}
         </div>
@@ -430,6 +491,8 @@ export async function form({ params, query, state, navigate }) {
           ul.lastElementChild.querySelector('textarea').focus();
         });
       }
+      const tq = root.querySelector('#rg-tq');
+      tq?.addEventListener('input', () => { const v = tq.value.trim().toLowerCase(); root.querySelectorAll('.rg-tlist li').forEach(li => { li.hidden = !!v && !li.dataset.text.includes(v) && !li.querySelector('input').checked; }); });
       let mode = 'draft';
       f.querySelectorAll('[data-mode]').forEach(btn => btn.addEventListener('click', () => { mode = btn.dataset.mode; }));
       f.addEventListener('submit', async e => {
@@ -438,6 +501,8 @@ export async function form({ params, query, state, navigate }) {
         err.hidden = true;
         const d = Object.fromEntries(new FormData(f));
         d.pinned = f.pinned.checked;
+        d.task_ids = [...f.querySelectorAll('[name=task_link]:checked')].map(c => Number(c.value));
+        delete d.task_link;
         d.type_id = type.id;
         if (d.assignee_id === '') d.assignee_id = null;
         if (ul) d.items = readItemEditors(ul);

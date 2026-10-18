@@ -1346,6 +1346,23 @@ async function main() {
   const rgH = (await rgRic('GET', '/projects/1/history')).data;
   ok(rgH.chapters.length > 0 && rgH.chapters.some(c => c.paragraphs.some(x => x.includes('ATA-PRJ-001-001'))) && rgH.intro[0].includes('PRJ-001'), 'história do projeto narra a reunião no capítulo do mês');
   ok(rgH.vigentes.some(v => v.code === 'DEF-PRJ-001-001') && rgH.timeline.some(e => e.kind === 'registro'), 'história traz definições vigentes e a linha do tempo');
+  // Vínculo de registro com tarefas existentes (pelo registro e pela tarefa)
+  const rgLinkT = (await rgRic('GET', '/projects/1/record-tasks')).data;
+  const rgT1 = rgLinkT.find(t => !t.parent_code).id;
+  const rgT2x = rgLinkT.filter(t => !t.parent_code)[1].id;
+  const rgOc = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Ocorrência / incidente'), title: 'Falta de energia no canteiro', task_ids: [rgT1] })).data.id;
+  let rgOcV = (await rgRic('GET', `/records/${rgOc}`)).data;
+  ok(rgOcV.linked_tasks.length === 1 && rgOcV.linked_tasks[0].id === rgT1, 'registro criado já vinculado a uma tarefa existente');
+  let rgTv = (await rgRic('GET', `/tasks/${rgT1}`)).data;
+  ok(rgTv.records.some(r => r.id === rgOc && r.linked) && rgTv.history.some(h => h.action === 'Registro do projeto vinculado'), 'a tarefa mostra o registro vinculado e registra no histórico');
+  rgTv = (await rgMar('POST', `/tasks/${rgT2x}/record-links`, { record_id: rgOc })).data;
+  ok(rgTv.records.some(r => r.id === rgOc), 'vínculo feito pela tela da tarefa');
+  ok((await rgRic('GET', `/records/${rgOc}`)).data.linked_tasks.length === 2, 'registro lista as duas tarefas vinculadas');
+  const rgOther = (await rgAna('GET', '/projects/2/record-tasks')).data[0];
+  ok((await rgAna('POST', `/records/${rgOc}/links`, { task_id: rgOther.id })).status === 400, 'tarefa de outro projeto não é vinculada');
+  rgOcV = (await rgRic('DELETE', `/records/${rgOc}/links/${rgT1}`)).data;
+  ok(rgOcV.linked_tasks.length === 1 && !(await rgRic('GET', `/tasks/${rgT1}`)).data.records.some(r => r.id === rgOc), 'desvincular remove dos dois lados');
+  ok((await rgMar('GET', `/tasks/${rgDem.task_id}`)).data.records.some(r => r.origin && r.code === 'ATA-PRJ-001-001'), 'tarefa gerada pela ata lista a ata como origem');
   const rgHm = rgH.chapters.find(c => c.detail.records.some(r => r.code === 'ATA-PRJ-001-001'));
   ok(rgHm && rgHm.detail.opened.some(t => t.title === 'Enviar amostras de rejunte') && rgH.chapters.some(c => c.detail.done.length && c.detail.done[0].code), 'história detalha no mês as tarefas abertas, concluídas e os registros');
   ok(rgG.marks.every(m => m.icon) && rgTypes.find(t => t.name === 'Ata de reunião').icon === 'reuniao', 'cada tipo de registro tem ícone próprio (Gantt e listas)');

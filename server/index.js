@@ -210,6 +210,12 @@ api.put('/api/records/:id', (req, res, { ctx, params, body }) => { recSec(ctx); 
 api.post('/api/records/:id/actions/:action', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.recordAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))); });
 api.post('/api/records/:id/files', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.addRecordFiles(ctx, intOrNull(params.id), body)); });
 api.delete('/api/records/:id/files/:fid', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.removeRecordFile(ctx, intOrNull(params.id), intOrNull(params.fid))); });
+api.get('/api/projects/:id/record-tasks', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.linkableTasks(ctx, intOrNull(params.id))); });
+api.post('/api/records/:id/links', (req, res, { ctx, params, body }) => { Records.linkRecordTask(ctx, intOrNull(params.id), intOrNull(body.task_id)); send(res, 200, Records.getRecord(ctx, intOrNull(params.id))); });
+api.delete('/api/records/:id/links/:tid', (req, res, { ctx, params }) => { Records.unlinkRecordTask(ctx, intOrNull(params.id), intOrNull(params.tid)); send(res, 200, Records.getRecord(ctx, intOrNull(params.id))); });
+// Pela tarefa: vincular / desvincular um registro do mesmo projeto
+api.post('/api/tasks/:id/record-links', (req, res, { ctx, params, body }) => { Records.linkRecordTask(ctx, intOrNull(body.record_id), intOrNull(params.id)); send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))); });
+api.delete('/api/tasks/:id/record-links/:rid', (req, res, { ctx, params }) => { Records.unlinkRecordTask(ctx, intOrNull(params.rid), intOrNull(params.id)); send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))); });
 api.get('/api/record-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Records.recordFileForUser(ctx, intOrNull(params.id))));
 
 // ---------- Tarefas financeiras (liberação por usuário) ----------

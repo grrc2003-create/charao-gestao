@@ -2251,3 +2251,6 @@ tr.is-inactive td { opacity: .55; }
 .pr-subsec + .pr-subsec { margin-top: 16px; }
 .pr-subsec[hidden] { display: none; }
 .pr-sub-h { font-size: 13.5px; font-weight: 700; color: var(--ink-2); margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--orange); }
+
+.pr-sec-tag { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.pr-sec-tag svg { width: 15px; height: 15px; }

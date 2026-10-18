@@ -4,7 +4,7 @@
 // (ou devolve com o motivo). Cada publicação gera uma versão (histórico).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, intOrNull } from '../lib/http.js';
-import { hasSection, isAdmin } from '../lib/permissions.js';
+import { hasSection, isAdmin, SECTIONS, SECTION_LABEL } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { saveImageFromDataUrl, cleanFileName, deleteStored } from './files.js';
 
@@ -25,9 +25,13 @@ const parse = s => { try { return s ? JSON.parse(s) : null; } catch { return nul
 const userName = id => (id ? one('SELECT name FROM users WHERE id = ?', id)?.name || null : null);
 
 // Leitores veem apenas processos publicados; quem edita vê também rascunhos e arquivados
+// Visibilidade por seção (ex.: tutorial de Contratos só para quem acessa Contratos). Administrador vê todos.
+const sectionOk = (user, c) => !c?.section || canApproveProcesses(user) || String(c.section).split('|').some(k => hasSection(user, k));
+const visibleRow = (user, p) => sectionOk(user, parse(p.published) || parse(p.draft));
+
 function loadProcess(ctx, id) {
   const p = one('SELECT * FROM processes WHERE id = ?', id);
-  if (!p || (!canEditProcesses(ctx.user) && p.status !== 'publicado')) throw notFound('Processo não encontrado.');
+  if (!p || (!canEditProcesses(ctx.user) && p.status !== 'publicado') || !visibleRow(ctx.user, p)) throw notFound('Processo não encontrado.');
   return p;
 }
 
@@ -44,6 +48,10 @@ function normalize(body, selfId = null) {
     outputs: str(b.outputs, { max: 3000, label: 'Saídas' }),
     rules: str(b.rules, { max: 3000, label: 'Regras e cuidados' }),
   };
+  // Visível para: todos (vazio) ou só quem tem a seção (uma ou mais, separadas por |)
+  const sec = String(b.section || '').split('|').map(x => x.trim()).filter(Boolean);
+  for (const k of sec) if (!SECTIONS.includes(k)) throw badRequest('Seção de visibilidade inválida.');
+  c.section = sec.length ? sec.join('|') : null;
   const links = Array.isArray(b.links) ? b.links : [];
   if (links.length > 20) throw badRequest('Use no máximo 20 materiais de apoio.');
   c.links = links.map(l => ({
@@ -118,7 +126,7 @@ function card(p, editor) {
   return {
     id: p.id, code: p.code, title: c.title, area: c.area, frequency: c.frequency, objective: c.objective,
     steps: st.steps, controls: st.controls, people: st.people, related: c.related || [],
-    status: p.status, version: p.version, published_at: p.published_at,
+    status: p.status, version: p.version, published_at: p.published_at, section: c.section || null,
     has_draft: editor ? !!p.draft : false,
     draft_title: editor && p.draft ? parse(p.draft)?.title : null,
     review_status: editor && p.draft ? p.review_status : null,
@@ -128,7 +136,8 @@ function card(p, editor) {
 export function listProcesses(ctx, { archived = false } = {}) {
   const editor = canEditProcesses(ctx.user);
   const rows = all('SELECT * FROM processes ORDER BY code')
-    .filter(p => p.status === 'publicado' || (editor && (p.status === 'rascunho' || archived)));
+    .filter(p => p.status === 'publicado' || (editor && (p.status === 'rascunho' || archived)))
+    .filter(p => visibleRow(ctx.user, p));
   const items = rows.map(p => card(p, editor));
   const pub = items.filter(i => i.status === 'publicado');
   return {
@@ -147,13 +156,14 @@ export function listProcesses(ctx, { archived = false } = {}) {
     },
     areas: [...new Set(all('SELECT published, draft FROM processes').flatMap(p => [parse(p.published)?.area, parse(p.draft)?.area]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')),
     frequencies: FREQUENCIES,
+    sections: SECTIONS.map(k => ({ key: k, label: SECTION_LABEL[k] })),
   };
 }
 
 function relatedOf(ctx, c) {
   const editor = canEditProcesses(ctx.user);
   return (c?.related || []).map(id => one('SELECT id, code, status, published, draft FROM processes WHERE id = ?', id))
-    .filter(r => r && (r.status === 'publicado' || editor))
+    .filter(r => r && (r.status === 'publicado' || editor) && visibleRow(ctx.user, r))
     .map(r => ({ id: r.id, code: r.code, title: (parse(r.published) || parse(r.draft) || {}).title, status: r.status }));
 }
 
@@ -183,7 +193,7 @@ export function getProcess(ctx, id, { view = '' } = {}) {
     published_at: p.published_at, published_by_name: userName(p.published_by),
     has_draft: editor && !!p.draft, draft_at: editor ? p.draft_at : null, draft_by_name: editor ? userName(p.draft_by) : null,
     showing,
-    content: { ...content, related_items: relatedOf(ctx, content) },
+    content: { ...content, related_items: relatedOf(ctx, content), section_label: content.section ? content.section.split('|').map(k => SECTION_LABEL[k] || k).join(' ou ') : null },
     // Formulário de edição: parte do rascunho (se houver) ou da versão publicada
     editable: editor ? draft || parse(p.published) : null,
     // Código/responsável alterados no rascunho de um processo publicado (valem na publicação)
@@ -213,7 +223,7 @@ export function getProcess(ctx, id, { view = '' } = {}) {
 
 // Manual completo (impressão): todos os processos publicados, com o conteúdo
 export function processManual(ctx) {
-  const rows = all("SELECT * FROM processes WHERE status = 'publicado' ORDER BY code");
+  const rows = all("SELECT * FROM processes WHERE status = 'publicado' ORDER BY code").filter(p => visibleRow(ctx.user, p));
   return {
     processes: rows.map(p => {
       const c = parse(p.published) || {};

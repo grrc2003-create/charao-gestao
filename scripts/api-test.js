@@ -1474,7 +1474,12 @@ async function main() {
   const prList = (await prFel('GET', '/processes')).data;
   const prPrc = prList.items.filter(i => i.code.startsWith('PRC-'));
   ok(prPrc.length === 8 && prPrc.reduce((n, i) => n + i.controls, 0) === 13 && new Set(prPrc.map(i => i.area)).size === 5 && !prList.can_edit, 'carga inicial: 8 processos publicados, 13 pontos de controle, leitura para todos');
-  const prSis = prList.items.filter(i => i.code.startsWith('SIS-'));
+  const prSis = (await prAna('GET', '/processes')).data.items.filter(i => i.code.startsWith('SIS-'));
+  const prFelSecs = (await prFel('GET', '/meta')).data.can.sections;
+  const prFelSis = prList.items.filter(i => i.code.startsWith('SIS-'));
+  const prExp = prSis.filter(i => !i.section || i.section.split('|').some(k => prFelSecs.includes(k)));
+  ok(prFelSis.length === prExp.length && prFelSis.length < 19 && !prFelSis.some(i => i.code === 'SIS-12' && !prFelSecs.includes('contratos')), 'tutoriais aparecem só para quem tem acesso à seção correspondente');
+  ok(prFelSecs.includes('contratos') || (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-12').id}`)).status === 404, 'sem a seção, o tutorial não abre nem pelo endereço');
   const prSis5 = (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-05').id}`)).data;
   ok(prSis.length === 19 && prSis.every(i => i.status === 'publicado' && i.area.startsWith('Sistema · ')) && prSis5.content.related_items.some(r => r.code === 'SIS-06') && prSis5.versions.length === 1, 'tutoriais do sistema: 19 processos SIS publicados, com relacionados');
   ok((await prAna('GET', '/meta')).data.can.edit_processes && !(await prFel('GET', '/meta')).data.can.edit_processes, 'edição de processos: administrador sim, colaborador não');
@@ -1505,7 +1510,7 @@ async function main() {
   ok((await prAna('POST', `/processes/${prNew.id}/restaurar`)).data.status === 'publicado', 'processo restaurado');
   const prDel = (await prAna('POST', '/processes', { ...prBody, title: 'Rascunho descartável' })).data;
   ok((await prAna('DELETE', `/processes/${prDel.id}`)).status === 200 && (await prAna('GET', `/processes/${prDel.id}`)).status === 404, 'rascunho nunca publicado pode ser excluído');
-  ok((await prFel('GET', '/processes/manual')).data.processes.length === 28, 'manual completo com os processos publicados');
+  ok((await prAna('GET', '/processes/manual')).data.processes.length === 28, 'manual completo com os processos publicados');
   // Aprovação: gestor/coordenador criam e enviam; só o administrador publica
   const prJu = await login('juliana@charao.eng.br');
   const prJuMeta = (await prJu('GET', '/meta')).data.can;

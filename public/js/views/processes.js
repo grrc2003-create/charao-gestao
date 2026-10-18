@@ -193,6 +193,7 @@ export async function view({ params, query, navigate, render }) {
         <div class="pr-main">
           <section class="card section"><div class="card-body pr-objective">
             <div class="sub-label">Objetivo</div><p>${c.objective}</p>
+            ${c.section_label ? html`<div class="pr-sec-tag">${icon('shield')}Visível só para quem acessa: <b>${c.section_label}</b></div>` : ''}
             ${c.erp_module ? html`<div class="pr-erp"><span class="sub-label">Módulo no ERP</span><b>${c.erp_module}</b></div>` : ''}
             ${c.links?.length ? html`<div class="sub-label" style="margin-top:12px">Material de apoio</div>${linksHtml(c.links)}` : ''}
           </div></section>
@@ -382,6 +383,11 @@ export async function form({ params, state, navigate }) {
         </div>
         <div class="field"><label class="req" for="pr-obj">Objetivo</label><textarea id="pr-obj" name="objective" rows="2" maxlength="1000" required placeholder="Para que serve este processo">${c.objective || ''}</textarea></div>
         <div class="field"><label for="pr-erp">Módulo no ERP / sistema</label><input type="text" id="pr-erp" name="erp_module" maxlength="200" value="${c.erp_module || ''}" placeholder="Ex.: Obras → Medição de Obras"></div>
+        <div class="field"><label for="pr-sec">Visível para</label><select id="pr-sec" name="section">
+            <option value="">Todos os usuários</option>
+            ${c.section && !all.sections.some(x => x.key === c.section) ? html`<option value="${c.section}" selected>Quem acessa: ${c.section.split('|').map(k => all.sections.find(x => x.key === k)?.label || k).join(' ou ')}</option>` : ''}
+            ${all.sections.map(x => html`<option value="${x.key}" ${c.section === x.key ? 'selected' : ''}>Só quem acessa: ${x.label}</option>`)}</select>
+          <span class="hint">Ex.: um tutorial de Contratos visível só para quem tem a seção Contratos. O administrador vê todos.</span></div>
         <fieldset class="fieldset form"><legend>Material de apoio</legend>
           <span class="hint">Vídeos de treinamento, artigos da central de ajuda e outros links.</span>
           <ul class="pr-le-list" id="pr-links">${(c.links || []).map(l => linkEditor(l))}</ul>
@@ -452,7 +458,7 @@ export async function form({ params, state, navigate }) {
         const val = (li, k) => li.querySelector(`[data-f="${k}"]`);
         return {
           code: fd.get('code'), title: fd.get('title'), area: fd.get('area'), frequency: fd.get('frequency'), owner_id: fd.get('owner_id'),
-          objective: fd.get('objective'), erp_module: fd.get('erp_module'), inputs: fd.get('inputs'), outputs: fd.get('outputs'), rules: fd.get('rules'),
+          objective: fd.get('objective'), erp_module: fd.get('erp_module'), section: fd.get('section'), inputs: fd.get('inputs'), outputs: fd.get('outputs'), rules: fd.get('rules'),
           indicators: String(fd.get('indicators') || '').split('\n'),
           related: fd.getAll('related').map(Number),
           links: [...linksEl.querySelectorAll('[data-le]')].map(li => ({ kind: val(li, 'kind').value, label: val(li, 'label').value, url: val(li, 'url').value })).filter(l => l.url.trim() || l.label.trim()),

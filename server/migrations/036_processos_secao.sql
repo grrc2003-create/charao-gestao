@@ -1,0 +1,38 @@
+-- Processos da Empresa: visibilidade por seção (campo "section" do conteúdo).
+-- Tutoriais do sistema (SIS) aparecem só para quem tem acesso à seção correspondente. Migração apenas aditiva.
+UPDATE processes SET published = json_set(published, '$.section', 'projetos') WHERE code = 'SIS-03' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'projetos') WHERE code = 'SIS-03' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'projetos') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-03');
+UPDATE processes SET published = json_set(published, '$.section', 'tarefas') WHERE code = 'SIS-04' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'tarefas') WHERE code = 'SIS-04' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'tarefas') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-04');
+UPDATE processes SET published = json_set(published, '$.section', 'tarefas') WHERE code = 'SIS-08' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'tarefas') WHERE code = 'SIS-08' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'tarefas') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-08');
+UPDATE processes SET published = json_set(published, '$.section', 'projetos') WHERE code = 'SIS-09' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'projetos') WHERE code = 'SIS-09' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'projetos') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-09');
+UPDATE processes SET published = json_set(published, '$.section', 'projetos') WHERE code = 'SIS-10' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'projetos') WHERE code = 'SIS-10' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'projetos') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-10');
+UPDATE processes SET published = json_set(published, '$.section', 'relatorios') WHERE code = 'SIS-11' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'relatorios') WHERE code = 'SIS-11' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'relatorios') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-11');
+UPDATE processes SET published = json_set(published, '$.section', 'contratos') WHERE code = 'SIS-12' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'contratos') WHERE code = 'SIS-12' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'contratos') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-12');
+UPDATE processes SET published = json_set(published, '$.section', 'financeiro') WHERE code = 'SIS-13' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'financeiro') WHERE code = 'SIS-13' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'financeiro') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-13');
+UPDATE processes SET published = json_set(published, '$.section', 'equipe') WHERE code = 'SIS-15' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'equipe') WHERE code = 'SIS-15' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'equipe') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-15');
+UPDATE processes SET published = json_set(published, '$.section', 'equipe|cadastro_usuarios') WHERE code = 'SIS-17' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'equipe|cadastro_usuarios') WHERE code = 'SIS-17' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'equipe|cadastro_usuarios') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-17');
+UPDATE processes SET published = json_set(published, '$.section', 'configuracoes') WHERE code = 'SIS-18' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'configuracoes') WHERE code = 'SIS-18' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'configuracoes') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-18');
+UPDATE processes SET published = json_set(published, '$.section', 'auditoria') WHERE code = 'SIS-19' AND published IS NOT NULL;
+UPDATE processes SET draft = json_set(draft, '$.section', 'auditoria') WHERE code = 'SIS-19' AND draft IS NOT NULL;
+UPDATE process_versions SET content = json_set(content, '$.section', 'auditoria') WHERE process_id = (SELECT id FROM processes WHERE code = 'SIS-19');

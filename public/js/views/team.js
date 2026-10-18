@@ -1,6 +1,7 @@
 // Gestão da Equipe: Organograma (árvore por gestor/líder, arrastar para mudar o gestor) e Cadastro da Equipe
 // (função e responsabilidades obrigatórias, setor, admissão; pessoas com ou sem acesso ao sistema).
-import { html, api, icon, fmtDate, initials, ROLE } from '../core.js';
+import { html, raw, api, icon, fmtDate, initials, ROLE, avatarUrl } from '../core.js';
+import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
 import { vacPill } from './vacation-ui.js';
@@ -9,6 +10,7 @@ const ROLE_COLOR = { admin: '#C9520F', gestor: '#2A3D50', coordenador: '#1F6FB2'
 const roleOf = p => (p.is_external ? 'Terceirizado' : ROLE[p.role] || '');
 const colorOf = p => (p.is_external ? '#8E44AD' : ROLE_COLOR[p.role] || '#5B6B7A');
 const dm = d => fmtDate(d).slice(0, 5);
+const av = p => { const u = avatarUrl(p.id); return u ? html`<img src="${u}" alt="" loading="lazy">` : initials(p.name); };
 const sec = (state, k) => !state.meta.can.sections || state.meta.can.sections.includes(k);
 
 // ---------- Árvore ----------
@@ -29,7 +31,7 @@ function card(p, { childCount = 0, collapsed = false, print = false } = {}) {
   const v = p.vacation;
   const l = p.load;
   return html`<div class="org-card ${p.is_external ? 'is-ext' : ''} ${p.missing_function ? 'is-missing' : ''}" data-pid="${p.id}" ${print ? '' : html`draggable="true" tabindex="0" role="button" aria-label="${p.name}"`} style="--c:${colorOf(p)}">
-    <div class="org-top"><span class="org-av">${initials(p.name)}</span><div class="org-who"><b>${p.name}</b><small>${roleOf(p)}${p.department ? ` · ${p.department}` : ''}</small></div></div>
+    <div class="org-top"><span class="org-av">${av(p)}</span><div class="org-who"><b>${p.name}</b><small>${roleOf(p)}${p.department ? ` · ${p.department}` : ''}</small></div></div>
     <div class="org-fn ${p.missing_function ? 'warn' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</div>
     ${p.is_external && p.company ? html`<div class="org-meta">${p.company}</div>` : ''}
     <div class="org-tags">
@@ -57,7 +59,7 @@ function detailBody(p, data, state) {
   const direct = data.people.filter(x => x.manager_id === p.id);
   const options = data.people.filter(x => x.id !== p.id && !x.is_external);
   return html`<div class="org-detail">
-    <div class="org-top"><span class="org-av" style="--c:${colorOf(p)}">${initials(p.name)}</span><div class="org-who"><b>${p.name}</b><small>${roleOf(p)}${p.department ? ` · ${p.department}` : ''}</small></div></div>
+    <div class="org-top"><span class="org-av" style="--c:${colorOf(p)}">${av(p)}</span><div class="org-who"><b>${p.name}</b><small>${roleOf(p)}${p.department ? ` · ${p.department}` : ''}</small></div></div>
     <dl class="kv">
       <dt>Função</dt><dd>${p.job_title || html`<span class="late">não informada</span>`}</dd>
       <dt>${p.is_external ? 'Líder' : 'Gestor'}</dt><dd>${mgr ? mgr.name : 'sem gestor (topo)'}</dd>
@@ -207,7 +209,7 @@ export async function list({ query, setQuery, state }) {
       <input type="search" id="tm-q" class="section" placeholder="Buscar por nome, função ou setor…" aria-label="Buscar" style="width:100%;max-width:420px">
       ${deps.map(dep => html`<section class="card section" data-dep><div class="card-head"><h2>${dep}</h2><span class="sub">${byDep.get(dep).length}</span></div>
         <ul class="rows">${byDep.get(dep).map(p => html`<li data-text="${`${p.name} ${p.job_title || ''} ${p.department || ''}`.toLowerCase()}"><a class="row-link" href="#/equipe/cadastro/${p.id}">
-          <span class="org-av" style="--c:${colorOf(p)}">${initials(p.name)}</span>
+          <span class="org-av" style="--c:${colorOf(p)}">${av(p)}</span>
           <div class="grow"><div class="row-title">${p.name}</div>
             <div class="row-meta"><span class="${p.missing_function ? 'late' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</span><span>${roleOf(p)}</span>
               ${p.manager_name ? html`<span>${p.is_external ? 'Líder' : 'Gestor'}: ${p.manager_name}</span>` : ''}${p.admission_date ? html`<span>admissão ${fmtDate(p.admission_date)}</span>` : ''}</div></div>
@@ -243,6 +245,7 @@ export async function form({ params, state, navigate }) {
         sub: creating ? 'Para funcionários que não usam o sistema (ex.: equipe de campo). Eles aparecem no organograma e nas férias.' : `${roleOf(u)}${u.login_enabled ? ' · com acesso ao sistema' : ' · sem acesso ao sistema'}`,
       })}
       <form class="card card-pad form" id="tm-form" novalidate style="max-width:860px">
+        ${!creating ? avatarEditor(u, { canEdit: u.role !== 'admin' || state.user.role === 'admin' || u.id === state.user.id }) : ''}
         ${own ? html`<div class="field"><label class="req" for="tm-name">Nome completo</label><input type="text" id="tm-name" name="name" maxlength="120" required value="${u.name}"></div>` : ''}
         <div class="form-row">
           <div class="field"><label class="req" for="tm-fn">Função</label><input type="text" id="tm-fn" name="job_title" maxlength="120" required value="${u.job_title || ''}" placeholder="Ex.: Mestre de obras, Engenheira de planejamento"></div>
@@ -267,7 +270,8 @@ export async function form({ params, state, navigate }) {
         <div class="form-error" hidden></div>
         <div class="form-actions"><a class="btn btn-ghost" href="#/equipe/cadastro">Cancelar</a><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
       </form>`,
-    mount(root) {
+    mount(root, ctx) {
+      if (!creating) bindAvatarEditor(root, u, { self: u.id === state.user.id, after: () => ctx.render() });
       const f = root.querySelector('#tm-form');
       f.addEventListener('submit', async e => {
         e.preventDefault();

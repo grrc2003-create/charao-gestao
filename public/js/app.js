@@ -1,5 +1,5 @@
 // Aplicação: sessão, layout (shell) e roteamento por hash.
-import { api, html, icon, avatar, ROLE, brandMark } from './core.js';
+import { api, html, icon, avatar, setAvatars, ROLE, brandMark } from './core.js';
 import { toast } from './ui.js';
 import './required.js';
 import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
@@ -164,6 +164,7 @@ export const setQuery = obj => {
 
 export async function reloadMeta() {
   state.meta = await api('/meta');
+  setAvatars(state.meta.avatars);
   return state.meta;
 }
 
@@ -214,12 +215,12 @@ function shell() {
         ${state.meta?.can.view_audit ? html`<a href="#/auditoria" data-nav="/auditoria">${icon('shield')}<span>Auditoria</span></a>` : ''}
         ${state.meta?.can.manage_settings ? html`<a href="#/configuracoes" data-nav="/configuracoes">${icon('settings')}<span>Configurações</span></a>` : ''}
       </nav>
-      <a href="#/conta" class="sidebar-user">${avatar(u.name)}<span><b>${u.name}</b><small>${ROLE[u.role]}</small></span></a>
+      <a href="#/conta" class="sidebar-user">${avatar(u.name, '', u.id)}<span><b>${u.name}</b><small>${ROLE[u.role]}</small></span></a>
       ${state.demo ? html`<div class="demo-flag" title="Os dados exibidos são fictícios para testes">Ambiente de demonstração</div>` : ''}
     </aside>
     <header class="topbar">
       <a href="#/" class="topbar-brand" aria-label="Início">${brandMark(30)}<span><b>CHARÃO</b><small>Gestão de Obras</small></span></a>
-      <a href="#/conta" class="topbar-user" aria-label="Minha conta">${avatar(u.name, 'sm')}</a>
+      <a href="#/conta" class="topbar-user" aria-label="Minha conta">${avatar(u.name, 'sm', u.id)}</a>
     </header>
     <main id="view" tabindex="-1"></main>
     <nav class="bottombar" aria-label="Navegação">
@@ -299,6 +300,7 @@ async function boot() {
     state.user = me.user;
     state.demo = me.demo;
     state.meta = meta;
+    setAvatars(meta.avatars);
   } catch {
     state.user = null;
     const cfg = await api('/config').catch(() => ({ demo: false }));

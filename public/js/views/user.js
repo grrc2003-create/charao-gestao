@@ -65,7 +65,7 @@ export async function view({ params, query, setQuery, render, state, panel = fal
       })}
       <section class="card card-pad">
         <div class="profile-head">
-          ${avatar(u.name, 'lg')}
+          ${avatar(u.name, 'lg', u.id)}
           <div style="flex:1;min-width:0">
             <h1>${u.name}</h1>
             <div class="muted">${u.job_title || '—'}</div>

@@ -1452,6 +1452,13 @@ async function main() {
   ok((await eqRic('POST', `/vacations/${fpReq.data.id}/approve`)).status === 200, 'gestor aprova as férias');
   const fpT = (await eqRic('GET', `/tasks/${fpTask}`)).data;
   ok(fpT.due_date === fpNew && fpT.reschedules.some(r => r.reason_name === 'Férias do responsável'), 'aprovação aplica o reagendamento com a justificativa Férias do responsável');
+  // Foto de perfil
+  ok((await eqMar('POST', '/users/4/avatar', { data: tinyPng() })).status === 200, 'a própria pessoa coloca a foto de perfil');
+  ok((await eqAna('GET', '/meta')).data.avatars.some(a => a.id === 4) && (await eqAna('GET', '/avatars/4')).status === 200, 'a foto aparece para os demais (meta e imagem)');
+  ok((await eqRic('POST', '/users/5/avatar', { data: tinyPng() })).status === 403, 'sem Cadastro/Gestão da Equipe não troca a foto de outra pessoa');
+  ok((await eqAna('POST', '/users/5/avatar', { data: tinyPng() })).status === 200, 'quem tem a Gestão da Equipe troca a foto de outra pessoa');
+  ok((await eqMar('POST', '/users/4/avatar', { data: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 teste').toString('base64') })).status === 400, 'foto precisa ser imagem');
+  ok((await eqMar('DELETE', '/users/4/avatar')).status === 200 && (await eqAna('GET', '/avatars/4')).status === 404, 'remover a foto volta às iniciais');
 
 }
 

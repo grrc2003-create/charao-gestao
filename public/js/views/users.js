@@ -1,5 +1,6 @@
 import { html, api, icon, avatar, ROLE, SCOPE, fmtPct, fmtDateTime, roleLabel } from '../core.js';
 import { toast, sheet } from '../ui.js';
+import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
 import { pageHead, bindCommon, STATUS_COLOR } from './shared.js';
 
 export async function list({ state }) {
@@ -8,7 +9,7 @@ export async function list({ state }) {
   const byRole = r => users.filter(u => (r === 'terceirizado' ? u.is_external : !u.is_external && u.role === r));
   const canEditRow = u => isAdmin && (state.user.role === 'admin' || u.role !== 'admin');
   const row = u => html`<li><a class="row-link rank" href="#/usuarios/${u.id}${canEditRow(u) ? '/editar' : ''}">
-    ${avatar(u.name)}
+    ${avatar(u.name, '', u.id)}
     <div class="grow">
       <div class="row-title">${u.name} <span class="pill ${u.is_external ? 'pill-ext' : u.role === 'admin' ? 'pill-orange' : u.role === 'gestor' || u.role === 'coordenador' ? '' : 'pill-sand'}">${roleLabel(u)}</span>
         ${!u.active ? html`<span class="pill" style="color:var(--st-atrasada)">Inativo</span>` : ''}</div>
@@ -85,6 +86,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
       })}
       <div class="notice ext-only" style="max-width:860px;margin-bottom:14px" ${ext ? '' : 'hidden'}>${icon('info')}<span id="ext-notice"></span></div>
       <form class="card card-pad form" id="user-form" novalidate style="max-width:860px">
+        ${editing ? avatarEditor(u, { canEdit: u.role !== 'admin' || state.user.role === 'admin' }) : ''}
         <fieldset class="fieldset form"><legend>Dados do usuário</legend>
           <div class="form-row">
             <div class="field"><label class="req" for="name">Nome completo</label><input id="name" name="name" type="text" maxlength="120" required value="${u.name || ''}"></div>
@@ -148,6 +150,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         </div>
       </form>`,
     mount(root) {
+      if (editing) bindAvatarEditor(root, u, { self: u.id === state.user.id, after: () => location.reload() });
       const f = root.querySelector('#user-form');
       const err = f.querySelector('.form-error');
       const managerSel = f.querySelector('#manager_id');

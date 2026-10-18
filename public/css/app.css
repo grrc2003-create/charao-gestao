@@ -2079,3 +2079,15 @@ tr.is-inactive td { opacity: .55; }
   .sidebar-user small { display: none; }
   .demo-flag { margin-top: 4px; padding: 2px; font-size: 10.5px; }
 }
+
+/* Foto de perfil */
+.avatar.has-photo { padding: 0; overflow: hidden; background: var(--sand); }
+.avatar img, .org-av img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.org-av:has(img) { background: none; overflow: hidden; }
+.avatar.xl { width: 88px; height: 88px; font-size: 28px; }
+.av-edit { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.av-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.av-acts small { flex-basis: 100%; font-size: 12px; }
+.av-acts label { cursor: pointer; }
+.profile-head .av-edit { margin-bottom: 0; }
+.profile-head:has(.av-edit) { flex-direction: column; align-items: flex-start; gap: 10px; }

@@ -2,6 +2,7 @@ import { html, api, icon, avatar, ROLE, SCOPE } from '../core.js';
 import { toast } from '../ui.js';
 import { pageHead } from './shared.js';
 import { logout } from '../app.js';
+import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
 
 export async function view({ state, navigate }) {
   const u = state.user;
@@ -11,7 +12,7 @@ export async function view({ state, navigate }) {
       ${pageHead({ eyebrow: 'Perfil e segurança', title: 'Minha conta' })}
       <div class="grid grid-2">
         <section class="card card-pad">
-          <div class="profile-head">${avatar(u.name, 'lg')}<div><h2>${u.name}</h2><div class="muted">${u.job_title || ''}</div>
+          <div class="profile-head">${avatarEditor(u)}<div><h2>${u.name}</h2><div class="muted">${u.job_title || ''}</div>
             <span class="pill" style="margin-top:6px">${ROLE[u.role]}</span></div></div>
           <hr class="divider">
           <dl class="kv"><dt>E-mail</dt><dd>${u.email}</dd><dt>Acesso</dt><dd>${SCOPE[u.access_scope]}</dd></dl>
@@ -37,6 +38,7 @@ export async function view({ state, navigate }) {
       </div>`,
     mount(root) {
       root.querySelector('#logout').addEventListener('click', logout);
+      bindAvatarEditor(root, u, { self: true });
       const f = root.querySelector('#pw-form');
       const err = f.querySelector('.form-error');
       f.addEventListener('submit', async e => {

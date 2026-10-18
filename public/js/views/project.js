@@ -140,7 +140,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
   };
 }
 
-const personRow = u => html`${avatar(u.name, 'sm')}<div class="grow"><div class="row-title">${u.name}</div>
+const personRow = u => html`${avatar(u.name, 'sm', u.id)}<div class="grow"><div class="row-title">${u.name}</div>
   <div class="row-meta"><span>${u.summary.total} tarefas</span><span>${u.summary.done} concluídas</span>
   <span style="color:${u.summary.late ? STATUS_COLOR.atrasada : ''}">${u.summary.late} atrasadas</span><span>${fmtPct(u.summary.on_time_pct)} no prazo</span></div>
   ${execInline(u.summary)}</div>

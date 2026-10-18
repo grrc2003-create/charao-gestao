@@ -199,6 +199,8 @@ api.get('/api/meta', (req, res, { ctx }) => {
       contracts: Contracts.canContracts(ctx.user),
       finance: Finance.canFinance(ctx.user),
     },
+    // Fotos de perfil (id → versão), para trocar as iniciais pela foto
+    avatars: Users.avatarMap(),
   });
 });
 
@@ -398,6 +400,9 @@ api.get('/api/users', (req, res, { ctx }) => {
 });
 api.post('/api/users', (req, res, { ctx, body }) => send(res, 201, { id: Users.createUser(ctx, body, clientIp(req)) }));
 // Diretório mínimo (nome/cargo) para seleção de responsáveis/equipe — sem dados pessoais
+api.post('/api/users/:id/avatar', (req, res, { ctx, params, body }) => send(res, 200, Users.setAvatar(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/users/:id/avatar', (req, res, { ctx, params }) => send(res, 200, Users.removeAvatar(ctx, intOrNull(params.id), clientIp(req))));
+api.get('/api/avatars/:id', (req, res, { params }) => sendFile(req, res, Users.avatarFile(intOrNull(params.id))));
 api.get('/api/users/directory', (req, res, { ctx }) => {
   if (!isAdmin(ctx.user) && !isManagerRole(ctx.user)) throw forbidden();
   send(res, 200, all(`SELECT id, name, job_title, role, access_scope, active, is_external, company FROM users WHERE active = 1 ORDER BY is_external, name`));

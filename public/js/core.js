@@ -107,7 +107,24 @@ export const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 export const statusBadge = (s, opts = {}) =>
   html`<span class="badge st-${s}" title="${STATUS[s].label}"><i aria-hidden="true">${STATUS[s].icon}</i>${opts.short && STATUS[s].short ? STATUS[s].short : STATUS[s].label}</span>`;
 export const priorityTag = p => html`<span class="prio prio-${p}">${PRIORITY[p]}</span>`;
-export const avatar = (name, size = '') => html`<span class="avatar ${size}" aria-hidden="true">${initials(name)}</span>`;
+// Fotos de perfil (id → versão), carregadas com o /meta. Sem id, procura pelo nome (quando ele é único).
+let AV = new Map();
+let AVN = new Map();
+export function setAvatars(list = []) {
+  AV = new Map(list.map(a => [a.id, a.v]));
+  AVN = new Map();
+  for (const a of list) AVN.set(a.name, AVN.has(a.name) ? null : a.id);
+}
+export const avatarUrl = (id, name) => {
+  const uid = id ?? (name ? AVN.get(name) : null);
+  const v = uid && AV.get(uid);
+  return v ? `/api/avatars/${uid}?v=${v}` : null;
+};
+export const avatar = (name, size = '', id = null) => {
+  const url = avatarUrl(id, name);
+  return url ? html`<span class="avatar ${size} has-photo" aria-hidden="true"><img src="${url}" alt="" loading="lazy"></span>`
+    : html`<span class="avatar ${size}" aria-hidden="true">${initials(name)}</span>`;
+};
 export const progress = (pct, label) =>
   html`<div class="progress" role="progressbar" aria-valuenow="${pct || 0}" aria-valuemin="0" aria-valuemax="100" aria-label="${label || 'Conclusão'}"><span style="width:${Math.max(0, Math.min(100, pct || 0))}%"></span></div>`;
 export const icon = name => raw(ICONS[name] || '');

@@ -8,6 +8,8 @@ import { userStats, summarize, monthlyTrend } from './metrics.js';
 import { listVisible, execWorkDaysAvg } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
+import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
+import { hasSection } from '../lib/permissions.js';
 import { checklistDashboard } from './checklist.js';
 
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
@@ -295,3 +297,41 @@ function updateExternal(ctx, u, body, ip) {
       acesso_ao_sistema: !!d.login_enabled, projetos: body.project_ids !== undefined ? projectIds : '(sem alteração)', ativo: !!active }, ip);
   });
 }
+
+// ---------- Foto de perfil ----------
+// A própria pessoa, quem tem o Cadastro de usuários ou a Gestão da Equipe (administradores só por administradores)
+function canEditAvatar(ctx, target) {
+  if (target.id === ctx.user.id) return true;
+  if (target.role === 'admin' && !isAdmin(ctx.user)) return false;
+  return isAdmin(ctx.user) || hasSection(ctx.user, 'cadastro_usuarios') || hasSection(ctx.user, 'equipe');
+}
+export function setAvatar(ctx, id, body, ip) {
+  const u = one('SELECT * FROM users WHERE id = ?', id);
+  if (!u) throw notFound('Pessoa não encontrada.');
+  if (!canEditAvatar(ctx, u)) throw forbidden('Você não pode alterar a foto desta pessoa.');
+  const saved = saveImageFromDataUrl(body.data);
+  if (isPdf(saved.mime)) { deleteStored(saved.stored_name); throw badRequest('Envie uma imagem (JPG, PNG ou WEBP).'); }
+  run(`UPDATE users SET avatar_file = ?, updated_at = datetime('now') WHERE id = ?`, saved.stored_name, id);
+  if (u.avatar_file) deleteStored(u.avatar_file);
+  audit(ctx.user.id, 'user', id, 'Foto de perfil alterada', { pessoa: u.name }, ip);
+  return { avatar: saved.stored_name };
+}
+export function removeAvatar(ctx, id, ip) {
+  const u = one('SELECT * FROM users WHERE id = ?', id);
+  if (!u) throw notFound('Pessoa não encontrada.');
+  if (!canEditAvatar(ctx, u)) throw forbidden('Você não pode alterar a foto desta pessoa.');
+  if (u.avatar_file) {
+    run(`UPDATE users SET avatar_file = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+    deleteStored(u.avatar_file);
+    audit(ctx.user.id, 'user', id, 'Foto de perfil removida', { pessoa: u.name }, ip);
+  }
+  return { avatar: null };
+}
+export function avatarFile(id) {
+  const u = one('SELECT avatar_file FROM users WHERE id = ?', id);
+  if (!u?.avatar_file) throw notFound('Sem foto.');
+  const ext = u.avatar_file.split('.').pop();
+  return { stored_name: u.avatar_file, mime: { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', svg: 'image/svg+xml' }[ext] || 'image/jpeg' };
+}
+// Fotos de todos (para as telas trocarem as iniciais pela foto)
+export const avatarMap = () => all('SELECT id, name, avatar_file FROM users WHERE avatar_file IS NOT NULL').map(u => ({ id: u.id, name: u.name, v: u.avatar_file.slice(0, 8) }));

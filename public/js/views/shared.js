@@ -122,7 +122,7 @@ export const projectRow = p => html`<li><a class="row-link proj-row" href="#/pro
   <span class="chev">${icon('chevron')}</span></a></li>`;
 
 export const userRankRow = (u, i) => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">
-  <span class="rank-num">${i + 1}</span>${avatar(u.name, 'sm')}
+  <span class="rank-num">${i + 1}</span>${avatar(u.name, 'sm', u.id)}
   <div class="grow"><div class="row-title truncate">${u.name}</div><div class="row-meta"><span class="truncate">${u.job_title || ''}</span></div></div>
   <div class="rank-metrics">
     <div class="ok"><b>${fmtPct(u.stats.on_time_pct)}</b>no prazo</div>

@@ -3,8 +3,7 @@
 import { html, raw, esc, api, icon } from '../core.js';
 import { pageHead } from './shared.js';
 
-const AREA_COLORS = ['#2A3D50', '#C9520F', '#1F6FB2', '#2E8B57', '#7A4FA3', '#A86F0E', '#0F7C83', '#B03A5B'];
-const W = 1000, H = 720, CX = W / 2, CY = H / 2;
+const AREA_COLORS = ['#2A3D50', '#C9520F', '#1F6FB2', '#2E8B57', '#7A4FA3', '#A86F0E', '#0F7C83', '#B03A5B', '#5B6B7A', '#8E5A2B'];
 
 // Quebra o título em até 2 linhas de ~24 caracteres
 function wrap(t, max = 24) {
@@ -19,22 +18,32 @@ function wrap(t, max = 24) {
   return lines.map(l => (l.length > max ? l.slice(0, max - 1) + '…' : l));
 }
 
+// Layout clássico de mapa mental: áreas à esquerda e à direita do centro, processos empilhados ao lado da área.
+// A altura cresce com a quantidade de processos (sem sobreposição).
+const W = 1440, CX = W / 2, NODE_W = 220, ROW = 70, GAP = 22, AREA_DX = 250, NODE_DX = 470;
+
 function layout(items) {
   const areas = [...new Set(items.map(i => i.area || 'Sem área'))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  const ordered = areas.flatMap(a => items.filter(i => (i.area || 'Sem área') === a));
-  const n = ordered.length;
+  const groups = areas.map((name, k) => ({ name, color: AREA_COLORS[k % AREA_COLORS.length], ps: items.filter(i => (i.area || 'Sem área') === name) }));
+  // Divide as áreas entre os dois lados equilibrando a quantidade de processos (mantendo a ordem)
+  const total = items.length;
+  let acc = 0;
+  const right = [], left = [];
+  for (const g of groups) { (acc + g.ps.length / 2 <= total / 2 || !right.length ? right : left).push(g); acc += g.ps.length; }
+  const sideH = side => side.reduce((h, g) => h + g.ps.length * ROW, 0) + Math.max(0, side.length - 1) * GAP;
+  const H = Math.max(560, Math.max(sideH(right), sideH(left)) + 80);
+  const CY = H / 2;
   const pos = new Map();
-  ordered.forEach((p, j) => {
-    const ang = (2 * Math.PI * j) / n - Math.PI / 2 + Math.PI / n;
-    pos.set(p.id, { x: CX + 385 * Math.cos(ang), y: CY + 285 * Math.sin(ang), ang });
-  });
-  const areaNodes = areas.map((a, k) => {
-    const ps = ordered.filter(i => (i.area || 'Sem área') === a);
-    const sx = ps.reduce((s, p) => s + Math.cos(pos.get(p.id).ang), 0), sy = ps.reduce((s, p) => s + Math.sin(pos.get(p.id).ang), 0);
-    const ang = Math.atan2(sy, sx);
-    return { name: a, color: AREA_COLORS[k % AREA_COLORS.length], x: CX + 190 * Math.cos(ang), y: CY + 140 * Math.sin(ang), ps };
-  });
-  // Ligações entre processos (sem repetir o par)
+  const areaNodes = [];
+  for (const [side, dir] of [[right, 1], [left, -1]]) {
+    let y = CY - sideH(side) / 2 + ROW / 2;
+    for (const g of side) {
+      const ys = [];
+      for (const p of g.ps) { pos.set(p.id, { x: CX + dir * NODE_DX, y, dir }); ys.push(y); y += ROW; }
+      y += GAP;
+      areaNodes.push({ ...g, dir, x: CX + dir * AREA_DX, y: (ys[0] + ys[ys.length - 1]) / 2 });
+    }
+  }
   const ids = new Set(items.map(i => i.id));
   const pairs = new Map();
   for (const i of items) for (const r of i.related || []) {
@@ -42,45 +51,55 @@ function layout(items) {
     const k = [Math.min(i.id, r), Math.max(i.id, r)].join('-');
     if (!pairs.has(k)) pairs.set(k, [Math.min(i.id, r), Math.max(i.id, r)]);
   }
-  return { areaNodes, pos, links: [...pairs.values()] };
+  return { areaNodes, pos, links: [...pairs.values()], H, CY };
 }
 
-const curve = (a, b, pull = 0.45) => {
-  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-  const qx = mx + (CX - mx) * pull, qy = my + (CY - my) * pull;
-  return `M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
-};
+const f = n => n.toFixed(1);
+// Ramo horizontal suave (centro → área → processo)
+const branch = (a, b) => { const mx = (a.x + b.x) / 2; return `M${f(a.x)},${f(a.y)} C${f(mx)},${f(a.y)} ${f(mx)},${f(b.y)} ${f(b.x)},${f(b.y)}`; };
+// Ligação entre processos: do mesmo lado, contorna por fora; de lados opostos, passa pelo centro
+function linkPath(a, b, CY) {
+  if (a.dir === b.dir) {
+    const x = a.x + a.dir * NODE_W / 2, bx = b.x + b.dir * NODE_W / 2;
+    const out = a.dir * (40 + Math.min(120, Math.abs(a.y - b.y) * 0.25));
+    return `M${f(x)},${f(a.y)} C${f(x + out)},${f(a.y)} ${f(bx + out)},${f(b.y)} ${f(bx)},${f(b.y)}`;
+  }
+  const x = a.x - a.dir * NODE_W / 2, bx = b.x - b.dir * NODE_W / 2;
+  return `M${f(x)},${f(a.y)} Q${f(CX)},${f((a.y + b.y) / 2 + (CY - (a.y + b.y) / 2) * 0.3)} ${f(bx)},${f(b.y)}`;
+}
 
 function svgMap(items) {
-  const { areaNodes, pos, links } = layout(items);
+  const { areaNodes, pos, links, H, CY } = layout(items);
   const colorOf = new Map(areaNodes.flatMap(a => a.ps.map(p => [p.id, a.color])));
   let s = `<svg viewBox="0 0 ${W} ${H}" class="pm-svg" role="img" aria-label="Mapa mental dos processos">`;
-  // Ramos: centro → área → processo
+  const C = { x: CX, y: CY };
   for (const a of areaNodes) {
-    s += `<path class="pm-branch" d="${curve({ x: CX, y: CY }, a, 0)}" stroke="${a.color}" stroke-width="5"/>`;
-    for (const p of a.ps) s += `<path class="pm-branch" data-branch="${p.id}" d="${curve(a, pos.get(p.id), -0.15)}" stroke="${a.color}" stroke-width="2.5"/>`;
+    s += `<path class="pm-branch" d="${branch({ x: CX + a.dir * 60, y: CY }, a)}" stroke="${a.color}" stroke-width="5"/>`;
+    for (const p of a.ps) {
+      const q = pos.get(p.id);
+      s += `<path class="pm-branch" data-branch="${p.id}" d="${branch(a, { x: q.x - q.dir * NODE_W / 2, y: q.y })}" stroke="${a.color}" stroke-width="2.5"/>`;
+    }
   }
-  // Ligações entre processos relacionados
-  for (const [x, y] of links) s += `<path class="pm-link" data-a="${x}" data-b="${y}" d="${curve(pos.get(x), pos.get(y), 0.55)}"/>`;
-  // Centro
-  s += `<g class="pm-center"><circle cx="${CX}" cy="${CY}" r="70"/><text x="${CX}" y="${CY - 6}" text-anchor="middle">Processos</text><text x="${CX}" y="${CY + 16}" text-anchor="middle">da Empresa</text></g>`;
-  // Áreas
+  for (const [x, y] of links) s += `<path class="pm-link" data-a="${x}" data-b="${y}" d="${linkPath(pos.get(x), pos.get(y), CY)}"/>`;
+  s += `<g class="pm-center"><circle cx="${C.x}" cy="${C.y}" r="70"/><text x="${C.x}" y="${C.y - 6}" text-anchor="middle">Processos</text><text x="${C.x}" y="${C.y + 16}" text-anchor="middle">da Empresa</text></g>`;
   for (const a of areaNodes) {
-    const w = Math.max(96, a.name.length * 9 + 30);
-    s += `<g class="pm-area"><rect x="${(a.x - w / 2).toFixed(1)}" y="${(a.y - 17).toFixed(1)}" width="${w}" height="34" rx="17" fill="${a.color}"/>
-      <text x="${a.x.toFixed(1)}" y="${(a.y + 5).toFixed(1)}" text-anchor="middle">${esc(a.name)}</text></g>`;
+    const lines = wrap(a.name, 20);
+    const w = Math.max(...lines.map(l => l.length)) * 8.4 + 30;
+    const h = 16 + lines.length * 17;
+    s += `<g class="pm-area"><rect x="${f(a.x - w / 2)}" y="${f(a.y - h / 2)}" width="${f(w)}" height="${h}" rx="${Math.min(17, h / 2)}" fill="${a.color}"/>
+      ${lines.map((l, i) => `<text x="${f(a.x)}" y="${f(a.y - h / 2 + 21 + i * 17)}" text-anchor="middle">${esc(l)}</text>`).join('')}</g>`;
   }
-  // Processos
   for (const p of items) {
     const { x, y } = pos.get(p.id);
-    const lines = wrap(p.title);
-    const h = 30 + lines.length * 17;
+    const lines = wrap(p.title, 27);
+    const h = 26 + lines.length * 17;
     const c = colorOf.get(p.id);
+    const left = x - NODE_W / 2;
     s += `<g class="pm-node ${p.status !== 'publicado' ? 'is-off' : ''}" data-id="${p.id}" tabindex="0" role="button" aria-label="${esc(`${p.code} ${p.title}`)}">
-      <rect x="${(x - 100).toFixed(1)}" y="${(y - h / 2).toFixed(1)}" width="200" height="${h}" rx="10" style="--c:${c}"/>
-      <rect class="pm-bar" x="${(x - 100).toFixed(1)}" y="${(y - h / 2).toFixed(1)}" width="6" height="${h}" rx="3" fill="${c}"/>
-      <text class="pm-code" x="${(x - 86).toFixed(1)}" y="${(y - h / 2 + 18).toFixed(1)}" fill="${c}">${esc(p.code)}${p.controls ? `  ◆ ${p.controls}` : ''}</text>
-      ${lines.map((l, i) => `<text class="pm-title" x="${(x - 86).toFixed(1)}" y="${(y - h / 2 + 36 + i * 17).toFixed(1)}">${esc(l)}</text>`).join('')}
+      <rect x="${f(left)}" y="${f(y - h / 2)}" width="${NODE_W}" height="${h}" rx="10" style="--c:${c}"/>
+      <rect class="pm-bar" x="${f(left)}" y="${f(y - h / 2)}" width="6" height="${h}" rx="3" fill="${c}"/>
+      <text class="pm-code" x="${f(left + 14)}" y="${f(y - h / 2 + 17)}" fill="${c}">${esc(p.code)}${p.controls ? `  ◆ ${p.controls}` : ''}</text>
+      ${lines.map((l, i) => `<text class="pm-title" x="${f(left + 14)}" y="${f(y - h / 2 + 34 + i * 17)}">${esc(l)}</text>`).join('')}
     </g>`;
   }
   return raw(s + '</svg>');

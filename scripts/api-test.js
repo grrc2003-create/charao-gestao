@@ -1472,7 +1472,11 @@ async function main() {
   const prAna = await login('ana@charao.eng.br');
   const prFel = await login('felipe@charao.eng.br');
   const prList = (await prFel('GET', '/processes')).data;
-  ok(prList.items.length === 8 && prList.summary.controls === 13 && prList.summary.areas === 5 && !prList.can_edit, 'carga inicial: 8 processos publicados, 13 pontos de controle, leitura para todos');
+  const prPrc = prList.items.filter(i => i.code.startsWith('PRC-'));
+  ok(prPrc.length === 8 && prPrc.reduce((n, i) => n + i.controls, 0) === 13 && new Set(prPrc.map(i => i.area)).size === 5 && !prList.can_edit, 'carga inicial: 8 processos publicados, 13 pontos de controle, leitura para todos');
+  const prSis = prList.items.filter(i => i.code.startsWith('SIS-'));
+  const prSis5 = (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-05').id}`)).data;
+  ok(prSis.length === 19 && prSis.every(i => i.status === 'publicado' && i.area.startsWith('Sistema · ')) && prSis5.content.related_items.some(r => r.code === 'SIS-06') && prSis5.versions.length === 1, 'tutoriais do sistema: 19 processos SIS publicados, com relacionados');
   ok((await prAna('GET', '/meta')).data.can.edit_processes && !(await prFel('GET', '/meta')).data.can.edit_processes, 'edição de processos: administrador sim, colaborador não');
   const prRdo = (await prFel('GET', '/processes/1')).data;
   ok(prRdo.content.steps.length === 5 && prRdo.content.steps[2].control && prRdo.content.steps[2].back_to === 1 && prRdo.content.links[0].kind === 'video', 'ficha do RDO com etapas, ponto de controle, retorno e vídeo');
@@ -1501,7 +1505,7 @@ async function main() {
   ok((await prAna('POST', `/processes/${prNew.id}/restaurar`)).data.status === 'publicado', 'processo restaurado');
   const prDel = (await prAna('POST', '/processes', { ...prBody, title: 'Rascunho descartável' })).data;
   ok((await prAna('DELETE', `/processes/${prDel.id}`)).status === 200 && (await prAna('GET', `/processes/${prDel.id}`)).status === 404, 'rascunho nunca publicado pode ser excluído');
-  ok((await prFel('GET', '/processes/manual')).data.processes.length === 9, 'manual completo com os processos publicados');
+  ok((await prFel('GET', '/processes/manual')).data.processes.length === 28, 'manual completo com os processos publicados');
   // Aprovação: gestor/coordenador criam e enviam; só o administrador publica
   const prJu = await login('juliana@charao.eng.br');
   const prJuMeta = (await prJu('GET', '/meta')).data.can;

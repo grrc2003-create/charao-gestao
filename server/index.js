@@ -56,7 +56,8 @@ function computeAppVersion() {
 let APP_VERSION = computeAppVersion();
 // Em desenvolvimento, recalcula a versão quando os arquivos mudam
 if (process.env.NODE_ENV !== 'production') {
-  try { fs.watch(path.join(ROOT, 'public'), { recursive: true }, () => { APP_VERSION = computeAppVersion(); }); } catch { /* sem suporte */ }
+  // Arquivos temporários de editores podem sumir durante a leitura: ignora e mantém a versão anterior
+  try { fs.watch(path.join(ROOT, 'public'), { recursive: true }, () => { try { APP_VERSION = computeAppVersion(); } catch { /* arquivo em edição */ } }); } catch { /* sem suporte */ }
 }
 
 // Primeiro início com banco vazio: cria o administrador inicial (ADMIN_EMAIL/ADMIN_PASSWORD)

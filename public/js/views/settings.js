@@ -19,6 +19,26 @@ const typeItem = t => html`<li class="stage-item reason-item type-item ${t.activ
   <button type="button" class="icon-btn" data-rm aria-disabled="${t.use_count ? 'true' : 'false'}" aria-label="Excluir tipo"
     title="${t.use_count ? 'Em uso: troque o tipo nesses projetos ou inative-o' : 'Excluir'}">✕</button></li>`;
 
+// Tipos de registro do projeto: nome, cor, comportamento, numeração e regras
+const REC_BEH = [['nota', 'Nota — texto e anexos'], ['decisao', 'Decisão — vigente / substituída'], ['reuniao', 'Reunião — ata com itens'], ['pendencia', 'Pendência — gera tarefa']];
+const recTypeItem = t => html`<li class="rt-item ${t.active === 0 ? 'is-inactive' : ''}" data-id="${t.id || ''}">
+  <div class="rt-main">
+    <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
+    <input type="color" data-color value="${t.color || '#2A3D50'}" aria-label="Cor do tipo">
+    <input type="text" data-name maxlength="60" value="${t.name || ''}" aria-label="Nome do tipo" placeholder="Nome do tipo" required>
+    <select data-beh aria-label="Comportamento" ${t.use_count ? 'disabled title="Em uso: o comportamento não pode ser trocado"' : ''}>${REC_BEH.map(([k, l]) => html`<option value="${k}" ${t.behavior === k ? 'selected' : ''}>${l}</option>`)}</select>
+    <input type="text" data-prefix maxlength="6" value="${t.prefix || ''}" aria-label="Numeração" placeholder="Nº (ex.: ATA)">
+    <button type="button" class="icon-btn" data-rm aria-label="Excluir tipo" title="${t.use_count ? 'Em uso: inative em vez de excluir' : 'Excluir'}">✕</button>
+  </div>
+  <div class="rt-flags">
+    <label><input type="checkbox" data-f="requires_approval" ${t.requires_approval ? 'checked' : ''}>Exige aprovação</label>
+    <label><input type="checkbox" data-f="internal" ${t.internal ? 'checked' : ''}>Interno (terceirizados não veem)</label>
+    <label><input type="checkbox" data-f="allow_colab" ${t.allow_colab ? 'checked' : ''}>Colaboradores criam</label>
+    <label><input type="checkbox" data-f="in_report" ${t.in_report !== 0 ? 'checked' : ''}>Entra na história do projeto</label>
+    <label><input type="checkbox" data-active ${t.active !== 0 ? 'checked' : ''}>Ativo</label>
+    <span class="stage-count">${t.use_count ? `${t.use_count} registro(s)` : 'nenhum registro'}</span>
+  </div></li>`;
+
 // Modelo (especialidades ou classificações): nome + um item por linha
 const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
   <div class="spec-tpl-head">
@@ -34,6 +54,7 @@ export async function view({ state, reloadMeta }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
   const [reasons, general, templates, stageTpls, cal, types] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
     api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar'), api('/settings/project-types', { query: { all: '1' } })]);
+  const recTypes = await api('/settings/record-types', { query: { all: '1' } });
 
   return {
     title: 'Configurações',
@@ -63,6 +84,18 @@ export async function view({ state, reloadMeta }) {
           </div>
           <div class="form-error" hidden></div>
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos</button></div>
+        </form>
+      </section>
+      <section class="card" id="rtypes-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('note')}Tipos de registro do projeto</h2><span class="sub">${recTypes.filter(t => t.active).length} ativo(s)</span></div>
+        <form class="card-body form" id="rtypes-form" novalidate>
+          <p class="muted" style="margin:0">Tipos usados nos <b>Registros do projeto</b> (observações, definições, atas, solicitações, ocorrências…). O <b>comportamento</b> define o que o registro faz:
+            Nota (texto e anexos) · Decisão (fica vigente e pode ser substituída) · Reunião (ata com itens que geram definições e tarefas) · Pendência (gera uma tarefa com responsável e prazo).
+            A <b>numeração</b> cria códigos como ATA-PRJ-001-001. Tipos com registros não podem ser excluídos — inative-os.</p>
+          <ul class="rt-list" id="rtype-list">${recTypes.map(recTypeItem)}</ul>
+          <button type="button" class="btn btn-ghost btn-sm" id="rtype-add" style="justify-self:start">${icon('plus')}Novo tipo de registro</button>
+          <div class="form-error" hidden></div>
+          <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos de registro</button></div>
         </form>
       </section>
       <section class="card" id="cal-card" style="max-width:900px;margin-bottom:16px">
@@ -161,6 +194,43 @@ export async function view({ state, reloadMeta }) {
         const body = { work_saturday: cf.work_saturday.checked, work_sunday: cf.work_sunday.checked, carnaval_off: cf.carnaval_off.checked, corpus_off: cf.corpus_off.checked,
           company_days: [...cl.querySelectorAll('li')].map(li => ({ date: li.querySelector('[data-cd-date]').value, name: li.querySelector('[data-cd-name]').value })) };
         try { await api('/settings/calendar', { method: 'PUT', body }); toast('Calendário de trabalho salvo.'); ctx.render(); } catch (ex) { cerr.textContent = ex.message; cerr.hidden = false; }
+      });
+      // Tipos de registro do projeto
+      const rf = root.querySelector('#rtypes-form');
+      const rl = root.querySelector('#rtype-list');
+      root.querySelector('#rtype-add').addEventListener('click', () => {
+        rl.insertAdjacentHTML('beforeend', recTypeItem({ name: '', behavior: 'nota', color: '#5B6B7A', active: 1, in_report: 1, allow_colab: 1, use_count: 0 }).toString());
+        rl.lastElementChild.querySelector('[data-name]').focus();
+      });
+      rl.addEventListener('click', e => {
+        const li = e.target.closest('.rt-item');
+        if (!li) return;
+        if (e.target.closest('[data-rm]')) li.remove();
+        const mv = e.target.closest('[data-move]');
+        if (mv) {
+          const sib = Number(mv.dataset.move) < 0 ? li.previousElementSibling : li.nextElementSibling;
+          if (sib) Number(mv.dataset.move) < 0 ? sib.before(li) : sib.after(li);
+        }
+      });
+      rl.addEventListener('change', e => { if (e.target.matches('[data-active]')) e.target.closest('.rt-item').classList.toggle('is-inactive', !e.target.checked); });
+      rf.addEventListener('submit', async e => {
+        e.preventDefault();
+        const rerr = rf.querySelector('.form-error');
+        rerr.hidden = true;
+        const payload = [...rl.querySelectorAll('.rt-item')].map(li => ({
+          id: li.dataset.id ? Number(li.dataset.id) : null,
+          name: li.querySelector('[data-name]').value,
+          color: li.querySelector('[data-color]').value,
+          behavior: li.querySelector('[data-beh]').value,
+          prefix: li.querySelector('[data-prefix]').value,
+          active: li.querySelector('[data-active]').checked,
+          ...Object.fromEntries([...li.querySelectorAll('[data-f]')].map(c => [c.dataset.f, c.checked])),
+        }));
+        try {
+          await api('/settings/record-types', { method: 'PUT', body: { types: payload } });
+          toast('Tipos de registro salvos.');
+          ctx.render();
+        } catch (ex) { rerr.textContent = ex.message; rerr.hidden = false; }
       });
       // Tipos de projeto
       const tf = root.querySelector('#types-form');

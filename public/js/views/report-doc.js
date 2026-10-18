@@ -248,7 +248,7 @@ export async function view({ query }) {
 
       ${r.gantt && r.gantt_tasks.length ? html`<section class="r-section r-gantt">
         <h3 class="r-h">Cronograma das tarefas (Gantt) <span class="muted small">(${r.gantt_tasks.length})</span></h3>
-        ${ganttChart(r.gantt_tasks, { ref: r.reference_date, groupLabel: groupLabelFor(r.group, multiProject) || (t => stageLabel(t, multiProject)), showProject: multiProject })}
+        ${ganttChart(r.gantt_tasks, { ref: r.reference_date, groupLabel: groupLabelFor(r.group, multiProject) || (t => stageLabel(t, multiProject)), showProject: multiProject, marks: r.gantt_marks || [] })}
       </section>` : ''}
 
       ${r.level !== 'resumo' ? html`<section class="r-section ${r.gantt ? 'r-after-gantt' : ''}">

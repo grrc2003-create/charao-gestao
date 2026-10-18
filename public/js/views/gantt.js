@@ -71,7 +71,7 @@ function ticks(from, to) {
  *               noun: ['tarefa(s)', 'concluída(s)'], head: 'Tarefa', legend: html, note: texto,
  *               range: { from, to } — mostra só o período (ex.: uma semana), com as tarefas que passam por ele }
  */
-export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly = false, color, statusOf, noun = ['tarefa(s)', 'concluída(s)'], head = 'Tarefa', legend, note, range, collapseSubs = false, openSubs = new Set() } = {}) {
+export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly = false, color, statusOf, noun = ['tarefa(s)', 'concluída(s)'], head = 'Tarefa', legend, note, range, collapseSubs = false, openSubs = new Set(), marks = [], markHref = m => `#/projetos/${m.project_id}/registros/${m.id}` } = {}) {
   if (!rows.length) return html`<p class="muted">Sem ${noun[0].replace('(s)', 's')} para o cronograma.</p>`;
   const lastOf = s => [s.end, s.due, s.lateTo].filter(Boolean).reduce((b, v) => (v > b ? v : b), s.end);
   let spans = rows.map(t => ({ t, s: ganttSpan(t, ref) }));
@@ -89,6 +89,9 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
   const isKid = x => collapseSubs && x.t.parent_code && kidsOf.has(x.t.parent_code);
   let from = spans.reduce((a, x) => (x.s.start < a ? x.s.start : a), spans[0].s.start);
   let to = spans.reduce((a, x) => (lastOf(x.s) > a ? lastOf(x.s) : a), spans[0].s.end);
+  // Registros do projeto (atas, definições, ocorrências…): o período inclui o momento de cada um
+  const mk = (marks || []).filter(m => m.date && (!range || (m.date >= range.from && m.date <= range.to)));
+  if (!range) for (const m of mk) { if (m.date < from) from = m.date; if (m.date > to) to = m.date; }
   if (ref > to) to = ref;
   if (ref < from) from = ref;
   if (range) {
@@ -110,7 +113,9 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
   const showToday = ref >= from && ref < to;
   const wk = 100 / Math.max(tk.length, 1);
   // Semanal: colunas alternadas para facilitar a leitura de cada semana
-  const grid = html`${weekly ? tk.filter(x => x.week % 2).map(x => html`<i class="g-week" style="left:${pos(x.d).toFixed(2)}%;width:${wk.toFixed(2)}%"></i>`) : ''}${tk.map(x => html`<i class="g-tick" style="left:${pos(x.d).toFixed(2)}%"></i>`)}${showToday ? html`<i class="g-today" style="left:${todayPct.toFixed(2)}%"></i>` : ''}`;
+  const mid = d => (pos(d) + pos(addDays(d, 1))) / 2;
+  const mlines = mk.map(m => html`<i class="g-mline" style="left:${mid(m.date).toFixed(2)}%;--c:${m.color}"></i>`);
+  const grid = html`${weekly ? tk.filter(x => x.week % 2).map(x => html`<i class="g-week" style="left:${pos(x.d).toFixed(2)}%;width:${wk.toFixed(2)}%"></i>`) : ''}${tk.map(x => html`<i class="g-tick" style="left:${pos(x.d).toFixed(2)}%"></i>`)}${mlines}${showToday ? html`<i class="g-today" style="left:${todayPct.toFixed(2)}%"></i>` : ''}`;
 
   const taskRow = ({ t, s }) => {
     const c = color ? color(t) : STATUS_COLOR[t.eff_status];
@@ -170,6 +175,23 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     body.push(...spans.map(taskRow));
   }
 
+  // Linha dos registros do projeto: um marcador por registro (empilhados quando ficam muito próximos)
+  if (mk.length) {
+    const placed = [];
+    const pins = mk.map(m => {
+      const x = mid(m.date);
+      let lv = 0;
+      while (placed.some(q => q.lv === lv && Math.abs(q.x - x) < 1.4) && lv < 3) lv++;
+      placed.push({ x, lv });
+      const tip = `${fmtDate(m.date)} · ${m.type_name}${m.code ? ` ${m.code}` : ''} · ${m.title}`;
+      return html`<a class="g-mark" href="${markHref(m)}" style="left:${x.toFixed(2)}%;top:${4 + lv * 11}px;--c:${m.color}" title="${tip}" aria-label="${tip}"></a>`;
+    });
+    const lvMax = Math.max(...placed.map(q => q.lv));
+    body.unshift(html`<tr class="g-row g-marks-row" style="--mh:${22 + lvMax * 11}px"><td class="g-label"><b>Registros do projeto</b>
+      <span class="g-meta">${mk.length} registro(s) · ${[...new Set(mk.map(m => m.type_name))].slice(0, 4).join(', ')}${new Set(mk.map(m => m.type_name)).size > 4 ? '…' : ''}</span></td>
+      <td class="g-track">${grid}${pins}</td></tr>`);
+  }
+
   // Ligações de dependência (setas desenhadas depois de montar) e caminho crítico
   const hasLinks = rows.some(t => t.preds?.length);
   const hasCritical = rows.some(t => t.critical);
@@ -189,6 +211,7 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       <span><i class="g-due g-due-legend"></i>Prazo</span>
       <span><i class="g-due g-orig g-due-legend"></i>Prazo original (reagendada)</span>
       <span><i class="g-today-legend"></i>Hoje (${fmtDate(ref)})</span>
+      ${mk.length ? html`<span><i class="g-mark-legend"></i>Registro do projeto (cor do tipo · linha = dia do registro)</span>` : ''}
     </div>`}
     ${hasLinks ? html`<div class="g-legend g-legend-dep"><span><i class="g-link-legend"></i>Dependência (término → início)</span>
       ${hasCritical ? html`<span><i class="g-sw g-sw-crit"></i>Caminho crítico: sequência sem folga que define a data final</span>` : ''}</div>` : ''}
@@ -281,7 +304,7 @@ export function bindGanttSections(root, fetcher) {
               ${wk !== monday(g.ref) ? html`<button type="button" class="btn btn-ghost btn-sm" data-gper="${monday(g.ref)}">Esta semana</button>` : ''}</div>` : ''}
             ${g.tasks.some(x => x.parent_code) ? html`<button type="button" class="btn btn-ghost btn-sm" data-gsuball>${openSubs.size ? 'Ocultar subtarefas' : 'Mostrar subtarefas'}</button>` : ''}
           </div>`;
-          body.innerHTML = html`${bar}${ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject, range, collapseSubs: true, openSubs })}`.toString();
+          body.innerHTML = html`${bar}${ganttChart(g.tasks, { ref: g.ref, groupLabel: label, showProject, range, collapseSubs: true, openSubs, marks: g.marks || [] })}`.toString();
           // Subtarefas: abrir/fechar embaixo da tarefa principal
           const toggleSubs = (code, on) => {
             body.querySelectorAll(`tr[data-gsub="${code}"]`).forEach(r => { r.hidden = !on; });

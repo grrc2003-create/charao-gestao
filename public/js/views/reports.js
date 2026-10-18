@@ -7,6 +7,7 @@ const TYPES = [
   ['usuario', 'Usuário', 'Desempenho e tarefas de um responsável', 'user'],
   ['equipe', 'Gestor / equipe', 'Consolidado da equipe sob um gestor', 'team'],
   ['geral', 'Geral', 'Panorama de todos os projetos acessíveis', 'dashboard'],
+  ['historia', 'História do projeto', 'Narrativa cronológica: reuniões, definições, entregas', 'history'],
 ];
 const LEVELS = [
   ['resumo', 'Resumo', 'Indicadores principais e panorama visual'],
@@ -28,6 +29,7 @@ export async function view({ state, query }) {
   const opt = (v, l) => html`<option value="${v}" ${String(init.id) === String(v) ? 'selected' : ''}>${l}</option>`;
   const scopes = {
     projeto: [projectOptions(meta.projects, init.id, (v, l) => opt(v, l))],
+    historia: [projectOptions(meta.projects, init.id, (v, l) => opt(v, l))],
     usuario: users.filter(u => u.active).map(u => opt(u.id, `${u.name}${u.job_title ? ` · ${u.job_title}` : ''}`)),
     equipe: managers.map(u => opt(u.id, `${u.name} · ${u.team_size} integrante(s)`)),
   };
@@ -43,7 +45,7 @@ export async function view({ state, query }) {
       <div class="report-config">
         <form class="card card-pad form" id="rep-form" novalidate>
           <div class="field"><span class="label">1. Tipo de relatório</span>
-            <div class="segmented seg-4">${TYPES.map(([k, l, d, ic]) => html`<label><input type="radio" name="type" value="${k}" ${init.type === k ? 'checked' : ''}>
+            <div class="segmented seg-5">${TYPES.map(([k, l, d, ic]) => html`<label><input type="radio" name="type" value="${k}" ${init.type === k ? 'checked' : ''}>
               <span class="seg-ic">${icon(ic)}</span>${l}<small>${d}</small></label>`)}</div></div>
 
           <div class="field" id="scope-field"><label for="scope" id="scope-label">2. Escopo</label>
@@ -102,6 +104,7 @@ export async function view({ state, query }) {
       const sel = f.querySelector('#scope');
       const labels = {
         projeto: ['2. Escopo — qual projeto?', 'Inclui todas as tarefas do projeto visíveis para você.'],
+        historia: ['2. Escopo — qual projeto?', 'Conta a história do projeto: tarefas, prazos, reuniões, definições e demais registros, mês a mês.'],
         usuario: ['2. Escopo — qual usuário?', 'Tarefas atribuídas ao usuário.'],
         equipe: ['2. Escopo — qual gestor?', 'Tarefas do gestor e de todos os integrantes da equipe.'],
       };
@@ -144,6 +147,7 @@ export async function view({ state, query }) {
         const type = fd.get('type');
         const err = f.querySelector('.form-error');
         if (type !== 'geral' && !fd.get('id')) { err.textContent = 'Selecione o escopo do relatório.'; err.hidden = false; return; }
+        if (type === 'historia') return ctx.navigate(`/imprimir/historia/${fd.get('id')}${fd.get('gantt') ? '' : '?gantt=0'}`);
         const qs = new URLSearchParams({ type, level: fd.get('level') });
         if (type !== 'geral') qs.set('id', fd.get('id'));
         if (fd.get('from')) qs.set('from', fd.get('from'));

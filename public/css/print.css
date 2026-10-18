@@ -324,3 +324,22 @@
 .bm-pay { border: 1px solid #9AA3AD; padding: 6px 10px; white-space: pre-line; min-width: 70mm; }
 .bm-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 30mm; margin-top: 16mm; font-size: 8pt; text-align: center; }
 .bm-sign span { display: block; border-top: 1px solid #2A3D50; margin-bottom: 3px; }
+
+/* Gantt: registros do projeto (marcadores na primeira linha e linha vertical no dia) */
+.g-mline { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--c); opacity: .45; z-index: 1; pointer-events: none; }
+.g-marks-row .g-track { height: var(--mh, 22px); }
+.g-marks-row td { background: #FBFAF7; border-bottom: 1px solid #E9E1D3; }
+.g-mark { position: absolute; width: 10px; height: 10px; background: var(--c); border: 1.5px solid #fff; box-shadow: 0 0 0 1px var(--c);
+  transform: translateX(-50%) rotate(45deg); z-index: 4; border-radius: 2px; }
+.g-mark:hover { transform: translateX(-50%) rotate(45deg) scale(1.35); }
+.g-mark-legend { display: inline-block; width: 9px; height: 9px; background: #2A3D50; transform: rotate(45deg); border-radius: 2px; }
+
+/* História do projeto e ata */
+.hist-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 8.5pt; color: #46535F; }
+.hist-counts span { display: inline-flex; align-items: center; gap: 5px; }
+.hist-counts i { width: 8px; height: 8px; border-radius: 2px; background: var(--c); transform: rotate(45deg); }
+.hist-ch { margin: 10px 0 6px; padding-left: 10px; border-left: 2.5px solid #E4DCCB; }
+.hist-month { margin: 0 0 4px; font-size: 10pt; color: #2A3D50; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; break-after: avoid; }
+.hist-mc { font-size: 7.5pt; font-weight: 500; color: #6E7A86; }
+.r-p.pre { white-space: pre-wrap; }
+.ata-items td { vertical-align: top; }

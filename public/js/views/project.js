@@ -7,9 +7,11 @@ import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
 import { ganttSection, bindGanttSections } from './gantt.js';
 import { calendarSection, bindCalendar } from './calendar-ui.js';
+import { recordsCard, bindRecordsCard } from './records.js';
 
-export async function view({ params, query, setQuery, render }) {
-  const [p, impactRank] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => [])]);
+export async function view({ params, query, setQuery, render, navigate }) {
+  const [p, impactRank, recs] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
+    api(`/projects/${params.id}/records`).catch(() => null)]);
   const active = query.get('status') || '';
   const org = readOrg(query);
   const stage = Number(query.get('stage')) || 0;
@@ -34,11 +36,13 @@ export async function view({ params, query, setQuery, render }) {
         actions: html`
           ${p.can_edit ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/editar">${icon('edit')}Editar</a>` : ''}
           <a class="btn btn-ghost" href="#/imprimir/relatorio?type=projeto&id=${p.id}&level=detalhado">${icon('print')}Relatório</a>
+          <a class="btn btn-ghost" href="#/imprimir/historia/${p.id}">${icon('history')}História</a>
           ${p.can_create_task ? html`<a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
       ${kpiBlock(p.summary)}
       ${execKpis(p.summary)}
+      ${recs ? recordsCard(recs) : ''}
       ${checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` })}
 
       <div class="grid grid-dash section">
@@ -115,6 +119,7 @@ export async function view({ params, query, setQuery, render }) {
       bindCommon(root);
       bindGanttSections(root, url => api(url));
       bindCalendar(root, p);
+      if (recs) bindRecordsCard(root, recs, navigate);
       bindChecklistCards(root);
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {

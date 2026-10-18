@@ -6,6 +6,9 @@ import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';
 import * as MyPanel from './views/my-panel.js';
+import * as Records from './views/records.js';
+import * as ReportAta from './views/report-ata.js';
+import * as ReportHistory from './views/report-history.js';
 import * as Projects from './views/projects.js';
 import * as Project from './views/project.js';
 import * as Tasks from './views/tasks.js';
@@ -65,6 +68,12 @@ const routes = [
   ['/imprimir/campo', FieldList.view, { print: true }],
   ['/imprimir/checklist/:id', ReportChecklist.view, { print: true }],
   ['/imprimir/medicao/:id', ReportMeasurement.view, { print: true }],
+  ['/imprimir/ata/:id', ReportAta.view, { print: true }],
+  ['/imprimir/historia/:id', ReportHistory.view, { print: true }],
+  ['/projetos/:id/registros', Records.list],
+  ['/projetos/:id/registros/novo', Records.form],
+  ['/projetos/:id/registros/:rid', Records.detail],
+  ['/projetos/:id/registros/:rid/editar', Records.form],
   ['/contratos', Contracts.list],
   ['/contratos/novo', Contracts.form],
   ['/contratos/:id', Contracts.view],
@@ -104,7 +113,7 @@ const homePath = () => (state.meta?.can.home === 'empresa' && sec('dashboard') ?
 function sectionOfPath(path) {
   if (path === '/' || path === '/painel') return null;
   if (path === '/empresa') return 'dashboard';
-  if (path.startsWith('/projetos')) return 'projetos';
+  if (path.startsWith('/projetos') || path.startsWith('/imprimir/ata') || path.startsWith('/imprimir/historia')) return 'projetos';
   if (path === '/tarefas' || path === '/tarefas/nova' || path.startsWith('/recorrencias')) return 'tarefas';
   if (/^\/usuarios\/\d+$/.test(path)) return Number(path.split('/')[2]) === state.user?.id ? null : 'usuarios|cadastro_usuarios';
   if (path === '/usuarios/novo' || /^\/usuarios\/\d+\/editar$/.test(path)) return 'cadastro_usuarios';

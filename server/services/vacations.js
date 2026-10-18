@@ -293,7 +293,7 @@ export function myVacations(ctx) {
 
 // Gestão da Equipe › Férias: visão geral do ano
 export function vacationsOverview(ctx, yearIn) {
-  if (!hasSection(ctx.user, 'equipe')) throw forbidden('A seção Gestão da Equipe não está liberada para o seu usuário.');
+  if (!hasSection(ctx.user, 'equipe')) throw forbidden('A seção Organograma e Férias não está liberada para o seu usuário.');
   const ref = today();
   const year = /^\d{4}$/.test(String(yearIn || '')) ? Number(yearIn) : Number(ref.slice(0, 4));
   const people = all(`SELECT u.*, m.name AS manager_name FROM users u LEFT JOIN users m ON m.id = u.manager_id WHERE u.active = 1 AND u.is_external = 0 ORDER BY u.name`);

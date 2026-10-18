@@ -46,13 +46,13 @@ export async function list({ state }) {
 
 // Seções que o administrador libera por usuário
 const SECTION_GROUPS = [
-  ['Gestão de Obras', [['dashboard', 'Visão da empresa', 'dashboard geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Usuários (desempenho)', 'telas de desempenho das pessoas'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
-  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos'], ['equipe', 'Gestão da Equipe', 'organograma, férias e cadastro da equipe']]],
-  ['Administração', [['cadastro_usuarios', 'Cadastro de usuários', 'criar, editar e liberar acessos'], ['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
+  ['Gestão de Obras', [['dashboard', 'Visão da empresa', 'dashboard geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Desempenho das pessoas', 'telas de desempenho de outras pessoas'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
+  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos'], ['cadastro_usuarios', 'Cadastro da Equipe', 'cadastrar pessoas, função, acesso e permissões'], ['equipe', 'Organograma e Férias', 'organograma, mapa de férias e aprovações']]],
+  ['Administração', [['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
 ];
 
 export async function form({ params, query, state, navigate, reloadMeta }) {
-  if (!state.meta.can.manage_users) throw new Error('A seção Cadastro de usuários não está liberada para o seu usuário.');
+  if (!state.meta.can.manage_users) throw new Error('A seção Cadastro da Equipe não está liberada para o seu usuário.');
   const editing = !!params.id;
   const [detail, users, projects] = await Promise.all([
     editing ? api(`/users/${params.id}`) : Promise.resolve(null),
@@ -79,8 +79,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
     html: html`
       ${pageHead({
         back: (state.meta.can.sections || []).some(k => k === 'equipe' || k === 'cadastro_usuarios') ? { href: '#/equipe/cadastro', label: 'Cadastro da Equipe' } : { href: '#/usuarios', label: 'Usuários' },
-        eyebrow: 'Administração de acesso',
-        title: editing ? (ext ? 'Editar terceirizado' : 'Editar usuário e permissões') : ext ? 'Novo terceirizado' : 'Novo usuário',
+        eyebrow: 'Cadastro da Equipe',
+        title: editing ? (ext ? 'Terceirizado: acesso e permissões' : 'Acesso e permissões') : ext ? 'Novo terceirizado' : 'Novo usuário (com acesso)',
         sub: editing ? u.name : '',
         actions: editing ? html`<a class="btn btn-ghost" href="#/usuarios/${u.id}">${icon('dashboard')}Ver desempenho</a>` : '',
       })}
@@ -128,7 +128,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           <span class="hint">Marque as seções que esta pessoa pode abrir. O que não estiver marcado some do menu e fica bloqueado. A própria tela do usuário (com o Planejamento da semana) e as tarefas atribuídas a ela sempre abrem.</span>
           ${SECTION_GROUPS.map(([g, list]) => html`<div class="sec-group"><div class="sub-label">${g}</div>
             <div class="checks sec-checks">${list.map(([k, l, hint]) => html`<label><input type="checkbox" name="section" value="${k}" ${secSet.has(k) ? 'checked' : ''} ${!isAdminMe && !mySecs.has(k) && !secSet.has(k) ? 'disabled' : ''}>${l}<span class="muted" style="font-size:12px">${hint}</span></label>`)}</div></div>`)}
-          <span class="hint">Contratos e Tarefas financeiras também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre o Cadastro de usuários.</span>
+          <span class="hint">Contratos e Tarefas financeiras também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre o Cadastro da Equipe.</span>
           <div class="field" style="max-width:420px"><label for="home">Tela de entrada</label>
             <select id="home" name="home">
               <option value="pessoal" ${u.home !== 'empresa' ? 'selected' : ''}>Meu painel (dashboard da própria pessoa)</option>

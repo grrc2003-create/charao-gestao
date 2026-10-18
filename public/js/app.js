@@ -138,7 +138,7 @@ function sectionOfPath(path) {
   if (path === '/configuracoes') return 'configuracoes';
   return null;
 }
-const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Gestão da Equipe', 'usuarios|cadastro_usuarios': 'Usuários', cadastro_usuarios: 'Cadastro de usuários', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Usuários', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 
 export function navigate(path, { replace = false } = {}) {
   const h = '#' + path;

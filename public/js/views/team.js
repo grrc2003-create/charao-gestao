@@ -193,7 +193,7 @@ export async function list({ query, setQuery, state }) {
     html: html`
       ${pageHead({
         eyebrow: 'Gestão da Equipe', title: 'Cadastro da Equipe',
-        sub: 'Função e responsabilidades de cada pessoa, setor e admissão. Acesso e permissões ficam no Cadastro de usuários.',
+        sub: 'Função e responsabilidades de cada pessoa, setor e admissão. Ao abrir uma pessoa: função e responsabilidades, além do acesso e das permissões.',
         actions: html`${(state.meta.can.sections || []).includes('equipe') ? html`<a class="btn btn-ghost" href="#/equipe/organograma">${icon('team')}Organograma</a>` : ''}
           ${state.meta.can.manage_users ? html`<a class="btn btn-ghost" href="#/usuarios/novo?perfil=terceirizado">${icon('plus')}Novo terceirizado</a>
             <a class="btn btn-ghost" href="#/usuarios/novo">${icon('key')}Novo usuário (com acesso)</a>` : ''}
@@ -265,8 +265,8 @@ export async function form({ params, state, navigate }) {
           <span class="hint">Períodos aquisitivos encerrados antes desta data são considerados quitados (férias já tiradas fora do sistema). Em branco: controla desde a admissão.</span></div>` : ''}
         ${own ? html`<div class="form-row"><div class="field"><label for="tm-ph">Telefone</label><input type="tel" id="tm-ph" name="phone" maxlength="40" value="${u.phone || ''}"></div>
           ${!creating ? html`<div class="field"><span class="label">Situação</span><label class="switch"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}>Ativo</label></div>` : ''}</div>`
-          : html`<div class="notice">${icon('info')}<span>Nome, e-mail, perfil, acesso e permissões desta pessoa ficam no <a href="#/usuarios/${u.id}/editar">Cadastro de usuários</a>.</span></div>`}
-        ${!creating && !u.login_enabled && !u.is_external && state.meta.can.manage_users ? html`<div class="notice">${icon('key')}<span>Esta pessoa não acessa o sistema. Para liberar o acesso, abra o <a href="#/usuarios/${u.id}/editar">Cadastro de usuários</a> e informe e-mail e senha provisória.</span></div>` : ''}
+          : html`<div class="notice">${icon('info')}<span>Nome, e-mail, perfil, acesso e permissões desta pessoa: <a href="#/usuarios/${u.id}/editar">Acesso e permissões</a>.</span></div>`}
+        ${!creating && !u.login_enabled && !u.is_external && state.meta.can.manage_users ? html`<div class="notice">${icon('key')}<span>Esta pessoa não acessa o sistema. Para liberar o acesso, abra <a href="#/usuarios/${u.id}/editar">Acesso e permissões</a> e informe e-mail e senha provisória.</span></div>` : ''}
         <div class="form-error" hidden></div>
         <div class="form-actions"><a class="btn btn-ghost" href="#/equipe/cadastro">Cancelar</a><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
       </form>`,

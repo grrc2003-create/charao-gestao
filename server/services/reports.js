@@ -1,5 +1,6 @@
 // Montagem de dados para relatórios (A4) e listas de campo. Sempre respeita as permissões do solicitante.
 import { all, one } from '../db.js';
+import { recordMarks } from './records.js';
 import { badRequest, notFound, oneOf, intOrNull, date } from '../lib/http.js';
 import { canAccessProject, canSeeUser, teamIds } from '../lib/permissions.js';
 import { summarize, userStats, today, monthlyTrend, localDate, PERIODS, groupByPeriod, periodKey, periodLabel, byDue } from './metrics.js';
@@ -173,6 +174,7 @@ export function buildReport(ctx, q) {
     reschedules: rescheduleSummary,
     trend: monthlyTrend(tasks, today(), 6),
     chronic_min: getSetting('chronic_reschedule_threshold'),
+    gantt_marks: withGantt && type === 'projeto' ? recordMarks(ctx, id) : [],
     gantt_tasks: withGantt ? (() => {
       // Ligações (predecessoras) entre as tarefas do Gantt e o caminho crítico
       const links = ganttLinks(tasks.map(t => t.id));
@@ -297,5 +299,7 @@ export function ganttFor(ctx, q) {
       const ordered = [...tasks].sort(byStage);
       return withProgress(ordered, ordered.map(t => ({ ...ganttRow(t), dep_key: `t:${t.id}`, preds: links.get(t.id) || [], critical: crit.has(t.id) })));
     })(),
+    // Registros do projeto: o momento em que cada um foi feito
+    marks: projectId ? recordMarks(ctx, projectId) : [],
   };
 }

@@ -11,6 +11,7 @@ import { activeReason, getSetting } from './settings.js';
 import { workingDaysBetween } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask } from './finance.js';
+import { originOfTask } from './records.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
@@ -234,6 +235,7 @@ export function getTask(ctx, id) {
     work_days: t.start_date && t.due_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date) : null,
     calendar_days: t.start_date && t.due_date && t.due_date >= t.start_date ? daysBetween(t.start_date, t.due_date) + 1 : null,
     dep_shift: shiftedOfTask(id),
+    origin_record: originOfTask(ctx, t.origin_record_id),
     ...(t.task_type === 'checklist' ? checklistDetail(ctx, t) : {}),
   };
 }

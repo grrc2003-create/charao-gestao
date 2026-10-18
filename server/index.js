@@ -22,6 +22,8 @@ import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
 import * as Checklist from './services/checklist.js';
+import * as Records from './services/records.js';
+import { projectHistory } from './services/history.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
@@ -197,6 +199,18 @@ api.get('/api/meta', (req, res, { ctx }) => {
     },
   });
 });
+
+// ---------- Registros do projeto (observações, definições, atas, pendências…) ----------
+const recSec = ctx => requireSection(ctx.user, 'projetos');
+api.get('/api/projects/:id/records', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.listRecords(ctx, intOrNull(params.id))); });
+api.post('/api/projects/:id/records', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 201, { id: Records.createRecord(ctx, intOrNull(params.id), body, clientIp(req)) }); });
+api.get('/api/projects/:id/history', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, projectHistory(ctx, intOrNull(params.id))); });
+api.get('/api/records/:id', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.getRecord(ctx, intOrNull(params.id))); });
+api.put('/api/records/:id', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.updateRecord(ctx, intOrNull(params.id), body, clientIp(req))); });
+api.post('/api/records/:id/actions/:action', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.recordAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))); });
+api.post('/api/records/:id/files', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.addRecordFiles(ctx, intOrNull(params.id), body)); });
+api.delete('/api/records/:id/files/:fid', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.removeRecordFile(ctx, intOrNull(params.id), intOrNull(params.fid))); });
+api.get('/api/record-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Records.recordFileForUser(ctx, intOrNull(params.id))));
 
 // ---------- Tarefas financeiras (liberação por usuário) ----------
 api.get('/api/finance/month', (req, res, { ctx, query }) => send(res, 200, Finance.financeMonth(ctx, query.get('mes'))));
@@ -413,6 +427,8 @@ api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listS
 api.put('/api/settings/specialties', (req, res, { ctx, body }) => send(res, 200, Settings.saveSpecialtyTemplates(ctx, body.templates, clientIp(req))));
 api.get('/api/settings/project-types', (req, res, { query }) => send(res, 200, Settings.listProjectTypes({ includeInactive: query.get('all') === '1' })));
 api.put('/api/settings/project-types', (req, res, { ctx, body }) => send(res, 200, Settings.saveProjectTypes(ctx, body.types, clientIp(req))));
+api.get('/api/settings/record-types', (req, res, { query }) => send(res, 200, Records.listRecordTypes({ includeInactive: query.get('all') === '1' })));
+api.put('/api/settings/record-types', (req, res, { ctx, body }) => send(res, 200, Records.saveRecordTypes(ctx, body.types, clientIp(req))));
 api.get('/api/settings/stage-templates', (req, res) => send(res, 200, Settings.listStageTemplates()));
 api.put('/api/settings/stage-templates', (req, res, { ctx, body }) => send(res, 200, Settings.saveStageTemplates(ctx, body.templates, clientIp(req))));
 

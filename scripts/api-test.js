@@ -1279,6 +1279,81 @@ async function main() {
   ok((await cuRic('POST', '/users', { name: 'Y', email: 'y2@charao.eng.br', role: 'colaborador', password: 'Senha!2026x', sections: ['auditoria'] })).status === 403, 'só libera seções que ele mesmo tem');
   ok((await cuRic('PUT', `/users/${kAnaId}`, { name: 'Ana' })).status === 403, 'quem não é administrador não edita administrador');
 
+  // ---------- Registros do projeto ----------
+  console.log('Registros do projeto');
+  const rgAna = await login('ana@charao.eng.br');
+  const rgRicU = (await rgAna('GET', '/users/2')).data.user;
+  await rgAna('PUT', '/users/2', { ...rgRicU, sections: ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'configuracoes'], home: 'pessoal' });
+  const rgRic = await login('ricardo@charao.eng.br');
+  const rgMar = await login('marcos@charao.eng.br');
+  const rgTypes = (await rgAna('GET', '/settings/record-types')).data;
+  ok(rgTypes.length === 10 && rgTypes.some(t => t.behavior === 'reuniao') && rgTypes.some(t => t.requires_approval), 'tipos de registro padrão cadastrados (10)');
+  const rgTid = n => rgTypes.find(t => t.name === n).id;
+  const rgObs = await rgMar('POST', '/projects/1/records', { type_id: rgTid('Observação'), title: 'Acesso de caminhões só após 8h', body: 'Combinado com o condomínio.', pinned: true, files: [{ data: tinyPng(), caption: 'Placa' }] });
+  ok(rgObs.status === 201, 'colaborador registra observação (tipo liberado a colaboradores)');
+  const rgObsV = (await rgMar('GET', `/records/${rgObs.data.id}`)).data;
+  ok(rgObsV.status === 'ativo' && rgObsV.pinned === 1 && rgObsV.files.length === 1 && !rgObsV.code, 'observação fixada, com anexo e sem numeração');
+  ok((await rgMar('GET', `/record-files/${rgObsV.files[0].id}`)).status === 200, 'anexo do registro abre para quem acessa o projeto');
+  ok((await rgMar('POST', '/projects/1/records', { type_id: rgTid('Definição'), title: 'X' })).status === 403, 'colaborador não registra definição (tipo não liberado)');
+  ok((await rgRic('POST', '/projects/1/records', { type_id: rgTid('Definição'), title: 'X', record_date: '2099-01-01' })).status === 400, 'data do registro não pode ser futura');
+  const rgD1 = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Definição'), title: 'Piso do térreo: porcelanato 60x60', decided_by: 'Cliente', origin: 'E-mail' })).data.id;
+  const rgD1v = (await rgRic('GET', `/records/${rgD1}`)).data;
+  ok(rgD1v.status === 'vigente' && rgD1v.code === 'DEF-PRJ-001-001', 'definição vigente com numeração própria (DEF-PRJ-001-001)');
+  const rgD2 = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Definição'), title: 'Piso do térreo: porcelanato 90x90 cinza', replaces_id: rgD1 })).data.id;
+  ok((await rgRic('GET', `/records/${rgD1}`)).data.status === 'substituida' && (await rgRic('GET', `/records/${rgD2}`)).data.history_chain.length === 1, 'nova definição substitui a anterior e guarda o histórico');
+  // Pendência gera tarefa automaticamente
+  const rgP = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Solicitação do cliente'), title: 'Instalar ponto extra de tomada na sala', decided_by: 'Cliente', assignee_id: 4, due_date: '2099-03-10' })).data.id;
+  const rgPv = (await rgRic('GET', `/records/${rgP}`)).data;
+  ok(rgPv.status === 'aberta' && rgPv.task_id && rgPv.code === 'SOL-PRJ-001-001', 'pendência aberta gera a tarefa automaticamente');
+  const rgPt = (await rgMar('GET', `/tasks/${rgPv.task_id}`)).data;
+  ok(rgPt.assignee_id === 4 && rgPt.due_date === '2099-03-10' && rgPt.origin_record?.code === 'SOL-PRJ-001-001', 'tarefa gerada com responsável, prazo e origem');
+  await rgRic('POST', `/tasks/${rgPv.task_id}/actions/conclude`, SD);
+  ok((await rgRic('GET', `/records/${rgP}`)).data.eff_status === 'resolvida', 'pendência fica resolvida quando a tarefa é concluída');
+  // Aprovação
+  const rgA = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Alteração de escopo / aditivo'), title: 'Incluir pérgola na cobertura' })).data.id;
+  ok((await rgRic('GET', `/records/${rgA}`)).data.status === 'aguardando_aprovacao', 'tipo que exige aprovação fica aguardando');
+  ok((await rgRic('POST', `/records/${rgA}/actions/approve`)).status === 403, 'quem registrou não aprova o próprio registro');
+  ok((await rgAna('POST', `/records/${rgA}/actions/approve`, { note: 'ok' })).data.status === 'vigente', 'administrador aprova e a alteração fica vigente');
+  // Ata: rascunho → emitida (definições e demandas)
+  const rgAta = await rgRic('POST', '/projects/1/records', { type_id: rgTid('Ata de reunião'), title: 'Reunião de alinhamento com o cliente', meeting_time: '09:30', location: 'Canteiro',
+    participants: 'Ricardo Menezes\nCarlos Souza - Incorporadora Horizonte', agenda: 'Acabamentos e prazos',
+    items: [{ kind: 'info', text: 'Cliente aprovou o cronograma' }, { kind: 'definicao', text: 'Bancadas em granito preto São Gabriel' }, { kind: 'demanda', text: 'Enviar amostras de rejunte', assignee_id: 4, due_date: '2099-02-15' }] });
+  ok(rgAta.status === 201, 'ata criada em rascunho');
+  let rgAv = (await rgRic('GET', `/records/${rgAta.data.id}`)).data;
+  ok(rgAv.status === 'rascunho' && rgAv.items.length === 3 && !rgAv.items.some(i => i.task_id) && rgAv.participants[1].company === 'Incorporadora Horizonte', 'rascunho guarda itens e participantes (sem gerar nada ainda)');
+  rgAv = (await rgRic('POST', `/records/${rgAta.data.id}/actions/emit`)).data;
+  const rgDem = rgAv.items.find(i => i.kind === 'demanda');
+  const rgDef = rgAv.items.find(i => i.kind === 'definicao');
+  ok(rgAv.status === 'emitida' && rgDem.task_id && rgDef.decision_id && rgAv.code === 'ATA-PRJ-001-001', 'emitir a ata cria a tarefa da demanda e a definição vigente');
+  ok((await rgRic('GET', `/records/${rgDef.decision_id}`)).data.source_code === 'ATA-PRJ-001-001', 'definição gerada aponta a ata de origem');
+  ok((await rgMar('GET', `/tasks/${rgDem.task_id}`)).data.origin_record?.code === 'ATA-PRJ-001-001', 'tarefa da demanda mostra a ata de origem');
+  ok((await rgRic('PUT', `/records/${rgAta.data.id}`, { title: 'Mudou' })).status === 403, 'ata emitida não é editada');
+  ok((await rgMar('POST', `/records/${rgAta.data.id}/actions/addendum`, { items: [{ kind: 'demanda', text: 'X' }] })).status === 403, 'colaborador não inclui adendo');
+  rgAv = (await rgRic('POST', `/records/${rgAta.data.id}/actions/addendum`, { items: [{ kind: 'demanda', text: 'Revisar memorial de acabamentos', assignee_id: 4 }] })).data;
+  ok(rgAv.items.length === 4 && rgAv.items[3].addendum === 1 && rgAv.items[3].task_id, 'adendo na ata emitida gera a nova tarefa');
+  // Cancelar a definição atual devolve a anterior
+  await rgRic('POST', `/records/${rgD2}/actions/cancel`, { reason: 'Cliente voltou atrás' });
+  ok((await rgRic('GET', `/records/${rgD1}`)).data.status === 'vigente', 'cancelar a definição que substituiu reativa a anterior');
+  // Terceirizado com acesso não vê tipos internos
+  const rgExt = await rgAna('POST', '/users', { role: 'terceirizado', name: 'Lia Pintora', email: 'lia@pinta.com', company: 'Pinta Bem', login_enabled: true, access_scope: 'projetos', manager_id: 4, project_ids: [1], password: 'pinta12345' });
+  const rgLia = await login('lia@pinta.com', 'pinta12345');
+  const rgLiaList = (await rgLia('GET', '/projects/1/records')).data;
+  ok(rgExt.status === 201 && rgLiaList.records.length > 0 && !rgLiaList.records.some(r => r.internal) && (await rgLia('GET', `/records/${rgA}`)).status === 404, 'terceirizado não vê registros de tipos internos');
+  // Gantt e história
+  const rgG = (await rgRic('GET', '/gantt?project=1')).data;
+  ok(rgG.marks.some(m => m.code === 'ATA-PRJ-001-001') && !rgG.marks.some(m => m.status === 'cancelada'), 'Gantt do projeto traz as marcas dos registros');
+  ok((await rgRic('GET', '/gantt?user=4')).data.marks.length === 0, 'Gantt por usuário não traz marcas de registros');
+  const rgH = (await rgRic('GET', '/projects/1/history')).data;
+  ok(rgH.chapters.length > 0 && rgH.chapters.some(c => c.paragraphs.some(x => x.includes('ATA-PRJ-001-001'))) && rgH.intro[0].includes('PRJ-001'), 'história do projeto narra a reunião no capítulo do mês');
+  ok(rgH.vigentes.some(v => v.code === 'DEF-PRJ-001-001') && rgH.timeline.some(e => e.kind === 'registro'), 'história traz definições vigentes e a linha do tempo');
+  const rgRep = (await rgRic('GET', '/reports?type=projeto&id=1&level=resumo')).data;
+  ok(rgRep.gantt_marks.length > 0, 'relatório do projeto leva as marcas para o Gantt');
+  // Tipos editáveis em Configurações
+  const rgT2 = [...rgTypes.map(t => ({ ...t })), { name: 'Diário de obra', behavior: 'nota', color: '#336699', prefix: 'RDO', allow_colab: 1 }];
+  ok((await rgAna('PUT', '/settings/record-types', { types: rgT2 })).data.some(t => t.name === 'Diário de obra' && t.prefix === 'RDO'), 'novo tipo de registro cadastrado');
+  ok((await rgAna('PUT', '/settings/record-types', { types: rgT2.map(t => (t.name === 'Definição' ? { ...t, behavior: 'nota' } : t)) })).status === 400, 'tipo com registros não troca de comportamento');
+  ok((await rgMar('PUT', '/settings/record-types', { types: rgT2 })).status === 403, 'sem Configurações não altera os tipos');
+
 }
 
 main()

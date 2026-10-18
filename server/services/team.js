@@ -9,6 +9,8 @@ import { NO_LOGIN, placeholderEmail, isPlaceholderEmail, assertNoManagerCycle } 
 import { vacationSummary } from './vacations.js';
 
 export const requireTeam = ctx => requireSection(ctx.user, 'equipe');
+// Cadastro da Equipe: Gestão da Equipe ou Cadastro de usuários
+const requireRoster = ctx => { if (!hasSection(ctx.user, 'cadastro_usuarios')) requireTeam(ctx); };
 const missingFunction = u => !String(u.job_title || '').trim() || !String(u.responsibilities || '').trim();
 
 // Tarefas em aberto / atrasadas / em conferência por responsável (todas as áreas)
@@ -98,7 +100,7 @@ export function moveManager(ctx, id, body, ip) {
 
 // ---------- Cadastro da Equipe ----------
 export function listTeam(ctx) {
-  requireTeam(ctx);
+  requireRoster(ctx);
   const users = all('SELECT * FROM users ORDER BY name');
   const byId = new Map(users.map(u => [u.id, u]));
   const load = taskLoad();
@@ -111,7 +113,7 @@ export function listTeam(ctx) {
 }
 
 export function getMember(ctx, id) {
-  requireTeam(ctx);
+  requireRoster(ctx);
   const u = one('SELECT * FROM users WHERE id = ?', id);
   if (!u) throw notFound('Pessoa não encontrada.');
   return { ...person(u, taskLoad(), vacationFlags(), ctx), manager_name: u.manager_id ? one('SELECT name FROM users WHERE id = ?', u.manager_id)?.name : null };
@@ -137,7 +139,7 @@ function readMember(body, { creating, current }) {
 }
 
 export function createMember(ctx, body, ip) {
-  requireTeam(ctx);
+  requireRoster(ctx);
   const d = readMember(body, { creating: true });
   if (d.manager_id) {
     const m = one('SELECT * FROM users WHERE id = ?', d.manager_id);
@@ -154,7 +156,7 @@ export function createMember(ctx, body, ip) {
 }
 
 export function updateMember(ctx, id, body, ip) {
-  requireTeam(ctx);
+  requireRoster(ctx);
   const u = one('SELECT * FROM users WHERE id = ?', id);
   if (!u) throw notFound('Pessoa não encontrada.');
   if (!isAdmin(ctx.user) && u.role === 'admin') throw forbidden('Somente administradores alteram o cadastro de administradores.');

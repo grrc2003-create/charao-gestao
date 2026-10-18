@@ -194,7 +194,7 @@ export async function list({ query, setQuery, state }) {
       ${pageHead({
         eyebrow: 'Gestão da Equipe', title: 'Cadastro da Equipe',
         sub: 'Função e responsabilidades de cada pessoa, setor e admissão. Acesso e permissões ficam no Cadastro de usuários.',
-        actions: html`<a class="btn btn-ghost" href="#/equipe/organograma">${icon('team')}Organograma</a>
+        actions: html`${(state.meta.can.sections || []).includes('equipe') ? html`<a class="btn btn-ghost" href="#/equipe/organograma">${icon('team')}Organograma</a>` : ''}
           ${state.meta.can.manage_users ? html`<a class="btn btn-ghost" href="#/usuarios/novo?perfil=terceirizado">${icon('plus')}Novo terceirizado</a>
             <a class="btn btn-ghost" href="#/usuarios/novo">${icon('key')}Novo usuário (com acesso)</a>` : ''}
           <a class="btn btn-primary" href="#/equipe/cadastro/novo">${icon('plus')}Nova pessoa (sem acesso)</a>`,

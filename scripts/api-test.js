@@ -1459,6 +1459,11 @@ async function main() {
   ok((await eqAna('POST', '/users/5/avatar', { data: tinyPng() })).status === 200, 'quem tem a Gestão da Equipe troca a foto de outra pessoa');
   ok((await eqMar('POST', '/users/4/avatar', { data: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 teste').toString('base64') })).status === 400, 'foto precisa ser imagem');
   ok((await eqMar('DELETE', '/users/4/avatar')).status === 200 && (await eqAna('GET', '/avatars/4')).status === 404, 'remover a foto volta às iniciais');
+  // Cadastro da Equipe também com a seção Cadastro de usuários (sem a Gestão da Equipe)
+  const nuRicU = (await eqAna('GET', '/users/2')).data.user;
+  await eqAna('PUT', '/users/2', { ...nuRicU, sections: ['dashboard', 'projetos', 'cadastro_usuarios'] });
+  const nuRic = await login('ricardo@charao.eng.br');
+  ok((await nuRic('GET', '/team')).status === 200 && (await nuRic('GET', '/team/org')).status === 403 && (await nuRic('GET', '/vacations/overview')).status === 403, 'Cadastro de usuários abre o Cadastro da Equipe; organograma e férias seguem na Gestão da Equipe');
 
 }
 

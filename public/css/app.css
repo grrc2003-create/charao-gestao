@@ -2243,3 +2243,6 @@ tr.is-inactive td { opacity: .55; }
 .pr-tag-ret { background: #FBE9E7; color: #A1301F; }
 .notice-err { background: #FBE9E7; border-color: #F1C4BD; color: #7E2418; }
 .pr-review i { color: inherit; }
+
+/* Processos: filtros de área sempre visíveis (quebram em linhas) */
+.chips.pr-chips { flex-wrap: wrap; overflow: visible; row-gap: 8px; }

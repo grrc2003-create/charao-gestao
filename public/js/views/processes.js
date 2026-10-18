@@ -68,7 +68,7 @@ export async function list({ query, state, setQuery }) {
       ${data.can_edit && (s.drafts || s.archived) ? html`<div class="notice section">${icon('info')}<span>${s.drafts ? html`<b>${s.drafts}</b> processo(s) em rascunho (ainda não enviado(s) para aprovação). ` : ''}Rascunhos e arquivados aparecem só para quem edita processos${data.can_approve ? '' : '; a publicação é feita pelo administrador'}.
         ${s.archived ? html`<a href="#/processos${arq ? '' : '?arq=1'}">${arq ? 'Ocultar arquivados' : `Mostrar arquivados (${s.archived})`}</a>` : ''}</span></div>` : ''}
       <div class="rg-filters section">
-        <div class="chips" role="group" aria-label="Filtrar por área">
+        <div class="chips pr-chips" role="group" aria-label="Filtrar por área">
           <button type="button" class="chip" data-farea="" aria-pressed="${!area}">Todas<span class="n">${data.items.length}</span></button>
           ${areas.map(a => html`<button type="button" class="chip" data-farea="${a}" aria-pressed="${a === area}">${a}<span class="n">${data.items.filter(i => (i.area || 'Sem área') === a).length}</span></button>`)}
         </div>

@@ -9,9 +9,10 @@ const KIND_LABEL = { projeto: 'Projeto', conclusao: 'Conclusão', reagendamento:
 
 export async function view({ params, query, setQuery, render }) {
   const withGantt = query.get('gantt') !== '0';
+  const gSubs = query.get('gsub') !== '0';
   const withTimeline = query.get('linha') === '1';
   const withDetail = query.get('detalhe') !== '0';
-  const q = over => ({ gantt: withGantt ? '' : '0', linha: withTimeline ? '1' : '', detalhe: withDetail ? '' : '0', ...over });
+  const q = over => ({ gantt: withGantt ? '' : '0', gsub: gSubs ? '' : '0', linha: withTimeline ? '1' : '', detalhe: withDetail ? '' : '0', ...over });
   const dd = d => (d ? fmtDate(d).slice(0, 5) : '—');
   // Detalhe do mês: tarefas abertas, concluídas, reagendamentos e registros
   const monthDetail = c => {
@@ -48,6 +49,7 @@ export async function view({ params, query, setQuery, render }) {
     html: html`${printToolbar({
       back: `#/projetos/${p.id}`, title: `História do projeto — ${p.code} · ${p.name}`,
       extra: html`<label class="pt-opt"><input type="checkbox" id="h-gantt" ${withGantt ? 'checked' : ''}>Cronograma</label>
+        ${withGantt ? html`<label class="pt-opt"><input type="checkbox" id="h-gsub" ${gSubs ? 'checked' : ''}>Subtarefas no Gantt</label>` : ''}
         <label class="pt-opt"><input type="checkbox" id="h-det" ${withDetail ? 'checked' : ''}>Detalhar tarefas por mês</label>
         <label class="pt-opt"><input type="checkbox" id="h-line" ${withTimeline ? 'checked' : ''}>Linha do tempo detalhada</label>`,
     })}
@@ -81,7 +83,7 @@ export async function view({ params, query, setQuery, render }) {
       </section>
 
       ${g && g.tasks.length ? html`<section class="r-section r-gantt"><h3 class="r-h">Cronograma e momentos registrados</h3>
-        ${ganttChart(g.tasks, { ref: g.ref, groupLabel: t => t.stage_name || 'Geral', marks: g.marks })}</section>` : ''}
+        ${ganttChart(gSubs ? g.tasks : g.tasks.filter(t => !t.parent_code), { ref: g.ref, groupLabel: t => t.stage_name || 'Geral', marks: g.marks })}</section>` : ''}
 
       <section class="r-section ${g && g.tasks.length ? 'r-after-gantt' : ''}"><h3 class="r-h">A história, mês a mês</h3>
         ${chapters.length ? chapters.map(c => html`<div class="hist-ch">
@@ -123,6 +125,7 @@ export async function view({ params, query, setQuery, render }) {
       drawGanttLinks(root);
       bindPrintToolbar(root);
       root.querySelector('#h-gantt').addEventListener('change', e => { setQuery(q({ gantt: e.target.checked ? '' : '0' })); render(); });
+      root.querySelector('#h-gsub')?.addEventListener('change', e => { setQuery(q({ gsub: e.target.checked ? '' : '0' })); render(); });
       root.querySelector('#h-det').addEventListener('change', e => { setQuery(q({ detalhe: e.target.checked ? '' : '0' })); render(); });
       root.querySelector('#h-line').addEventListener('change', e => { setQuery(q({ linha: e.target.checked ? '1' : '' })); render(); });
     },

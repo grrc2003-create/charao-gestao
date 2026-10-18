@@ -162,6 +162,8 @@ function evidence(t) {
 
 export async function view({ query }) {
   const q = Object.fromEntries(query);
+  // Gantt recolhido: só as tarefas principais (sem as subtarefas)
+  const gSubs = q.gsub !== '0';
   const r = await api('/reports', { query: q });
   const s = r.summary;
   const title = TYPE_TITLE[r.type];
@@ -169,6 +171,7 @@ export async function view({ query }) {
   const p = r.scope.project;
 
   const statsUser = r.user_stats || r.manager_stats;
+  const gRows = gSubs ? r.gantt_tasks || [] : (r.gantt_tasks || []).filter(t => !t.parent_code);
   const doc = html`
     <article class="doc a4" id="doc">
       <header class="r-header">
@@ -247,8 +250,8 @@ export async function view({ query }) {
         <tbody>${r.critical.map(t => html`<tr><td class="mono nowrap">${t.code}</td><td>${t.title}</td><td class="small">${t.assignee_name || '—'}</td><td class="nowrap small">${fmtDate(t.due_date)}</td><td class="num late">${t.days_late} d</td></tr>`)}</tbody></table></section>` : ''}
 
       ${r.gantt && r.gantt_tasks.length ? html`<section class="r-section r-gantt">
-        <h3 class="r-h">Cronograma das tarefas (Gantt) <span class="muted small">(${r.gantt_tasks.length})</span></h3>
-        ${ganttChart(r.gantt_tasks, { ref: r.reference_date, groupLabel: groupLabelFor(r.group, multiProject) || (t => stageLabel(t, multiProject)), showProject: multiProject, marks: r.gantt_marks || [] })}
+        <h3 class="r-h">Cronograma das tarefas (Gantt) <span class="muted small">(${gRows.length}${gSubs ? '' : ' · sem subtarefas'})</span></h3>
+        ${ganttChart(gRows, { ref: r.reference_date, groupLabel: groupLabelFor(r.group, multiProject) || (t => stageLabel(t, multiProject)), showProject: multiProject, marks: r.gantt_marks || [] })}
       </section>` : ''}
 
       ${r.level !== 'resumo' ? html`<section class="r-section ${r.gantt ? 'r-after-gantt' : ''}">
@@ -289,8 +292,9 @@ export async function view({ query }) {
       extra: html`<label class="pt-opt">Nível <select id="lvl">${Object.entries(LEVEL_TITLE).map(([k, l]) => html`<option value="${k}" ${r.level === k ? 'selected' : ''}>${l}</option>`)}</select></label>
         <label class="pt-opt">Organizar <select id="grp">${Object.entries(ORG_LABEL).map(([k, l]) => html`<option value="${k}" ${r.group === k ? 'selected' : ''}>${l}</option>`)}</select></label>
         <label class="pt-opt"><input type="checkbox" id="gnt" ${r.gantt ? 'checked' : ''}>Gantt</label>
+        ${r.gantt ? html`<label class="pt-opt"><input type="checkbox" id="gsub" ${gSubs ? 'checked' : ''}>Subtarefas no Gantt</label>` : ''}
         ${r.type === 'tarefas' ? html`<a class="btn btn-ghost btn-sm" href="${back}">${icon('filter')}Alterar filtros</a>`
-          : html`<a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}">${icon('edit')}Configurar</a>`}`,
+          : html`<a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}${gSubs ? '' : '&gsub=0'}">${icon('edit')}Configurar</a>`}`,
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
       setPageFooter(`Charão · ${title} · ${r.scope.label}`);
@@ -302,6 +306,7 @@ export async function view({ query }) {
       });
       root.querySelector('#grp').addEventListener('change', e => { ctx.setQuery({ ...q, group: e.target.value }); ctx.render(); });
       root.querySelector('#gnt').addEventListener('change', e => { ctx.setQuery({ ...q, gantt: e.target.checked ? '' : '0' }); ctx.render(); });
+      root.querySelector('#gsub')?.addEventListener('change', e => { ctx.setQuery({ ...q, gsub: e.target.checked ? '' : '0' }); ctx.render(); });
     },
   };
 }

@@ -20,7 +20,7 @@ export async function view({ state, query }) {
   const meta = state.meta;
   const managers = users.filter(u => u.team_size > 0);
   const init = { type: query.get('type') || 'projeto', id: query.get('id') || '', level: query.get('level') || 'detalhado',
-    group: query.get('group') || 'classificacao', gantt: query.get('gantt') !== '0' };
+    group: query.get('group') || 'classificacao', gantt: query.get('gantt') !== '0', gsub: query.get('gsub') !== '0' };
   const GROUPS = [['classificacao', 'Agrupar por classificação', 'Tarefas organizadas por Grupo/Local/Etapa, com andamento de cada uma'],
     ['nenhum', 'Por status e prazo', 'Lista única: atrasadas e pendentes primeiro'],
     ['dia', 'Por dia', 'Tarefas agrupadas pelo dia do prazo'],
@@ -57,7 +57,8 @@ export async function view({ state, query }) {
 
           <div class="field"><span class="label">4. Organização das tarefas</span>
             <div class="segmented">${GROUPS.map(([k, l, d]) => html`<label><input type="radio" name="group" value="${k}" ${init.group === k ? 'checked' : ''}>${l}<small>${d}</small></label>`)}</div>
-            <label class="switch" style="margin-top:6px"><input type="checkbox" name="gantt" ${init.gantt ? 'checked' : ''}>Incluir cronograma das tarefas (gráfico de Gantt)</label></div>
+            <label class="switch" style="margin-top:6px"><input type="checkbox" name="gantt" ${init.gantt ? 'checked' : ''}>Incluir cronograma das tarefas (gráfico de Gantt)</label>
+            <label class="switch" id="gsub-sw"><input type="checkbox" name="gsub" ${init.gsub ? 'checked' : ''}>Mostrar as subtarefas no Gantt (desmarcado: Gantt recolhido, só tarefas principais)</label></div>
 
           <fieldset class="fieldset form"><legend>Filtros opcionais</legend>
             <div class="field" id="stage-field" hidden><span class="label">Classificações</span>
@@ -138,6 +139,7 @@ export async function view({ state, query }) {
         const kf = root.querySelector('#kind-field');
         if (kf) kf.style.display = type === 'projeto' ? 'none' : '';
         root.querySelector('#li-gantt').style.opacity = f.gantt.checked ? '1' : '.35';
+        root.querySelector('#gsub-sw').style.display = f.gantt.checked ? '' : 'none';
       };
       f.addEventListener('change', sync);
       sync();
@@ -147,7 +149,7 @@ export async function view({ state, query }) {
         const type = fd.get('type');
         const err = f.querySelector('.form-error');
         if (type !== 'geral' && !fd.get('id')) { err.textContent = 'Selecione o escopo do relatório.'; err.hidden = false; return; }
-        if (type === 'historia') return ctx.navigate(`/imprimir/historia/${fd.get('id')}${fd.get('gantt') ? '' : '?gantt=0'}`);
+        if (type === 'historia') return ctx.navigate(`/imprimir/historia/${fd.get('id')}?${fd.get('gantt') ? '' : 'gantt=0&'}${fd.get('gsub') ? '' : 'gsub=0'}`);
         const qs = new URLSearchParams({ type, level: fd.get('level') });
         if (type !== 'geral') qs.set('id', fd.get('id'));
         if (fd.get('from')) qs.set('from', fd.get('from'));
@@ -156,6 +158,7 @@ export async function view({ state, query }) {
         if (fd.get('kind') && type !== 'projeto') qs.set('kind', fd.get('kind'));
         qs.set('group', fd.get('group'));
         if (!fd.get('gantt')) qs.set('gantt', '0');
+        else if (!fd.get('gsub')) qs.set('gsub', '0');
         const stages = type === 'projeto' ? fd.getAll('stage') : [];
         if (stages.length) qs.set('stage', stages.join(','));
         ctx.navigate(`/imprimir/relatorio?${qs}`);

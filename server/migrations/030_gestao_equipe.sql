@@ -1,4 +1,4 @@
--- Gestão da Equipe: organograma, cadastro da equipe (função e responsabilidades) e férias (regras da CLT).
+-- Gestão da Equipe: organograma, cadastro da equipe (função e responsabilidades) e férias (regras de férias).
 -- Migração apenas aditiva.
 ALTER TABLE users ADD COLUMN responsibilities TEXT;   -- o que a pessoa faz na empresa (obrigatório no Cadastro da Equipe)
 ALTER TABLE users ADD COLUMN department TEXT;         -- setor / departamento

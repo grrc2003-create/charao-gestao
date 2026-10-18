@@ -173,25 +173,41 @@ export function nonWorkingDays(projectId, from, to) {
 }
 const weekendOff = (d, s) => (dow(d) === 6 && !s.work_saturday) || (dow(d) === 0 && !s.work_sunday);
 
-// Cache simples por obra (o cálculo é chamado várias vezes por requisição)
-function calendarFor(projectId, from, to) {
+// Férias aprovadas da pessoa no intervalo: para ela, esses dias não são trabalhados
+export function vacationDays(userId, from, to) {
+  const set = new Set();
+  if (!userId) return set;
+  for (const v of all(`SELECT start_date, end_date FROM vacations WHERE user_id = ? AND status = 'aprovada' AND start_date <= ? AND end_date >= ?`, userId, to, from)) {
+    for (let d = v.start_date < from ? from : v.start_date; d <= v.end_date && d <= to; d = addDaysISO(d, 1)) set.add(d);
+  }
+  return set;
+}
+// Férias aprovadas que cruzam o intervalo (para avisos)
+export function vacationsOverlapping(userId, from, to) {
+  if (!userId || !from || !to) return [];
+  return all(`SELECT start_date, end_date FROM vacations WHERE user_id = ? AND status = 'aprovada' AND start_date <= ? AND end_date >= ? ORDER BY start_date`, userId, to, from);
+}
+
+// Calendário da obra (e, se informado, das férias do responsável)
+function calendarFor(projectId, from, to, userId = null) {
   const s = calendarSettings();
   const off = nonWorkingDays(projectId, from, to);
-  return d => !weekendOff(d, s) && !off.has(d);
+  const vac = vacationDays(userId, from, to);
+  return d => !weekendOff(d, s) && !off.has(d) && !vac.has(d);
 }
-export function isWorkingDay(projectId, d) { return calendarFor(projectId, d, d)(d); }
+export function isWorkingDay(projectId, d, userId = null) { return calendarFor(projectId, d, d, userId)(d); }
 
 // Dias úteis entre início e término (inclusive)
-export function workingDaysBetween(projectId, start, end) {
+export function workingDaysBetween(projectId, start, end, userId = null) {
   if (!start || !end || end < start) return null;
-  const isWork = calendarFor(projectId, start, end);
+  const isWork = calendarFor(projectId, start, end, userId);
   let n = 0;
   for (let d = start; d <= end; d = addDaysISO(d, 1)) if (isWork(d)) n++;
   return n;
 }
 // Próximo dia útil a partir de d (inclusive)
-export function nextWorkingDay(projectId, d) {
-  const isWork = calendarFor(projectId, d, addDaysISO(d, 400));
+export function nextWorkingDay(projectId, d, userId = null) {
+  const isWork = calendarFor(projectId, d, addDaysISO(d, 400), userId);
   let x = d;
   for (let i = 0; i < 400 && !isWork(x); i++) x = addDaysISO(x, 1);
   return x;
@@ -204,8 +220,8 @@ export function prevWorkingDay(projectId, d) {
   return x;
 }
 // Soma n dias úteis a d (n ≥ 0; com n = 0 devolve o próprio d se for útil, senão o próximo útil)
-export function addWorkingDays(projectId, d, n) {
-  const isWork = calendarFor(projectId, d, addDaysISO(d, n * 3 + 400));
+export function addWorkingDays(projectId, d, n, userId = null) {
+  const isWork = calendarFor(projectId, d, addDaysISO(d, n * 3 + 400), userId);
   let x = d;
   if (n <= 0) { while (!isWork(x)) x = addDaysISO(x, 1); return x; }
   // Cada passo vai ao próximo dia útil (término num sábado: segunda já é o 1º dia útil seguinte)
@@ -221,15 +237,20 @@ export function planDates(ctx, projectId, q) {
   const corridos = q.mode === 'corridos';
   let due = readDate(q.due, 'Término');
   const days = intOrNull(q.days);
+  // Responsável: as férias aprovadas dele não contam como dias úteis
+  const userId = intOrNull(q.user);
   if (!due) {
     if (!days || days < 1 || days > 2000) throw badRequest('Informe a quantidade de dias (1 a 2000).');
     // O dia de início conta como o 1º dia
-    due = corridos ? addDaysISO(start, days - 1) : addWorkingDays(projectId, start, days - 1);
+    // Início dentro das férias do responsável: a contagem começa no primeiro dia útil depois delas
+    const base = !corridos && userId && vacationDays(userId, start, start).has(start) ? nextWorkingDay(projectId, start, userId) : start;
+    due = corridos ? addDaysISO(start, days - 1) : addWorkingDays(projectId, base, days - 1, userId);
   }
   return {
     start, due,
-    start_working: isWorkingDay(projectId, start),
-    work_days: workingDaysBetween(projectId, start, due),
+    start_working: isWorkingDay(projectId, start, userId),
+    vacations: vacationsOverlapping(userId, start, due),
+    work_days: workingDaysBetween(projectId, start, due, userId),
     calendar_days: due >= start ? Math.round((Date.parse(due) - Date.parse(start)) / 86400e3) + 1 : null,
   };
 }

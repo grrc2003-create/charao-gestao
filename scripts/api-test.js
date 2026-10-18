@@ -1374,7 +1374,7 @@ async function main() {
   ok((await rgAna('PUT', '/settings/record-types', { types: rgT2.map(t => (t.name === 'Definição' ? { ...t, behavior: 'nota' } : t)) })).status === 400, 'tipo com registros não troca de comportamento');
   ok((await rgMar('PUT', '/settings/record-types', { types: rgT2 })).status === 403, 'sem Configurações não altera os tipos');
 
-  // ---------- Gestão da Equipe: organograma, cadastro e férias (CLT) ----------
+  // ---------- Gestão da Equipe: organograma, cadastro e férias ----------
   console.log('Gestão da Equipe');
   const eqAna0 = await login('ana@charao.eng.br');
   const eqAnaU = (await eqAna0('GET', `/users/${kAnaId}`)).data.user;
@@ -1410,14 +1410,14 @@ async function main() {
   ok(eqPv.ok && eqPv.end_date && eqPv.period.balance_after === 20, 'prévia calcula o término e o saldo restante');
   const eqFri = new Date(eqSt.getTime() - 3 * 86400e3);
   const eqPvFri = (await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqFri), days: 10 })).data;
-  ok(!eqPvFri.ok && /repouso|domingo/.test(eqPvFri.error), 'CLT: não começa nos 2 dias antes do repouso semanal');
-  ok(!(await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 4 })).data.ok, 'CLT: cada parte com no mínimo 5 dias');
-  ok(/Sobrariam/.test((await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 27 })).data.error || ''), 'CLT: não deixa sobra menor que 5 dias');
+  ok(!eqPvFri.ok && /repouso|domingo/.test(eqPvFri.error), 'férias: não começa nos 2 dias antes do repouso semanal');
+  ok(!(await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 4 })).data.ok, 'férias: cada parte com no mínimo 5 dias');
+  ok(/Sobrariam/.test((await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt), days: 27 })).data.error || ''), 'férias: não deixa sobra menor que 5 dias');
   const eqReq = await eqMar('POST', '/vacations', { start_date: eqIso(eqSt), days: 10, note: 'Viagem em família' });
   ok(eqReq.status === 201 && eqReq.data.status === 'solicitada', 'a própria pessoa solicita as férias');
   const eqSt2 = new Date(eqSt.getTime() + 21 * 86400e3);
   const eqPv2 = (await eqMar('POST', '/vacations/preview', { start_date: eqIso(eqSt2), days: 10 })).data;
-  ok(!eqPv2.ok && /14 dias/.test(eqPv2.error || ''), 'CLT: uma das partes precisa ter ao menos 14 dias');
+  ok(!eqPv2.ok && /14 dias/.test(eqPv2.error || ''), 'férias: uma das partes precisa ter ao menos 14 dias');
   ok((await eqMar('POST', `/vacations/${eqReq.data.id}/approve`)).status === 403, 'quem solicita não aprova as próprias férias');
   const eqRicMe = (await eqRic('GET', '/vacations/me')).data;
   ok(eqRicMe.approvals.some(v => v.id === eqReq.data.id), 'gestor direto vê a solicitação para aprovar no Meu painel');
@@ -1430,6 +1430,28 @@ async function main() {
   const eqU = (await eqAna('GET', `/users/${eqNew.data.id}`)).data.user;
   const eqGrant = await eqAna('PUT', `/users/${eqNew.data.id}`, { ...eqU, email: 'joao.servente@charao.eng.br', password: 'Servente!2026', sections: ['tarefas'] });
   ok(eqGrant.status === 200 && (await client()('POST', '/auth/login', { email: 'joao.servente@charao.eng.br', password: 'Servente!2026' })).status === 200, 'Cadastro de usuários libera o acesso de quem não tinha login');
+
+  // Férias × prazos: dias de férias não contam como úteis; entregas no período exigem novo prazo proposto
+  const fpIso = d => d.toISOString().slice(0, 10);
+  const fpVacEnd = fpIso(new Date(eqSt.getTime() + 9 * 86400e3));
+  const fpPlanU = (await eqRic('GET', `/projects/1/plan-dates?start=${fpIso(eqSt)}&days=3&user=4`)).data;
+  const fpPlan = (await eqRic('GET', `/projects/1/plan-dates?start=${fpIso(eqSt)}&days=3`)).data;
+  ok(fpPlanU.due > fpVacEnd && fpPlan.due < fpVacEnd && fpPlanU.vacations.length === 1, 'prazo em dias úteis pula as férias aprovadas do responsável');
+  const fpStart = new Date(eqSt.getTime() + 28 * 86400e3);
+  const fpDueIn = fpIso(new Date(fpStart.getTime() + 3 * 86400e3));
+  const fpTask = (await eqRic('POST', '/tasks', { project_id: 1, title: 'Entrega durante as férias', description: 'Teste de conflito com férias', assignee_id: 4, due_date: fpDueIn })).data.id;
+  const fpPv = (await eqMar('POST', '/vacations/preview', { start_date: fpIso(fpStart), days: 20 })).data;
+  ok(fpPv.ok && fpPv.conflicts.some(c => c.id === fpTask && c.suggested > fpPv.end_date), 'prévia lista as entregas no período com sugestão de novo prazo');
+  const fpNo = await eqMar('POST', '/vacations', { start_date: fpIso(fpStart), days: 20 });
+  ok(fpNo.status === 400 && /Proponha o novo prazo/.test(fpNo.data.error), 'sem propor o novo prazo das entregas, não solicita');
+  ok((await eqMar('POST', '/vacations', { start_date: fpIso(fpStart), days: 20, reschedules: [{ task_id: fpTask, new_due: fpDueIn }] })).status === 400, 'novo prazo dentro das férias é recusado');
+  const fpNew = fpPv.conflicts.find(c => c.id === fpTask).suggested;
+  const fpReq = await eqMar('POST', '/vacations', { start_date: fpIso(fpStart), days: 20, reschedules: fpPv.conflicts.map(c => ({ task_id: c.id, new_due: c.suggested })) });
+  ok(fpReq.status === 201 && fpReq.data.reschedules >= 1 && (await eqRic('GET', `/tasks/${fpTask}`)).data.due_date === fpDueIn, 'solicitação guarda a proposta; o prazo só muda na aprovação');
+  ok((await eqRic('GET', '/vacations/me')).data.approvals.find(v => v.id === fpReq.data.id).reschedules.some(r => r.task_id === fpTask && r.new_due === fpNew), 'gestor vê os reagendamentos propostos');
+  ok((await eqRic('POST', `/vacations/${fpReq.data.id}/approve`)).status === 200, 'gestor aprova as férias');
+  const fpT = (await eqRic('GET', `/tasks/${fpTask}`)).data;
+  ok(fpT.due_date === fpNew && fpT.reschedules.some(r => r.reason_name === 'Férias do responsável'), 'aprovação aplica o reagendamento com a justificativa Férias do responsável');
 
 }
 

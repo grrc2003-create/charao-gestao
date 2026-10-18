@@ -164,6 +164,7 @@ function build(t, ctx) {
       <article class="card task-hero st-${t.eff_status}">
         <div class="code"><span>${t.code}</span>${t.parent_id ? html`<span class="pill pill-sand">Subtarefa</span>` : ''}${priorityTag(t.priority)}${t.stage_name ? html`<a class="stage-tag" href="#/tarefas?project=${t.project_id}&stage=${t.stage_id}" title="Classificação (Grupo/Local/Etapa)">${t.stage_name}</a>` : ''}
           ${t.recurrence_id ? html`<a class="rec-tag" href="#/recorrencias/${t.recurrence_id}" title="Tarefa recorrente: ${t.recurrence_title}">Recorrente · ${t.recurrence_seq}ª</a>` : ''}
+          ${t.assignee_vacations?.length ? html`<span class="rec-tag rec-vac" title="Os dias de férias do responsável não contam como dias úteis desta tarefa">Responsável de férias ${t.assignee_vacations.map(v => `${fmtDate(v.start_date).slice(0, 5)}–${fmtDate(v.end_date).slice(0, 5)}`).join(', ')}</span>` : ''}
           ${t.origin_record ? html`<a class="rec-tag rec-origin" href="#/projetos/${t.origin_record.project_id}/registros/${t.origin_record.id}" title="Gerada a partir do registro: ${t.origin_record.title}">Origem: ${t.origin_record.code || t.origin_record.type_name}</a>` : ''}</div>
         ${t.parent_id ? html`<div class="parent-link">↳ Subtarefa de ${t.parent_visible ? html`<a href="#/tarefas/${t.parent_id}"><b>${t.parent_code}</b> · ${t.parent_title}</a>` : html`<b>${t.parent_code}</b>`}</div>` : ''}
         <h1>${t.title}</h1>

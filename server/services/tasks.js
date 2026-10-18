@@ -8,7 +8,7 @@ import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
-import { workingDaysBetween } from './calendar.js';
+import { workingDaysBetween, vacationsOverlapping } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask } from './finance.js';
 import { originOfTask, recordsOfTask } from './records.js';
@@ -181,8 +181,8 @@ export function actualOf(t) {
     start, end,
     approved: t.status === 'concluida' ? localDate(t.completed_at) : null,
     calendar_days: daysBetween(start, end) + 1,
-    work_days: workingDaysBetween(t.project_id, start, end),
-    planned_work_days: t.start_date && t.due_date && t.due_date >= t.start_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date) : null,
+    work_days: workingDaysBetween(t.project_id, start, end, t.assignee_id),
+    planned_work_days: t.start_date && t.due_date && t.due_date >= t.start_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date, t.assignee_id) : null,
     vs_due: t.due_date ? daysBetween(t.due_date, end) : null,
     original_due: orig,
     due_shift: orig ? daysBetween(orig, t.due_date) : 0,
@@ -232,7 +232,8 @@ export function getTask(ctx, id) {
     neighbors: neighborsOf(ctx, t),
     impact: impactOfTask(id),
     // Prazo: dias úteis (calendário da obra) e corridos entre o início e o término
-    work_days: t.start_date && t.due_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date) : null,
+    work_days: t.start_date && t.due_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date, t.assignee_id) : null,
+    assignee_vacations: vacationsOverlapping(t.assignee_id, t.start_date || t.due_date, t.due_date),
     calendar_days: t.start_date && t.due_date && t.due_date >= t.start_date ? daysBetween(t.start_date, t.due_date) + 1 : null,
     dep_shift: shiftedOfTask(id),
     origin_record: originOfTask(ctx, t.origin_record_id),
@@ -378,10 +379,12 @@ function assertNotCancelled(t) {
   if (t.cancelled_at) throw badRequest('Tarefa cancelada. Reative-a para fazer alterações.');
 }
 
-export function updateTask(ctx, id, body) {
-  const t = loadVisible(ctx, id);
+// trusted: alteração feita pelo sistema em nome de quem aprovou (ex.: reagendamento por férias aprovadas)
+export function updateTask(ctx, id, body, { trusted = false } = {}) {
+  const t = trusted ? rawTask(id) : loadVisible(ctx, id);
+  if (!t) throw notFound('Tarefa não encontrada.');
   assertNotCancelled(t);
-  if (!canManageTask(ctx, t)) throw forbidden('Você não pode editar esta tarefa.');
+  if (!trusted && !canManageTask(ctx, t)) throw forbidden('Você não pode editar esta tarefa.');
   if (t.status === 'concluida') throw badRequest('Reabra a tarefa antes de editá-la.');
   const changes = [];
   const next = {};

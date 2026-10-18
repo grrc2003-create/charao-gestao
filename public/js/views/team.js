@@ -253,7 +253,7 @@ export async function form({ params, state, navigate }) {
           <div class="field"><label ${u.is_external ? 'class="req"' : ''} for="tm-mgr">${u.is_external ? 'Líder' : 'Gestor direto'}</label><select id="tm-mgr" name="manager_id">
             ${u.is_external ? '' : html`<option value="">Sem gestor (topo do organograma)</option>`}${managers.map(m => html`<option value="${m.id}" ${m.id === u.manager_id ? 'selected' : ''}>${m.name}${m.job_title ? ` · ${m.job_title}` : ''}</option>`)}</select></div>
           ${!u.is_external ? html`<div class="field"><label for="tm-adm">Data de admissão</label><input id="tm-adm" name="admission_date" type="date" value="${u.admission_date || ''}">
-            <span class="hint">Base dos períodos de férias (CLT).</span></div>` : ''}
+            <span class="hint">Base dos períodos de férias.</span></div>` : ''}
         </div>
         ${!u.is_external ? html`<div class="field" style="max-width:420px"><label for="tm-vs">Férias controladas no sistema a partir de</label><input id="tm-vs" name="vacation_since" type="date" value="${u.vacation_since || ''}">
           <span class="hint">Períodos aquisitivos encerrados antes desta data são considerados quitados (férias já tiradas fora do sistema). Em branco: controla desde a admissão.</span></div>` : ''}

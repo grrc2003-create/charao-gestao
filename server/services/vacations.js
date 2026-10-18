@@ -1,4 +1,4 @@
-// Férias (regras da CLT): períodos aquisitivos de 12 meses a partir da admissão, 30 dias de direito por período,
+// Férias (regras de férias): períodos aquisitivos de 12 meses a partir da admissão, 30 dias de direito por período,
 // gozo no período concessivo (12 meses seguintes), até 3 frações (uma com 14+ dias, as demais com 5+),
 // início vedado nos 2 dias que antecedem feriado ou o repouso semanal (domingo).
 // A pessoa solicita; o gestor (direto ou acima), quem tem a Gestão da Equipe ou o administrador aprova.
@@ -7,7 +7,8 @@ import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/ht
 import { isAdmin, hasSection, teamIds } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { today, daysBetween } from './metrics.js';
-import { nationalHolidays } from './calendar.js';
+import { nationalHolidays, nextWorkingDay } from './calendar.js';
+import { updateTask } from './tasks.js';
 
 const DIREITO = 30;
 const fmtD = d => (d ? d.split('-').reverse().join('/') : '—');
@@ -92,7 +93,7 @@ function check(target, startIn, daysIn, { allowPast = false, excludeId = null } 
   for (const i of [1, 2]) {
     const d = addDays(start, i);
     if (new Date(d + 'T00:00:00Z').getUTCDay() === 0 || hol.has(d)) {
-      throw badRequest(`Pela CLT, as férias não podem começar nos 2 dias que antecedem feriado ou o repouso semanal (${fmtD(d)}${hol.has(d) ? ', feriado' : ', domingo'}). Escolha outro início.`);
+      throw badRequest(`As férias não podem começar nos 2 dias que antecedem feriado ou o repouso semanal (${fmtD(d)}${hol.has(d) ? ', feriado' : ', domingo'}). Escolha outro início.`);
     }
   }
   // Sem sobreposição com outras férias da pessoa
@@ -107,17 +108,17 @@ function check(target, startIn, daysIn, { allowPast = false, excludeId = null } 
     if (balance <= 0) continue;
     let err = null;
     if (days > balance) err = `O período aquisitivo ${fmtD(p.start)}–${fmtD(p.end)} tem saldo de ${balance} dia(s).`;
-    else if (list.length >= 3) err = `O período aquisitivo ${fmtD(p.start)}–${fmtD(p.end)} já foi dividido em 3 partes (limite da CLT).`;
+    else if (list.length >= 3) err = `O período aquisitivo ${fmtD(p.start)}–${fmtD(p.end)} já foi dividido em 3 partes (limite de 3 partes).`;
     else {
       const remaining = balance - days;
       const hasBig = list.some(v => v.days >= 14) || days >= 14;
       if (remaining > 0 && remaining < 5) err = `Sobrariam ${remaining} dia(s) no período ${fmtD(p.start)}–${fmtD(p.end)}; cada parte deve ter ao menos 5 dias.`;
-      else if (!hasBig && (remaining < 14 || list.length + 1 >= 3)) err = 'Pela CLT, uma das partes das férias precisa ter ao menos 14 dias. Aumente este período ou reserve 14 dias para outra parte.';
+      else if (!hasBig && (remaining < 14 || list.length + 1 >= 3)) err = 'Uma das partes das férias precisa ter ao menos 14 dias. Aumente este período ou reserve 14 dias para outra parte.';
       else if (remaining > 0 && list.length + 1 >= 3) err = `Este seria o 3º período: use todo o saldo restante (${balance} dia(s)).`;
     }
     if (!err) {
       const warnings = [];
-      if (daysBetween(ref, start) < 30 && start >= ref) warnings.push('Pela CLT, as férias devem ser comunicadas com pelo menos 30 dias de antecedência.');
+      if (daysBetween(ref, start) < 30 && start >= ref) warnings.push('As férias devem ser comunicadas com pelo menos 30 dias de antecedência.');
       if (end > p.concession_end) warnings.push(`As férias terminam depois do fim do período concessivo (${fmtD(p.concession_end)}): os dias excedentes são pagos em dobro.`);
       if (p.concession_end < ref) warnings.push(`Férias do período ${fmtD(p.start)}–${fmtD(p.end)} já vencidas: pagamento em dobro.`);
       // Equipe: outras férias no mesmo período (mesmo gestor)
@@ -126,16 +127,53 @@ function check(target, startIn, daysIn, { allowPast = false, excludeId = null } 
           WHERE u.manager_id = ? AND u.id <> ? AND v.${LIVE.replace('status', 'status')} AND v.start_date <= ? AND v.end_date >= ?`, target.manager_id, target.id, end, start);
         if (mates.length) warnings.push(`Também estarão de férias no período: ${mates.map(m => `${m.name} (${fmtD(m.start_date).slice(0, 5)}–${fmtD(m.end_date).slice(0, 5)})`).join(', ')}.`);
       }
-      // Tarefas da pessoa que vencem durante as férias
-      const tasks = all(`SELECT code FROM tasks WHERE assignee_id = ? AND cancelled_at IS NULL AND status IN ('aberta','em_andamento') AND due_date BETWEEN ? AND ? ORDER BY due_date`, target.id, start, end);
-      if (tasks.length) warnings.push(`${tasks.length} tarefa(s) de ${target.name.split(' ')[0]} vencem durante as férias: ${tasks.slice(0, 5).map(t => t.code).join(', ')}${tasks.length > 5 ? '…' : ''}. Reprograme ou troque o responsável.`);
-      return { start_date: start, end_date: end, days, period: { start: p.start, end: p.end, concession_end: p.concession_end, balance_after: balance - days }, warnings };
+      return { start_date: start, end_date: end, days, period: { start: p.start, end: p.end, concession_end: p.concession_end, balance_after: balance - days }, warnings,
+        conflicts: conflictsOf(target.id, start, end) };
     }
     firstErr = firstErr || err;
   }
   if (firstErr) throw badRequest(firstErr);
   const cur = periodsOf(target, ref).find(p => !p.acquired);
   throw badRequest(ps.length ? 'Não há saldo de férias disponível.' : `${target.name.split(' ')[0]} ainda não completou um período aquisitivo${cur ? `: o direito começa em ${fmtD(addDays(cur.end, 1))}` : ''}.`);
+}
+
+// Tarefas da pessoa com entrega (prazo) dentro das férias: precisam de novo prazo proposto
+export function conflictsOf(userId, start, end) {
+  return all(`SELECT t.id, t.code, t.title, t.due_date, t.start_date, t.project_id, p.code AS project_code FROM tasks t JOIN projects p ON p.id = t.project_id
+    WHERE t.assignee_id = ? AND t.cancelled_at IS NULL AND t.status IN ('aberta','em_andamento') AND t.task_type = 'tarefa'
+      AND t.due_date BETWEEN ? AND ? ORDER BY t.due_date, t.code`, userId, start, end)
+    .map(t => ({ ...t, suggested: nextWorkingDay(t.project_id, addDays(end, 1), userId) }));
+}
+
+// Lê e valida os novos prazos propostos: um para cada tarefa em conflito, fora do período das férias
+function readProposals(conflicts, input, start, end) {
+  const map = new Map((Array.isArray(input) ? input : []).map(x => [intOrNull(x?.task_id), x?.new_due]));
+  const missing = [];
+  const out = [];
+  for (const t of conflicts) {
+    const nd = map.get(t.id) ? date(map.get(t.id), `Novo prazo de ${t.code}`) : null;
+    if (!nd) { missing.push(t.code); continue; }
+    if (nd >= start && nd <= end) throw badRequest(`O novo prazo de ${t.code} (${fmtD(nd)}) cai dentro das férias. Escolha uma data antes de ${fmtD(start)} ou depois de ${fmtD(end)}.`);
+    if (nd < today()) throw badRequest(`O novo prazo de ${t.code} não pode ser no passado.`);
+    if (t.start_date && nd < t.start_date) throw badRequest(`O novo prazo de ${t.code} é anterior ao início previsto da tarefa (${fmtD(t.start_date)}).`);
+    out.push({ task_id: t.id, old_due: t.due_date, new_due: nd });
+  }
+  if (missing.length) throw badRequest(`Há ${missing.length} tarefa(s) com entrega nas férias: ${missing.join(', ')}. Proponha o novo prazo de cada uma para solicitar este período.`);
+  return out;
+}
+
+// Aplica os reagendamentos (na aprovação): justificativa "Férias do responsável"
+function applyProposals(ctx, v, t, list) {
+  const reason = one(`SELECT id FROM reschedule_reasons WHERE name = 'Férias do responsável' COLLATE NOCASE`)
+    || one('SELECT id FROM reschedule_reasons WHERE active = 1 ORDER BY sort_order LIMIT 1');
+  const requester = one('SELECT name FROM users WHERE id = ?', v.requested_by)?.name || t.name;
+  for (const r of list) {
+    const task = one('SELECT id, due_date, cancelled_at, status FROM tasks WHERE id = ?', r.task_id);
+    if (!task || task.cancelled_at || !['aberta', 'em_andamento'].includes(task.status) || task.due_date === r.new_due) continue;
+    updateTask(ctx, r.task_id, { due_date: r.new_due, reschedule_reason_id: reason.id,
+      reschedule_note: `Férias de ${t.name} de ${fmtD(v.start_date)} a ${fmtD(v.end_date)} · proposto por ${requester}, aprovado por ${ctx.user.name}` }, { trusted: true });
+    run('UPDATE vacation_reschedules SET applied = 1 WHERE vacation_id = ? AND task_id = ?', v.id, r.task_id);
+  }
 }
 
 function targetOf(userId) {
@@ -162,17 +200,21 @@ export function requestVacation(ctx, body, ip) {
   const approver = canApprove(ctx, t);
   if (!self && !approver) throw forbidden('Você não pode lançar férias desta pessoa.');
   const c = check(t, body.start_date, body.days, { allowPast: approver });
+  const proposals = readProposals(c.conflicts, body.reschedules, c.start_date, c.end_date);
   const status = approver ? 'aprovada' : 'solicitada';
   const note = str(body.note, { max: 1000, label: 'Observação' });
   const id = tx(() => {
     const r = run(`INSERT INTO vacations (user_id, period_start, start_date, end_date, days, status, note, requested_by, decided_by, decided_at)
       VALUES (?,?,?,?,?,?,?,?,?,?)`, t.id, c.period.start, c.start_date, c.end_date, c.days, status, note, ctx.user.id,
       status === 'aprovada' ? ctx.user.id : null, status === 'aprovada' ? new Date().toISOString().replace('T', ' ').slice(0, 19) : null);
-    audit(ctx.user.id, 'vacation', Number(r.lastInsertRowid), status === 'aprovada' ? 'Férias lançadas' : 'Férias solicitadas',
-      { pessoa: t.name, periodo: `${fmtD(c.start_date)} a ${fmtD(c.end_date)}`, dias: c.days }, ip);
-    return Number(r.lastInsertRowid);
+    const vid = Number(r.lastInsertRowid);
+    for (const x of proposals) run('INSERT INTO vacation_reschedules (vacation_id, task_id, old_due, new_due) VALUES (?,?,?,?)', vid, x.task_id, x.old_due, x.new_due);
+    if (status === 'aprovada') applyProposals(ctx, { id: vid, start_date: c.start_date, end_date: c.end_date, requested_by: ctx.user.id }, t, proposals);
+    audit(ctx.user.id, 'vacation', vid, status === 'aprovada' ? 'Férias lançadas' : 'Férias solicitadas',
+      { pessoa: t.name, periodo: `${fmtD(c.start_date)} a ${fmtD(c.end_date)}`, dias: c.days, reagendamentos: proposals.length }, ip);
+    return vid;
   });
-  return { id, status, warnings: c.warnings };
+  return { id, status, warnings: c.warnings, reschedules: proposals.length };
 }
 
 export function vacationAction(ctx, id, action, body = {}, ip) {
@@ -186,9 +228,22 @@ export function vacationAction(ctx, id, action, body = {}, ip) {
     if (!approver) throw forbidden('Você não pode decidir as férias desta pessoa.');
     if (v.status !== 'solicitada') throw badRequest('Estas férias não estão aguardando aprovação.');
     const note = str(body.note, { max: 1000, required: action === 'reject', label: 'Motivo' });
-    if (action === 'approve') check(t, v.start_date, v.days, { allowPast: true, excludeId: v.id });
-    run(`UPDATE vacations SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, updated_at = datetime('now') WHERE id = ?`,
-      action === 'approve' ? 'aprovada' : 'recusada', ctx.user.id, now, note, id);
+    tx(() => {
+      if (action === 'approve') {
+        check(t, v.start_date, v.days, { allowPast: true, excludeId: v.id });
+        // Propostas da pessoa (o gestor pode ajustar ou completar, ex.: tarefa criada depois do pedido)
+        const saved = all('SELECT task_id, new_due FROM vacation_reschedules WHERE vacation_id = ?', v.id);
+        const given = new Map((Array.isArray(body.reschedules) ? body.reschedules : []).map(x => [intOrNull(x?.task_id), x?.new_due]));
+        const merged = saved.map(x => ({ task_id: x.task_id, new_due: given.get(x.task_id) || x.new_due }));
+        for (const [tid, nd] of given) if (tid && !merged.some(x => x.task_id === tid)) merged.push({ task_id: tid, new_due: nd });
+        const proposals = readProposals(conflictsOf(t.id, v.start_date, v.end_date), merged, v.start_date, v.end_date);
+        for (const x of proposals) run(`INSERT INTO vacation_reschedules (vacation_id, task_id, old_due, new_due) VALUES (?,?,?,?)
+          ON CONFLICT (vacation_id, task_id) DO UPDATE SET new_due = excluded.new_due`, v.id, x.task_id, x.old_due, x.new_due);
+        applyProposals(ctx, v, t, proposals);
+      }
+      run(`UPDATE vacations SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, updated_at = datetime('now') WHERE id = ?`,
+        action === 'approve' ? 'aprovada' : 'recusada', ctx.user.id, now, note, id);
+    });
     audit(ctx.user.id, 'vacation', id, action === 'approve' ? 'Férias aprovadas' : 'Férias recusadas', { pessoa: t.name, periodo: `${fmtD(v.start_date)} a ${fmtD(v.end_date)}`, motivo: note }, ip);
   } else if (action === 'cancel') {
     const can = (self && v.status === 'solicitada') || (approver && ['solicitada', 'aprovada'].includes(v.status));
@@ -203,6 +258,16 @@ export function vacationAction(ctx, id, action, body = {}, ip) {
   return { ok: true };
 }
 
+function withProposals(rows) {
+  for (const v of rows) {
+    v.reschedules = all(`SELECT r.task_id, r.old_due, r.new_due, r.applied, t.code, t.title FROM vacation_reschedules r JOIN tasks t ON t.id = r.task_id WHERE r.vacation_id = ? ORDER BY r.old_due`, v.id);
+    if (v.status === 'solicitada') {
+      const have = new Set(v.reschedules.map(x => x.task_id));
+      v.new_conflicts = conflictsOf(v.user_id, v.start_date, v.end_date).filter(c => !have.has(c.id));
+    }
+  }
+  return rows;
+}
 const REQ_SQL = `SELECT v.*, u.name AS user_name, u.job_title, u.manager_id, rb.name AS requested_by_name, db.name AS decided_by_name
   FROM vacations v JOIN users u ON u.id = v.user_id LEFT JOIN users rb ON rb.id = v.requested_by LEFT JOIN users db ON db.id = v.decided_by`;
 
@@ -214,7 +279,7 @@ export function userVacations(ctx, userId) {
   return {
     user: { id: t.id, name: t.name, job_title: t.job_title, admission_date: t.admission_date, is_external: t.is_external },
     summary: vacationSummary(t), periods: periodsOf(t).reverse(),
-    requests: all(`${REQ_SQL} WHERE v.user_id = ? ORDER BY v.start_date DESC`, t.id),
+    requests: withProposals(all(`${REQ_SQL} WHERE v.user_id = ? ORDER BY v.start_date DESC`, t.id)),
     can_launch: canApprove(ctx, t),
   };
 }
@@ -223,7 +288,7 @@ export function userVacations(ctx, userId) {
 export function myVacations(ctx) {
   const mine = userVacations(ctx, ctx.user.id);
   const pending = all(`${REQ_SQL} WHERE v.status = 'solicitada' ORDER BY v.start_date`).filter(v => v.user_id !== ctx.user.id && canApprove(ctx, one('SELECT * FROM users WHERE id = ?', v.user_id)));
-  return { ...mine, approvals: pending };
+  return { ...mine, approvals: withProposals(pending) };
 }
 
 // Gestão da Equipe › Férias: visão geral do ano
@@ -238,7 +303,7 @@ export function vacationsOverview(ctx, yearIn) {
   return {
     year, ref,
     people: rows,
-    pending: all(`${REQ_SQL} WHERE v.status = 'solicitada' ORDER BY v.start_date`),
+    pending: withProposals(all(`${REQ_SQL} WHERE v.status = 'solicitada' ORDER BY v.start_date`)),
     kpis: {
       on_vacation: all(`SELECT DISTINCT user_id FROM vacations WHERE status = 'aprovada' AND start_date <= ? AND end_date >= ?`, ref, ref).length,
       pending: rows.reduce((n, r) => n + r.vacations.filter(v => v.status === 'solicitada').length, 0),

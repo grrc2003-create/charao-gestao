@@ -163,14 +163,16 @@ export async function view({ params, query, state, navigate }) {
       const qdInfo = root.querySelector('#qd-info');
       const setDue = val => { f.due_date.value = val; f.due_date.dispatchEvent(new Event('input')); f.due_date.dispatchEvent(new Event('change')); };
       const fmtBR = d => d.split('-').reverse().join('/');
+      // Férias aprovadas do responsável no período: esses dias não contam como úteis
+      const vacNote = r => (r.vacations?.length ? html`<span class="qd-vac"> · responsável de férias ${r.vacations.map(v => `${fmtBR(v.start_date).slice(0, 5)}–${fmtBR(v.end_date).slice(0, 5)}`).join(', ')} (dias não contados)</span>` : '');
       let qdTimer = null;
       const showSpan = async () => {
         // Início + prazo já preenchidos: mostra a duração em dias úteis e corridos
         const pid = f.project_id.value;
         if (!pid || !f.start_date.value || !f.due_date.value || f.due_date.value < f.start_date.value) return;
         try {
-          const r = await api(`/projects/${pid}/plan-dates`, { query: { start: f.start_date.value, due: f.due_date.value } });
-          qdInfo.innerHTML = html`${fmtBR(r.start)} → ${fmtBR(r.due)} · <b>${r.work_days} dia(s) útil(eis)</b> (${r.calendar_days} corridos)`.toString();
+          const r = await api(`/projects/${pid}/plan-dates`, { query: { start: f.start_date.value, due: f.due_date.value, user: f.assignee_id?.value || '' } });
+          qdInfo.innerHTML = html`${fmtBR(r.start)} → ${fmtBR(r.due)} · <b>${r.work_days} dia(s) útil(eis)</b> (${r.calendar_days} corridos)${vacNote(r)}`.toString();
         } catch { /* só informativo */ }
       };
       const calc = async () => {
@@ -181,15 +183,16 @@ export async function view({ params, query, state, navigate }) {
         if (!pid) { qdInfo.textContent = 'Escolha o projeto (o calendário de dias úteis é o da obra).'; return; }
         if (f.due_date.readOnly) return;
         try {
-          const r = await api(`/projects/${pid}/plan-dates`, { query: { start: f.start_date.value, days: n, mode: qdMode.value } });
+          const r = await api(`/projects/${pid}/plan-dates`, { query: { start: f.start_date.value, days: n, mode: qdMode.value, user: f.assignee_id?.value || '' } });
           setDue(r.due);
-          qdInfo.innerHTML = html`Prazo: <b>${fmtBR(r.due)}</b> · ${r.work_days} dia(s) útil(eis) (${r.calendar_days} corridos)${!r.start_working ? ' · atenção: o início cai em dia não útil' : ''}`.toString();
+          qdInfo.innerHTML = html`Prazo: <b>${fmtBR(r.due)}</b> · ${r.work_days} dia(s) útil(eis) (${r.calendar_days} corridos)${!r.start_working ? ' · atenção: o início cai em dia não útil' : ''}${vacNote(r)}`.toString();
         } catch (e) { qdInfo.textContent = e.message; }
       };
       qdDays?.addEventListener('input', () => { clearTimeout(qdTimer); qdTimer = setTimeout(calc, 300); });
       qdMode?.addEventListener('change', calc);
       root.querySelectorAll('[data-qd]').forEach(b => b.addEventListener('click', () => { qdDays.value = b.dataset.qd; calc(); }));
       f.start_date.addEventListener('change', () => (qdDays?.value ? calc() : showSpan()));
+      f.assignee_id?.addEventListener('change', () => (qdDays?.value ? calc() : showSpan()));
       f.due_date.addEventListener('change', () => { if (document.activeElement === f.due_date) { if (qdDays) qdDays.value = ''; } showSpan(); });
       showSpan();
       // ---------- Datas pelas dependências (predecessora / sucessora) ----------

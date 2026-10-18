@@ -1,4 +1,4 @@
-// Gestão da Equipe › Férias: visão do ano (quem sai quando), saldos e vencimentos pela CLT, aprovações e lançamentos.
+// Gestão da Equipe › Férias: visão do ano (quem sai quando), saldos e vencimentos, aprovações e lançamentos.
 import { html, api, icon, fmtDate, todayISO } from '../core.js';
 import { sheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
@@ -28,7 +28,7 @@ export async function view({ query, setQuery, render }) {
     html: html`
       ${pageHead({
         eyebrow: 'Gestão da Equipe', title: 'Férias',
-        sub: 'Regras da CLT: 30 dias por período aquisitivo, gozados no período concessivo, em até 3 partes.',
+        sub: '30 dias por período aquisitivo, gozados no período concessivo, em até 3 partes.',
         actions: html`<button type="button" class="btn btn-primary" data-launch>${icon('plus')}Lançar férias</button>`,
       })}
       <div class="kpis kpis-5">

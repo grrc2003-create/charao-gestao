@@ -2032,3 +2032,20 @@ tr.is-inactive td { opacity: .55; }
 .vac-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .vac-legend .vac-bar { position: static; transform: none; width: 22px; height: 10px; }
 .vac-today-l { width: 0; height: 12px; border-left: 2px solid var(--orange); display: inline-block; }
+
+/* Férias × prazos */
+.vs-conf { border: 1px solid #F0DDB0; background: #FFFBF2; border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.vs-conf-head { display: flex; gap: 8px; font-size: 13px; color: #7A5208; }
+.vs-conf-head svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.vs-conf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vs-conf-list li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.vs-conf-list .grow { flex: 1; min-width: 180px; }
+.vs-conf-list small { display: block; color: var(--muted); font-size: 11.5px; }
+.vs-nd { display: grid; gap: 2px; font-size: 11.5px; color: var(--muted); }
+.vs-nd input { min-width: 150px; }
+.vac-rs { display: grid; gap: 2px; margin-top: 6px; font-size: 12.5px; color: #46535F; background: var(--navy-50); border-radius: 8px; padding: 6px 10px; }
+.vac-rs.is-new { background: #FFFBF2; color: #7A5208; }
+.vac-rs label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qd-vac { color: #7A5208; font-weight: 600; }
+.rec-vac { color: #1F6B41; background: #E5F4EC; }
+.rec-vac::before { content: "☀"; }

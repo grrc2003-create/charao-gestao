@@ -1465,6 +1465,69 @@ async function main() {
   const nuRic = await login('ricardo@charao.eng.br');
   ok((await nuRic('GET', '/team')).status === 200 && (await nuRic('GET', '/team/org')).status === 403 && (await nuRic('GET', '/vacations/overview')).status === 403, 'Cadastro de usuários abre o Cadastro da Equipe; organograma e férias seguem na Gestão da Equipe');
 
+  // ---------- Processos da Empresa ----------
+  // Ana tem lista de seções salva (testes anteriores): recebe a edição de processos
+  const prAnaU = (await eqAna('GET', '/users/1')).data.user;
+  await eqAna('PUT', '/users/1', { ...prAnaU, sections: [...prAnaU.section_list, 'processos'] });
+  const prAna = await login('ana@charao.eng.br');
+  const prFel = await login('felipe@charao.eng.br');
+  const prList = (await prFel('GET', '/processes')).data;
+  ok(prList.items.length === 8 && prList.summary.controls === 13 && prList.summary.areas === 5 && !prList.can_edit, 'carga inicial: 8 processos publicados, 13 pontos de controle, leitura para todos');
+  ok((await prAna('GET', '/meta')).data.can.edit_processes && !(await prFel('GET', '/meta')).data.can.edit_processes, 'edição de processos: administrador sim, colaborador não');
+  const prRdo = (await prFel('GET', '/processes/1')).data;
+  ok(prRdo.content.steps.length === 5 && prRdo.content.steps[2].control && prRdo.content.steps[2].back_to === 1 && prRdo.content.links[0].kind === 'video', 'ficha do RDO com etapas, ponto de controle, retorno e vídeo');
+  ok((await prFel('PUT', '/processes/1', { ...prRdo.content })).status === 403 && (await prFel('POST', '/processes', { title: 'X' })).status === 403, 'colaborador não edita nem cria processos');
+  const prBody = { title: 'Fechamento de Obra', area: 'Obras', frequency: 'Sob demanda', objective: 'Encerrar a obra com a documentação completa.',
+    links: [{ kind: 'video', label: 'Treinamento', url: 'https://www.youtube.com/watch?v=abc' }], indicators: 'Prazo de entrega da documentação\n- Pendências no recebimento',
+    steps: [{ responsible: 'Engenheiro de Obra', activity: 'Vistoria final', details: '- conferir itens\n**assinar** o termo' }, { responsible: 'Diretoria', activity: 'Aprova o encerramento', control: true, fail: 'Reprovado → nova vistoria', back_to: 1 }], related: [1, 7] };
+  ok((await prAna('POST', '/processes', { ...prBody, steps: [] })).status === 400, 'processo sem etapas é recusado');
+  ok((await prAna('POST', '/processes', { ...prBody, links: [{ kind: 'link', url: 'javascript:alert(1)' }] })).status === 400, 'link de material de apoio precisa ser http(s)');
+  ok((await prAna('POST', '/processes', { ...prBody, steps: [{ responsible: 'A', activity: 'B', control: true, back_to: 1 }] })).status === 400, 'etapa não pode retornar para ela mesma');
+  const prNew = (await prAna('POST', '/processes', prBody)).data;
+  ok(prNew.code === 'PRC-09' && prNew.status === 'rascunho' && prNew.content.indicators.length === 2 && prNew.content.related_items.length === 2, 'novo processo nasce como rascunho com código automático');
+  ok(!(await prFel('GET', '/processes')).data.items.some(i => i.id === prNew.id) && (await prFel('GET', `/processes/${prNew.id}`)).status === 404, 'rascunho não aparece para os leitores');
+  ok((await prAna('POST', `/processes/${prNew.id}/publicar`, { note: 'Primeira versão' })).data.version === 1 && (await prFel('GET', `/processes/${prNew.id}`)).status === 200, 'publicado, passa a aparecer para todos');
+  await prAna('PUT', `/processes/${prNew.id}`, { ...prBody, title: 'Fechamento e Entrega de Obra' });
+  ok((await prFel('GET', `/processes/${prNew.id}`)).data.content.title === 'Fechamento de Obra' && (await prAna('GET', `/processes/${prNew.id}`, null)).data.has_draft, 'alteração fica em rascunho; leitores seguem vendo a versão publicada');
+  ok((await prAna('GET', `/processes/${prNew.id}?ver=rascunho`)).data.content.title === 'Fechamento e Entrega de Obra', 'quem edita vê o rascunho');
+  const prV2 = (await prAna('POST', `/processes/${prNew.id}/publicar`, { note: 'Nome ajustado' })).data;
+  ok(prV2.version === 2 && prV2.versions.length === 2 && prV2.versions[0].note === 'Nome ajustado' && (await prFel('GET', `/processes/${prNew.id}?ver=1`)).data.content.title === 'Fechamento de Obra', 'nova versão publicada; a anterior fica no histórico');
+  ok((await prAna('PUT', `/processes/${prNew.id}`, { ...prBody, code: 'PRC-01' })).status === 400, 'código repetido é recusado');
+  const prFile = (await prAna('POST', `/processes/${prNew.id}/files`, { files: [{ data: tinyPng(), name: 'modelo.png' }] })).data.files[0];
+  ok(prFile && (await prFel('GET', `/process-files/${prFile.id}`)).status === 200 && (await prFel('POST', `/processes/${prNew.id}/files`, { files: [{ data: tinyPng() }] })).status === 403, 'documentos: quem edita anexa, todos baixam');
+  ok((await prAna('DELETE', `/processes/${prNew.id}`)).status === 400, 'processo publicado não é excluído (só arquivado)');
+  await prAna('POST', `/processes/${prNew.id}/arquivar`);
+  ok((await prFel('GET', `/processes/${prNew.id}`)).status === 404 && (await prFel('GET', `/process-files/${prFile.id}`)).status === 404 && (await prAna('GET', '/processes?arquivados=1')).data.items.some(i => i.id === prNew.id), 'arquivado some para os leitores e segue para quem edita');
+  ok((await prAna('POST', `/processes/${prNew.id}/restaurar`)).data.status === 'publicado', 'processo restaurado');
+  const prDel = (await prAna('POST', '/processes', { ...prBody, title: 'Rascunho descartável' })).data;
+  ok((await prAna('DELETE', `/processes/${prDel.id}`)).status === 200 && (await prAna('GET', `/processes/${prDel.id}`)).status === 404, 'rascunho nunca publicado pode ser excluído');
+  ok((await prFel('GET', '/processes/manual')).data.processes.length === 9, 'manual completo com os processos publicados');
+  // Aprovação: gestor/coordenador criam e enviam; só o administrador publica
+  const prJu = await login('juliana@charao.eng.br');
+  const prJuMeta = (await prJu('GET', '/meta')).data.can;
+  ok(prJuMeta.edit_processes && !prJuMeta.approve_processes && (await prAna('GET', '/meta')).data.can.approve_processes, 'gestor edita processos por padrão; só o administrador aprova');
+  const prJ = (await prJu('POST', '/processes', { ...prBody, title: 'Entrega de Chaves', related: [], submit: true, note: 'Novo processo' })).data;
+  ok(prJ.status === 'rascunho' && prJ.review.status === 'enviado' && prJ.can.submit === false && prJ.can.publish === false, 'gestor cria e envia para aprovação');
+  ok((await prFel('GET', `/processes/${prJ.id}`)).status === 404, 'enviado ainda não aparece para os leitores');
+  ok((await prJu('POST', `/processes/${prJ.id}/publicar`, {})).status === 403 && (await prJu('POST', '/processes/1/arquivar')).status === 403, 'gestor não publica nem arquiva');
+  ok((await prJu('POST', '/processes/1/files', { files: [{ data: tinyPng() }] })).status === 403 && (await prJu('POST', `/processes/${prJ.id}/files`, { files: [{ data: tinyPng() }] })).status === 200, 'documentos: gestor só anexa em processo ainda não publicado');
+  ok((await prAna('GET', '/processes')).data.summary.pending >= 1, 'administrador vê os processos aguardando aprovação');
+  ok((await prAna('POST', `/processes/${prJ.id}/devolver`, { note: '' })).status === 400, 'devolver exige o motivo');
+  const prRet = (await prAna('POST', `/processes/${prJ.id}/devolver`, { note: 'Detalhar a vistoria' })).data;
+  ok(prRet.review.status === 'devolvido' && prRet.review.note === 'Detalhar a vistoria' && (await prJu('GET', `/processes/${prJ.id}`)).data.review.note === 'Detalhar a vistoria', 'administrador devolve e o gestor vê o motivo');
+  const prJ2 = (await prJu('PUT', `/processes/${prJ.id}`, { ...prBody, title: 'Entrega de Chaves', objective: 'Entregar as chaves com a vistoria detalhada.', related: [] })).data;
+  ok(prJ2.review.status === null && prJ2.can.submit, 'ajustado, volta a rascunho para novo envio');
+  await prJu('POST', `/processes/${prJ.id}/enviar`, { note: 'Vistoria detalhada' });
+  const prPub = (await prAna('POST', `/processes/${prJ.id}/publicar`, {})).data;
+  ok(prPub.status === 'publicado' && prPub.version === 1 && prPub.versions[0].note === 'Vistoria detalhada' && (await prFel('GET', `/processes/${prJ.id}`)).status === 200, 'administrador aprova e publica; nota do envio vai para o histórico');
+  // Alteração de processo publicado: nada muda para os leitores até a aprovação (inclusive responsável)
+  const prP1 = (await prAna('GET', '/processes/1')).data;
+  await prJu('PUT', '/processes/1', { ...prP1.editable, title: 'RDO (revisado)', owner_id: 3, submit: true });
+  const prFelP1 = (await prFel('GET', '/processes/1')).data;
+  ok(prFelP1.content.title === 'Relatório Diário de Obra (RDO)' && !prFelP1.owner_id, 'alteração enviada não muda a versão publicada nem o responsável');
+  const prP1b = (await prAna('POST', '/processes/1/publicar', {})).data;
+  ok(prP1b.version === 2 && prP1b.owner_id === 3 && (await prFel('GET', '/processes/1')).data.content.title === 'RDO (revisado)', 'na aprovação valem o novo conteúdo e o novo responsável');
+
 }
 
 main()

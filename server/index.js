@@ -26,6 +26,7 @@ import * as Records from './services/records.js';
 import { projectHistory } from './services/history.js';
 import * as Team from './services/team.js';
 import * as Vacations from './services/vacations.js';
+import * as Processes from './services/processes.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
@@ -198,6 +199,8 @@ api.get('/api/meta', (req, res, { ctx }) => {
       manage_settings: canManageSettings(ctx.user),
       contracts: Contracts.canContracts(ctx.user),
       finance: Finance.canFinance(ctx.user),
+      edit_processes: Processes.canEditProcesses(ctx.user),
+      approve_processes: Processes.canApproveProcesses(ctx.user),
     },
     // Fotos de perfil (id → versão), para trocar as iniciais pela foto
     avatars: Users.avatarMap(),
@@ -211,6 +214,17 @@ api.get('/api/team', (req, res, { ctx }) => send(res, 200, Team.listTeam(ctx)));
 api.post('/api/team', (req, res, { ctx, body }) => send(res, 201, Team.createMember(ctx, body, clientIp(req))));
 api.get('/api/team/:id', (req, res, { ctx, params }) => send(res, 200, Team.getMember(ctx, intOrNull(params.id))));
 api.put('/api/team/:id', (req, res, { ctx, params, body }) => send(res, 200, Team.updateMember(ctx, intOrNull(params.id), body, clientIp(req))));
+// ---------- Processos da Empresa (leitura: todos; edição: seção processos) ----------
+api.get('/api/processes', (req, res, { ctx, query }) => send(res, 200, Processes.listProcesses(ctx, { archived: query.get('arquivados') === '1' })));
+api.get('/api/processes/manual', (req, res, { ctx }) => send(res, 200, Processes.processManual(ctx)));
+api.post('/api/processes', (req, res, { ctx, body }) => send(res, 201, Processes.createProcess(ctx, body, clientIp(req))));
+api.get('/api/processes/:id', (req, res, { ctx, params, query }) => send(res, 200, Processes.getProcess(ctx, intOrNull(params.id), { view: query.get('ver') || '' })));
+api.put('/api/processes/:id', (req, res, { ctx, params, body }) => send(res, 200, Processes.saveDraft(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/processes/:id', (req, res, { ctx, params }) => send(res, 200, Processes.removeProcess(ctx, intOrNull(params.id), clientIp(req))));
+api.post('/api/processes/:id/files', (req, res, { ctx, params, body }) => send(res, 200, Processes.addProcessFiles(ctx, intOrNull(params.id), body)));
+api.delete('/api/processes/:id/files/:fid', (req, res, { ctx, params }) => send(res, 200, Processes.removeProcessFile(ctx, intOrNull(params.id), intOrNull(params.fid))));
+api.post('/api/processes/:id/:action', (req, res, { ctx, params, body }) => send(res, 200, Processes.processAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
+api.get('/api/process-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Processes.processFileForUser(ctx, intOrNull(params.id))));
 api.get('/api/vacations/me', (req, res, { ctx }) => send(res, 200, Vacations.myVacations(ctx)));
 api.get('/api/vacations/overview', (req, res, { ctx, query }) => send(res, 200, Vacations.vacationsOverview(ctx, query.get('ano'))));
 api.get('/api/vacations/user/:id', (req, res, { ctx, params }) => send(res, 200, Vacations.userVacations(ctx, intOrNull(params.id))));

@@ -29,6 +29,9 @@ import * as Recurrences from './views/recurrences.js';
 import * as Contracts from './views/contracts.js';
 import * as Finance from './views/finance.js';
 import * as ReportMeasurement from './views/report-measurement.js';
+import * as Processes from './views/processes.js';
+import * as ProcessesPrint from './views/processes-print.js';
+import * as ProcessMap from './views/process-map.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
 
@@ -72,6 +75,13 @@ const routes = [
   ['/imprimir/medicao/:id', ReportMeasurement.view, { print: true }],
   ['/imprimir/ata/:id', ReportAta.view, { print: true }],
   ['/imprimir/organograma', TeamVacations.printOrg, { print: true }],
+  ['/processos', Processes.list],
+  ['/processos/novo', Processes.form],
+  ['/processos/mapa', ProcessMap.view],
+  ['/processos/:id', Processes.view],
+  ['/processos/:id/editar', Processes.form],
+  ['/imprimir/processos', ProcessesPrint.manual, { print: true }],
+  ['/imprimir/processo/:id', ProcessesPrint.one, { print: true }],
   ['/equipe/organograma', Team.org],
   ['/equipe/ferias', TeamVacations.view],
   ['/equipe/cadastro', Team.list],
@@ -134,11 +144,12 @@ function sectionOfPath(path) {
   if (path.startsWith('/financeiro')) return 'financeiro';
   if (path.startsWith('/equipe/cadastro')) return 'equipe|cadastro_usuarios';
   if (path.startsWith('/equipe') || path.startsWith('/imprimir/organograma')) return 'equipe';
+  if (path === '/processos/novo' || /^\/processos\/\d+\/editar$/.test(path)) return 'processos';
   if (path === '/auditoria') return 'auditoria';
   if (path === '/configuracoes') return 'configuracoes';
   return null;
 }
-const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', processos: 'Processos da Empresa (edição)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 
 export function navigate(path, { replace = false } = {}) {
   const h = '#' + path;
@@ -171,13 +182,14 @@ export async function reloadMeta() {
 }
 
 // Celular: barra inferior com até 5 botões de rótulo curto; o restante fica em "Mais"
-const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Tarefas financeiras': 'Financeiro', 'Configurações': 'Ajustes' };
+const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Tarefas financeiras': 'Financeiro', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes' };
 function mobileNav() {
   const c = state.meta?.can || {};
   const all = [...navItems(),
     ...(showUsersNav() ? [USERS_NAV] : []),
     ...(c.contracts ? [['/contratos', 'Contratos', 'contract']] : []),
     ...(c.finance ? [['/financeiro', 'Tarefas financeiras', 'wallet']] : []),
+    ['/processos', 'Processos da Empresa', 'checklist'],
     ...(sec('equipe') ? [['/equipe/organograma', 'Organograma', 'team'], ['/equipe/ferias', 'Férias', 'calendar']] : []),
     ...(rosterOk() ? [['/equipe/cadastro', 'Cadastro da Equipe', 'user']] : []),
     ...(c.view_audit ? [['/auditoria', 'Auditoria', 'shield']] : []),
@@ -206,9 +218,10 @@ function shell() {
       <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
       <div class="sidebar-tag">Gestão de Obras</div>
       <nav>${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
-        ${state.meta?.can.contracts || state.meta?.can.finance || rosterOk() ? html`<div class="sidebar-tag sidebar-group">Gestão da Empresa</div>` : ''}
+        <div class="sidebar-tag sidebar-group">Gestão da Empresa</div>
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Tarefas financeiras</span></a>` : ''}
+        <a href="#/processos" data-nav="/processos">${icon('checklist')}<span>Processos da Empresa</span></a>
         ${rosterOk() ? html`<div class="sidebar-sub">Gestão da Equipe</div>
           ${sec('equipe') ? html`<a href="#/equipe/organograma" data-nav="/equipe/organograma">${icon('team')}<span>Organograma</span></a>
           <a href="#/equipe/ferias" data-nav="/equipe/ferias">${icon('calendar')}<span>Férias</span></a>` : ''}

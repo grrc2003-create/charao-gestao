@@ -367,3 +367,36 @@
 .org-print { overflow: hidden; margin-top: 10px; }
 .org-print .org-tree { transform: scale(var(--z, 1)); transform-origin: top left; }
 .org-print .org-card { cursor: default; box-shadow: none; }
+
+/* Processos da Empresa */
+.pd-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin: 6px 0 8px; }
+.pd-head h1 { margin: 2px 0 0; }
+.pd-freq { text-align: right; font-weight: 700; color: #2A3D50; font-size: 10pt; white-space: nowrap; border: 1px solid #CFC3AE; border-radius: 6px; padding: 4px 10px; }
+.pd-freq small { display: block; font-size: 7pt; letter-spacing: .08em; text-transform: uppercase; color: #6E7A86; font-weight: 600; }
+.pd-obj { background: #FAF8F4; border-left: 3px solid #F26B21; padding: 6px 10px; margin-bottom: 10px; }
+.pd-erp { font-size: 9pt; margin-top: 3px; }
+.pd-links { font-size: 8.5pt; margin-top: 4px; display: grid; gap: 2px; }
+.pd-links .muted { word-break: break-all; font-size: 7.5pt; }
+.pd-flow td { vertical-align: top; }
+.pd-flow tr.is-ctl td { background: #FFF7E8; }
+.pd-n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--c); color: #fff; font-weight: 700; font-size: 8pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.pd-flow tr.is-ctl .pd-n { border-radius: 3px; background: #A86F0E; }
+.pd-ctl { color: #8A5A0B; white-space: nowrap; }
+.pd-fail { color: #C0392B; margin-top: 2px; }
+.pd-how { font-size: 8.5pt; color: #46535F; margin-top: 3px; }
+.pd-how p { margin: 0 0 2px; }
+.pd-how ul { margin: 0 0 2px; padding-left: 14px; }
+.pd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.pd-box { border: 1px solid #E4E1DA; border-radius: 6px; padding: 6px 9px; }
+.pd-ind { margin: 2px 0 0; padding-left: 14px; font-size: 9pt; }
+.pd-foot { margin-top: 10px; border-top: 1px solid #E4E1DA; padding-top: 4px; }
+.pd-cover { min-height: 250mm; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 6px; padding: 0 8mm; border-left: 6px solid #F26B21; }
+.pd-cover-logo { width: 62mm; margin-bottom: 18mm; }
+.pd-cover h1 { font-size: 30pt; margin: 0; }
+.pd-cover-sub { font-size: 12pt; color: #46535F; max-width: 140mm; }
+.pd-map td { vertical-align: top; }
+.pd-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0 14px; }
+.pd-kpis > div { border: 1px solid #E4E1DA; border-radius: 8px; padding: 10px 12px; }
+.pd-kpis b { display: block; font-size: 22pt; color: #F26B21; }
+.pd-kpis span { font-size: 9.5pt; color: #46535F; }
+@media screen and (max-width: 700px) { .pd-grid, .pd-kpis { grid-template-columns: 1fr; } .pd-cover { min-height: 0; padding: 20px 12px; } }

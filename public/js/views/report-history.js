@@ -1,6 +1,7 @@
 // História do projeto (A4): narrativa cronológica — abertura, capítulos por mês, situação atual,
 // definições vigentes, cronograma com os registros e (opcional) a linha do tempo detalhada.
-import { html, api, icon, fmtDate, fmtDateTime, fmtPct } from '../core.js';
+import { html, api, fmtDate, fmtDateTime, fmtPct, STATUS } from '../core.js';
+import { recBadge } from './record-icons.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
 
@@ -9,6 +10,34 @@ const KIND_LABEL = { projeto: 'Projeto', conclusao: 'Conclusão', reagendamento:
 export async function view({ params, query, setQuery, render }) {
   const withGantt = query.get('gantt') !== '0';
   const withTimeline = query.get('linha') === '1';
+  const withDetail = query.get('detalhe') !== '0';
+  const q = over => ({ gantt: withGantt ? '' : '0', linha: withTimeline ? '1' : '', detalhe: withDetail ? '' : '0', ...over });
+  const dd = d => (d ? fmtDate(d).slice(0, 5) : '—');
+  // Detalhe do mês: tarefas abertas, concluídas, reagendamentos e registros
+  const monthDetail = c => {
+    const d = c.detail;
+    if (!d) return '';
+    return html`<div class="hist-det">
+      ${d.records.length ? html`<h5 class="hist-dh">Registros do mês (${d.records.length})</h5>
+        <table class="r-table hist-t"><thead><tr><th>Data</th><th>Tipo</th><th>Código</th><th>Registro</th></tr></thead>
+        <tbody>${d.records.map(r => html`<tr><td class="small nowrap">${dd(r.date)}</td><td class="small nowrap">${recBadge(r.icon, r.color, 'rg-ic-xs')} ${r.type_name}</td>
+          <td class="mono small nowrap">${r.code || '—'}</td><td>${r.title}</td></tr>`)}</tbody></table>` : ''}
+      ${d.opened.length ? html`<h5 class="hist-dh">Tarefas abertas (${d.opened.length})</h5>
+        <table class="r-table hist-t"><thead><tr><th>Aberta</th><th>Código</th><th>Tarefa</th><th>Classificação</th><th>Responsável</th><th>Prazo</th><th>Situação hoje</th></tr></thead>
+        <tbody>${d.opened.map(t => html`<tr><td class="small nowrap">${dd(t.opened)}</td><td class="mono small nowrap">${t.code}</td><td>${t.sub ? '↳ ' : ''}${t.title}${t.origin ? html` <span class="small muted">(de registro)</span>` : ''}</td>
+          <td class="small">${t.stage_name || '—'}</td><td class="small">${t.assignee_name || '—'}</td><td class="small nowrap">${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}</td>
+          <td class="small nowrap ${t.status === 'atrasada' ? 'late' : ''}">${STATUS[t.status]?.label || t.status}</td></tr>`)}</tbody></table>` : ''}
+      ${d.done.length ? html`<h5 class="hist-dh">Tarefas concluídas (${d.done.length})</h5>
+        <table class="r-table hist-t"><thead><tr><th>Conclusão</th><th>Código</th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Resultado</th></tr></thead>
+        <tbody>${d.done.map(t => html`<tr><td class="small nowrap">${dd(t.date)}</td><td class="mono small nowrap">${t.code}</td><td>${t.sub ? '↳ ' : ''}${t.title}</td>
+          <td class="small">${t.assignee_name || '—'}</td><td class="small nowrap">${t.due_date ? fmtDate(t.due_date) : 'sem prazo'}</td>
+          <td class="small nowrap ${t.on_time ? '' : 'late'}">${!t.due_date ? 'concluída' : t.on_time ? (t.early ? `${t.early} d antes do prazo` : 'no prazo') : `${t.days_late} d de atraso`}</td></tr>`)}</tbody></table>` : ''}
+      ${d.reschedules.length ? html`<h5 class="hist-dh">Reagendamentos de prazo (${d.reschedules.length})</h5>
+        <table class="r-table hist-t"><thead><tr><th>Data</th><th>Código</th><th>Tarefa</th><th>Prazo</th><th class="num">Dias</th><th>Justificativa</th></tr></thead>
+        <tbody>${d.reschedules.map(r => html`<tr><td class="small nowrap">${dd(r.date)}</td><td class="mono small nowrap">${r.code}</td><td>${r.title}</td>
+          <td class="small nowrap">${dd(r.old_due)} → ${dd(r.new_due)}</td><td class="num small">${r.days === null ? '—' : `${r.days > 0 ? '+' : ''}${r.days}`}</td><td class="small">${r.reason}</td></tr>`)}</tbody></table>` : ''}
+    </div>`;
+  };
   const [h, g] = await Promise.all([api(`/projects/${params.id}/history`), withGantt ? api('/gantt', { query: { project: params.id } }) : null]);
   const p = h.project;
   const s = h.summary;
@@ -19,6 +48,7 @@ export async function view({ params, query, setQuery, render }) {
     html: html`${printToolbar({
       back: `#/projetos/${p.id}`, title: `História do projeto — ${p.code} · ${p.name}`,
       extra: html`<label class="pt-opt"><input type="checkbox" id="h-gantt" ${withGantt ? 'checked' : ''}>Cronograma</label>
+        <label class="pt-opt"><input type="checkbox" id="h-det" ${withDetail ? 'checked' : ''}>Detalhar tarefas por mês</label>
         <label class="pt-opt"><input type="checkbox" id="h-line" ${withTimeline ? 'checked' : ''}>Linha do tempo detalhada</label>`,
     })}
     <div class="doc-stage"><article class="doc a4 hist-doc" id="doc">
@@ -47,17 +77,17 @@ export async function view({ params, query, setQuery, render }) {
           ${kpi('Entregas no prazo', fmtPct(s.on_time_pct), `${s.on_time} de ${s.delivered}`, '#1F6B41')}
           ${kpi('Atrasadas', s.late, s.late ? 'em aberto' : 'nenhuma', '#C0392B')}
         </div>
-        ${h.counts.length ? html`<div class="hist-counts">${h.counts.map(c => html`<span style="--c:${c.color}"><i></i>${c.name}: <b>${c.n}</b></span>`)}</div>` : ''}
+        ${h.counts.length ? html`<div class="hist-counts">${h.counts.map(c => html`<span>${recBadge(c.icon, c.color, 'rg-ic-xs')}${c.name}: <b>${c.n}</b></span>`)}</div>` : ''}
       </section>
 
       ${g && g.tasks.length ? html`<section class="r-section r-gantt"><h3 class="r-h">Cronograma e momentos registrados</h3>
         ${ganttChart(g.tasks, { ref: g.ref, groupLabel: t => t.stage_name || 'Geral', marks: g.marks })}</section>` : ''}
 
       <section class="r-section ${g && g.tasks.length ? 'r-after-gantt' : ''}"><h3 class="r-h">A história, mês a mês</h3>
-        ${chapters.length ? chapters.map(c => html`<div class="hist-ch avoid">
+        ${chapters.length ? chapters.map(c => html`<div class="hist-ch">
           <h4 class="hist-month">${c.label[0].toUpperCase()}${c.label.slice(1)}
             <span class="hist-mc">${c.counts.created} aberta(s) · ${c.counts.done} concluída(s)${c.counts.records ? ` · ${c.counts.records} registro(s)` : ''}${c.counts.reschedules ? ` · ${c.counts.reschedules} reagendamento(s)` : ''}</span></h4>
-          ${c.paragraphs.map(t => html`<p class="r-p">${t}</p>`)}</div>`) : html`<p class="muted">Ainda não há acontecimentos registrados.</p>`}
+          ${c.paragraphs.map(t => html`<p class="r-p">${t}</p>`)}${withDetail ? monthDetail(c) : ''}</div>`) : html`<p class="muted">Ainda não há acontecimentos registrados.</p>`}
       </section>
 
       <section class="r-section avoid"><h3 class="r-h">Onde estamos</h3>${h.current.map(t => html`<p class="r-p">${t}</p>`)}
@@ -76,7 +106,7 @@ export async function view({ params, query, setQuery, render }) {
 
       ${withTimeline ? html`<section class="r-section"><h3 class="r-h">Linha do tempo detalhada <span class="muted small">(${h.timeline.length})</span></h3>
         <table class="r-table"><thead><tr><th>Data</th><th>Tipo</th><th>Acontecimento</th><th>Detalhe</th></tr></thead>
-        <tbody>${h.timeline.map(e => html`<tr><td class="small nowrap">${fmtDate(e.date)}</td><td class="small nowrap"><span class="r-dot" style="--c:${e.color}"></span>${KIND_LABEL[e.kind] || e.kind}</td>
+        <tbody>${h.timeline.map(e => html`<tr><td class="small nowrap">${fmtDate(e.date)}</td><td class="small nowrap">${e.kind === 'registro' ? recBadge(e.icon, e.color, 'rg-ic-xs') : html`<span class="r-dot" style="--c:${e.color}"></span>`} ${e.kind === 'registro' ? e.detail : KIND_LABEL[e.kind] || e.kind}</td>
           <td>${e.title}</td><td class="small">${e.detail}</td></tr>`)}</tbody></table></section>` : ''}
 
       <section class="r-section r-sign avoid">
@@ -92,8 +122,9 @@ export async function view({ params, query, setQuery, render }) {
       setPageFooter(`Charão · História do projeto · ${p.code} · ${p.name}`);
       drawGanttLinks(root);
       bindPrintToolbar(root);
-      root.querySelector('#h-gantt').addEventListener('change', e => { setQuery({ gantt: e.target.checked ? '' : '0', linha: withTimeline ? '1' : '' }); render(); });
-      root.querySelector('#h-line').addEventListener('change', e => { setQuery({ gantt: withGantt ? '' : '0', linha: e.target.checked ? '1' : '' }); render(); });
+      root.querySelector('#h-gantt').addEventListener('change', e => { setQuery(q({ gantt: e.target.checked ? '' : '0' })); render(); });
+      root.querySelector('#h-det').addEventListener('change', e => { setQuery(q({ detalhe: e.target.checked ? '' : '0' })); render(); });
+      root.querySelector('#h-line').addEventListener('change', e => { setQuery(q({ linha: e.target.checked ? '1' : '' })); render(); });
     },
   };
 }

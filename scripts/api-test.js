@@ -1346,6 +1346,9 @@ async function main() {
   const rgH = (await rgRic('GET', '/projects/1/history')).data;
   ok(rgH.chapters.length > 0 && rgH.chapters.some(c => c.paragraphs.some(x => x.includes('ATA-PRJ-001-001'))) && rgH.intro[0].includes('PRJ-001'), 'história do projeto narra a reunião no capítulo do mês');
   ok(rgH.vigentes.some(v => v.code === 'DEF-PRJ-001-001') && rgH.timeline.some(e => e.kind === 'registro'), 'história traz definições vigentes e a linha do tempo');
+  const rgHm = rgH.chapters.find(c => c.detail.records.some(r => r.code === 'ATA-PRJ-001-001'));
+  ok(rgHm && rgHm.detail.opened.some(t => t.title === 'Enviar amostras de rejunte') && rgH.chapters.some(c => c.detail.done.length && c.detail.done[0].code), 'história detalha no mês as tarefas abertas, concluídas e os registros');
+  ok(rgG.marks.every(m => m.icon) && rgTypes.find(t => t.name === 'Ata de reunião').icon === 'reuniao', 'cada tipo de registro tem ícone próprio (Gantt e listas)');
   const rgRep = (await rgRic('GET', '/reports?type=projeto&id=1&level=resumo')).data;
   ok(rgRep.gantt_marks.length > 0, 'relatório do projeto leva as marcas para o Gantt');
   // Tipos editáveis em Configurações

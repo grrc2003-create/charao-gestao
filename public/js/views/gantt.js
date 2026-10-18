@@ -3,6 +3,7 @@
 // atrasadas ganham uma extensão hachurada do prazo até hoje. Losango = prazo. Linha laranja = hoje.
 import { html, raw, icon, STATUS, fmtDate } from '../core.js';
 import { STATUS_COLOR } from './shared.js';
+import { recIconSvg } from './record-icons.js';
 
 const TZ = 'America/Sao_Paulo';
 const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ });
@@ -181,13 +182,13 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
     const pins = mk.map(m => {
       const x = mid(m.date);
       let lv = 0;
-      while (placed.some(q => q.lv === lv && Math.abs(q.x - x) < 1.4) && lv < 3) lv++;
+      while (placed.some(q => q.lv === lv && Math.abs(q.x - x) < 2.2) && lv < 3) lv++;
       placed.push({ x, lv });
       const tip = `${fmtDate(m.date)} · ${m.type_name}${m.code ? ` ${m.code}` : ''} · ${m.title}`;
-      return html`<a class="g-mark" href="${markHref(m)}" style="left:${x.toFixed(2)}%;top:${4 + lv * 11}px;--c:${m.color}" title="${tip}" aria-label="${tip}"></a>`;
+      return html`<a class="g-mark" href="${markHref(m)}" style="left:${x.toFixed(2)}%;top:${4 + lv * 20}px;--c:${m.color}" title="${tip}" aria-label="${tip}">${recIconSvg(m.icon)}</a>`;
     });
     const lvMax = Math.max(...placed.map(q => q.lv));
-    body.unshift(html`<tr class="g-row g-marks-row" style="--mh:${22 + lvMax * 11}px"><td class="g-label"><b>Registros do projeto</b>
+    body.unshift(html`<tr class="g-row g-marks-row" style="--mh:${26 + lvMax * 20}px"><td class="g-label"><b>Registros do projeto</b>
       <span class="g-meta">${mk.length} registro(s) · ${[...new Set(mk.map(m => m.type_name))].slice(0, 4).join(', ')}${new Set(mk.map(m => m.type_name)).size > 4 ? '…' : ''}</span></td>
       <td class="g-track">${grid}${pins}</td></tr>`);
   }
@@ -211,7 +212,8 @@ export function ganttChart(rows, { ref, groupLabel, showProject = false, weekly 
       <span><i class="g-due g-due-legend"></i>Prazo</span>
       <span><i class="g-due g-orig g-due-legend"></i>Prazo original (reagendada)</span>
       <span><i class="g-today-legend"></i>Hoje (${fmtDate(ref)})</span>
-      ${mk.length ? html`<span><i class="g-mark-legend"></i>Registro do projeto (cor do tipo · linha = dia do registro)</span>` : ''}
+      ${mk.length ? html`<span class="g-legend-recs">Registros do projeto (linha tracejada = dia do registro):
+        ${[...new Map(mk.map(m => [m.type_name, m])).values()].map(m => html`<span><span class="g-mark g-mark-static" style="--c:${m.color}">${recIconSvg(m.icon)}</span>${m.type_name}</span>`)}</span>` : ''}
     </div>`}
     ${hasLinks ? html`<div class="g-legend g-legend-dep"><span><i class="g-link-legend"></i>Dependência (término → início)</span>
       ${hasCritical ? html`<span><i class="g-sw g-sw-crit"></i>Caminho crítico: sequência sem folga que define a data final</span>` : ''}</div>` : ''}

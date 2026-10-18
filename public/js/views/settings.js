@@ -1,5 +1,6 @@
 // Configurações gerais (Gestor e Administrador). Organizada em seções para receber novos cadastros no futuro.
 import { html, api, icon } from '../core.js';
+import { REC_ICONS, recBadge } from './record-icons.js';
 import { toast } from '../ui.js';
 import { pageHead } from './shared.js';
 
@@ -25,6 +26,8 @@ const recTypeItem = t => html`<li class="rt-item ${t.active === 0 ? 'is-inactive
   <div class="rt-main">
     <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
     <input type="color" data-color value="${t.color || '#2A3D50'}" aria-label="Cor do tipo">
+    <span class="rt-icon"><span data-prev>${recBadge(t.icon || 'nota', t.color || '#2A3D50')}</span>
+      <select data-icon aria-label="Ícone do tipo">${Object.entries(REC_ICONS).map(([k, [l]]) => html`<option value="${k}" ${(t.icon || 'nota') === k ? 'selected' : ''}>${l}</option>`)}</select></span>
     <input type="text" data-name maxlength="60" value="${t.name || ''}" aria-label="Nome do tipo" placeholder="Nome do tipo" required>
     <select data-beh aria-label="Comportamento" ${t.use_count ? 'disabled title="Em uso: o comportamento não pode ser trocado"' : ''}>${REC_BEH.map(([k, l]) => html`<option value="${k}" ${t.behavior === k ? 'selected' : ''}>${l}</option>`)}</select>
     <input type="text" data-prefix maxlength="6" value="${t.prefix || ''}" aria-label="Numeração" placeholder="Nº (ex.: ATA)">
@@ -199,7 +202,7 @@ export async function view({ state, reloadMeta }) {
       const rf = root.querySelector('#rtypes-form');
       const rl = root.querySelector('#rtype-list');
       root.querySelector('#rtype-add').addEventListener('click', () => {
-        rl.insertAdjacentHTML('beforeend', recTypeItem({ name: '', behavior: 'nota', color: '#5B6B7A', active: 1, in_report: 1, allow_colab: 1, use_count: 0 }).toString());
+        rl.insertAdjacentHTML('beforeend', recTypeItem({ name: '', behavior: 'nota', color: '#5B6B7A', icon: 'bandeira', active: 1, in_report: 1, allow_colab: 1, use_count: 0 }).toString());
         rl.lastElementChild.querySelector('[data-name]').focus();
       });
       rl.addEventListener('click', e => {
@@ -212,7 +215,12 @@ export async function view({ state, reloadMeta }) {
           if (sib) Number(mv.dataset.move) < 0 ? sib.before(li) : sib.after(li);
         }
       });
-      rl.addEventListener('change', e => { if (e.target.matches('[data-active]')) e.target.closest('.rt-item').classList.toggle('is-inactive', !e.target.checked); });
+      const prevIcon = li => { li.querySelector('[data-prev]').innerHTML = recBadge(li.querySelector('[data-icon]').value, li.querySelector('[data-color]').value).toString(); };
+      rl.addEventListener('change', e => {
+        if (e.target.matches('[data-active]')) e.target.closest('.rt-item').classList.toggle('is-inactive', !e.target.checked);
+        if (e.target.matches('[data-icon], [data-color]')) prevIcon(e.target.closest('.rt-item'));
+      });
+      rl.addEventListener('input', e => { if (e.target.matches('[data-color]')) prevIcon(e.target.closest('.rt-item')); });
       rf.addEventListener('submit', async e => {
         e.preventDefault();
         const rerr = rf.querySelector('.form-error');
@@ -221,6 +229,7 @@ export async function view({ state, reloadMeta }) {
           id: li.dataset.id ? Number(li.dataset.id) : null,
           name: li.querySelector('[data-name]').value,
           color: li.querySelector('[data-color]').value,
+          icon: li.querySelector('[data-icon]').value,
           behavior: li.querySelector('[data-beh]').value,
           prefix: li.querySelector('[data-prefix]').value,
           active: li.querySelector('[data-active]').checked,

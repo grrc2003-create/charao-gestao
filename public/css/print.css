@@ -329,17 +329,33 @@
 .g-mline { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--c); opacity: .45; z-index: 1; pointer-events: none; }
 .g-marks-row .g-track { height: var(--mh, 22px); }
 .g-marks-row td { background: #FBFAF7; border-bottom: 1px solid #E9E1D3; }
-.g-mark { position: absolute; width: 10px; height: 10px; background: var(--c); border: 1.5px solid #fff; box-shadow: 0 0 0 1px var(--c);
-  transform: translateX(-50%) rotate(45deg); z-index: 4; border-radius: 2px; }
-.g-mark:hover { transform: translateX(-50%) rotate(45deg) scale(1.35); }
-.g-mark-legend { display: inline-block; width: 9px; height: 9px; background: #2A3D50; transform: rotate(45deg); border-radius: 2px; }
+.g-mark { position: absolute; width: 18px; height: 18px; display: grid; place-items: center; background: var(--c); border: 1.5px solid #fff; border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--c), 0 1px 2px rgba(0,0,0,.18); transform: translateX(-50%); z-index: 4; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.g-mark svg { width: 11px; height: 11px; }
+.g-mark:hover { transform: translateX(-50%) scale(1.25); z-index: 5; }
+.g-mark.g-mark-static { position: relative; transform: none; width: 15px; height: 15px; box-shadow: 0 0 0 1px var(--c); }
+.g-mark.g-mark-static svg { width: 9px; height: 9px; }
+.g-legend-recs { display: inline-flex !important; flex-wrap: wrap; gap: 4px 12px !important; }
+.g-legend-recs > span { display: inline-flex; align-items: center; gap: 4px; }
 
 /* História do projeto e ata */
 .hist-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 8.5pt; color: #46535F; }
 .hist-counts span { display: inline-flex; align-items: center; gap: 5px; }
-.hist-counts i { width: 8px; height: 8px; border-radius: 2px; background: var(--c); transform: rotate(45deg); }
+.hist-det { margin: 4px 0 8px; }
+.hist-dh { margin: 8px 0 3px; font-size: 7.8pt; font-weight: 700; color: #46535F; text-transform: uppercase; letter-spacing: .05em; break-after: avoid; }
+.hist-t { font-size: 7.8pt; }
+.hist-t td, .hist-t th { padding-top: 2px; padding-bottom: 2px; }
 .hist-ch { margin: 10px 0 6px; padding-left: 10px; border-left: 2.5px solid #E4DCCB; }
 .hist-month { margin: 0 0 4px; font-size: 10pt; color: #2A3D50; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; break-after: avoid; }
 .hist-mc { font-size: 7.5pt; font-weight: 500; color: #6E7A86; }
 .r-p.pre { white-space: pre-wrap; }
 .ata-items td { vertical-align: top; }
+
+/* Selo do tipo de registro (ícone branco no círculo da cor do tipo) */
+.rg-ic { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--c); color: #fff; flex: none; vertical-align: middle;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.rg-ic svg { width: 13px; height: 13px; }
+.rg-ic.rg-ic-sm { width: 18px; height: 18px; }
+.rg-ic.rg-ic-sm svg { width: 11px; height: 11px; }
+.rg-ic.rg-ic-xs { width: 14px; height: 14px; }
+.rg-ic.rg-ic-xs svg { width: 8.5px; height: 8.5px; }

@@ -48,7 +48,7 @@ export function projectHistory(ctx, id) {
     ev(localDate(r.created_at), 'reagendamento', `${t.code} reagendada`, `${fmtD(r.old_due)} → ${fmtD(r.new_due)} · ${r.reason_name}`, '#B7950B', { reason: r.reason_name });
   }
   for (const r of records) {
-    ev(r.record_date, 'registro', `${r.code ? `${r.code} · ` : ''}${r.title}`, r.type_name, r.color, { record: r });
+    ev(r.record_date, 'registro', `${r.code ? `${r.code} · ` : ''}${r.title}`, r.type_name, r.color, { record: r, icon: r.type_icon });
   }
   for (const m of measurements) ev(localDate(m.issued_at), 'medicao', `Medição ${m.code} emitida`, `referência ${m.ref_month.slice(5)}/${m.ref_month.slice(0, 4)}`, '#2A78D6');
   // Classificações (Grupo/Local/Etapa) concluídas
@@ -113,7 +113,18 @@ export function projectHistory(ctx, id) {
     }
     const ms = evs.filter(e => e.kind === 'medicao');
     if (ms.length) par.push(`${ms.length === 1 ? 'Foi emitida a medição' : 'Foram emitidas as medições'} ${joinPt(ms.map(e => e.title.replace('Medição ', '').replace(' emitida', '')))}.`);
-    return { ym, label: monthLabel(ym), paragraphs: par, counts: { created: created.length, done: done.length, on_time: onTime, reschedules: rs.length, records: recs.length }, events: evs.map(({ record, ...e }) => e) };
+    // Detalhe do mês: quais tarefas foram abertas, concluídas e reagendadas
+    const taskOf = id => tasks.find(t => t.id === id);
+    const detail = {
+      opened: created.sort((a, b) => a.created_at.localeCompare(b.created_at)).map(t => ({ code: t.code, title: t.title, assignee_name: t.assignee_name, stage_name: t.stage_name,
+        opened: localDate(t.created_at), due_date: t.due_date, status: t.eff_status, sub: !!t.parent_id, origin: !!t.origin_record_id })),
+      done: done.sort((a, b) => a.delivered_date.localeCompare(b.delivered_date)).map(t => ({ code: t.code, title: t.title, assignee_name: t.assignee_name, stage_name: t.stage_name,
+        date: t.delivered_date, due_date: t.due_date, on_time: t.on_time, days_late: t.days_late, early: t.due_date && t.delivered_date < t.due_date ? daysBetween(t.delivered_date, t.due_date) : 0, sub: !!t.parent_id })),
+      reschedules: rs.map(r => ({ code: taskOf(r.task_id).code, title: taskOf(r.task_id).title, assignee_name: taskOf(r.task_id).assignee_name, date: localDate(r.created_at), old_due: r.old_due, new_due: r.new_due,
+        days: r.old_due && r.new_due ? daysBetween(r.old_due, r.new_due) : null, reason: r.reason_name })),
+      records: recs.map(r => ({ id: r.id, date: r.record_date, code: r.code, title: r.title, type_name: r.type_name, color: r.color, icon: r.type_icon, status: r.eff_status })),
+    };
+    return { ym, label: monthLabel(ym), paragraphs: par, detail, counts: { created: created.length, done: done.length, on_time: onTime, reschedules: rs.length, records: recs.length }, events: evs.map(({ record, ...e }) => e) };
   });
 
   // ---------- Abertura e situação atual ----------
@@ -150,7 +161,7 @@ export function projectHistory(ctx, id) {
     ],
     late: late.slice(0, 10).map(t => ({ code: t.code, title: t.title, assignee_name: t.assignee_name, due_date: t.due_date, days_late: t.days_late })),
     upcoming: upcoming.slice(0, 10).map(t => ({ code: t.code, title: t.title, assignee_name: t.assignee_name, due_date: t.due_date })),
-    counts: Object.entries(records.reduce((a, r) => ({ ...a, [r.type_name]: (a[r.type_name] || 0) + 1 }), {})).map(([name, n]) => ({ name, n, color: records.find(r => r.type_name === name).color })),
+    counts: Object.entries(records.reduce((a, r) => ({ ...a, [r.type_name]: (a[r.type_name] || 0) + 1 }), {})).map(([name, n]) => ({ name, n, color: records.find(r => r.type_name === name).color, icon: records.find(r => r.type_name === name).type_icon })),
     timeline: events.map(({ record, ...e }) => e),
   };
 }

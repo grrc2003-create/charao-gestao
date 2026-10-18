@@ -3,6 +3,7 @@
 import { html, api, icon, fmtDate, fmtDateTime, todayISO, STATUS } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, lightbox } from '../ui.js';
 import { pageHead } from './shared.js';
+import { recBadge } from './record-icons.js';
 
 export const REC_ST = {
   ativo: ['Registrado', '#5B6B7A'], rascunho: ['Rascunho', '#8A96A3'], emitida: ['Emitida', '#2A3D50'], aguardando_aprovacao: ['Aguardando aprovação', '#B7791F'],
@@ -15,7 +16,7 @@ const ORIGINS = ['Reunião', 'E-mail', 'Obra', 'Cliente', 'Telefone', 'WhatsApp'
 const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
 export const recStatus = s => html`<span class="rg-st" style="--c:${(REC_ST[s] || REC_ST.ativo)[1]}">${(REC_ST[s] || [s])[0]}</span>`;
-export const recType = r => html`<span class="rg-type" style="--c:${r.color}"><i></i>${r.type_name}</span>`;
+export const recType = r => html`<span class="rg-type" style="--c:${r.color}">${recBadge(r.type_icon, r.color, 'rg-ic-sm')}${r.type_name}</span>`;
 const taskStatus = s => (s ? html`<span class="rg-st" style="--c:${s === 'concluida' ? '#1F6B41' : s === 'atrasada' ? '#C0392B' : s === 'cancelada' ? '#8A96A3' : '#1F6FB2'}">${s === 'cancelada' ? 'Cancelada' : STATUS[s]?.label || s}</span>` : '');
 const recHref = (pid, id) => `#/projetos/${pid}/registros/${id}`;
 
@@ -53,7 +54,7 @@ export function chooseType(data, navigate) {
   wrap.innerHTML = html`<div class="sheet" role="dialog" aria-modal="true" aria-label="Novo registro">
     <div class="sheet-grip" aria-hidden="true"></div>
     <header class="sheet-head"><h2>Novo registro</h2><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></header>
-    <nav class="more-list rg-choose">${types.map(t => html`<a href="#/projetos/${data.project.id}/registros/novo?tipo=${t.id}"><span class="rg-dot" style="--c:${t.color}"></span>
+    <nav class="more-list rg-choose">${types.map(t => html`<a href="#/projetos/${data.project.id}/registros/novo?tipo=${t.id}">${recBadge(t.icon, t.color)}
       <span><b>${t.name}</b><small>${BEH[t.behavior]}${t.requires_approval ? ' · exige aprovação' : ''}${t.internal ? ' · interno' : ''}</small></span>${icon('chevron')}</a>`)}</nav></div>`.toString();
   document.body.appendChild(wrap);
   document.body.classList.add('no-scroll');

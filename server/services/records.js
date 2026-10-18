@@ -16,6 +16,8 @@ export const STATUS_LABEL = {
   substituida: 'Substituída', reprovada: 'Reprovada', aberta: 'Em aberto', resolvida: 'Resolvida', atrasada: 'Atrasada', cancelada: 'Cancelada',
 };
 const ITEM_KINDS = ['info', 'definicao', 'demanda'];
+// Ícones disponíveis para os tipos (desenhos em public/js/views/record-icons.js)
+export const ICON_KEYS = ['nota', 'check', 'reuniao', 'balao', 'troca', 'alerta', 'olho', 'megafone', 'pergunta', 'lampada', 'bandeira', 'estrela', 'camera', 'ferramenta', 'clipe', 'calendario'];
 const fmtD = d => (d ? d.split('-').reverse().join('/') : '');
 const nowIso = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
@@ -36,6 +38,7 @@ export function saveRecordTypes(ctx, input, ip) {
     name: String(x?.name ?? '').replace(/\s+/g, ' ').trim(),
     behavior: String(x?.behavior || ''),
     color: /^#[0-9a-fA-F]{6}$/.test(x?.color || '') ? x.color.toUpperCase() : '#2A3D50',
+    icon: ICON_KEYS.includes(x?.icon) ? x.icon : 'nota',
     prefix: String(x?.prefix || '').trim().toUpperCase() || null,
     requires_approval: flag(x?.requires_approval),
     internal: flag(x?.internal),
@@ -71,15 +74,15 @@ export function saveRecordTypes(ctx, input, ip) {
     // Nomes/numerações temporários para permitir trocas entre tipos
     for (const x of items.filter(x => x.id)) run('UPDATE record_types SET name = ?, prefix = NULL WHERE id = ?', `~tmp~${x.id}`, x.id);
     for (const x of items) {
-      const vals = [x.name, x.behavior, x.color, x.prefix, x.requires_approval, x.internal, x.allow_colab, x.in_report, x.active, x.order];
+      const vals = [x.name, x.behavior, x.color, x.icon, x.prefix, x.requires_approval, x.internal, x.allow_colab, x.in_report, x.active, x.order];
       if (x.id) {
         const o = byId.get(x.id);
-        if (['name', 'color', 'prefix', 'requires_approval', 'internal', 'allow_colab', 'in_report', 'active'].some(k => String(o[k] ?? '') !== String(x[k] ?? ''))) log.alterados.push(x.name);
-        run(`UPDATE record_types SET name=?, behavior=?, color=?, prefix=?, requires_approval=?, internal=?, allow_colab=?, in_report=?, active=?, sort_order=?,
+        if (['name', 'color', 'icon', 'prefix', 'requires_approval', 'internal', 'allow_colab', 'in_report', 'active'].some(k => String(o[k] ?? '') !== String(x[k] ?? ''))) log.alterados.push(x.name);
+        run(`UPDATE record_types SET name=?, behavior=?, color=?, icon=?, prefix=?, requires_approval=?, internal=?, allow_colab=?, in_report=?, active=?, sort_order=?,
           updated_at=datetime('now') WHERE id=?`, ...vals, x.id);
       } else {
-        run(`INSERT INTO record_types (name, behavior, color, prefix, requires_approval, internal, allow_colab, in_report, active, sort_order)
-          VALUES (?,?,?,?,?,?,?,?,?,?)`, ...vals);
+        run(`INSERT INTO record_types (name, behavior, color, icon, prefix, requires_approval, internal, allow_colab, in_report, active, sort_order)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)`, ...vals);
         log.criados.push(x.name);
       }
     }
@@ -98,7 +101,7 @@ const typeVisible = (ctx, t) => !(t.internal && ctx.user.is_external);
 const isManager = (ctx, projectId) => canManageProject(ctx, projectId);
 const canCreateType = (ctx, t) => !!t.active && typeVisible(ctx, t) && (isAdmin(ctx.user) || isManagerRole(ctx.user) || !!t.allow_colab);
 
-const BASE = `SELECT r.*, t.name AS type_name, t.behavior, t.color, t.internal, t.in_report, t.requires_approval,
+const BASE = `SELECT r.*, t.name AS type_name, t.behavior, t.color, t.icon AS type_icon, t.internal, t.in_report, t.requires_approval,
     cu.name AS created_by_name, au.name AS assignee_name, ap.name AS approved_by_name, eu.name AS emitted_by_name, xu.name AS cancelled_by_name,
     rp.code AS replaces_code, rp.title AS replaces_title, rb.code AS replaced_by_code, rb.title AS replaced_by_title,
     sr.code AS source_code, sr.title AS source_title,
@@ -203,7 +206,7 @@ export function listRecords(ctx, projectId) {
   const live = rows.filter(r => !['cancelada', 'reprovada', 'rascunho'].includes(r.status));
   return {
     project: { id: p.id, code: p.code, name: p.name, client: p.client, status: p.status, kind: p.kind },
-    types: types.map(t => ({ id: t.id, name: t.name, behavior: t.behavior, color: t.color, prefix: t.prefix, active: t.active, internal: t.internal, requires_approval: t.requires_approval })),
+    types: types.map(t => ({ id: t.id, name: t.name, behavior: t.behavior, color: t.color, icon: t.icon, prefix: t.prefix, active: t.active, internal: t.internal, requires_approval: t.requires_approval })),
     creatable: creatable.map(t => t.id),
     can_manage: isManager(ctx, p.id),
     records: rows,
@@ -231,7 +234,7 @@ export function getRecord(ctx, id) {
 export function recordMarks(ctx, projectId) {
   if (!canAccessProject(ctx.user, projectId, ctx.projects)) return [];
   return visibleRows(ctx, projectId).filter(r => !['cancelada', 'reprovada', 'rascunho'].includes(r.status))
-    .map(r => ({ id: r.id, project_id: r.project_id, date: r.record_date, code: r.code, title: r.title, type_name: r.type_name, color: r.color,
+    .map(r => ({ id: r.id, project_id: r.project_id, date: r.record_date, code: r.code, title: r.title, type_name: r.type_name, color: r.color, icon: r.type_icon,
       behavior: r.behavior, status: effStatus(r) }))
     .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
 }

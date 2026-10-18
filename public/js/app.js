@@ -222,7 +222,7 @@ function shell() {
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Tarefas financeiras</span></a>` : ''}
         <a href="#/processos" data-nav="/processos">${icon('checklist')}<span>Processos da Empresa</span></a>
-        ${rosterOk() ? html`<div class="sidebar-sub">Gestão da Equipe</div>
+        ${rosterOk() ? html`<div class="sidebar-tag sidebar-group">Gestão da Equipe</div>
           ${sec('equipe') ? html`<a href="#/equipe/organograma" data-nav="/equipe/organograma">${icon('team')}<span>Organograma</span></a>
           <a href="#/equipe/ferias" data-nav="/equipe/ferias">${icon('calendar')}<span>Férias</span></a>` : ''}
           <a href="#/equipe/cadastro" data-nav="/equipe/cadastro">${icon('user')}<span>Cadastro da Equipe</span></a>` : ''}
@@ -244,7 +244,28 @@ function shell() {
       ${mob.more.length ? html`<a href="#" data-more data-more-paths="${mob.more.map(m => m[0]).join(' ')}" role="button">${icon('more')}<span>Mais</span></a>` : ''}
     </nav>`.toString();
   app.querySelector('[data-more]')?.addEventListener('click', e => { e.preventDefault(); openMoreMenu(mob.more); });
+  fitSidebar();
+  // Logo, foto e fontes carregam depois: refaz o ajuste quando mudam de tamanho
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(fitFrame); fitFrame = requestAnimationFrame(fitSidebar); });
+    app.querySelectorAll('.sidebar-brand, .sidebar-user').forEach(el => ro.observe(el));
+  }
 }
+let fitFrame;
+
+// Menu lateral sem rolagem: compacta (níveis 0 a 4) até todos os itens caberem na altura da janela
+function fitSidebar() {
+  const sb = document.querySelector('.sidebar');
+  const nav = sb?.querySelector('nav');
+  if (!nav || getComputedStyle(sb).display === 'none') return;
+  for (let d = 0; d <= 4; d++) {
+    sb.dataset.density = d;
+    if (nav.scrollHeight <= nav.clientHeight + 1) break;
+  }
+}
+let fitTimer;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitSidebar, 80); });
+document.fonts?.ready.then(fitSidebar);
 
 function markNav(path) {
   document.querySelectorAll('[data-nav]').forEach(a => {

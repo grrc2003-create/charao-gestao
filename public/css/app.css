@@ -2050,34 +2050,37 @@ tr.is-inactive td { opacity: .55; }
 .rec-vac { color: #1F6B41; background: #E5F4EC; }
 .rec-vac::before { content: "☀"; }
 
-/* Menu lateral: rola quando a janela é baixa (marca e usuário ficam fixos) */
+/* Menu lateral sem barra de rolagem: a densidade (data-density 0–4) é ajustada pelo app até caber na janela */
 @media (min-width: 1024px) {
-  .sidebar nav { overflow-y: auto; min-height: 0; margin: 0 -6px; padding: 0 6px; scrollbar-width: thin; }
-  .sidebar nav::-webkit-scrollbar { width: 6px; }
-  .sidebar nav::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
-}
-/* Janelas baixas: menu mais compacto */
-@media (min-width: 1024px) and (max-height: 860px) {
-  .sidebar { padding-top: 14px; }
-  .sidebar-tag { margin: 6px 8px 10px; padding-top: 6px; }
-  .sidebar nav a { padding: 7px 12px; font-size: 14px; }
-  .sidebar nav .sidebar-group { margin: 8px 8px 4px; }
-  .sidebar nav .sidebar-sub { margin: 4px 12px 0; }
-  .sidebar nav .sidebar-sep { margin: 6px 8px 4px; }
-  .sidebar-user { padding: 7px 10px; margin-top: 6px; }
-  .demo-flag { margin-top: 6px; padding: 4px; }
-}
-@media (min-width: 1024px) and (max-height: 720px) {
-  .sidebar { padding-top: 10px; padding-bottom: 8px; }
-  .sidebar-brand img { max-height: 34px; width: auto; }
-  .sidebar-tag { margin: 4px 8px 6px; padding-top: 4px; }
-  .sidebar nav { gap: 0; }
-  .sidebar nav a { padding: 4px 12px; font-size: 13px; gap: 10px; }
-  .sidebar nav a svg { width: 17px; height: 17px; }
-  .sidebar nav .sidebar-group { margin: 5px 8px 2px; }
-  .sidebar-user { padding: 5px 8px; }
-  .sidebar-user small { display: none; }
-  .demo-flag { margin-top: 4px; padding: 2px; font-size: 10.5px; }
+  .sidebar nav { overflow-y: auto; min-height: 0; margin: 0 -6px; padding: 0 6px; scrollbar-width: none; }
+  .sidebar nav::-webkit-scrollbar { display: none; }
+  .sidebar[data-density="1"], .sidebar[data-density="2"], .sidebar[data-density="3"], .sidebar[data-density="4"] { padding-top: 14px; }
+  .sidebar[data-density="1"] .sidebar-tag { margin: 6px 8px 10px; padding-top: 6px; }
+  .sidebar[data-density="1"] nav a { padding: 7px 12px; font-size: 14px; }
+  .sidebar[data-density="1"] nav .sidebar-group { margin: 8px 8px 4px; }
+  .sidebar[data-density="1"] nav .sidebar-sep { margin: 6px 8px 4px; }
+  .sidebar[data-density="1"] .sidebar-user { padding: 7px 10px; margin-top: 6px; }
+  .sidebar[data-density="1"] .demo-flag { margin-top: 6px; padding: 4px; }
+
+  .sidebar[data-density="2"] .sidebar-tag, .sidebar[data-density="3"] .sidebar-tag, .sidebar[data-density="4"] .sidebar-tag { margin: 4px 8px 6px; padding-top: 4px; }
+  .sidebar[data-density="2"] nav, .sidebar[data-density="3"] nav, .sidebar[data-density="4"] nav { gap: 0; }
+  .sidebar[data-density="2"] nav a { padding: 5px 12px; font-size: 13.5px; gap: 10px; }
+  .sidebar[data-density="2"] nav a svg, .sidebar[data-density="3"] nav a svg, .sidebar[data-density="4"] nav a svg { width: 17px; height: 17px; }
+  .sidebar[data-density="2"] nav .sidebar-group { margin: 6px 8px 2px; }
+  .sidebar[data-density="2"] nav .sidebar-sep, .sidebar[data-density="3"] nav .sidebar-sep, .sidebar[data-density="4"] nav .sidebar-sep { margin: 4px 8px 2px; }
+  .sidebar[data-density="2"] .sidebar-user, .sidebar[data-density="3"] .sidebar-user, .sidebar[data-density="4"] .sidebar-user { padding: 5px 8px; margin-top: 4px; }
+  .sidebar[data-density="2"] .demo-flag, .sidebar[data-density="3"] .demo-flag { margin-top: 4px; padding: 2px; font-size: 10.5px; }
+
+  .sidebar[data-density="3"], .sidebar[data-density="4"] { padding-top: 10px; padding-bottom: 8px; }
+  .sidebar[data-density="3"] .sidebar-brand img, .sidebar[data-density="4"] .sidebar-brand img { max-height: 32px; width: auto; }
+  .sidebar[data-density="3"] nav a { padding: 3px 12px; font-size: 13px; }
+  .sidebar[data-density="3"] nav .sidebar-group, .sidebar[data-density="4"] nav .sidebar-group { margin: 4px 8px 1px; }
+  .sidebar[data-density="3"] .sidebar-user small, .sidebar[data-density="4"] .sidebar-user small { display: none; }
+
+  .sidebar[data-density="4"] nav a { padding: 2px 12px; font-size: 12.5px; }
+  .sidebar[data-density="4"] nav a svg { width: 15px; height: 15px; }
+  .sidebar[data-density="4"] .sidebar-tag { margin: 2px 8px 3px; }
+  .sidebar[data-density="4"] .demo-flag { display: none; }
 }
 
 /* Foto de perfil */

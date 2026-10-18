@@ -2,6 +2,7 @@
 // Tocar em um processo destaca as ligações dele e mostra o resumo ao lado (com atalho para a ficha).
 import { html, raw, esc, api, icon } from '../core.js';
 import { pageHead } from './shared.js';
+import { areaGroup } from './processes.js';
 
 const AREA_COLORS = ['#2A3D50', '#C9520F', '#1F6FB2', '#2E8B57', '#7A4FA3', '#A86F0E', '#0F7C83', '#B03A5B', '#5B6B7A', '#8E5A2B'];
 
@@ -23,13 +24,16 @@ function wrap(t, max = 24) {
 const W = 1440, CX = W / 2, NODE_W = 220, ROW = 70, GAP = 22, AREA_DX = 250, NODE_DX = 470;
 
 function layout(items) {
-  const areas = [...new Set(items.map(i => i.area || 'Sem área'))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  const groups = areas.map((name, k) => ({ name, color: AREA_COLORS[k % AREA_COLORS.length], ps: items.filter(i => (i.area || 'Sem área') === name) }));
-  // Divide as áreas entre os dois lados equilibrando a quantidade de processos (mantendo a ordem)
-  const total = items.length;
-  let acc = 0;
+  const areas = [...new Set(items.map(i => areaGroup(i.area)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const groups = areas.map((name, k) => ({ name, color: AREA_COLORS[k % AREA_COLORS.length], ps: items.filter(i => areaGroup(i.area) === name) }));
+  // Divide as áreas entre os dois lados equilibrando a quantidade de processos (maiores primeiro; cada lado em ordem alfabética)
   const right = [], left = [];
-  for (const g of groups) { (acc + g.ps.length / 2 <= total / 2 || !right.length ? right : left).push(g); acc += g.ps.length; }
+  let nr = 0, nl = 0;
+  for (const g of [...groups].sort((a, b) => b.ps.length - a.ps.length)) {
+    if (nr <= nl) { right.push(g); nr += g.ps.length; } else { left.push(g); nl += g.ps.length; }
+  }
+  const byName = (a, b) => a.name.localeCompare(b.name, 'pt-BR');
+  right.sort(byName); left.sort(byName);
   const sideH = side => side.reduce((h, g) => h + g.ps.length * ROW, 0) + Math.max(0, side.length - 1) * GAP;
   const H = Math.max(560, Math.max(sideH(right), sideH(left)) + 80);
   const CY = H / 2;

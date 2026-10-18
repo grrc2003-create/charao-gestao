@@ -137,7 +137,7 @@ export function listProcesses(ctx, { archived = false } = {}) {
     can_approve: canApproveProcesses(ctx.user),
     summary: {
       total: pub.length,
-      areas: [...new Set(pub.map(i => i.area))].length,
+      areas: [...new Set(pub.map(i => String(i.area || '').split(' · ')[0].trim()))].length,
       controls: pub.reduce((s, i) => s + i.controls, 0),
       people: [...new Set(pub.flatMap(i => i.people))].length,
       drafts: editor ? items.filter(i => (i.status === 'rascunho' || i.has_draft) && i.review_status !== 'enviado').length : 0,

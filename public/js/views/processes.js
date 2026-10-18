@@ -35,6 +35,11 @@ const statusTag = p => p.status === 'arquivado' ? html`<span class="pr-tag pr-ta
   : p.review_status === 'devolvido' ? html`<span class="pr-tag pr-tag-ret">Devolvido para ajustes</span>`
   : p.status === 'rascunho' ? html`<span class="pr-tag pr-tag-draft">Rascunho · não publicado</span>`
   : p.has_draft ? html`<span class="pr-tag pr-tag-draft">Alterações em rascunho</span>` : '';
+// Área "Grupo · Subárea" (ex.: Sistema · Gestão de Obras): agrupa pelo grupo, com subtítulos por subárea
+export const areaGroup = a => String(a || 'Sem área').split(' · ')[0].trim() || 'Sem área';
+const areaSub = a => String(a || '').split(' · ').slice(1).join(' · ').trim();
+const SUB_ORDER = ['Gestão de Obras', 'Gestão da Empresa', 'Gestão da Equipe', 'Administração'];
+const subRank = s => (s ? (SUB_ORDER.includes(s) ? SUB_ORDER.indexOf(s) : 50) : -1);
 const freqTag = f => (f ? html`<span class="pr-freq">${icon('clock')}${f}</span>` : '');
 
 // ---------- Mapa de processos ----------
@@ -43,7 +48,20 @@ export async function list({ query, state, setQuery }) {
   const data = await api('/processes', { query: { arquivados: arq ? '1' : '' } });
   const area = query.get('area') || '';
   const s = data.summary;
-  const areas = [...new Set(data.items.map(i => i.area || 'Sem área'))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const areas = [...new Set(data.items.map(i => areaGroup(i.area)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const card = i => html`
+          <a class="pr-card ${i.status !== 'publicado' ? 'is-off' : ''}" href="#/processos/${i.id}" data-freq="${i.frequency || ''}" data-text="${[i.code, i.title, i.objective, i.area, ...(i.people || [])].join(' ').toLowerCase()}">
+            <div class="pr-card-top"><span class="pr-code">${i.code}</span>${freqTag(i.frequency)}</div>
+            <h3>${i.title}</h3>
+            <p>${i.objective || ''}</p>
+            <div class="pr-card-foot"><span>${i.steps} etapa(s)</span>${i.controls ? html`<span class="pr-ctl-mini">◆ ${i.controls} ponto(s) de controle</span>` : ''}${statusTag(i)}</div>
+          </a>`;
+  const groupBody = a => {
+    const its = data.items.filter(i => areaGroup(i.area) === a);
+    const subs = [...new Set(its.map(i => areaSub(i.area)))].sort((x, y) => subRank(x) - subRank(y) || x.localeCompare(y, 'pt-BR'));
+    if (subs.length === 1 && !subs[0]) return html`<div class="pr-grid">${its.map(card)}</div>`;
+    return subs.map(sb => html`<div class="pr-subsec" data-subsec>${sb ? html`<h3 class="pr-sub-h">${sb}</h3>` : ''}<div class="pr-grid">${its.filter(i => areaSub(i.area) === sb).map(card)}</div></div>`);
+  };
   const freqs = [...new Set(data.items.map(i => i.frequency).filter(Boolean))];
   return {
     title: 'Processos da Empresa',
@@ -70,7 +88,7 @@ export async function list({ query, state, setQuery }) {
       <div class="rg-filters section">
         <div class="chips pr-chips" role="group" aria-label="Filtrar por área">
           <button type="button" class="chip" data-farea="" aria-pressed="${!area}">Todas<span class="n">${data.items.length}</span></button>
-          ${areas.map(a => html`<button type="button" class="chip" data-farea="${a}" aria-pressed="${a === area}">${a}<span class="n">${data.items.filter(i => (i.area || 'Sem área') === a).length}</span></button>`)}
+          ${areas.map(a => html`<button type="button" class="chip" data-farea="${a}" aria-pressed="${a === area}">${a}<span class="n">${data.items.filter(i => areaGroup(i.area) === a).length}</span></button>`)}
         </div>
         <div class="rg-filter-row">
           <select id="pr-freq" aria-label="Frequência"><option value="">Todas as frequências</option>${freqs.map(f => html`<option value="${f}">${f}</option>`)}</select>
@@ -79,13 +97,7 @@ export async function list({ query, state, setQuery }) {
       </div>
       ${data.items.length ? areas.map(a => html`<section class="section pr-area" data-area="${a}">
         <h2 class="pr-area-h">${a}<span class="n" data-acount></span></h2>
-        <div class="pr-grid">${data.items.filter(i => (i.area || 'Sem área') === a).map(i => html`
-          <a class="pr-card ${i.status !== 'publicado' ? 'is-off' : ''}" href="#/processos/${i.id}" data-freq="${i.frequency || ''}" data-text="${[i.code, i.title, i.objective, i.area, ...(i.people || [])].join(' ').toLowerCase()}">
-            <div class="pr-card-top"><span class="pr-code">${i.code}</span>${freqTag(i.frequency)}</div>
-            <h3>${i.title}</h3>
-            <p>${i.objective || ''}</p>
-            <div class="pr-card-foot"><span>${i.steps} etapa(s)</span>${i.controls ? html`<span class="pr-ctl-mini">◆ ${i.controls} ponto(s) de controle</span>` : ''}${statusTag(i)}</div>
-          </a>`)}</div></section>`)
+        ${groupBody(a)}</section>`)
         : html`<div class="empty-state"><h2>Nenhum processo cadastrado</h2><p>${data.can_edit ? 'Cadastre o primeiro processo: objetivo, etapas com responsável, pontos de controle, entradas, saídas e indicadores.' : 'Os processos publicados da empresa aparecerão aqui.'}</p></div>`}
       <p class="muted pr-none" hidden>Nenhum processo com esses filtros.</p>
       ${data.can_edit ? html`<a class="fab" href="#/processos/novo" aria-label="Novo processo">${icon('plus')}</a>` : ''}`,
@@ -102,6 +114,7 @@ export async function list({ query, state, setQuery }) {
             c.hidden = !v;
             if (v) n++;
           });
+          sec.querySelectorAll('[data-subsec]').forEach(ss => { ss.hidden = ![...ss.querySelectorAll('.pr-card')].some(c => !c.hidden); });
           sec.hidden = !n;
           sec.querySelector('[data-acount]').textContent = n;
           shown += n;

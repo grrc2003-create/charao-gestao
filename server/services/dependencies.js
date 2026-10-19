@@ -6,7 +6,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, intOrNull } from '../lib/http.js';
 import { canSeeTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
-import { loadVisible, checklistMaxDue } from './tasks.js';
+import { loadVisible, checklistMaxDue, syncParentDue } from './tasks.js';
 import { addDays, daysBetween, today } from './metrics.js';
 import { addWorkingDays, workingDaysBetween, prevWorkingDay } from './calendar.js';
 
@@ -259,6 +259,7 @@ export function applyShift({ userId, projectId, cause, kind, causeOldDue, causeN
     run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', p.newStart, newDue, new Date().toISOString(), t.id);
     run('INSERT INTO dependency_shifts (event_id, target_task_id, old_start, old_due, new_start, new_due, days) VALUES (?,?,?,?,?,?,?)', ev, t.id, p.oldStart, p.oldDue, p.newStart, newDue, p.days);
     taskHistory(t.id, userId, 'Prazo ajustado por dependência', `${fmt(p.oldDue)} → ${fmt(newDue)} (+${dd(p.days)}) · causa: ${causeLabel} (${WHY[kind]}) · não conta como reagendamento desta tarefa`);
+    if (t.parent_id) syncParentDue(t.parent_id, userId, t.code);
   }
   const endNew = projectEnd(projectId);
   run('UPDATE dependency_events SET project_end_new = ? WHERE id = ?', endNew, ev);
@@ -391,7 +392,11 @@ function setDates(n, start, due) {
     run('UPDATE checklist_items SET start_date = ?, due_date = ? WHERE id = ?', start, due, n.id);
     const max = checklistMaxDue(n.task_id);
     if (max) run('UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?', max, new Date().toISOString(), n.task_id);
-  } else run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', start, due, new Date().toISOString(), n.id);
+  } else {
+    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', start, due, new Date().toISOString(), n.id);
+    const pid = one('SELECT parent_id FROM tasks WHERE id = ?', n.id)?.parent_id;
+    if (pid) syncParentDue(pid, null, null);
+  }
 }
 const ownerOf = n => (n.kind === 'item' ? n.task_id : n.id);
 

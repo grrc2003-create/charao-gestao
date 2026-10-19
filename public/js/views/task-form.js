@@ -72,12 +72,13 @@ export async function view({ params, query, state, navigate }) {
           <div class="form-row form-row-3 dates-row">
             <div class="field" id="start-row"><label for="start_date">Início previsto</label><input id="start_date" name="start_date" type="date" value="${v.start_date || ''}">
               <span class="hint">Opcional. Usado no cronograma (Gantt).</span></div>
-            <div class="field quick-due" id="quick-due" ${editing && t.can?.due_from_items ? 'hidden' : ''}><label for="qd-days">Duração</label>
+            <div class="field quick-due" id="quick-due" ${editing && (t.can?.due_from_items || t.can?.due_from_subtasks) ? 'hidden' : ''}><label for="qd-days">Duração</label>
               <div class="qd-line"><input id="qd-days" type="number" min="1" max="2000" step="1" inputmode="numeric" placeholder="nº de dias" aria-label="Quantidade de dias">
                 <select id="qd-mode" aria-label="Tipo de dia"><option value="uteis">dias úteis</option><option value="corridos">dias corridos</option></select></div>
               <div class="chips qd-chips">${[1, 2, 3, 5, 10, 15, 20, 30].map(n => html`<button type="button" class="chip" data-qd="${n}">${n}</button>`)}</div>
               <span class="hint" id="qd-info">Preencha o início e a quantidade de dias: o prazo é calculado (o dia de início conta como 1º dia).</span></div>
-            <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}" ${editing && t.can?.due_from_items ? 'readonly' : ''}>
+            <div class="field"><label for="due_date" id="due-label">Prazo</label><input id="due_date" name="due_date" type="date" value="${v.due_date || ''}" ${editing && (t.can?.due_from_items || t.can?.due_from_subtasks) ? 'readonly' : ''}>
+              ${editing && t.can?.due_from_subtasks ? html`<span class="hint">O prazo acompanha a <b>maior data final das subtarefas</b> — reagende as subtarefas para mudar.</span>` : ''}
               <span class="hint cl-only" id="due-hint" ${isChecklist ? '' : 'hidden'}>No check-list, o prazo acompanha o <b>maior prazo dos itens</b>${editing && t.can?.due_from_items ? ' — altere o prazo dos itens para mudar.' : ' (se algum item tiver data de término).'}</span></div>
           </div>
           ${editing ? html`<div class="dep-dates" id="dep-dates" hidden></div>` : ''}
@@ -199,14 +200,14 @@ export async function view({ params, query, state, navigate }) {
       const depBox = root.querySelector('#dep-dates');
       if (depBox) {
         api(`/tasks/${t.id}/dep-dates`).then(d => {
-          if (!d.has_pred && !d.has_succ) return;
+          if (!d.has_pred && !(d.has_succ && !t.can?.due_from_subtasks && !t.can?.due_from_items)) return;
           depBox.hidden = false;
           depBox.innerHTML = html`<span class="sub-label">Datas pelas dependências</span>
             <div class="dep-dates-btns">
               ${d.has_pred ? (d.from_pred ? html`<button type="button" class="btn btn-ghost btn-sm" data-pull="start">${icon('calendar')}Puxar início da predecessora · ${fmtBR(d.from_pred.start)}</button>
                 <span class="hint">${d.from_pred.code} termina em ${fmtBR(d.from_pred.finish)}${d.from_pred.lag ? ` + ${d.from_pred.lag} dia(s) de folga` : ''} → início no dia útil seguinte.</span>`
                 : html`<span class="hint">A predecessora ainda não tem término.</span>`) : ''}
-              ${d.has_succ ? (d.from_succ ? html`<button type="button" class="btn btn-ghost btn-sm" data-pull="due">${icon('calendar')}Puxar término pela sucessora · ${fmtBR(d.from_succ.due)}</button>
+              ${d.has_succ && !t.can?.due_from_subtasks && !t.can?.due_from_items ? (d.from_succ ? html`<button type="button" class="btn btn-ghost btn-sm" data-pull="due">${icon('calendar')}Puxar término pela sucessora · ${fmtBR(d.from_succ.due)}</button>
                 <span class="hint">${d.from_succ.code} começa em ${fmtBR(d.from_succ.start)}${d.from_succ.lag ? ` (folga ${d.from_succ.lag} dia(s))` : ''} → término no dia útil anterior.</span>`
                 : html`<span class="hint">A sucessora ainda não tem início.</span>`) : ''}
             </div>`.toString();

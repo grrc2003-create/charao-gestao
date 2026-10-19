@@ -1648,6 +1648,19 @@ async function main() {
   ok((await fo('DELETE', `/users/${duX.id}`)).status === 200 && (await fo('GET', `/users/${duX.id}`)).status === 404, 'exclusão permanente');
   ok((await fo('GET', `/team/${duY.id}`)).data.manager_id === 1, 'subordinados passam para o gestor da pessoa excluída');
   ok((await fo('GET', '/audit')).data.some(a => a.action === 'Usuário excluído permanentemente'), 'exclusão registrada na auditoria');
+  // Tarefa principal acompanha a maior data final das subtarefas
+  const pdP = (await fo('POST', '/tasks', { project_id: 1, title: 'Tarefa mãe (prazos)', description: 'Teste de prazo da tarefa principal', assignee_id: 4, start_date: '2099-05-01', due_date: '2099-05-10' })).data.id;
+  const pdS1 = (await fo('POST', '/tasks', { parent_id: pdP, project_id: 1, title: 'Sub 1', description: 'Subtarefa 1', assignee_id: 4, start_date: '2099-05-01', due_date: '2099-05-05' })).data.id;
+  const pdS2 = (await fo('POST', '/tasks', { parent_id: pdP, project_id: 1, title: 'Sub 2', description: 'Subtarefa 2', assignee_id: 4, start_date: '2099-05-02', due_date: '2099-05-07' })).data.id;
+  ok((await fo('GET', `/tasks/${pdP}`)).data.due_date === '2099-05-10', 'subtarefa nova com prazo menor não encolhe a tarefa principal');
+  const pdReason = reasons[0].id;
+  await fo('POST', `/tasks/${pdS1}/reschedule`, { due_date: '2099-05-20', reason_id: pdReason });
+  let pdPv = (await fo('GET', `/tasks/${pdP}`)).data;
+  ok(pdPv.due_date === '2099-05-20' && pdPv.can.due_from_subtasks && !pdPv.can.reschedule, 'subtarefa reagendada depois da principal: a principal estende para a maior data final');
+  await fo('POST', `/tasks/${pdS1}/reschedule`, { due_date: '2099-05-06', reason_id: pdReason });
+  pdPv = (await fo('GET', `/tasks/${pdP}`)).data;
+  ok(pdPv.due_date === '2099-05-07' && pdPv.reschedule_count === 0 && pdPv.history.some(h => h.action === 'Prazo ajustado pelas subtarefas'), 'subtarefa antecipada: a principal antecipa para a maior data final (sem contar como reagendamento)');
+  ok((await fo('PATCH', `/tasks/${pdP}`, { due_date: '2099-06-01', reschedule_reason_id: pdReason })).status === 400, 'prazo da principal não é alterado direto quando acompanha as subtarefas');
 
 }
 

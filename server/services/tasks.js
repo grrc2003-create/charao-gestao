@@ -112,6 +112,28 @@ export function loadVisible(ctx, id) {
 // Check-list: o prazo da tarefa acompanha o maior prazo dos itens (quando algum item tem prazo)
 export const checklistMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM checklist_items WHERE task_id = ?', taskId)?.d || null;
 
+// Tarefa principal: o prazo acompanha a maior data final das subtarefas (quando alguma subtarefa tem prazo)
+export const subtasksMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND due_date IS NOT NULL', taskId)?.d || null;
+export function syncParentDue(parentId, userId, causeCode = null, { extendOnly = false } = {}) {
+  if (!parentId) return;
+  const p = one('SELECT * FROM tasks WHERE id = ?', parentId);
+  if (!p || p.cancelled_at || p.status === 'concluida') return;
+  const max = subtasksMaxDue(parentId);
+  if (!max || max === p.due_date) return;
+  if (extendOnly && p.due_date && max < p.due_date) return; // subtarefa nova: só estende
+  const endBefore = projectEndOf(p.project_id);
+  // Início depois do novo término (antecipação): o início acompanha a primeira subtarefa
+  const minStart = one('SELECT MIN(start_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND start_date IS NOT NULL', parentId)?.d;
+  const start = p.start_date && p.start_date > max ? (minStart && minStart <= max ? minStart : max) : p.start_date;
+  run('UPDATE tasks SET due_date = ?, start_date = ?, updated_at = ? WHERE id = ?', max, start, nowIso(), parentId);
+  taskHistory(parentId, userId, 'Prazo ajustado pelas subtarefas', `${fmtDate(p.due_date)} → ${fmtDate(max)} · acompanha a maior data final das subtarefas${causeCode ? ` (alteração em ${causeCode})` : ''} · não conta como reagendamento desta tarefa`);
+  // Estendido: as sucessoras da tarefa principal são empurradas (sem penalizá-las)
+  if (p.due_date && max > p.due_date) {
+    applyShift({ userId, projectId: p.project_id, cause: { taskId: parentId, code: p.code, title: p.title }, kind: 'reagendamento',
+      causeOldDue: p.due_date, causeNewDue: max, sources: [{ key: `t:${parentId}`, finish: max }], projectEndBefore: endBefore });
+  }
+}
+
 export function permissionsFor(ctx, t) {
   const manage = canManageTask(ctx, t);
   if (t.cancelled_at) {
@@ -124,8 +146,9 @@ export function permissionsFor(ctx, t) {
   return {
     edit: manage && t.status !== 'concluida',
     reassign: canReassignTask(ctx, t),
-    reschedule: manage && t.status !== 'concluida' && !!t.due_date && !(t.task_type === 'checklist' && checklistMaxDue(t.id)),
+    reschedule: manage && t.status !== 'concluida' && !!t.due_date && !(t.task_type === 'checklist' && checklistMaxDue(t.id)) && !(!t.parent_id && subtasksMaxDue(t.id)),
     due_from_items: t.task_type === 'checklist' && !!checklistMaxDue(t.id),
+    due_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMaxDue(t.id),
     execute: editableExec,
     start: execute && t.status === 'aberta',
     // Avanço parcial (%): responsável ou quem gerencia, enquanto a tarefa está aberta ou em andamento (check-list: pelos itens)
@@ -356,6 +379,7 @@ export function insertTask({ project, parent = null, data, stageInput, creatorId
       `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável${isChecklist ? ' global' : ''}: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · ${isChecklist ? `${data.items.length} item(ns) · ${PHOTO_RULE_LABEL[data.photo_rule]}` : `Comprovação: ${PROOF_LABEL[data.proof_type]}`}`);
     if (isChecklist) insertItems(id, data.items, creatorId);
     if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
+    if (parent && data.due_date) syncParentDue(parent.id, creatorId, code, { extendOnly: true });
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption, img.name);
     for (const f of copyFiles) {
       const c = copyStored(f.stored_name);
@@ -407,6 +431,8 @@ export function updateTask(ctx, id, body, { trusted = false } = {}) {
     if ((nd ?? null) !== (t.due_date ?? null)) {
       const maxDue = t.task_type === 'checklist' ? checklistMaxDue(t.id) : null;
       if (maxDue) throw badRequest(`O prazo do check-list acompanha o maior prazo dos itens (${fmtDate(maxDue)}). Para mudar, altere o prazo dos itens.`);
+      const subMax = !t.parent_id && !trusted ? subtasksMaxDue(t.id) : null;
+      if (subMax) throw badRequest(`O prazo da tarefa principal acompanha a maior data final das subtarefas (${fmtDate(subMax)}). Para mudar, reagende as subtarefas.`);
       next.due_date = nd;
       if (t.due_date) {
         const reason = activeReason(body.reschedule_reason_id);
@@ -459,6 +485,8 @@ export function updateTask(ctx, id, body, { trusted = false } = {}) {
     }
     // Datas mudaram: alinha com as predecessoras e preenche o que estiver em branco (planejamento)
     if ('start_date' in next || 'due_date' in next) scheduleAround(`t:${id}`, ctx.user.id);
+    // Subtarefa: a tarefa principal acompanha a maior data final das subtarefas
+    if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
   });
 }
 
@@ -533,6 +561,7 @@ export function useParentDates(ctx, id) {
     run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', p.start_date, p.due_date, nowIso(), id);
     taskHistory(id, ctx.user.id, 'Datas copiadas da tarefa principal', `${p.code}: início ${fmtDate(p.start_date)} · término ${fmtDate(p.due_date)}`);
     scheduleAround(`t:${id}`, ctx.user.id);
+    syncParentDue(t.parent_id, ctx.user.id, t.code);
   });
 }
 
@@ -853,6 +882,7 @@ export function cancelTask(ctx, id, body) {
     for (const s of subs) cancel(s.id, `Cancelada junto com a tarefa principal ${t.code}: ${reason}`);
     if (subs.length) taskHistory(id, ctx.user.id, 'Subtarefas canceladas', subs.map(s => s.code).join(', '));
     if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa cancelada', `${t.code} · ${t.title}`);
+    if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
   });
 }
 
@@ -866,6 +896,7 @@ export function reactivateTask(ctx, id, body = {}) {
     run('UPDATE tasks SET cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, updated_at = ? WHERE id = ?', nowIso(), id);
     taskHistory(id, ctx.user.id, 'Tarefa reativada', note || `Cancelamento desfeito (motivo anterior: ${t.cancel_reason})`);
     if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa reativada', `${t.code} · ${t.title}`);
+    if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
   });
 }
 

@@ -13,6 +13,11 @@ export const mondayOf = s => { const d = parse(s); return addDays(s, -((d.getDay
 
 const open = t => t.status !== 'concluida' && !t.cancelled_at;
 
+// Cor por projeto (faixa à esquerda de cada tarefa + legenda abaixo do quadro). Definida a cada montagem da semana.
+const PROJ_PALETTE = ['#1F6FB2', '#C9520F', '#2E8B57', '#7A4FA3', '#B03A5B', '#0F7C83', '#A86F0E', '#2A3D50', '#5C8A1E', '#D14E8F', '#4A6FA5', '#8E5A2B'];
+let PROJ = new Map();
+const projColor = t => PROJ.get(t.project_id)?.color || '#9AA3AD';
+
 // Período da tarefa no calendário: início previsto → prazo (sem início, só o dia do prazo)
 const spanOf = t => {
   const due = t.due_date;
@@ -52,7 +57,7 @@ const chip = (t, day) => {
   const sh = day ? dayShare(t, day) : null;
   const shCls = !sh ? '' : sh.fill >= 1 ? 'is-share-done' : sh.fill > 0 ? 'is-share-part' : 'is-share-todo';
   const shTip = sh ? ` · executado ${sh.pct}%${sh.share ? ` · parcela do dia ${sh.share}% (acumulado até o dia ${sh.upto}%)` : ''}${sh.fill >= 1 ? ' · parcela feita' : ''}` : '';
-  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} ${t.parent_id ? 'data-wp-sub' : ''} style="--fill:${sh ? Math.round(sh.fill * 100) : 0}%" class="wp-task ${shCls} ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}${shTip}">
+  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} ${t.parent_id ? 'data-wp-sub' : ''} style="--fill:${sh ? Math.round(sh.fill * 100) : 0}%;--pc:${projColor(t)}" class="wp-task wp-proj ${shCls} ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.project_code || ''} · ${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}${shTip}">
   <span class="dot" style="--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'}"></span>
   <span class="wp-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small>
     ${sh ? html`<small class="wp-share">${sh.fill >= 1 ? '✓ parcela feita' : sh.fill > 0 ? `parcela ${Math.round(sh.fill * 100)}% feita` : 'parcela a fazer'} · ${sh.pct}% executado</small>` : ''}</span></a>`;
@@ -93,8 +98,8 @@ const bar = ({ t, sp, a, b, orphan }, row, days) => {
   const before = sp.begin < days[0], after = sp.due > days[6];
   return html`<a href="#/tarefas/${t.id}" class="wp-span ${t.parent_id ? 'is-sub' : ''} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''} ${before ? 'cut-l' : ''} ${after ? 'cut-r' : ''}"
     ${t.status === 'concluida' ? 'data-done' : ''} ${t.parent_id ? 'data-wp-sub' : ''}
-    style="grid-row:${row};grid-column:${a + 1} / ${b + 2};--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'};--p:${pct}%"
-    title="${t.code} · ${t.title} · ${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ${STATUS[t.eff_status]?.label || ''} · ${pct}% executado">
+    style="grid-row:${row};grid-column:${a + 1} / ${b + 2};--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'};--p:${pct}%;--pc:${projColor(t)}"
+    title="${t.project_code || ''} · ${t.code} · ${t.title} · ${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ${STATUS[t.eff_status]?.label || ''} · ${pct}% executado">
     ${before ? html`<span class="wp-cut">◀</span>` : ''}<span class="dot"></span>
     <span class="wp-span-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span> · ${dm(sp.begin)} → ${dm(sp.due)} · ${pct}%${orphan && t.parent_title ? ` · de ${t.parent_title}` : ''}</small></span>
     ${after ? html`<span class="wp-cut">▶ ${dm(sp.due)}</span>` : ''}</a>`;
@@ -125,6 +130,10 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
   const late = tasks.filter(t => open(t) && t.eff_status === 'atrasada' && t.due_date < start);
   const undated = tasks.filter(t => open(t) && !t.due_date);
   const label = `${fmtDate(start)} a ${fmtDate(end)}`;
+  // Projetos que aparecem nesta semana (na grade, atrasadas e sem prazo): cor fixa pela ordem do código
+  const shown = [...new Map([...days.flatMap(x => byDay.get(x)), ...late, ...undated].map(t => [t.project_id, t])).values()]
+    .sort((a, b) => String(a.project_code).localeCompare(String(b.project_code)));
+  PROJ = new Map(shown.map((t, i) => [t.project_id, { color: PROJ_PALETTE[i % PROJ_PALETTE.length], code: t.project_code, name: t.project_name }]));
 
   const dayCol = x => {
     const dt = parse(x);
@@ -180,6 +189,8 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
         </div>`;
       })()}
       <div class="wp-grid wp-mob">${days.map(dayCol)}</div>
+      ${PROJ.size ? html`<div class="wp-legend" aria-label="Legenda dos projetos"><span class="wp-legend-t">Projetos:</span>
+        ${[...PROJ.values()].map(p => html`<span class="wp-legend-i" title="${p.code} · ${p.name}"><i style="--pc:${p.color}"></i><b>${p.code}</b> ${p.name}</span>`)}</div>` : ''}
       ${late.length ? html`<details class="wp-extra wp-late"><summary>Atrasadas de semanas anteriores <span class="n">${late.length}</span></summary>
         <p class="muted wp-hint">Para trazer uma atrasada para esta semana, abra a tarefa e use <b>Reagendar</b> (pede a justificativa).</p>
         <div class="wp-list wp-list-row">${late.map(t => html`<div class="wp-row">${chip(t)}<span class="muted">venceu ${fmtDate(t.due_date)}</span></div>`)}</div></details>` : ''}

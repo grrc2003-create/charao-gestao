@@ -2372,3 +2372,12 @@ tr.is-inactive td { opacity: .55; }
 .ud-list { margin: 8px 0 12px; padding-left: 18px; font-size: 13.5px; }
 .ud-list li { margin: 3px 0; }
 .ud-list li:has(b) { display: flex; justify-content: space-between; gap: 12px; list-style: none; margin-left: -18px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+
+/* Planejamento da semana: subtarefas ocultas até clicar em "Mostrar subtarefas" */
+.week-plan:not(.show-subs) [data-wp-sub] { display: none !important; }
+.week-plan:not(.show-subs) .wp-row:not(:has(.wp-task:not([data-wp-sub]))) { display: none; }
+
+.week-plan .wp-day-head .n-all { display: none; }
+.week-plan.show-subs .wp-day-head .n-all { display: inline; }
+.week-plan.show-subs .wp-day-head .n-main { display: none; }
+.week-plan:not(.show-subs) .wp-day-head .n-subonly { display: none; }

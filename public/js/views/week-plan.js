@@ -50,9 +50,9 @@ const chip = (t, day) => {
   const sh = day ? dayShare(t, day) : null;
   const shCls = !sh ? '' : sh.fill >= 1 ? 'is-share-done' : sh.fill > 0 ? 'is-share-part' : 'is-share-todo';
   const shTip = sh ? ` · executado ${sh.pct}%${sh.share ? ` · parcela do dia ${sh.share}% (acumulado até o dia ${sh.upto}%)` : ''}${sh.fill >= 1 ? ' · parcela feita' : ''}` : '';
-  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} style="--fill:${sh ? Math.round(sh.fill * 100) : 0}%" class="wp-task ${shCls} ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}${shTip}">
+  return html`<a ${t.status === 'concluida' ? 'data-done' : ''} ${t.parent_id ? 'data-wp-sub' : ''} style="--fill:${sh ? Math.round(sh.fill * 100) : 0}%" class="wp-task ${shCls} ${part} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''}" href="#/tarefas/${t.id}" title="${t.code} · ${t.title} · ${multi ? `${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ` : ''}${STATUS[t.eff_status]?.label || ''}${shTip}">
   <span class="dot" style="--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'}"></span>
-  <span class="wp-txt"><b>${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small>
+  <span class="wp-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small>
     ${sh ? html`<small class="wp-share">${sh.fill >= 1 ? '✓ parcela feita' : sh.fill > 0 ? `parcela ${Math.round(sh.fill * 100)}% feita` : 'parcela a fazer'} · ${sh.pct}% executado</small>` : ''}</span></a>`;
 };
 
@@ -77,7 +77,8 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
     const weekend = dt.getDay() === 0 || dt.getDay() === 6;
     return html`<div class="wp-day ${x === today ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''} ${x < today ? 'is-past' : ''}" data-day="${x}">
       <div class="wp-day-head"><span><b>${DOW[dt.getDay()]}</b> ${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}</span>
-        ${list.length ? html`<span class="n">${list.length}</span>` : ''}</div>
+        ${list.length ? (() => { const main = list.filter(t => !t.parent_id).length;
+          return html`<span class="n ${main ? '' : 'n-subonly'}"><span class="n-main">${main}</span><span class="n-all">${list.length}</span></span>`; })() : ''}</div>
       <div class="wp-list">${list.map(t => chip(t, x))}</div>
       ${canPlan ? html`<button type="button" class="wp-add" data-wp-add="${x}" aria-label="Nova tarefa para ${fmtDate(x)}">${icon('plus')}<span>Tarefa</span></button>` : ''}
     </div>`;
@@ -95,6 +96,8 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
           ${start !== mondayOf(today) ? html`<button type="button" class="btn btn-ghost btn-sm" data-wp-week="">Esta semana</button>` : ''}
         </div>
         ${doneToggle(new Set(days.flatMap(x => byDay.get(x).filter(t => t.status === 'concluida').map(t => t.id))).size)}
+        ${(() => { const n = new Set([...days.flatMap(x => byDay.get(x)), ...late, ...undated].filter(t => t.parent_id).map(t => t.id)).size;
+          return n ? html`<button type="button" class="btn btn-ghost btn-sm done-toggle" data-wp-subs aria-pressed="false">${icon('tasks')}<span>Mostrar subtarefas (${n})</span></button>` : ''; })()}
         ${canPlan ? html`<button type="button" class="btn btn-accent btn-sm" data-wp-add="${days.includes(today) ? today : start}">${icon('plus')}Nova tarefa</button>` : ''}
       </div>
       <div class="wp-grid">${days.map(dayCol)}</div>
@@ -152,6 +155,21 @@ export function bindWeekPlan(root, { d, user, meta, week, setWeek, render }) {
   const box = root.querySelector('#week-plan');
   if (!box) return;
   box.querySelectorAll('[data-wp-week]').forEach(b => b.addEventListener('click', () => { setWeek(b.dataset.wpWeek); render(); }));
+  // Subtarefas ocultas por padrão (como as concluídas); o botão mostra/oculta
+  const subBtn = box.querySelector('[data-wp-subs]');
+  if (subBtn) {
+    const n = subBtn.textContent.match(/\((\d+)\)/)?.[1] || '';
+    const setSubs = on => {
+      box.classList.toggle('show-subs', on);
+      subBtn.setAttribute('aria-pressed', String(on));
+      subBtn.querySelector('span').textContent = `${on ? 'Ocultar' : 'Mostrar'} subtarefas (${n})`;
+      try { sessionStorage.setItem('charao-wp-subs', on ? '1' : ''); } catch { /* sem armazenamento */ }
+    };
+    let saved = false;
+    try { saved = sessionStorage.getItem('charao-wp-subs') === '1'; } catch { /* sem armazenamento */ }
+    setSubs(saved);
+    subBtn.addEventListener('click', () => setSubs(!box.classList.contains('show-subs')));
+  }
   box.querySelectorAll('[data-wp-add]').forEach(b => b.addEventListener('click', async () => {
     // O formulário é montado na hora (sheet); a classificação acompanha o projeto escolhido
     const pending = quickAdd({ day: b.dataset.wpAdd, user, projects: d.plan_projects || [], meta });

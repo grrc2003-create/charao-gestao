@@ -153,6 +153,41 @@ export function moveSubtasks(parentId, days, userId, why) {
 }
 export const hasDatedSubtasks = taskId => !!(subtasksMaxDue(taskId) || subtasksMinStart(taskId));
 
+// ---------- Status e avanço da tarefa principal pelas subtarefas ----------
+// Avanço = média das subtarefas não canceladas (concluída/em conferência = 100%).
+// Status: nenhuma começou → Aberta · alguma começou → Em andamento · todas concluídas → Aguardando conferência.
+export const hasActiveSubtasks = taskId => !!one('SELECT 1 FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL LIMIT 1', taskId);
+export function syncParentStatus(parentId, userId) {
+  if (!parentId) return;
+  const p = one('SELECT * FROM tasks WHERE id = ?', parentId);
+  if (!p || p.cancelled_at || p.status === 'concluida' || p.task_type === 'checklist') return;
+  const subs = all('SELECT status, progress_pct, started_at, delivered_at, completed_at FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL', parentId);
+  if (!subs.length) return;
+  const pct = Math.round(subs.reduce((n, s) => n + (['concluida', 'aguardando_conferencia'].includes(s.status) ? 100 : s.progress_pct || 0), 0) / subs.length);
+  const allDone = subs.every(s => s.status === 'concluida');
+  const started = subs.some(s => s.status !== 'aberta' || (s.progress_pct || 0) > 0);
+  let target = allDone ? 'aguardando_conferencia' : started ? 'em_andamento' : 'aberta';
+  // Devolvida pelo conferente com tudo concluído: fica em andamento (reenvio manual ou mudança nas subtarefas)
+  if (allDone && p.status === 'em_andamento' && p.review_status === 'devolvida') target = 'em_andamento';
+  if (!allDone && p.review_status === 'devolvida') run('UPDATE tasks SET review_status = NULL WHERE id = ?', parentId);
+  if ((p.progress_pct ?? null) !== pct) run('UPDATE tasks SET progress_pct = ?, updated_at = ? WHERE id = ?', pct, nowIso(), parentId);
+  if (target === p.status) return;
+  const now = nowIso();
+  const minStarted = subs.map(s => s.started_at).filter(Boolean).sort()[0] || now;
+  if (target === 'aguardando_conferencia') {
+    const lastDone = subs.map(s => s.delivered_at || s.completed_at).filter(Boolean).sort().pop() || now;
+    run(`UPDATE tasks SET status = 'aguardando_conferencia', delivered_at = ?, review_status = 'pendente', review_comment = NULL, started_at = COALESCE(started_at, ?),
+      claimed_done_date = NULL, done_date_status = NULL, delivered_registered_at = NULL, filling_delay_days = NULL, updated_at = ? WHERE id = ?`, lastDone, minStarted, now, parentId);
+    taskHistory(parentId, userId, 'Enviada para conferência', 'Automático: todas as subtarefas foram concluídas');
+  } else if (target === 'em_andamento') {
+    run(`UPDATE tasks SET status = 'em_andamento', started_at = COALESCE(started_at, ?), delivered_at = NULL,
+      review_status = CASE WHEN status = 'aguardando_conferencia' THEN NULL ELSE review_status END, updated_at = ? WHERE id = ?`, minStarted, now, parentId);
+  } else {
+    run(`UPDATE tasks SET status = 'aberta', delivered_at = NULL, review_status = NULL, updated_at = ? WHERE id = ?`, now, parentId);
+  }
+  taskHistory(parentId, userId, 'Status alterado', `${STATUS_LABEL[p.status]} → ${STATUS_LABEL[target]} · automático pelas subtarefas`);
+}
+
 // Alinhamento único das tarefas principais existentes (antes da regra): retorna as que mudaram
 export function alignAllParents() {
   const ids = all(`SELECT DISTINCT s.parent_id AS id FROM tasks s JOIN tasks p ON p.id = s.parent_id
@@ -175,6 +210,19 @@ export function alignAllParents() {
   return changed;
 }
 
+export function syncAllParentStatus() {
+  const ids = all(`SELECT DISTINCT s.parent_id AS id FROM tasks s JOIN tasks p ON p.id = s.parent_id
+    WHERE s.cancelled_at IS NULL AND p.cancelled_at IS NULL AND p.status <> 'concluida' AND p.task_type <> 'checklist'`).map(r => r.id);
+  const changed = [];
+  for (const id of ids) {
+    const b = one('SELECT code, status, progress_pct FROM tasks WHERE id = ?', id);
+    tx(() => syncParentStatus(id, null));
+    const a = one('SELECT status, progress_pct FROM tasks WHERE id = ?', id);
+    if (a.status !== b.status || a.progress_pct !== b.progress_pct) changed.push(b.code);
+  }
+  return changed;
+}
+
 export function permissionsFor(ctx, t) {
   const manage = canManageTask(ctx, t);
   if (t.cancelled_at) {
@@ -183,6 +231,8 @@ export function permissionsFor(ctx, t) {
   }
   const execute = canExecuteTask(ctx, t);
   const review = canReviewTask(ctx, t);
+  const auto = !t.parent_id && t.task_type !== 'checklist' && hasActiveSubtasks(t.id);
+  const subsDone = auto && !one(`SELECT 1 FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND status <> 'concluida' LIMIT 1`, t.id);
   const editableExec = execute && (t.status === 'aberta' || t.status === 'em_andamento');
   return {
     edit: manage && t.status !== 'concluida',
@@ -192,13 +242,14 @@ export function permissionsFor(ctx, t) {
     due_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMaxDue(t.id),
     start_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMinStart(t.id),
     execute: editableExec,
-    start: execute && t.status === 'aberta',
+    start: execute && t.status === 'aberta' && !auto,
+    auto_from_subtasks: auto,
     // Avanço parcial (%): responsável ou quem gerencia, enquanto a tarefa está aberta ou em andamento (check-list: pelos itens)
-    progress: t.task_type !== 'checklist' && (execute || manage) && (t.status === 'aberta' || t.status === 'em_andamento'),
-    submit: editableExec,
+    progress: t.task_type !== 'checklist' && !auto && (execute || manage) && (t.status === 'aberta' || t.status === 'em_andamento'),
+    submit: editableExec && (!auto || subsDone),
     review: review && t.status === 'aguardando_conferencia',
     reopen: manage && t.status === 'concluida',
-    conclude_directly: manage && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || isManagerRole(ctx.user)),
+    conclude_directly: manage && !auto && t.status !== 'concluida' && t.status !== 'aguardando_conferencia' && (isAdmin(ctx.user) || isManagerRole(ctx.user)),
     // Subtarefas: um nível. Quem gerencia a tarefa ou é o responsável por ela pode dividi-la.
     add_subtask: t.task_type !== 'checklist' && !t.parent_id && t.status !== 'concluida' && (manage || t.assignee_id === ctx.user.id),
     cancel: manage && t.status !== 'concluida',
@@ -422,6 +473,7 @@ export function insertTask({ project, parent = null, data, stageInput, creatorId
     if (isChecklist) insertItems(id, data.items, creatorId);
     if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
     if (parent && (data.due_date || data.start_date)) syncParentDue(parent.id, creatorId, code, { extendOnly: true });
+    if (parent) syncParentStatus(parent.id, creatorId);
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption, img.name);
     for (const f of copyFiles) {
       const c = copyStored(f.stored_name);
@@ -710,6 +762,7 @@ export function setProgress(ctx, id, body = {}) {
       const finish = body.finish === 'conclude' && can.conclude_directly ? 'conclude' : can.submit ? 'submit' : can.conclude_directly ? 'conclude' : null;
       if (finish) transition(ctx, id, finish, { start_date: body.start_date, comment: body.comment, done_date: body.done_date });
     }
+    if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
 }
 
@@ -717,6 +770,7 @@ export function autoStart(ctx, t) {
   if (t.status === 'aberta') {
     run(`UPDATE tasks SET status = 'em_andamento', started_at = COALESCE(started_at, ?) WHERE id = ?`, nowIso(), t.id);
     taskHistory(t.id, ctx.user.id, 'Status alterado', 'Aberta → Em andamento');
+    if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   }
 }
 
@@ -908,6 +962,7 @@ export function transition(ctx, id, action, body = {}) {
         throw badRequest('Ação desconhecida.');
     }
     if (['approve', 'conclude', 'reopen'].includes(action)) syncFromTask(id, action, ctx.user.id);
+    if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
 }
 
@@ -930,6 +985,7 @@ export function cancelTask(ctx, id, body) {
     if (subs.length) taskHistory(id, ctx.user.id, 'Subtarefas canceladas', subs.map(s => s.code).join(', '));
     if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa cancelada', `${t.code} · ${t.title}`);
     if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
+    if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
 }
 
@@ -944,6 +1000,7 @@ export function reactivateTask(ctx, id, body = {}) {
     taskHistory(id, ctx.user.id, 'Tarefa reativada', note || `Cancelamento desfeito (motivo anterior: ${t.cancel_reason})`);
     if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa reativada', `${t.code} · ${t.title}`);
     if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
+    if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
 }
 
@@ -958,6 +1015,7 @@ export function deleteTask(ctx, id, body, ip) {
   tx(() => {
     run('DELETE FROM tasks WHERE id = ?', id); // histórico, imagens e reagendamentos saem em cascata
     if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa excluída', `${t.code} · ${t.title} · Motivo: ${reason}`);
+    if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
     audit(ctx.user.id, 'task', id, 'Tarefa excluída definitivamente', {
       codigo: t.code, titulo: t.title, projeto: `${t.project_code} · ${t.project_name}`, responsavel: t.assignee_name || '—',
       prazo: t.due_date || '—', motivo: reason, imagens: files.length, reagendamentos: resch,

@@ -36,6 +36,13 @@ import { all } from './db.js';
 
 migrate();
 bootstrap();
+// Uma vez: status e avanço das tarefas principais existentes passam a vir das subtarefas
+if (one('SELECT COUNT(*) AS n FROM users').n > 0 && !one(`SELECT value FROM app_settings WHERE key = 'parent_status_synced'`)) {
+  const changed = Tasks.syncAllParentStatus();
+  db.prepare(`INSERT INTO app_settings (key, value) VALUES ('parent_status_synced', ?)`).run(new Date().toISOString());
+  if (changed.length) audit(null, 'system', null, 'Status e avanço das tarefas principais calculados pelas subtarefas', { tarefas: changed });
+  console.log(`[init] status/avanço de ${changed.length} tarefa(s) principal(is) recalculados pelas subtarefas${changed.length ? `: ${changed.join(', ')}` : ''}`);
+}
 // Alinhamento único: tarefas principais existentes passam a acompanhar as datas das subtarefas
 if (one('SELECT COUNT(*) AS n FROM users').n > 0 && !one(`SELECT value FROM app_settings WHERE key = 'parent_dates_aligned'`)) {
   const changed = Tasks.alignAllParents();

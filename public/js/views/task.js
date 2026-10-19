@@ -169,7 +169,7 @@ function build(t, ctx) {
         ${t.parent_id ? html`<div class="parent-link">↳ Subtarefa de ${t.parent_visible ? html`<a href="#/tarefas/${t.parent_id}"><b>${t.parent_code}</b> · ${t.parent_title}</a>` : html`<b>${t.parent_code}</b>`}</div>` : ''}
         <h1>${t.title}</h1>
         <div class="facts">
-          <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}</div></div>
+          <div class="fact"><div class="k">Status</div><div class="v">${statusBadge(t.eff_status)}${can.auto_from_subtasks && !t.cancelled_at ? html`<small>pelas subtarefas</small>` : ''}</div></div>
           <div class="fact"><div class="k">${icon('user')}Responsável</div><div class="v">${t.assignee_id ? html`<a href="#/usuarios/${t.assignee_id}">${t.assignee_name}</a>` : 'Sem responsável'}
             ${t.assignee_external ? html`<small>Terceirizado${t.assignee_company ? ` · ${t.assignee_company}` : ''} · líder: ${t.assignee_leader_name || '—'}</small>` : ''}</div></div>
           <div class="fact"><div class="k">${icon('calendar')}Prazo</div><div class="v ${due.cls}">${fmtDate(t.due_date)}
@@ -200,14 +200,14 @@ function build(t, ctx) {
           ${(() => {
             // Avanço (%): opcional; concluída/entregue = 100%; check-list = média dos itens
             const done = ['concluida', 'aguardando_conferencia'].includes(t.eff_status);
-            const pct = done ? 100 : t.checklist ? t.checklist.summary.progress : t.progress_pct;
+            const pct = done ? 100 : t.checklist ? t.checklist.summary.progress : can.auto_from_subtasks ? (t.progress_pct ?? 0) : t.progress_pct;
             if (pct === null || pct === undefined) {
               return can.progress ? html`<div class="fact fact-wide fact-progress"><div class="k">${icon('clock')}Avanço</div><div class="v"><span class="muted">Não informado</span>
                 <button type="button" class="btn btn-ghost btn-sm" data-act="progress">Informar avanço</button></div></div>` : '';
             }
             return html`<div class="fact fact-wide fact-progress"><div class="k">${icon('clock')}Avanço</div><div class="v"><span class="pg-line">${pctBar(pct)}<b>${pct}%</b>
               ${can.progress ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="progress">Atualizar</button>` : ''}</span>
-              <small>${done ? (t.eff_status === 'concluida' ? 'Concluída' : 'Entregue, aguardando conferência') : t.checklist ? 'Média dos itens (resolvido = 100%)' : 'Informado pelo responsável'}</small></div></div>`;
+              <small>${done ? (t.eff_status === 'concluida' ? 'Concluída' : 'Entregue, aguardando conferência') : t.checklist ? 'Média dos itens (resolvido = 100%)' : can.auto_from_subtasks ? 'Média das subtarefas (concluída = 100%)' : 'Informado pelo responsável'}</small></div></div>`;
           })()}
           ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}

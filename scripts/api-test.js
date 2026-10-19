@@ -1659,8 +1659,17 @@ async function main() {
   ok(pdPv.due_date === '2099-05-20' && pdPv.can.due_from_subtasks && !pdPv.can.reschedule, 'subtarefa reagendada depois da principal: a principal estende para a maior data final');
   await fo('POST', `/tasks/${pdS1}/reschedule`, { due_date: '2099-05-06', reason_id: pdReason });
   pdPv = (await fo('GET', `/tasks/${pdP}`)).data;
-  ok(pdPv.due_date === '2099-05-07' && pdPv.reschedule_count === 0 && pdPv.history.some(h => h.action === 'Prazo ajustado pelas subtarefas'), 'subtarefa antecipada: a principal antecipa para a maior data final (sem contar como reagendamento)');
+  ok(pdPv.due_date === '2099-05-07' && pdPv.reschedule_count === 0 && pdPv.history.some(h => h.action === 'Datas ajustadas pelas subtarefas'), 'subtarefa antecipada: a principal antecipa para a maior data final (sem contar como reagendamento)');
   ok((await fo('PATCH', `/tasks/${pdP}`, { due_date: '2099-06-01', reschedule_reason_id: pdReason })).status === 400, 'prazo da principal não é alterado direto quando acompanha as subtarefas');
+  await fo('PATCH', `/tasks/${pdS2}`, { start_date: '2099-04-25' });
+  ok((await fo('GET', `/tasks/${pdP}`)).data.start_date === '2099-04-25', 'subtarefa começando antes: o início da principal acompanha a que começa mais cedo');
+  await fo('PATCH', `/tasks/${pdS2}`, { start_date: '2099-05-03' });
+  ok((await fo('GET', `/tasks/${pdP}`)).data.start_date === '2099-05-01', 'início adiado: a principal passa a começar com a subtarefa mais cedo');
+  ok((await fo('PATCH', `/tasks/${pdP}`, { start_date: '2099-04-01' })).status === 400, 'início da principal não é alterado direto quando acompanha as subtarefas');
+  const pdS3 = (await fo('POST', '/tasks', { parent_id: pdP, project_id: 1, title: 'Sub 3 sem datas', description: 'Subtarefa sem datas', assignee_id: 4 })).data.id;
+  await fo('POST', `/tasks/${pdS3}/parent-dates`);
+  const pdS3v = (await fo('GET', `/tasks/${pdS3}`)).data, pdPv3 = (await fo('GET', `/tasks/${pdP}`)).data;
+  ok(pdS3v.start_date === pdPv3.start_date && pdS3v.due_date === pdPv3.due_date && pdPv3.due_date === '2099-05-07', 'subtarefa continua podendo puxar as datas da tarefa mãe (sem alterar a mãe)');
 
 }
 

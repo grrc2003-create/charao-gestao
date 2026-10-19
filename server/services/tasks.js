@@ -112,25 +112,30 @@ export function loadVisible(ctx, id) {
 // Check-list: o prazo da tarefa acompanha o maior prazo dos itens (quando algum item tem prazo)
 export const checklistMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM checklist_items WHERE task_id = ?', taskId)?.d || null;
 
-// Tarefa principal: o prazo acompanha a maior data final das subtarefas (quando alguma subtarefa tem prazo)
+// Tarefa principal: início = subtarefa que começa mais cedo; término = subtarefa que termina mais tarde
+// (só as datas preenchidas das subtarefas não canceladas contam)
 export const subtasksMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND due_date IS NOT NULL', taskId)?.d || null;
+export const subtasksMinStart = taskId => one('SELECT MIN(start_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND start_date IS NOT NULL', taskId)?.d || null;
 export function syncParentDue(parentId, userId, causeCode = null, { extendOnly = false } = {}) {
   if (!parentId) return;
   const p = one('SELECT * FROM tasks WHERE id = ?', parentId);
   if (!p || p.cancelled_at || p.status === 'concluida') return;
-  const max = subtasksMaxDue(parentId);
-  if (!max || max === p.due_date) return;
-  if (extendOnly && p.due_date && max < p.due_date) return; // subtarefa nova: só estende
+  const max = subtasksMaxDue(parentId), min = subtasksMinStart(parentId);
+  // Subtarefa nova: só amplia o período da principal (nunca encolhe)
+  let due = max ? (extendOnly && p.due_date && max < p.due_date ? p.due_date : max) : p.due_date;
+  let start = min ? (extendOnly && p.start_date && min > p.start_date ? p.start_date : min) : p.start_date;
+  if (start && due && start > due) start = due;
+  if (due === p.due_date && start === p.start_date) return;
   const endBefore = projectEndOf(p.project_id);
-  // Início depois do novo término (antecipação): o início acompanha a primeira subtarefa
-  const minStart = one('SELECT MIN(start_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND start_date IS NOT NULL', parentId)?.d;
-  const start = p.start_date && p.start_date > max ? (minStart && minStart <= max ? minStart : max) : p.start_date;
-  run('UPDATE tasks SET due_date = ?, start_date = ?, updated_at = ? WHERE id = ?', max, start, nowIso(), parentId);
-  taskHistory(parentId, userId, 'Prazo ajustado pelas subtarefas', `${fmtDate(p.due_date)} → ${fmtDate(max)} · acompanha a maior data final das subtarefas${causeCode ? ` (alteração em ${causeCode})` : ''} · não conta como reagendamento desta tarefa`);
-  // Estendido: as sucessoras da tarefa principal são empurradas (sem penalizá-las)
-  if (p.due_date && max > p.due_date) {
+  run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', start, due, nowIso(), parentId);
+  const parts = [];
+  if (start !== p.start_date) parts.push(`início ${fmtDate(p.start_date)} → ${fmtDate(start)}`);
+  if (due !== p.due_date) parts.push(`término ${fmtDate(p.due_date)} → ${fmtDate(due)}`);
+  taskHistory(parentId, userId, 'Datas ajustadas pelas subtarefas', `${parts.join(' · ')} · acompanha a subtarefa que começa mais cedo e a que termina mais tarde${causeCode ? ` (alteração em ${causeCode})` : ''} · não conta como reagendamento desta tarefa`);
+  // Término estendido: as sucessoras da tarefa principal são empurradas (sem penalizá-las)
+  if (p.due_date && due > p.due_date) {
     applyShift({ userId, projectId: p.project_id, cause: { taskId: parentId, code: p.code, title: p.title }, kind: 'reagendamento',
-      causeOldDue: p.due_date, causeNewDue: max, sources: [{ key: `t:${parentId}`, finish: max }], projectEndBefore: endBefore });
+      causeOldDue: p.due_date, causeNewDue: due, sources: [{ key: `t:${parentId}`, finish: due }], projectEndBefore: endBefore });
   }
 }
 
@@ -149,6 +154,7 @@ export function permissionsFor(ctx, t) {
     reschedule: manage && t.status !== 'concluida' && !!t.due_date && !(t.task_type === 'checklist' && checklistMaxDue(t.id)) && !(!t.parent_id && subtasksMaxDue(t.id)),
     due_from_items: t.task_type === 'checklist' && !!checklistMaxDue(t.id),
     due_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMaxDue(t.id),
+    start_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMinStart(t.id),
     execute: editableExec,
     start: execute && t.status === 'aberta',
     // Avanço parcial (%): responsável ou quem gerencia, enquanto a tarefa está aberta ou em andamento (check-list: pelos itens)
@@ -379,7 +385,7 @@ export function insertTask({ project, parent = null, data, stageInput, creatorId
       `${recurrence ? `${recurrence.label} · ` : ''}Classificação: ${stageName} · Responsável${isChecklist ? ' global' : ''}: ${assignee} · Prazo: ${fmtDate(data.due_date)} · Prioridade: ${PRIORITY_LABEL[data.priority]} · ${isChecklist ? `${data.items.length} item(ns) · ${PHOTO_RULE_LABEL[data.photo_rule]}` : `Comprovação: ${PROOF_LABEL[data.proof_type]}`}`);
     if (isChecklist) insertItems(id, data.items, creatorId);
     if (parent) taskHistory(parent.id, creatorId, 'Subtarefa adicionada', `${code} · ${data.title} · Responsável: ${assignee}`);
-    if (parent && data.due_date) syncParentDue(parent.id, creatorId, code, { extendOnly: true });
+    if (parent && (data.due_date || data.start_date)) syncParentDue(parent.id, creatorId, code, { extendOnly: true });
     for (const img of images) addFileInternal(ctx, id, 'referencia', img.data, img.caption, img.name);
     for (const f of copyFiles) {
       const c = copyStored(f.stored_name);
@@ -432,7 +438,7 @@ export function updateTask(ctx, id, body, { trusted = false } = {}) {
       const maxDue = t.task_type === 'checklist' ? checklistMaxDue(t.id) : null;
       if (maxDue) throw badRequest(`O prazo do check-list acompanha o maior prazo dos itens (${fmtDate(maxDue)}). Para mudar, altere o prazo dos itens.`);
       const subMax = !t.parent_id && !trusted ? subtasksMaxDue(t.id) : null;
-      if (subMax) throw badRequest(`O prazo da tarefa principal acompanha a maior data final das subtarefas (${fmtDate(subMax)}). Para mudar, reagende as subtarefas.`);
+      if (subMax) throw badRequest(`O término da tarefa principal acompanha a subtarefa que termina mais tarde (${fmtDate(subMax)}). Para mudar, reagende as subtarefas.`);
       next.due_date = nd;
       if (t.due_date) {
         const reason = activeReason(body.reschedule_reason_id);
@@ -444,7 +450,12 @@ export function updateTask(ctx, id, body, { trusted = false } = {}) {
       }
     }
   }
-  if ('start_date' in body) set('start_date', date(body.start_date, 'Início previsto'), 'Início previsto alterado', d => (d ? fmtDate(d) : '—'));
+  if ('start_date' in body) {
+    const ns = date(body.start_date, 'Início previsto');
+    const subMin = !t.parent_id && !trusted && (ns ?? null) !== (t.start_date ?? null) ? subtasksMinStart(t.id) : null;
+    if (subMin) throw badRequest(`O início da tarefa principal acompanha a subtarefa que começa mais cedo (${fmtDate(subMin)}). Para mudar, ajuste as subtarefas.`);
+    set('start_date', ns, 'Início previsto alterado', d => (d ? fmtDate(d) : '—'));
+  }
   assertDateOrder(next.start_date !== undefined ? next.start_date : t.start_date, next.due_date !== undefined ? next.due_date : t.due_date);
   if ('stage_id' in body) {
     const sid = resolveStage(t.project_id, body.stage_id);

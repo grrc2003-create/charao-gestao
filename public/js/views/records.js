@@ -214,7 +214,7 @@ export async function detail({ params, navigate, render }) {
   if (r.behavior === 'pendencia') {
     add('Responsável', r.assignee_name || (r.task_code ? '' : 'quem registrou'));
     add('Prazo', r.due_date ? fmtDate(r.due_date) : 'sem prazo');
-    add('Tarefa gerada', r.task_code ? html`<a href="#/tarefas/${r.task_id}" class="mono">${r.task_code}</a> ${taskStatus(r.task_eff)}` : r.status === 'aguardando_aprovacao' ? 'será criada na aprovação' : '');
+    add('Tarefa gerada', r.task_code ? html`<a href="#/tarefas/${r.task_id}" class="mono">${r.task_code}</a> ${taskStatus(r.task_eff)}` : r.status === 'aguardando_aprovacao' && r.create_task ? 'será criada na aprovação' : 'nenhuma (sem tarefa)');
   }
   if (r.source_code) add('Gerada pela', html`<a href="${recHref(pid, r.source_record_id)}">${r.source_code} · ${r.source_title}</a>`);
   if (r.replaces_code) add('Substitui', html`<a href="${recHref(pid, r.replaces_id)}">${r.replaces_code} · ${r.replaces_title}</a>`);
@@ -240,10 +240,12 @@ export async function detail({ params, navigate, render }) {
           ${c.edit ? html`<a class="btn btn-ghost" href="#/projetos/${pid}/registros/${r.id}/editar">${icon('edit')}Editar</a>` : ''}
           ${c.replace ? html`<a class="btn btn-ghost" href="#/projetos/${pid}/registros/novo?tipo=${r.type_id}&substitui=${r.id}">${icon('reschedule')}Substituir definição</a>` : ''}
           ${c.emit ? html`<button type="button" class="btn btn-primary" data-act="emit">${icon('send')}Emitir ata</button>` : ''}
+          ${c.task ? html`<button type="button" class="btn btn-ghost" data-act="task">${icon('plus')}Gerar tarefa</button>` : ''}
+          ${c.resolve ? html`<button type="button" class="btn btn-primary" data-act="resolve">${icon('check')}Marcar como resolvida</button>` : ''}
           ${c.approve ? html`<button type="button" class="btn btn-primary" data-act="approve">${icon('check')}Aprovar</button><button type="button" class="btn btn-ghost" data-act="reject">Reprovar</button>` : ''}`,
       })}
-      ${r.status === 'aguardando_aprovacao' ? html`<div class="notice section" style="margin-top:0">${icon('info')}<span>Aguardando aprovação de um gestor ou administrador${r.behavior === 'pendencia' ? '. A tarefa é criada quando o registro for aprovado' : ''}.</span></div>` : ''}
-      ${r.status === 'rascunho' ? html`<div class="notice section" style="margin-top:0">${icon('info')}<span>Ata em rascunho. Ao <b>emitir</b>, ela fica travada: as definições viram registros vigentes e cada demanda vira uma tarefa no projeto.</span></div>` : ''}
+      ${r.status === 'aguardando_aprovacao' ? html`<div class="notice section" style="margin-top:0">${icon('info')}<span>Aguardando aprovação de um gestor ou administrador${r.behavior === 'pendencia' ? '. Se marcada a opção, a tarefa é criada quando o registro for aprovado' : ''}.</span></div>` : ''}
+      ${r.status === 'rascunho' ? html`<div class="notice section" style="margin-top:0">${icon('info')}<span>Ata em rascunho. Ao <b>emitir</b>, ela fica travada: as definições viram registros vigentes e as demandas marcadas com “Gerar tarefa” viram tarefas no projeto.</span></div>` : ''}
       <div class="grid grid-dash">
         <section class="card">
           <div class="card-head"><h2>Detalhes</h2>
@@ -274,7 +276,7 @@ export async function detail({ params, navigate, render }) {
             <div class="rg-tags"><span class="rg-type" style="--c:${KIND[i.kind][1]}"><i></i>${KIND[i.kind][0]}</span>${i.addendum ? html`<span class="pill pill-sand">Adendo</span>` : ''}</div>
             <div class="rg-it-text">${i.text}</div>
             <div class="row-meta">${i.kind === 'demanda' ? html`<span>${icon('user')}${i.assignee_name || 'quem emitir'}</span><span>${icon('calendar')}${i.due_date ? fmtDate(i.due_date) : 'sem prazo'}</span>` : ''}
-              ${i.task_id ? html`<a href="#/tarefas/${i.task_id}" class="mono">${i.task_code}</a>${taskStatus(i.task_eff)}` : ''}
+              ${i.task_id ? html`<a href="#/tarefas/${i.task_id}" class="mono">${i.task_code}</a>${taskStatus(i.task_eff)}` : i.kind === 'demanda' ? html`<span class="muted">sem tarefa</span>${c.item_task ? html`<button type="button" class="btn btn-ghost btn-sm" data-item-task="${i.id}">${icon('plus')}Gerar tarefa</button>` : ''}` : ''}
               ${i.decision_id ? html`<a href="${recHref(pid, i.decision_id)}" class="mono">${i.decision_code || 'definição'}</a>${recStatus(i.decision_status)}` : ''}</div></div></li>`)}</ul>`
             : html`<div class="card-body muted">Sem itens.</div>`}
           ${c.addendum ? html`<div class="card-body"><button type="button" class="btn btn-ghost btn-sm" data-act="addendum">${icon('plus')}Incluir adendo</button>
@@ -301,8 +303,12 @@ export async function detail({ params, navigate, render }) {
       root.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async () => {
         const a = b.dataset.act;
         try {
-          if (a === 'emit') {
-            const nd = items.filter(i => i.kind === 'demanda').length;
+          if (a === 'task') {
+            if (await confirmSheet('Gerar tarefa', `Cria uma tarefa no projeto para ${r.assignee_name || 'quem registrou'}${r.due_date ? `, com prazo ${fmtDate(r.due_date)}` : ''}. A pendência fica resolvida quando a tarefa for concluída.`, 'Gerar tarefa')) { await act('task'); toast('Tarefa gerada.'); }
+          } else if (a === 'resolve') {
+            if (await confirmSheet('Marcar como resolvida', 'A pendência deixa de aparecer como em aberto.', 'Resolvida')) { await act('resolve'); toast('Pendência resolvida.'); }
+          } else if (a === 'emit') {
+            const nd = items.filter(i => i.kind === 'demanda' && i.create_task).length;
             const nf = items.filter(i => i.kind === 'definicao').length;
             if (await confirmSheet('Emitir ata', `A ata ficará travada${nd ? `, ${nd} tarefa(s) serão criadas` : ''}${nf ? ` e ${nf} definição(ões) passarão a valer` : ''}. Confirmar?`, 'Emitir')) {
               await act('emit');
@@ -326,7 +332,7 @@ export async function detail({ params, navigate, render }) {
           } else if (a === 'addendum') {
             const users = await api(`/projects/${pid}/assignees`);
             adUsers = users;
-            const res = await sheet({ title: 'Adendo à ata', wide: true, body: html`<p class="muted">Os itens entram na ata como adendo (com a data de hoje). Definições passam a valer e demandas viram tarefas.</p>
+            const res = await sheet({ title: 'Adendo à ata', wide: true, body: html`<p class="muted">Os itens entram na ata como adendo (com a data de hoje). Definições passam a valer e as demandas marcadas com “Gerar tarefa” viram tarefas.</p>
               <ul class="rg-items-edit" id="ad-items">${itemEditor({ kind: 'demanda' }, users)}</ul>
               <button type="button" class="btn btn-ghost btn-sm" id="ad-add">${icon('plus')}Outro item</button>`,
               submitLabel: 'Incluir adendo',
@@ -334,6 +340,9 @@ export async function detail({ params, navigate, render }) {
             if (res) { toast('Adendo incluído.'); render(); }
           }
         } catch (e) { toast(e.message, 'error'); }
+      }));
+      root.querySelectorAll('[data-item-task]').forEach(b => b.addEventListener('click', async () => {
+        try { await act('item_task', { item_id: Number(b.dataset.itemTask) }); toast('Tarefa gerada para a demanda.'); } catch (e) { toast(e.message, 'error'); }
       }));
       root.querySelector('[data-link-task]')?.addEventListener('click', async () => {
         try {
@@ -377,6 +386,7 @@ function itemEditor(i, users) {
     <div class="rg-ie-dem" ${k === 'demanda' ? '' : 'hidden'}>
       <select data-ie-user aria-label="Responsável pela demanda"><option value="">Responsável: quem emitir a ata</option>${users.map(u => html`<option value="${u.id}" ${i.assignee_id === u.id ? 'selected' : ''}>${u.name}</option>`)}</select>
       <input type="date" data-ie-due value="${i.due_date || ''}" aria-label="Prazo da demanda">
+      <label class="rg-ie-task"><input type="checkbox" data-ie-task ${i.create_task ? 'checked' : ''}> Gerar tarefa ao emitir</label>
     </div>
   </li>`;
 }
@@ -386,6 +396,7 @@ function readItemEditors(ul) {
     text: li.querySelector('[data-ie-text]').value,
     assignee_id: li.querySelector('[data-ie-user]').value ? Number(li.querySelector('[data-ie-user]').value) : null,
     due_date: li.querySelector('[data-ie-due]').value || null,
+    create_task: !!li.querySelector('[data-ie-task]')?.checked,
   })).filter(x => x.text.trim());
 }
 function bindItemEditors(ul) {
@@ -449,19 +460,20 @@ export async function form({ params, query, state, navigate }) {
         <div class="field"><label for="rg-body">${b === 'reuniao' ? 'Resumo da reunião' : 'Descrição'}</label><textarea id="rg-body" name="body" rows="${b === 'reuniao' ? 4 : 5}" maxlength="20000">${r.body || ''}</textarea></div>
         ${b !== 'reuniao' ? html`<div class="field"><label for="rg-by">${b === 'pendencia' ? 'Solicitante' : b === 'decisao' ? 'Quem definiu' : 'Informado por'}</label>
           <input type="text" id="rg-by" name="decided_by" maxlength="160" value="${r.decided_by || ''}" placeholder="${b === 'pendencia' ? 'Ex.: Cliente — Sr. Carlos' : 'Ex.: Cliente, projetista, fiscalização…'}"></div>` : ''}
-        ${b === 'pendencia' && !(editing && r.task_id) ? html`<fieldset class="fieldset form"><legend>Tarefa gerada automaticamente</legend>
+        ${b === 'pendencia' && !(editing && r.task_id) ? html`<fieldset class="fieldset form"><legend>Responsável e prazo</legend>
           <div class="form-row">
             <div class="field"><label for="rg-ass">Responsável</label><select id="rg-ass" name="assignee_id"><option value="">Quem registrar (${state.user.name})</option>
               ${users.map(u => html`<option value="${u.id}" ${r.assignee_id === u.id ? 'selected' : ''}>${u.name}</option>`)}</select></div>
             <div class="field"><label for="rg-due">Prazo</label><input id="rg-due" name="due_date" type="date" value="${r.due_date || ''}"></div>
           </div>
-          <span class="hint">${approvalNote ? 'Após a aprovação' : 'Ao salvar'}, uma tarefa é criada no projeto para o responsável, com a origem neste registro. Quando a tarefa for concluída, a pendência fica resolvida.</span></fieldset>` : ''}
+          <label class="rg-ie-task"><input type="checkbox" name="create_task" ${r.create_task && editing ? 'checked' : ''}> Gerar automaticamente uma tarefa para o responsável</label>
+          <span class="hint">Marcado: ${approvalNote ? 'após a aprovação' : 'ao salvar'}, uma tarefa é criada no projeto com a origem neste registro, e a pendência fica resolvida quando a tarefa for concluída. Desmarcado: a pendência fica só registrada (dá para gerar a tarefa depois ou marcá-la como resolvida).</span></fieldset>` : ''}
         ${b === 'pendencia' && editing && r.task_id ? html`<div class="notice">${icon('info')}<span>Responsável e prazo são ajustados na tarefa gerada <a href="#/tarefas/${r.task_id}">${r.task_code}</a>.</span></div>` : ''}
         ${b === 'decisao' && !editing ? html`<div class="field"><label for="rg-rep">Substitui a definição</label><select id="rg-rep" name="replaces_id"><option value="">Nenhuma (nova definição)</option>
             ${vig.map(x => html`<option value="${x.id}" ${r.replaces_id === x.id ? 'selected' : ''}>${x.code ? `${x.code} · ` : ''}${x.title}</option>`)}</select>
           <span class="hint">A definição substituída deixa de valer e fica no histórico.</span></div>` : ''}
         ${b === 'reuniao' ? html`<fieldset class="fieldset form"><legend>Itens da ata</legend>
-          <span class="hint">Informação: apenas registro · Definição: passa a valer no projeto · Demanda: vira uma tarefa com responsável e prazo. Definições e tarefas são criadas quando a ata é emitida.</span>
+          <span class="hint">Informação: apenas registro · Definição: passa a valer no projeto · Demanda: responsável e prazo (marque “Gerar tarefa” para criar a tarefa). Definições e tarefas são criadas quando a ata é emitida.</span>
           <ul class="rg-items-edit" id="rg-items">${(r.items?.length ? r.items : [{ kind: 'info' }]).map(i => itemEditor(i, users))}</ul>
           <button type="button" class="btn btn-ghost btn-sm" id="rg-add-item">${icon('plus')}Adicionar item</button></fieldset>` : ''}
         <fieldset class="fieldset form"><legend>Tarefas vinculadas (opcional)</legend>
@@ -509,7 +521,7 @@ export async function form({ params, query, state, navigate }) {
         const btns = f.querySelectorAll('button[type=submit]');
         try {
           if (b === 'reuniao' && mode === 'emit') {
-            const nd = d.items.filter(i => i.kind === 'demanda').length;
+            const nd = d.items.filter(i => i.kind === 'demanda' && i.create_task).length;
             const nf = d.items.filter(i => i.kind === 'definicao').length;
             if (!(await confirmSheet('Salvar e emitir ata', `A ata ficará travada${nd ? `, ${nd} tarefa(s) serão criadas` : ''}${nf ? ` e ${nf} definição(ões) passarão a valer` : ''}. Confirmar?`, 'Emitir'))) return;
             d.emit = true;

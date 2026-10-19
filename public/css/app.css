@@ -2359,3 +2359,7 @@ tr.is-inactive td { opacity: .55; }
 .rb-month > summary::-webkit-details-marker { display: none; }
 .rb-month:not([open]) > summary { border-bottom: 0; }
 @media (max-width: 700px) { .rb-kpis { grid-template-columns: 1fr 1fr; } .rb-kpis > div:first-child { grid-column: 1 / -1; } }
+
+/* Registros: opção de gerar tarefa */
+.rg-ie-task { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--navy-700); cursor: pointer; }
+.rg-ie-task input { width: 17px; height: 17px; }

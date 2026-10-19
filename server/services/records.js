@@ -1,6 +1,6 @@
 // Registros do projeto: observações, definições, atas de reunião, pendências e outros tipos cadastráveis.
 // Comportamentos: nota (texto e anexos) · decisao (vigente/substituída) · reuniao (ata com itens que geram
-// definições e tarefas) · pendencia (gera uma tarefa com responsável e prazo).
+// definições e, se marcado, tarefas) · pendencia (responsável e prazo; gera tarefa só se a pessoa escolher).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/http.js';
 import { isAdmin, isManagerRole, canAccessProject, canManageProject, canManageSettings, userHasProjectAccess } from '../lib/permissions.js';
@@ -18,6 +18,7 @@ export const STATUS_LABEL = {
 const ITEM_KINDS = ['info', 'definicao', 'demanda'];
 // Ícones disponíveis para os tipos (desenhos em public/js/views/record-icons.js)
 export const ICON_KEYS = ['nota', 'check', 'reuniao', 'balao', 'troca', 'alerta', 'olho', 'megafone', 'pergunta', 'lampada', 'bandeira', 'estrela', 'camera', 'ferramenta', 'clipe', 'calendario'];
+const flag = v => (v === true || v === 1 || v === '1' || v === 'on' ? 1 : 0);
 const fmtD = d => (d ? d.split('-').reverse().join('/') : '');
 const nowIso = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
@@ -125,6 +126,8 @@ function effStatus(r, ref = today()) {
     if (te === 'concluida') return 'resolvida';
     if (te === 'cancelada') return 'cancelada';
     if (te === 'atrasada') return 'atrasada';
+    if (!r.task_id && r.resolved_at) return 'resolvida';
+    if (!r.task_id && r.due_date && r.due_date < ref) return 'atrasada';
   }
   return r.status;
 }
@@ -154,6 +157,9 @@ function shape(ctx, r, { full = false } = {}) {
       emit: r.behavior === 'reuniao' && st === 'rascunho' && (manager || mine),
       addendum: r.behavior === 'reuniao' && st === 'emitida' && manager,
       replace: r.behavior === 'decisao' && st === 'vigente' && (manager || mine),
+      task: r.behavior === 'pendencia' && st === 'aberta' && !r.task_id && !r.resolved_at && (manager || mine),
+      resolve: r.behavior === 'pendencia' && st === 'aberta' && !r.task_id && !r.resolved_at && (manager || mine),
+      item_task: r.behavior === 'reuniao' && st === 'emitida' && (manager || mine),
       cancel: (st === 'ativo' || st === 'rascunho' || st === 'aguardando_aprovacao' || st === 'vigente' || st === 'emitida') && (manager || (mine && st !== 'emitida')),
       pin: manager || mine,
       files: st !== 'cancelada' && (manager || mine),
@@ -260,7 +266,7 @@ function readItemsIn(v, projectId) {
     const text = str(x?.text, { max: 2000, label: `Item ${i + 1} da ata` });
     const assignee = kind === 'demanda' ? intOrNull(x?.assignee_id) : null;
     if (assignee && !userHasProjectAccess(assignee, projectId)) throw badRequest(`Item ${i + 1}: o responsável não tem acesso a este projeto.`);
-    return { kind, text, assignee_id: assignee, due_date: kind === 'demanda' ? date(x?.due_date, `Prazo do item ${i + 1}`) : null };
+    return { kind, text, assignee_id: assignee, due_date: kind === 'demanda' ? date(x?.due_date, `Prazo do item ${i + 1}`) : null, create_task: kind === 'demanda' ? flag(x?.create_task) : 0 };
   }).filter(x => x.text);
 }
 
@@ -273,6 +279,7 @@ function readBody(ctx, body, type, projectId) {
     decided_by: str(body.decided_by, { max: 160, label: type.behavior === 'pendencia' ? 'Solicitante' : 'Quem definiu' }),
     pinned: body.pinned ? 1 : 0,
     assignee_id: null, due_date: null, meeting_time: null, location: null, participants: null, agenda: null,
+    create_task: type.behavior === 'pendencia' ? flag(body.create_task) : 0,
   };
   if (d.record_date > today()) throw badRequest('A data do registro não pode ser futura.');
   if (type.behavior === 'pendencia') {
@@ -326,7 +333,7 @@ function createTaskFrom(ctx, project, { title, description, assignee_id, due_dat
 
 // Pendência aberta: cria a tarefa (uma só)
 function openPendencia(ctx, project, r) {
-  if (r.task_id) return;
+  if (r.task_id || !r.create_task) return;
   const desc = `${r.body || r.title}\n\nOrigem: ${r.code || r.type_name} — ${r.title} (${fmtD(r.record_date)})${r.decided_by ? ` · solicitado por ${r.decided_by}` : ''}.`;
   const taskId = createTaskFrom(ctx, project, { title: r.title, description: desc, assignee_id: r.assignee_id, due_date: r.due_date, start_date: r.record_date, recordId: r.id, label: `${r.code || r.type_name} · ${r.title}` });
   run('UPDATE project_records SET task_id = ? WHERE id = ?', taskId, r.id);
@@ -358,7 +365,7 @@ function processItems(ctx, project, ata, items) {
       run('UPDATE record_items SET decision_id = ? WHERE id = ?', Number(rr.lastInsertRowid), i.id);
       defs++;
     }
-    if (i.kind === 'demanda' && !i.task_id) {
+    if (i.kind === 'demanda' && !i.task_id && i.create_task) {
       const desc = `${i.text}\n\nDemanda da ${ata.code || 'ata'} — ${ata.title} (reunião de ${fmtD(ata.record_date)}), item ${i.seq}${i.addendum ? ' (adendo)' : ''}.`;
       const taskId = createTaskFrom(ctx, project, { title: i.text.split(/\r?\n/)[0], description: desc, assignee_id: i.assignee_id, due_date: i.due_date, start_date: i.addendum ? today() : ata.record_date, recordId: ata.id,
         label: `${ata.code || 'Ata'} · item ${i.seq}` });
@@ -373,8 +380,8 @@ function insertItemsFor(ctx, recordId, items, { addendum = 0 } = {}) {
   let seq = one('SELECT MAX(seq) AS n FROM record_items WHERE record_id = ?', recordId).n || 0;
   for (const i of items) {
     seq++;
-    run('INSERT INTO record_items (record_id, seq, kind, text, assignee_id, due_date, addendum, created_by) VALUES (?,?,?,?,?,?,?,?)',
-      recordId, seq, i.kind, i.text, i.assignee_id, i.due_date, addendum, ctx.user.id);
+    run('INSERT INTO record_items (record_id, seq, kind, text, assignee_id, due_date, create_task, addendum, created_by) VALUES (?,?,?,?,?,?,?,?,?)',
+      recordId, seq, i.kind, i.text, i.assignee_id, i.due_date, i.create_task ? 1 : 0, addendum, ctx.user.id);
   }
 }
 
@@ -393,14 +400,14 @@ export function createRecord(ctx, projectId, body, ip) {
   const needsApproval = type.requires_approval && !isAdmin(ctx.user);
   const status = type.behavior === 'nota' ? 'ativo' : type.behavior === 'reuniao' ? 'rascunho'
     : needsApproval ? 'aguardando_aprovacao' : type.behavior === 'decisao' ? 'vigente' : 'aberta';
-  if (type.behavior === 'pendencia' && status === 'aberta' && !openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
+  if (type.behavior === 'pendencia' && status === 'aberta' && d.create_task && !openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
   const id = tx(() => {
     const { seq, code } = nextCode(project, type);
     const r = run(`INSERT INTO project_records (project_id, type_id, seq, code, title, body, record_date, status, pinned, origin, decided_by, replaces_id,
-        assignee_id, due_date, meeting_time, location, participants, agenda, approved_by, approved_at, created_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        assignee_id, due_date, meeting_time, location, participants, agenda, create_task, approved_by, approved_at, created_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       project.id, type.id, seq, code, d.title, d.body, d.record_date, status, d.pinned, d.origin, d.decided_by, replaces?.id ?? null,
-      d.assignee_id, d.due_date, d.meeting_time, d.location, d.participants, d.agenda,
+      d.assignee_id, d.due_date, d.meeting_time, d.location, d.participants, d.agenda, d.create_task,
       type.requires_approval && !needsApproval ? ctx.user.id : null, type.requires_approval && !needsApproval ? nowIso() : null, ctx.user.id);
     const rid = Number(r.lastInsertRowid);
     if (items.length) insertItemsFor(ctx, rid, items);
@@ -426,9 +433,14 @@ export function updateRecord(ctx, id, body, ip) {
   // Pendência já aberta: responsável e prazo são cuidados na própria tarefa
   if (r.behavior === 'pendencia' && r.task_id) { d.assignee_id = r.assignee_id; d.due_date = r.due_date; }
   tx(() => {
+    const createTask = r.behavior === 'pendencia' && !r.task_id ? d.create_task : r.create_task;
     run(`UPDATE project_records SET title=?, body=?, record_date=?, pinned=?, origin=?, decided_by=?, assignee_id=?, due_date=?, meeting_time=?, location=?,
-      participants=?, agenda=?, updated_at=datetime('now') WHERE id=?`,
-      d.title, d.body, d.record_date, d.pinned, d.origin, d.decided_by, d.assignee_id, d.due_date, d.meeting_time, d.location, d.participants, d.agenda, id);
+      participants=?, agenda=?, create_task=?, updated_at=datetime('now') WHERE id=?`,
+      d.title, d.body, d.record_date, d.pinned, d.origin, d.decided_by, d.assignee_id, d.due_date, d.meeting_time, d.location, d.participants, d.agenda, createTask, id);
+    if (r.behavior === 'pendencia' && r.status === 'aberta' && !r.task_id && createTask) {
+      if (!openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
+      openPendencia(ctx, project, one(`${BASE} WHERE r.id = ?`, id));
+    }
     if (r.behavior === 'reuniao' && r.status === 'rascunho' && Array.isArray(body.items)) {
       run('DELETE FROM record_items WHERE record_id = ?', id);
       insertItemsFor(ctx, id, readItemsIn(body.items, project.id));
@@ -444,7 +456,7 @@ export function updateRecord(ctx, id, body, ip) {
 function emitInternal(ctx, project, r, ip) {
   const items = itemsOf(r.id);
   if (!items.length && !r.agenda && !r.body) throw badRequest('Inclua a pauta, o resumo ou os itens da ata antes de emitir.');
-  if (items.some(i => i.kind === 'demanda') && !openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas: a ata tem demandas.');
+  if (items.some(i => i.kind === 'demanda' && i.create_task) && !openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas: a ata tem demandas que geram tarefa.');
   run(`UPDATE project_records SET status = 'emitida', emitted_by = ?, emitted_at = ?, updated_at = datetime('now') WHERE id = ?`, ctx.user.id, nowIso(), r.id);
   const res = processItems(ctx, project, { ...r, status: 'emitida' }, items);
   audit(ctx.user.id, 'record', r.id, 'Ata emitida', { codigo: r.code, definicoes: res.defs, tarefas: res.tasks }, ip);
@@ -484,6 +496,24 @@ export function recordAction(ctx, id, action, body = {}, ip) {
         run(`UPDATE project_records SET status = 'vigente', replaced_by_id = NULL, updated_at = datetime('now') WHERE id = ? AND status = 'substituida'`, r.replaces_id);
       }
       audit(ctx.user.id, 'record', id, 'Registro cancelado', { codigo: r.code, motivo: reason }, ip);
+    } else if (action === 'task') {
+      if (!v.can.task) throw forbidden('Não é possível gerar a tarefa desta pendência.');
+      if (!openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
+      run('UPDATE project_records SET create_task = 1 WHERE id = ?', id);
+      openPendencia(ctx, project, one(`${BASE} WHERE r.id = ?`, id));
+      audit(ctx.user.id, 'record', id, 'Tarefa gerada pela pendência', { codigo: r.code, titulo: r.title }, ip);
+    } else if (action === 'resolve') {
+      if (!v.can.resolve) throw forbidden('Esta pendência não pode ser marcada como resolvida aqui.');
+      run(`UPDATE project_records SET resolved_at = ?, resolved_by = ?, updated_at = datetime('now') WHERE id = ?`, nowIso(), ctx.user.id, id);
+      audit(ctx.user.id, 'record', id, 'Pendência resolvida', { codigo: r.code, titulo: r.title }, ip);
+    } else if (action === 'item_task') {
+      if (!v.can.item_task) throw forbidden('Não é possível gerar tarefa para este item.');
+      const it = one(`SELECT * FROM record_items WHERE id = ? AND record_id = ?`, intOrNull(body.item_id), id);
+      if (!it || it.kind !== 'demanda' || it.task_id) throw badRequest('Escolha uma demanda da ata que ainda não tem tarefa.');
+      if (!openProject(project)) throw badRequest('Projeto encerrado não recebe novas tarefas.');
+      run('UPDATE record_items SET create_task = 1 WHERE id = ?', it.id);
+      const res = processItems(ctx, project, r, itemsOf(id).filter(i => i.id === it.id));
+      audit(ctx.user.id, 'record', id, 'Tarefa gerada para demanda da ata', { codigo: r.code, item: it.seq, tarefas: res.tasks }, ip);
     } else if (action === 'pin' || action === 'unpin') {
       if (!v.can.pin) throw forbidden('Você não pode fixar este registro.');
       run('UPDATE project_records SET pinned = ? WHERE id = ?', action === 'pin' ? 1 : 0, id);

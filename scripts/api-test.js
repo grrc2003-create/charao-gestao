@@ -1303,7 +1303,7 @@ async function main() {
   const rgD2 = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Definição'), title: 'Piso do térreo: porcelanato 90x90 cinza', replaces_id: rgD1 })).data.id;
   ok((await rgRic('GET', `/records/${rgD1}`)).data.status === 'substituida' && (await rgRic('GET', `/records/${rgD2}`)).data.history_chain.length === 1, 'nova definição substitui a anterior e guarda o histórico');
   // Pendência gera tarefa automaticamente
-  const rgP = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Solicitação do cliente'), title: 'Instalar ponto extra de tomada na sala', decided_by: 'Cliente', assignee_id: 4, due_date: '2099-03-10' })).data.id;
+  const rgP = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Solicitação do cliente'), title: 'Instalar ponto extra de tomada na sala', decided_by: 'Cliente', assignee_id: 4, due_date: '2099-03-10', create_task: true })).data.id;
   const rgPv = (await rgRic('GET', `/records/${rgP}`)).data;
   ok(rgPv.status === 'aberta' && rgPv.task_id && rgPv.code === 'SOL-PRJ-001-001', 'pendência aberta gera a tarefa automaticamente');
   const rgPt = (await rgMar('GET', `/tasks/${rgPv.task_id}`)).data;
@@ -1318,10 +1318,10 @@ async function main() {
   // Ata: rascunho → emitida (definições e demandas)
   const rgAta = await rgRic('POST', '/projects/1/records', { type_id: rgTid('Ata de reunião'), title: 'Reunião de alinhamento com o cliente', meeting_time: '09:30', location: 'Canteiro',
     participants: 'Ricardo Menezes\nCarlos Souza - Incorporadora Horizonte', agenda: 'Acabamentos e prazos',
-    items: [{ kind: 'info', text: 'Cliente aprovou o cronograma' }, { kind: 'definicao', text: 'Bancadas em granito preto São Gabriel' }, { kind: 'demanda', text: 'Enviar amostras de rejunte', assignee_id: 4, due_date: '2099-02-15' }] });
+    items: [{ kind: 'info', text: 'Cliente aprovou o cronograma' }, { kind: 'definicao', text: 'Bancadas em granito preto São Gabriel' }, { kind: 'demanda', text: 'Enviar amostras de rejunte', assignee_id: 4, due_date: '2099-02-15', create_task: true }, { kind: 'demanda', text: 'Conferir medidas no local', assignee_id: 4 }] });
   ok(rgAta.status === 201, 'ata criada em rascunho');
   let rgAv = (await rgRic('GET', `/records/${rgAta.data.id}`)).data;
-  ok(rgAv.status === 'rascunho' && rgAv.items.length === 3 && !rgAv.items.some(i => i.task_id) && rgAv.participants[1].company === 'Incorporadora Horizonte', 'rascunho guarda itens e participantes (sem gerar nada ainda)');
+  ok(rgAv.status === 'rascunho' && rgAv.items.length === 4 && !rgAv.items.some(i => i.task_id) && rgAv.participants[1].company === 'Incorporadora Horizonte', 'rascunho guarda itens e participantes (sem gerar nada ainda)');
   rgAv = (await rgRic('POST', `/records/${rgAta.data.id}/actions/emit`)).data;
   const rgDem = rgAv.items.find(i => i.kind === 'demanda');
   const rgDef = rgAv.items.find(i => i.kind === 'definicao');
@@ -1330,8 +1330,19 @@ async function main() {
   ok((await rgMar('GET', `/tasks/${rgDem.task_id}`)).data.origin_record?.code === 'ATA-PRJ-001-001', 'tarefa da demanda mostra a ata de origem');
   ok((await rgRic('PUT', `/records/${rgAta.data.id}`, { title: 'Mudou' })).status === 403, 'ata emitida não é editada');
   ok((await rgMar('POST', `/records/${rgAta.data.id}/actions/addendum`, { items: [{ kind: 'demanda', text: 'X' }] })).status === 403, 'colaborador não inclui adendo');
-  rgAv = (await rgRic('POST', `/records/${rgAta.data.id}/actions/addendum`, { items: [{ kind: 'demanda', text: 'Revisar memorial de acabamentos', assignee_id: 4 }] })).data;
-  ok(rgAv.items.length === 4 && rgAv.items[3].addendum === 1 && rgAv.items[3].task_id, 'adendo na ata emitida gera a nova tarefa');
+  rgAv = (await rgRic('POST', `/records/${rgAta.data.id}/actions/addendum`, { items: [{ kind: 'demanda', text: 'Revisar memorial de acabamentos', assignee_id: 4, create_task: true }] })).data;
+  ok(rgAv.items.length === 5 && rgAv.items[4].addendum === 1 && rgAv.items[4].task_id, 'adendo na ata emitida gera a nova tarefa');
+  // Tarefa opcional: sem marcar, a demanda/pendência fica só registrada (dá para gerar depois)
+  const rgSem = rgAv.items.find(i => i.text === 'Conferir medidas no local');
+  ok(rgSem && !rgSem.task_id, 'demanda sem “Gerar tarefa” não cria tarefa ao emitir');
+  const rgAv2 = (await rgRic('POST', `/records/${rgAta.data.id}/actions/item_task`, { item_id: rgSem.id })).data;
+  ok(rgAv2.items.find(i => i.id === rgSem.id).task_id, 'gerar a tarefa da demanda depois, pela ata');
+  const rgP2 = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Solicitação do cliente'), title: 'Trocar torneira do lavabo', assignee_id: 4, due_date: '2099-03-12' })).data.id;
+  const rgP2v = (await rgRic('GET', `/records/${rgP2}`)).data;
+  ok(rgP2v.status === 'aberta' && !rgP2v.task_id && rgP2v.can.task && rgP2v.can.resolve, 'pendência sem a opção marcada não gera tarefa');
+  ok((await rgRic('POST', `/records/${rgP2}/actions/task`)).data.task_id, 'opção de gerar a tarefa da pendência depois');
+  const rgP3 = (await rgRic('POST', '/projects/1/records', { type_id: rgTid('Solicitação do cliente'), title: 'Retocar pintura do hall' })).data.id;
+  ok((await rgRic('POST', `/records/${rgP3}/actions/resolve`)).data.eff_status === 'resolvida', 'pendência sem tarefa pode ser marcada como resolvida');
   // Cancelar a definição atual devolve a anterior
   await rgRic('POST', `/records/${rgD2}/actions/cancel`, { reason: 'Cliente voltou atrás' });
   ok((await rgRic('GET', `/records/${rgD1}`)).data.status === 'vigente', 'cancelar a definição que substituiu reativa a anterior');

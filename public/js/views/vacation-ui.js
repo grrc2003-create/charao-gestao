@@ -106,12 +106,12 @@ export function bindCancel(root, after) {
 }
 
 // Card do Meu painel: minhas férias + aprovações pendentes da minha equipe
-export function myVacationCard(v, user) {
+export function myVacationCard(v, user, { bare = false } = {}) {
   if (user.is_external) return '';
   const s = v.summary || {};
   const next = v.requests.filter(r => r.status === 'aprovada' && r.end_date >= todayISO()).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
   const pend = v.requests.filter(r => r.status === 'solicitada');
-  return html`<div class="grid grid-dash section">
+  const cards = html`
     <section class="card" id="my-vac"><div class="card-head"><h2>${icon('calendar')}Minhas férias</h2>${vacPill(s.status)}</div>
       <div class="card-body vac-mine">
         ${s.status === 'sem_admissao' ? html`<p class="muted" style="margin:0">Sua data de admissão ainda não foi informada. Peça à Gestão da Equipe para completar o seu cadastro.</p>` : html`
@@ -123,8 +123,8 @@ export function myVacationCard(v, user) {
             <button type="button" class="btn btn-ghost btn-sm" data-vac-hist>Histórico</button></div>`}
       </div></section>
     ${v.approvals.length ? html`<section class="card" id="vac-appr"><div class="card-head"><h2>${icon('team')}Férias para aprovar</h2><span class="sub">${v.approvals.length}</span></div>
-      ${approvalsList(v.approvals)}</section>` : ''}
-  </div>`;
+      ${approvalsList(v.approvals)}</section>` : ''}`;
+  return bare ? cards : html`<div class="grid grid-dash section">${cards}</div>`;
 }
 export function bindMyVacationCard(root, v, render) {
   root.querySelector('[data-vac-req]')?.addEventListener('click', async () => { if (await vacationSheet()) render(); });

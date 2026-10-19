@@ -2340,3 +2340,11 @@ tr.is-inactive td { opacity: .55; }
 .rb-inlist li span:first-child { flex: 1; min-width: 160px; }
 .rb-pick { cursor: pointer; justify-self: start; max-width: 100%; }
 .rb-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Meu painel: férias + reembolsos lado a lado */
+.panel-stack { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.grid-dash.grid-one { grid-template-columns: minmax(0, 1fr) !important; }
+.rb-list .rb-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; }
+.rb-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; }
+.rb-side b { font-variant-numeric: tabular-nums; font-size: 15px; }
+.rb-side .btn { margin-top: 2px; }

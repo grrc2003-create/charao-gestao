@@ -101,8 +101,13 @@ export async function view({ state, query, setQuery, render }) {
         <section class="card"><div class="card-head"><h2>${icon('calendar')}Próximos 7 dias</h2><span class="sub">${soon.length}</span></div>
           ${soon.length ? html`<ul class="rows">${soon.slice(0, 8).map(t => taskRow(t))}</ul>` : html`<div class="card-body muted">Nada vencendo nos próximos dias.</div>`}</section>
       </div>
-      ${vac ? myVacationCard(vac, me) : ''}
-      ${reimb ? myReimbCard(reimb) : ''}
+      ${(() => {
+        // Férias (e aprovações) à esquerda, reembolsos à direita: sem colunas vazias
+        const vacCards = vac ? myVacationCard(vac, me, { bare: true }) : '';
+        const left = vacCards ? html`<div class="panel-stack">${vacCards}</div>` : '';
+        const right = reimb ? myReimbCard(reimb, { bare: true }) : '';
+        return left || right ? html`<div class="grid grid-dash section ${left && right ? '' : 'grid-one'}">${left}${right}</div>` : '';
+      })()}
       ${checklistSection(d.checklists || [], { title: 'Meus check-lists', linkAll: '' })}
       ${teamSection}`,
     mount(root) {

@@ -15,20 +15,21 @@ export const SIT = {
 export const sitTag = r => html`<span class="rb-st ${SIT[r.situation][1]}">${SIT[r.situation][0]}${r.month_ref && ['incluido', 'pago'].includes(r.situation) ? ` ${refLabel(r.month_ref)}` : ''}</span>`;
 export const filesLinks = files => (files?.length ? html`<span class="rb-files">${files.map((f, i) => html`<a href="/api/reimbursement-files/${f.id}" target="_blank" rel="noopener" title="${f.original_name || 'Comprovante'}">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${files.length > 1 ? i + 1 : 'Comprovante'}</a>`)}</span>` : '');
 
-export function myReimbCard(data) {
+export function myReimbCard(data, { bare = false } = {}) {
   const items = data.items || [];
-  return html`<div class="grid grid-dash section"><section class="card" id="my-reimb">
+  const card = html`<section class="card" id="my-reimb">
     <div class="card-head"><h2>${icon('wallet')}Meus reembolsos</h2>
       <button type="button" class="btn btn-primary btn-sm" data-reimb-new>${icon('plus')}Lançar reembolso</button></div>
     ${data.pending_total ? html`<div class="card-body rb-sum">Aguardando a folha: <b>${money(data.pending_total)}</b></div>` : ''}
     ${items.length ? html`<ul class="rows rb-list">${items.map(r => html`<li class="rb-row">
         <div class="grow"><div class="row-title">${r.description}</div>
           <div class="row-meta"><span>${fmtDate(r.expense_date)}</span>${filesLinks(r.files)}${r.status === 'recusado' && r.decision_note ? html`<span class="rb-why">Motivo: ${r.decision_note}</span>` : ''}</div></div>
-        <div class="rb-right"><b>${money(r.amount)}</b>${sitTag(r)}
+        <div class="rb-side"><b>${money(r.amount)}</b>${sitTag(r)}
           ${r.status === 'enviado' ? html`<button type="button" class="btn btn-ghost btn-sm" data-reimb-cancel="${r.id}">Cancelar</button>` : ''}</div>
       </li>`)}</ul>`
       : html`<div class="card-body muted">Gastou algo pela empresa? Lance aqui com o comprovante: o valor entra na folha de pagamento.</div>`}
-  </section></div>`;
+  </section>`;
+  return bare ? card : html`<div class="grid grid-dash section">${card}</div>`;
 }
 
 export function bindMyReimbCard(root, render) {

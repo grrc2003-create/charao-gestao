@@ -458,6 +458,8 @@ api.put('/api/users/:id', (req, res, { ctx, params, body }) => {
   Users.updateUser(ctx, intOrNull(params.id), body, clientIp(req));
   send(res, 200, { ok: true });
 });
+api.get('/api/users/:id/deletion', (req, res, { ctx, params }) => send(res, 200, Users.deletionInfo(ctx, intOrNull(params.id))));
+api.delete('/api/users/:id', (req, res, { ctx, params }) => send(res, 200, Users.deleteUserPermanently(ctx, intOrNull(params.id), clientIp(req))));
 api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
   Users.resetPassword(ctx, intOrNull(params.id), body, clientIp(req));
   send(res, 200, { ok: true });

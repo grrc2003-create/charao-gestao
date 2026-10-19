@@ -335,3 +335,65 @@ export function avatarFile(id) {
 }
 // Fotos de todos (para as telas trocarem as iniciais pela foto)
 export const avatarMap = () => all('SELECT id, name, avatar_file FROM users WHERE avatar_file IS NOT NULL').map(u => ({ id: u.id, name: u.name, v: u.avatar_file.slice(0, 8) }));
+
+// ---------- Exclusão permanente (administrador) ----------
+// Só para quem não tem tarefas nem outros registros que precisam ficar no histórico.
+// Removidos junto: sessões, liberações de projeto, férias da própria pessoa e a foto. Subordinados passam ao gestor dela.
+// Na auditoria, as ações antigas da pessoa ficam com o nome registrado.
+const REF_LABEL = {
+  tasks: 'Tarefas', task_history: 'Histórico de tarefas', task_reschedules: 'Reagendamentos de tarefas', task_files: 'Arquivos de tarefas',
+  recurrences: 'Tarefas recorrentes', recurrence_files: 'Arquivos de recorrências', checklist_items: 'Itens de check-list', checklist_answers: 'Respostas de check-list',
+  checklist_files: 'Fotos de check-list', projects: 'Projetos cadastrados', project_templates: 'Modelos de projeto', dependencies: 'Dependências entre tarefas',
+  dependency_events: 'Histórico de dependências', calendar_days: 'Dias do calendário', contracts: 'Contratos', measurements: 'Medições de contratos',
+  finance_obligations: 'Tarefas financeiras', finance_items: 'Pagamentos registrados', project_records: 'Registros do projeto', record_items: 'Itens de ata',
+  record_files: 'Anexos de registros', record_task_links: 'Vínculos de registros', vacations: 'Férias de outras pessoas (decididas/solicitadas)',
+  processes: 'Processos da Empresa', process_versions: 'Versões de processos', process_files: 'Documentos de processos', payroll_people: 'Folha (Administrativa)',
+  payroll_months: 'Folhas criadas/fechadas', reimbursements: 'Reembolsos', reimbursement_files: 'Comprovantes de reembolso',
+};
+// Referências que a exclusão resolve sozinha
+const AUTO = new Set(['sessions.user_id', 'project_members.user_id', 'user_project_access.user_id', 'vacations.user_id', 'users.manager_id', 'projects.lead_id', 'processes.owner_id', 'audit_log.actor_id']);
+function userRefs() {
+  const out = [];
+  for (const t of all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)) {
+    for (const f of all(`PRAGMA foreign_key_list("${t.name}")`)) if (f.table === 'users') out.push({ table: t.name, col: f.from });
+  }
+  return out;
+}
+
+export function deletionInfo(ctx, id) {
+  requireAdmin(ctx.user);
+  const u = one('SELECT id, name, role FROM users WHERE id = ?', id);
+  if (!u) throw notFound('Pessoa não encontrada.');
+  const counts = new Map();
+  for (const r of userRefs()) {
+    if (AUTO.has(`${r.table}.${r.col}`)) continue;
+    // Férias da própria pessoa saem junto (só contam as de outras pessoas)
+    const extra = r.table === 'vacations' ? ' AND user_id <> ?' : '';
+    const n = one(`SELECT COUNT(*) AS n FROM "${r.table}" WHERE "${r.col}" = ?${extra}`, ...(extra ? [id, id] : [id])).n;
+    if (!n) continue;
+    const label = REF_LABEL[r.table] || r.table;
+    counts.set(label, (counts.get(label) || 0) + n);
+  }
+  const tasks = one('SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? OR creator_id = ? OR assigned_by_id = ? OR reviewed_by = ? OR cancelled_by = ?', id, id, id, id, id).n;
+  const blockers = [...counts].map(([label, count]) => ({ label, count })).sort((a, b) => (b.label === 'Tarefas') - (a.label === 'Tarefas') || b.count - a.count);
+  const reasons = [];
+  if (u.id === ctx.user.id) reasons.push('Você não pode excluir o próprio usuário.');
+  return { id: u.id, name: u.name, tasks, blockers, can_delete: !reasons.length && !blockers.length, reasons,
+    subordinates: one('SELECT COUNT(*) AS n FROM users WHERE manager_id = ?', id).n };
+}
+
+export function deleteUserPermanently(ctx, id, ip) {
+  const info = deletionInfo(ctx, id);
+  if (info.reasons.length) throw badRequest(info.reasons[0]);
+  if (info.blockers.length) throw badRequest(`Não é possível excluir: ${info.blockers.map(b => `${b.label} (${b.count})`).join(', ')}. Inative a pessoa em vez de excluir.`);
+  const u = one('SELECT * FROM users WHERE id = ?', id);
+  if (u.role === 'admin') ensureAnotherAdmin(id);
+  tx(() => {
+    run('UPDATE users SET manager_id = ? WHERE manager_id = ?', u.manager_id && u.manager_id !== id ? u.manager_id : null, id);
+    run(`UPDATE audit_log SET details = json_set(CASE WHEN json_valid(details) THEN details ELSE '{}' END, '$.usuario_excluido', ?), actor_id = NULL WHERE actor_id = ?`, u.name, id);
+    run('DELETE FROM users WHERE id = ?', id);
+    audit(ctx.user.id, 'user', id, 'Usuário excluído permanentemente', { nome: u.name, email: u.email, perfil: u.role }, ip);
+  });
+  if (u.avatar_file) deleteStored(u.avatar_file);
+  return { ok: true };
+}

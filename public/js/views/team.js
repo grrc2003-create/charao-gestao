@@ -2,6 +2,7 @@
 // (função e responsabilidades obrigatórias, setor, admissão; pessoas com ou sem acesso ao sistema).
 import { html, raw, api, icon, fmtDate, initials, ROLE, avatarUrl } from '../core.js';
 import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
+import { deleteButton, bindDeleteButton } from './user-delete.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
 import { vacPill } from './vacation-ui.js';
@@ -269,9 +270,11 @@ export async function form({ params, state, navigate }) {
         ${!creating && !u.login_enabled && !u.is_external && state.meta.can.manage_users ? html`<div class="notice">${icon('key')}<span>Esta pessoa não acessa o sistema. Para liberar o acesso, abra <a href="#/usuarios/${u.id}/editar">Acesso e permissões</a> e informe e-mail e senha provisória.</span></div>` : ''}
         <div class="form-error" hidden></div>
         <div class="form-actions"><a class="btn btn-ghost" href="#/equipe/cadastro">Cancelar</a><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
-      </form>`,
+      </form>
+      ${!creating && state.user.role === 'admin' && u.id !== state.user.id ? html`<div style="max-width:860px">${deleteButton()}</div>` : ''}`,
     mount(root, ctx) {
       if (!creating) bindAvatarEditor(root, u, { self: u.id === state.user.id, after: () => ctx.render() });
+      if (!creating) bindDeleteButton(root, u.id, () => navigate('/equipe/cadastro'));
       const f = root.querySelector('#tm-form');
       f.addEventListener('submit', async e => {
         e.preventDefault();

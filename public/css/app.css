@@ -2363,3 +2363,12 @@ tr.is-inactive td { opacity: .55; }
 /* Registros: opção de gerar tarefa */
 .rg-ie-task { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--navy-700); cursor: pointer; }
 .rg-ie-task input { width: 17px; height: 17px; }
+
+/* Exclusão permanente de pessoa */
+.ud-zone { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 16px; padding: 12px 16px; border: 1px solid #F1C4BD; background: #FFF8F7; border-radius: var(--radius); }
+.ud-zone > div { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.ud-zone .muted { font-size: 12.5px; }
+.ud-btn { color: #C0392B; border-color: #F1C4BD; }
+.ud-list { margin: 8px 0 12px; padding-left: 18px; font-size: 13.5px; }
+.ud-list li { margin: 3px 0; }
+.ud-list li:has(b) { display: flex; justify-content: space-between; gap: 12px; list-style: none; margin-left: -18px; padding: 4px 0; border-bottom: 1px solid var(--line); }

@@ -1636,6 +1636,18 @@ async function main() {
   const rbClosed = (await fo('POST', `/payroll/months/${ffM.id}/close`)).data;
   const rbMe = (await rbCam('GET', '/reimbursements/me')).data.items;
   ok(rbClosed.entries.find(e => e.id === rbCamEntry.id).requests.length === 1 && rbMe.find(r => r.id === rb1.id).situation === 'pago' && rbMe.find(r => r.id === rb2.id).decision_note === 'Sem nota fiscal válida', 'folha fechada: reembolso pago; recusado com o motivo para a pessoa');
+  // Exclusão permanente de pessoa (administrador, sem tarefas)
+  const duX = (await fo('POST', '/team', { name: 'Pessoa Teste Exclusão', job_title: 'Auxiliar', responsibilities: 'Cadastro feito por engano para testar a exclusão.', manager_id: 1 })).data;
+  const duY = (await fo('POST', '/team', { name: 'Subordinado Teste', job_title: 'Auxiliar', responsibilities: 'Subordinado da pessoa que será excluída.', manager_id: duX.id })).data;
+  ok((await prFel('GET', `/users/${duX.id}/deletion`)).status === 403 && (await prFel('DELETE', `/users/${duX.id}`)).status === 403, 'só o administrador exclui pessoas');
+  const duInfo = (await fo('GET', `/users/${duX.id}/deletion`)).data;
+  ok(duInfo.can_delete && duInfo.tasks === 0 && duInfo.subordinates === 1, 'pessoa sem tarefas pode ser excluída');
+  const duMar = (await fo('GET', '/users/4/deletion')).data;
+  ok(!duMar.can_delete && duMar.blockers.some(b => b.label === 'Tarefas') && (await fo('DELETE', '/users/4')).status === 400, 'pessoa com tarefas não é excluída (mostra o motivo)');
+  ok((await fo('DELETE', '/users/1')).status === 400, 'administrador não exclui a si mesmo');
+  ok((await fo('DELETE', `/users/${duX.id}`)).status === 200 && (await fo('GET', `/users/${duX.id}`)).status === 404, 'exclusão permanente');
+  ok((await fo('GET', `/team/${duY.id}`)).data.manager_id === 1, 'subordinados passam para o gestor da pessoa excluída');
+  ok((await fo('GET', '/audit')).data.some(a => a.action === 'Usuário excluído permanentemente'), 'exclusão registrada na auditoria');
 
 }
 

@@ -3,7 +3,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
   canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
-import { decorate, today, daysBetween, localDate, summarize } from './metrics.js';
+import { decorate, today, daysBetween, localDate, summarize, addDays } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
@@ -116,7 +116,7 @@ export const checklistMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM che
 // (só as datas preenchidas das subtarefas não canceladas contam)
 export const subtasksMaxDue = taskId => one('SELECT MAX(due_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND due_date IS NOT NULL', taskId)?.d || null;
 export const subtasksMinStart = taskId => one('SELECT MIN(start_date) AS d FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND start_date IS NOT NULL', taskId)?.d || null;
-export function syncParentDue(parentId, userId, causeCode = null, { extendOnly = false } = {}) {
+export function syncParentDue(parentId, userId, causeCode = null, { extendOnly = false, note = null } = {}) {
   if (!parentId) return;
   const p = one('SELECT * FROM tasks WHERE id = ?', parentId);
   if (!p || p.cancelled_at || p.status === 'concluida') return;
@@ -131,12 +131,48 @@ export function syncParentDue(parentId, userId, causeCode = null, { extendOnly =
   const parts = [];
   if (start !== p.start_date) parts.push(`início ${fmtDate(p.start_date)} → ${fmtDate(start)}`);
   if (due !== p.due_date) parts.push(`término ${fmtDate(p.due_date)} → ${fmtDate(due)}`);
-  taskHistory(parentId, userId, 'Datas ajustadas pelas subtarefas', `${parts.join(' · ')} · acompanha a subtarefa que começa mais cedo e a que termina mais tarde${causeCode ? ` (alteração em ${causeCode})` : ''} · não conta como reagendamento desta tarefa`);
+  taskHistory(parentId, userId, 'Datas ajustadas pelas subtarefas', `${parts.join(' · ')} · acompanha a subtarefa que começa mais cedo e a que termina mais tarde${note ? ` (${note})` : causeCode ? ` (alteração em ${causeCode})` : ''} · não conta como reagendamento desta tarefa`);
   // Término estendido: as sucessoras da tarefa principal são empurradas (sem penalizá-las)
   if (p.due_date && due > p.due_date) {
     applyShift({ userId, projectId: p.project_id, cause: { taskId: parentId, code: p.code, title: p.title }, kind: 'reagendamento',
       causeOldDue: p.due_date, causeNewDue: due, sources: [{ key: `t:${parentId}`, finish: due }], projectEndBefore: endBefore });
   }
+}
+
+// Tarefa principal empurrada (dependência/planejamento): as subtarefas em aberto andam junto, o mesmo número de dias
+export function moveSubtasks(parentId, days, userId, why) {
+  if (!days) return 0;
+  const subs = all(`SELECT id, code, start_date, due_date FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND status <> 'concluida'
+    AND (start_date IS NOT NULL OR due_date IS NOT NULL)`, parentId);
+  for (const s of subs) {
+    const ns = s.start_date ? addDays(s.start_date, days) : null, nd = s.due_date ? addDays(s.due_date, days) : null;
+    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', ns, nd, nowIso(), s.id);
+    taskHistory(s.id, userId, 'Datas ajustadas com a tarefa principal', `início ${fmtDate(s.start_date)} → ${fmtDate(ns)} · término ${fmtDate(s.due_date)} → ${fmtDate(nd)} (${days > 0 ? '+' : ''}${days} dia(s)) · ${why} · não conta como reagendamento desta subtarefa`);
+  }
+  return subs.length;
+}
+export const hasDatedSubtasks = taskId => !!(subtasksMaxDue(taskId) || subtasksMinStart(taskId));
+
+// Alinhamento único das tarefas principais existentes (antes da regra): retorna as que mudaram
+export function alignAllParents() {
+  const ids = all(`SELECT DISTINCT s.parent_id AS id FROM tasks s JOIN tasks p ON p.id = s.parent_id
+    WHERE s.cancelled_at IS NULL AND (s.start_date IS NOT NULL OR s.due_date IS NOT NULL)
+      AND p.cancelled_at IS NULL AND p.status <> 'concluida'`).map(r => r.id);
+  const changed = [];
+  for (const id of ids) {
+    const before = one('SELECT code, start_date, due_date FROM tasks WHERE id = ?', id);
+    tx(() => {
+      // Principal empurrada por dependência com as subtarefas para trás: as subtarefas andam até o início da principal
+      const pushed = one('SELECT 1 FROM dependency_shifts WHERE target_task_id = ? LIMIT 1', id) || one(`SELECT 1 FROM task_history WHERE task_id = ? AND action LIKE '%dependência%' LIMIT 1`, id);
+      const min = subtasksMinStart(id) || subtasksMaxDue(id);
+      const anchor = before.start_date || before.due_date;
+      if (pushed && min && anchor && min < anchor) moveSubtasks(id, daysBetween(min, anchor), null, 'acompanham a tarefa principal, que foi empurrada por dependência');
+      syncParentDue(id, null, null, { note: 'alinhamento geral das tarefas principais às subtarefas' });
+    });
+    const after = one('SELECT start_date, due_date FROM tasks WHERE id = ?', id);
+    if (after.start_date !== before.start_date || after.due_date !== before.due_date) changed.push({ id, code: before.code, before, after });
+  }
+  return changed;
 }
 
 export function permissionsFor(ctx, t) {

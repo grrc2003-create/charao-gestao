@@ -1670,6 +1670,14 @@ async function main() {
   await fo('POST', `/tasks/${pdS3}/parent-dates`);
   const pdS3v = (await fo('GET', `/tasks/${pdS3}`)).data, pdPv3 = (await fo('GET', `/tasks/${pdP}`)).data;
   ok(pdS3v.start_date === pdPv3.start_date && pdS3v.due_date === pdPv3.due_date && pdPv3.due_date === '2099-05-07', 'subtarefa continua podendo puxar as datas da tarefa mãe (sem alterar a mãe)');
+  // Mãe empurrada por dependência: as subtarefas em aberto andam junto
+  const mvA = (await fo('POST', '/tasks', { project_id: 1, title: 'Predecessora (mover subtarefas)', description: 'Teste', assignee_id: 4, start_date: '2099-07-01', due_date: '2099-07-03' })).data.id;
+  const mvP = (await fo('POST', '/tasks', { project_id: 1, title: 'Mãe sucessora', description: 'Teste', assignee_id: 4, start_date: '2099-07-06', due_date: '2099-07-10' })).data.id;
+  const mvS = (await fo('POST', '/tasks', { parent_id: mvP, project_id: 1, title: 'Sub da mãe sucessora', description: 'Teste', assignee_id: 4, start_date: '2099-07-06', due_date: '2099-07-10' })).data.id;
+  await fo('POST', '/dependencies', { pred: `t:${mvA}`, succ: `t:${mvP}` });
+  await fo('POST', `/tasks/${mvA}/reschedule`, { due_date: '2099-07-15', reason_id: pdReason });
+  const mvPv = (await fo('GET', `/tasks/${mvP}`)).data, mvSv = (await fo('GET', `/tasks/${mvS}`)).data;
+  ok(mvPv.start_date > '2099-07-15' && mvSv.start_date === mvPv.start_date && mvSv.due_date === mvPv.due_date && mvSv.reschedule_count === 0, 'mãe empurrada por dependência leva as subtarefas junto (sem contar como reagendamento)');
 
 }
 

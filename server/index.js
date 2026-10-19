@@ -36,6 +36,13 @@ import { all } from './db.js';
 
 migrate();
 bootstrap();
+// Alinhamento único: tarefas principais existentes passam a acompanhar as datas das subtarefas
+if (one('SELECT COUNT(*) AS n FROM users').n > 0 && !one(`SELECT value FROM app_settings WHERE key = 'parent_dates_aligned'`)) {
+  const changed = Tasks.alignAllParents();
+  db.prepare(`INSERT INTO app_settings (key, value) VALUES ('parent_dates_aligned', ?)`).run(new Date().toISOString());
+  if (changed.length) audit(null, 'system', null, 'Datas das tarefas principais alinhadas às subtarefas', { tarefas: changed.map(c => c.code) });
+  console.log(`[init] datas de ${changed.length} tarefa(s) principal(is) alinhadas às subtarefas${changed.length ? `: ${changed.map(c => c.code).join(', ')}` : ''}`);
+}
 if (one('SELECT COUNT(*) AS n FROM users').n) { Projects.ensureInternalArea(); Contracts.ensureContractsArea(); Finance.ensureFinanceArea(); }
 
 const PORT = Number(process.env.PORT || 3000);

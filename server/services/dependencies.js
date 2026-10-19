@@ -6,7 +6,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, intOrNull } from '../lib/http.js';
 import { canSeeTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
-import { loadVisible, checklistMaxDue, syncParentDue } from './tasks.js';
+import { loadVisible, checklistMaxDue, syncParentDue, moveSubtasks, hasDatedSubtasks, subtasksMinStart, subtasksMaxDue } from './tasks.js';
 import { addDays, daysBetween, today } from './metrics.js';
 import { addWorkingDays, workingDaysBetween, prevWorkingDay } from './calendar.js';
 
@@ -255,8 +255,15 @@ export function applyShift({ userId, projectId, cause, kind, causeOldDue, causeN
         run('UPDATE checklist_items SET start_date = ?, due_date = ? WHERE id = ?', i.start_date ? addDays(i.start_date, p.days) : null, i.due_date ? addDays(i.due_date, p.days) : null, i.id);
       }
     }
-    const newDue = datedItems ? checklistMaxDue(t.id) : p.newDue;
-    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', p.newStart, newDue, new Date().toISOString(), t.id);
+    let newDue = datedItems ? checklistMaxDue(t.id) : p.newDue;
+    let newStart = p.newStart;
+    // Tarefa principal empurrada: as subtarefas em aberto andam junto; a principal fica com o início/término delas
+    if (!t.parent_id && t.task_type !== 'checklist' && hasDatedSubtasks(t.id)) {
+      moveSubtasks(t.id, daysBetween(p.oldStart || p.oldDue, p.newStart || p.newDue), userId, `a tarefa principal foi empurrada por ${causeLabel}`);
+      newStart = subtasksMinStart(t.id) || p.newStart;
+      newDue = subtasksMaxDue(t.id) || p.newDue;
+    }
+    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', newStart, newDue, new Date().toISOString(), t.id);
     run('INSERT INTO dependency_shifts (event_id, target_task_id, old_start, old_due, new_start, new_due, days) VALUES (?,?,?,?,?,?,?)', ev, t.id, p.oldStart, p.oldDue, p.newStart, newDue, p.days);
     taskHistory(t.id, userId, 'Prazo ajustado por dependência', `${fmt(p.oldDue)} → ${fmt(newDue)} (+${dd(p.days)}) · causa: ${causeLabel} (${WHY[kind]}) · não conta como reagendamento desta tarefa`);
     if (t.parent_id) syncParentDue(t.parent_id, userId, t.code);
@@ -393,6 +400,14 @@ function setDates(n, start, due) {
     const max = checklistMaxDue(n.task_id);
     if (max) run('UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?', max, new Date().toISOString(), n.task_id);
   } else {
+    const cur = one('SELECT parent_id, task_type, start_date, due_date FROM tasks WHERE id = ?', n.id);
+    if (cur && !cur.parent_id && cur.task_type !== 'checklist' && hasDatedSubtasks(n.id)) {
+      // Principal reposicionada pelo planejamento: as subtarefas andam junto
+      const from = cur.start_date || cur.due_date, to = start || due;
+      if (from && to) moveSubtasks(n.id, daysBetween(from, to), null, 'a tarefa principal foi reposicionada pela dependência');
+      start = subtasksMinStart(n.id) || start;
+      due = subtasksMaxDue(n.id) || due;
+    }
     run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', start, due, new Date().toISOString(), n.id);
     const pid = one('SELECT parent_id FROM tasks WHERE id = ?', n.id)?.parent_id;
     if (pid) syncParentDue(pid, null, null);

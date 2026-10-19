@@ -2409,3 +2409,8 @@ tr.is-inactive td { opacity: .55; }
   .wp-cal { display: none; }
   .wp-mob { display: grid; }
 }
+
+/* Planejamento: subtarefa logo abaixo da principal, recuada */
+.wp-span.is-sub { margin-left: 18px; background-color: #FCFBF9; }
+.wp-span.is-sub.cut-l { margin-left: 18px; }
+.wp-mob .wp-task[data-wp-sub] { margin-left: 14px; }

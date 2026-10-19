@@ -60,37 +60,43 @@ const chip = (t, day) => {
 
 // ---------- Computador: faixas contínuas para tarefas de vários dias ----------
 // Cada tarefa de vários dias vira uma barra única do início ao prazo (recortada na semana), sempre na mesma linha.
-// Linhas por grupo (principais abertas → principais concluídas → subtarefas abertas → subtarefas concluídas),
-// para que ocultar concluídas/subtarefas não deixe buracos.
+// Cada tarefa principal tem a própria linha e as subtarefas dela ficam logo abaixo (ocultar não deixa buracos:
+// a linha some junto). Subtarefas cuja principal não está na tela ficam no fim.
 function laneBars(tasks, days) {
   const start = days[0], end = days[6];
   const col = x => days.indexOf(x);
-  const groups = [[false, false], [false, true], [true, false], [true, true]];
-  const lanes = [];
-  for (const [isSub, isDone] of groups) {
-    const list = tasks.filter(t => !!t.parent_id === isSub && (t.status === 'concluida') === isDone)
-      .map(t => { const sp = spanOf(t); return { t, sp, a: col(sp.begin < start ? start : sp.begin), b: col(sp.due > end ? end : sp.due) }; })
-      .sort((x, y) => x.a - y.a || y.b - x.b || x.t.code.localeCompare(y.t.code));
-    const mine = [];
-    for (const it of list) {
-      let lane = mine.find(l => l.every(o => it.a > o.b || it.b < o.a));
-      if (!lane) { lane = []; mine.push(lane); }
-      lane.push(it);
+  const items = tasks.map(t => { const sp = spanOf(t); return { t, sp, a: col(sp.begin < start ? start : sp.begin), b: col(sp.due > end ? end : sp.due) }; });
+  const order = (x, y) => x.a - y.a || y.b - x.b || x.t.code.localeCompare(y.t.code);
+  const pack = list => {
+    const rows = [];
+    for (const it of [...list].sort(order)) {
+      let row = rows.find(r => r.every(o => it.a > o.b || it.b < o.a));
+      if (!row) { row = []; rows.push(row); }
+      row.push(it);
     }
-    lanes.push(...mine);
+    return rows;
+  };
+  const mains = items.filter(i => !i.t.parent_id).sort((x, y) => (x.t.status === 'concluida') - (y.t.status === 'concluida') || order(x, y));
+  const ids = new Set(mains.map(m => m.t.id));
+  const lanes = [];
+  for (const m of mains) {
+    lanes.push([m]);
+    lanes.push(...pack(items.filter(i => i.t.parent_id === m.t.id)));
   }
+  lanes.push(...pack(items.filter(i => i.t.parent_id && !ids.has(i.t.parent_id)).map(i => ({ ...i, orphan: true }))));
   return lanes;
 }
 
-const bar = ({ t, sp, a, b }, row, days) => {
+const bar = ({ t, sp, a, b, orphan }, row, days) => {
+  // subtarefas: recuadas, logo abaixo da principal
   const pct = ['concluida', 'aguardando_conferencia'].includes(t.eff_status) ? 100 : (t.progress_pct || 0);
   const before = sp.begin < days[0], after = sp.due > days[6];
-  return html`<a href="#/tarefas/${t.id}" class="wp-span ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''} ${before ? 'cut-l' : ''} ${after ? 'cut-r' : ''}"
+  return html`<a href="#/tarefas/${t.id}" class="wp-span ${t.parent_id ? 'is-sub' : ''} ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''} ${before ? 'cut-l' : ''} ${after ? 'cut-r' : ''}"
     ${t.status === 'concluida' ? 'data-done' : ''} ${t.parent_id ? 'data-wp-sub' : ''}
     style="grid-row:${row};grid-column:${a + 1} / ${b + 2};--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'};--p:${pct}%"
     title="${t.code} · ${t.title} · ${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ${STATUS[t.eff_status]?.label || ''} · ${pct}% executado">
     ${before ? html`<span class="wp-cut">◀</span>` : ''}<span class="dot"></span>
-    <span class="wp-span-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span> · ${dm(sp.begin)} → ${dm(sp.due)} · ${pct}%</small></span>
+    <span class="wp-span-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span> · ${dm(sp.begin)} → ${dm(sp.due)} · ${pct}%${orphan && t.parent_title ? ` · de ${t.parent_title}` : ''}</small></span>
     ${after ? html`<span class="wp-cut">▶ ${dm(sp.due)}</span>` : ''}</a>`;
 };
 
@@ -102,10 +108,19 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
   const tasks = d.tasks.filter(t => !t.cancelled_at);
   // A tarefa aparece em todos os dias do período (início → prazo); prazo do dia primeiro
   const dated = tasks.filter(t => t.due_date);
+  const byId = new Map(dated.map(t => [t.id, t]));
+  const rootOf = t => (t.parent_id && byId.has(t.parent_id) ? byId.get(t.parent_id) : t);
   const byDay = new Map(days.map(x => [x, dated.filter(t => { const sp = spanOf(t); return sp.begin <= x && x <= sp.due; })
-    // Vários dias primeiro, sempre na mesma ordem (início, prazo, código); depois as de um dia
-    .sort((a, b) => { const sa = spanOf(a), sb = spanOf(b), ma = sa.begin !== sa.due, mb = sb.begin !== sb.due;
-      return (mb - ma) || (ma ? sa.begin.localeCompare(sb.begin) || sa.due.localeCompare(sb.due) : 0) || a.due_date.localeCompare(b.due_date) || a.code.localeCompare(b.code); })]));
+    // Agrupa a subtarefa com a principal (quando a principal está na tela): vários dias primeiro, sempre na mesma
+    // ordem (início, prazo, código); depois as de um dia; dentro do grupo, a principal e logo abaixo as subtarefas
+    .sort((a, b) => {
+      const ra = rootOf(a), rb = rootOf(b);
+      if (ra.id !== rb.id) {
+        const sa = spanOf(ra), sb = spanOf(rb), ma = sa.begin !== sa.due, mb = sb.begin !== sb.due;
+        return (mb - ma) || (ma ? sa.begin.localeCompare(sb.begin) || sa.due.localeCompare(sb.due) : 0) || ra.due_date.localeCompare(rb.due_date) || ra.code.localeCompare(rb.code);
+      }
+      return (a.id === ra.id ? 0 : 1) - (b.id === rb.id ? 0 : 1) || spanOf(a).begin.localeCompare(spanOf(b).begin) || a.code.localeCompare(b.code);
+    })]));
   const inWeek = new Set(days.flatMap(x => byDay.get(x).filter(open).map(t => t.id)));
   const late = tasks.filter(t => open(t) && t.eff_status === 'atrasada' && t.due_date < start);
   const undated = tasks.filter(t => open(t) && !t.due_date);

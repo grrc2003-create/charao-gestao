@@ -29,7 +29,7 @@ function load(id) {
 
 // ---------- Pessoa (Meu painel) ----------
 export function myReimbursements(ctx) {
-  const list = all(`${BASE} WHERE r.user_id = ? ORDER BY r.created_at DESC LIMIT 60`, ctx.user.id).map(shape);
+  const list = all(`${BASE} WHERE r.user_id = ? ORDER BY r.created_at DESC LIMIT 500`, ctx.user.id).map(shape);
   return {
     items: list,
     pending_total: r2(list.filter(r => r.status === 'enviado').reduce((s, r) => s + r.amount, 0)),

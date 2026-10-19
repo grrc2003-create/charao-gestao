@@ -34,6 +34,7 @@ import * as ProcessesPrint from './views/processes-print.js';
 import * as ProcessMap from './views/process-map.js';
 import * as Payroll from './views/payroll.js';
 import * as PayrollPrint from './views/payroll-print.js';
+import * as Reimb from './views/reimb-ui.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
 
@@ -57,6 +58,7 @@ const routes = [
   ['/', () => ({ html: '' })],
   ['/painel', MyPanel.view],
   ['/painel/desempenho', User.myPerformance],
+  ['/painel/reembolsos', Reimb.history],
   ['/empresa', Dashboard.view],
   ['/projetos', Projects.list],
   ['/projetos/novo', Projects.form],

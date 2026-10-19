@@ -2348,3 +2348,14 @@ tr.is-inactive td { opacity: .55; }
 .rb-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; }
 .rb-side b { font-variant-numeric: tabular-nums; font-size: 15px; }
 .rb-side .btn { margin-top: 2px; }
+
+/* Reembolsos: histórico */
+.rb-head-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.rb-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.rb-kpis > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
+.rb-kpis span { font-size: 12px; color: var(--muted); }
+.rb-kpis b { font-size: 20px; color: var(--navy); font-variant-numeric: tabular-nums; }
+.rb-month > summary { cursor: pointer; list-style: none; }
+.rb-month > summary::-webkit-details-marker { display: none; }
+.rb-month:not([open]) > summary { border-bottom: 0; }
+@media (max-width: 700px) { .rb-kpis { grid-template-columns: 1fr 1fr; } .rb-kpis > div:first-child { grid-column: 1 / -1; } }

@@ -20,9 +20,10 @@ function receipt(m, e) {
       ['Vale alimentação — adiantamento', per, `${c.vr_days} dias × ${money(m.vr_daily)}`, c.vr_base],
       ...(c.vr_adjust ? [['Vale alimentação — diferença', '', '', c.vr_adjust]] : []),
     ]),
-    ['Outros — reembolso', e.reimbursement_note || '', '', c.reimbursement],
+    ...(e.requests || []).map(r => [`Reembolso — ${r.description}`, short(r.expense_date), 'comprovante', r.amount]),
+    ...(c.reimb_manual || !(e.requests || []).length ? [['Outros — reembolso', e.reimbursement_note || '', '', c.reimb_manual ?? c.reimbursement]] : []),
   ];
-  const obs = [c.reimbursement ? `Reembolso: ${money(c.reimbursement)}${e.reimbursement_note ? ` (${e.reimbursement_note})` : ''}` : '', e.notes || ''].filter(Boolean).join('\n');
+  const obs = [c.reimbursement ? `Reembolso: ${money(c.reimbursement)}${e.reimbursement_note ? ` (${e.reimbursement_note})` : ''}${(e.requests || []).length ? ` · ${e.requests.length} lançado(s) pela pessoa` : ''}` : '', e.notes || ''].filter(Boolean).join('\n');
   return html`<article class="doc a4 pd-sheet rc-doc">
     <header class="rc-head">
       <img src="${co.logo}" alt="${co.name}" class="rc-logo">

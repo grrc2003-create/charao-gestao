@@ -3,6 +3,7 @@
 import { html, api, icon, avatar, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead } from './shared.js';
+import { filesLinks, rejectSheet } from './reimb-ui.js';
 
 export const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 export const money = v => BRL.format(Number(v) || 0);
@@ -25,8 +26,8 @@ const finOptions = (list, ref, selected) => {
 const stTag = st => html`<span class="pf-st pf-st-${st}">${st === 'fechada' ? 'Fechada' : 'Aberta'}</span>`;
 
 // ---------- Folhas ----------
-export async function list({ navigate }) {
-  const data = await api('/payroll/months');
+export async function list({ navigate, render }) {
+  const [data, pend] = await Promise.all([api('/payroll/months'), api('/reimbursements/pending')]);
   return {
     title: 'Folha (Administrativa)',
     html: html`
@@ -38,6 +39,10 @@ export async function list({ navigate }) {
           <button type="button" class="btn btn-primary" data-new>${icon('plus')}Nova folha</button>`,
       })}
       ${!data.people_count ? html`<div class="notice notice-warn section">${icon('info')}<span>Comece cadastrando as <a href="#/folha/pessoas">pessoas da folha</a>: valor mensal, turno, PIX e a escala de VT/VR de cada uma.</span></div>` : ''}
+      ${pend.length ? html`<section class="card section"><div class="card-head"><h2>${icon('wallet')}Reembolsos aguardando a folha</h2><span class="sub">${pend.length} · ${money(pend.reduce((s, r) => s + r.amount, 0))}</span></div>
+        <ul class="rows">${pend.map(r => html`<li class="rb-row"><div class="grow"><div class="row-title">${r.user_name} · ${r.description}</div>
+          <div class="row-meta"><span>${fmtDate(r.expense_date)}</span>${filesLinks(r.files)}${r.in_payroll ? html`<span>Puxe para o pagamento dentro da folha do mês</span>` : html`<span class="rb-why">Pessoa fora da folha: inclua-a em Pessoas da folha ou recuse</span>`}</div></div>
+          <div class="rb-right"><b>${money(r.amount)}</b><button type="button" class="btn btn-ghost btn-sm pf-danger" data-rb-reject="${r.id}">Recusar</button></div></li>`)}</ul></section>` : ''}
       ${data.months.length ? html`<div class="pf-months">${data.months.map(m => html`<a class="pf-mcard" href="#/folha/${m.id}">
           <div class="pf-mtop"><b>Folha ${refLabel(m.ref)}</b>${stTag(m.status)}</div>
           <div class="pf-mper">Bolsa ${dm(m.bolsa.start)} a ${dm(m.bolsa.end)} · VT/VR ${dm(m.benefit.start)} a ${dm(m.benefit.end)}</div>
@@ -47,6 +52,7 @@ export async function list({ navigate }) {
         : html`<div class="empty-state"><h2>Nenhuma folha ainda</h2><p>Crie a folha do mês: o sistema calcula a bolsa proporcional, o VT e o VR de cada pessoa e gera os recibos.</p></div>`}
       <button type="button" class="fab" data-new aria-label="Nova folha">${icon('plus')}</button>`,
     mount(root) {
+      root.querySelectorAll('[data-rb-reject]').forEach(b => b.addEventListener('click', () => rejectSheet(pend.find(r => r.id === Number(b.dataset.rbReject)), render)));
       // Ao trocar o mês, pré-seleciona a folha pré-lançada daquele mês
       document.addEventListener('change', function onRef(e) {
         if (!root.isConnected) return document.removeEventListener('change', onRef);
@@ -97,7 +103,7 @@ export async function month({ params, render }) {
         <div><dt>${e.kind === 'profissional' ? 'Valor' : 'Bolsa'}</dt><dd>${money(c.base)}</dd></div>
         <div><dt>VT</dt><dd>${money(c.vt)}</dd></div>
         <div><dt>VR</dt><dd>${money(c.vr)}</dd></div>
-        <div><dt>Reemb.</dt><dd>${money(c.reimbursement)}</dd></div>
+        <div><dt>Reemb.${e.requests?.length ? ` (${e.requests.length})` : ''}</dt><dd>${money(c.reimbursement)}</dd></div>
         <div class="pf-tot"><dt>Total</dt><dd>${money(c.total)}</dd></div>
       </dl>
       <div class="pf-acts">${open ? html`<button type="button" class="btn btn-ghost btn-sm" data-edit="${e.id}">${icon('edit')}Lançar</button>` : ''}
@@ -138,6 +144,12 @@ export async function month({ params, render }) {
         <div><span>Reembolsos</span><b>${money(t.reimbursement)}</b></div>
         <div class="pf-kt"><span>Total da folha</span><b>${money(t.total)}</b></div>
       </div>
+      ${open && m.pending_reimbursements.length ? html`<section class="card section rb-pend"><div class="card-head"><h2>${icon('wallet')}Reembolsos lançados pelas pessoas</h2>
+          <button type="button" class="btn btn-primary btn-sm" data-rb-all>${icon('check')}Incluir todos (${money(m.pending_reimbursements.reduce((s, r) => s + r.amount, 0))})</button></div>
+        <ul class="rows">${m.pending_reimbursements.map(r => html`<li class="rb-row"><div class="grow"><div class="row-title">${r.user_name} · ${r.description}</div>
+          <div class="row-meta"><span>${fmtDate(r.expense_date)}</span>${filesLinks(r.files)}</div></div>
+          <div class="rb-right"><b>${money(r.amount)}</b><button type="button" class="btn btn-ghost btn-sm" data-rb-inc="${r.id}" data-entry="${r.entry_id}">${icon('plus')}Incluir na folha</button>
+            <button type="button" class="btn btn-ghost btn-sm pf-danger" data-rb-reject="${r.id}">Recusar</button></div></li>`)}</ul></section>` : ''}
       <section class="card section">
         <div class="card-head"><h2>${icon('users')}Pessoas</h2><span class="sub">${m.entries.length}</span></div>
         ${m.entries.length ? html`<ul class="pf-rows">${m.entries.map(row)}</ul>` : html`<p class="muted card-body">Nenhuma pessoa nesta folha.</p>`}
@@ -156,6 +168,12 @@ export async function month({ params, render }) {
         try { await api(`/payroll/months/${m.id}/people`, { method: 'POST', body: { person_id: Number(v) } }); render(); } catch (ex) { toast(ex.message, 'error'); }
       });
       root.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => entrySheet(m, m.entries.find(x => x.id === Number(b.dataset.edit)), render)));
+      const include = async list => {
+        try { for (const r of list) await api(`/reimbursements/${r.id}/include`, { method: 'POST', body: { entry_id: r.entry_id } }); toast(list.length > 1 ? 'Reembolsos incluídos na folha.' : 'Reembolso incluído na folha.'); render(); } catch (ex) { toast(ex.message, 'error'); render(); }
+      };
+      root.querySelectorAll('[data-rb-inc]').forEach(b => b.addEventListener('click', () => include(m.pending_reimbursements.filter(r => r.id === Number(b.dataset.rbInc)))));
+      root.querySelector('[data-rb-all]')?.addEventListener('click', () => include(m.pending_reimbursements));
+      root.querySelectorAll('[data-rb-reject]').forEach(b => b.addEventListener('click', () => rejectSheet(m.pending_reimbursements.find(r => r.id === Number(b.dataset.rbReject)), render)));
       root.querySelector('[data-close]')?.addEventListener('click', async () => {
         const n = m.entries.filter(e => e.calc.total > 0).length;
         const fi = m.finance_item;
@@ -190,8 +208,9 @@ function entrySheet(m, e, render) {
         <div class="field"><label for="le-vt">VT diferença (R$)</label><input type="number" id="le-vt" name="vt_adjust" step="0.01" value="${i.vt_adjust || 0}"><span class="hint">Positivo soma, negativo desconta.</span></div>
         <div class="field"><label for="le-vr">VR diferença (R$)</label><input type="number" id="le-vr" name="vr_adjust" step="0.01" value="${i.vr_adjust || 0}"></div>
       </div>`}
+      ${e.requests?.length ? html`<div class="field"><label>Reembolsos lançados pela pessoa (incluídos)</label><ul class="rb-inlist">${e.requests.map(r => html`<li><span>${fmtDate(r.expense_date)} · ${r.description}</span><b>${money(r.amount)}</b>${filesLinks(r.files)}<button type="button" class="btn btn-ghost btn-sm" data-rb-rel="${r.id}">Tirar</button></li>`)}</ul></div>` : ''}
       <div class="form-row">
-        <div class="field"><label for="le-r">Reembolso / outros (R$)</label><input type="number" id="le-r" name="reimbursement" step="0.01" min="0" value="${i.reimbursement || 0}"></div>
+        <div class="field"><label for="le-r">${e.requests?.length ? 'Outro reembolso (manual, R$)' : 'Reembolso / outros (R$)'}</label><input type="number" id="le-r" name="reimbursement" step="0.01" min="0" value="${i.reimbursement || 0}"></div>
         <div class="field"><label for="le-rn">Descrição do reembolso</label><input type="text" id="le-rn" name="reimbursement_note" maxlength="300" value="${e.reimbursement_note || ''}" placeholder="Ex.: material de escritório"></div>
       </div>
       <div class="field"><label for="le-o">Observação no recibo</label><textarea id="le-o" name="notes" rows="2" maxlength="1000">${e.notes || ''}</textarea></div>
@@ -203,6 +222,9 @@ function entrySheet(m, e, render) {
       render();
     },
   });
+  setTimeout(() => document.querySelectorAll('.sheet [data-rb-rel]').forEach(b => b.addEventListener('click', async () => {
+    try { await api(`/reimbursements/${b.dataset.rbRel}/release`, { method: 'POST' }); document.querySelector('.sheet [data-close]')?.click(); toast('Reembolso retirado da folha (volta a aguardar).'); render(); } catch (ex) { toast(ex.message, 'error'); }
+  })), 60);
   setTimeout(() => document.querySelector('.sheet [data-rm]')?.addEventListener('click', async () => {
     document.querySelector('.sheet [data-close]')?.click();
     if (!(await confirmSheet('Tirar desta folha', `${e.name} sai da folha ${refLabel(m.ref)} (continua no cadastro da folha).`, 'Tirar', true))) return;

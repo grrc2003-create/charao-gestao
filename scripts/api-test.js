@@ -48,6 +48,7 @@ async function login(email, password = PW) {
 }
 
 // PNG 2x2 válido gerado em memória
+const r2t = v => Math.round(v * 100) / 100;
 function tinyPng() {
   const crc = buf => { let c, crc = 0xffffffff; for (const b of buf) { c = (crc ^ b) & 0xff; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; } return (crc ^ 0xffffffff) >>> 0; };
   const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
@@ -1177,7 +1178,7 @@ async function main() {
   ok(fTask.title.startsWith('DAS Simples Nacional —') && fTask.assignee_id === kAnaId && fTask.stage_name === 'Impostos', 'tarefa da parcela: título com o mês, responsável e classificação = categoria');
   ok((await ricardo('GET', `/tasks/${fIt.task_id}`)).status === 404, 'sem liberação financeira, a tarefa da parcela não aparece');
   ok((await fAna('GET', '/tasks')).data.some(t => t.id === fIt.task_id), 'liberado vê a tarefa da parcela na lista de Tarefas');
-  let fPaid = (await fAna('POST', `/finance/items/${fIt.id}/pay`, { paid_date: new Date().toISOString().slice(0, 10), paid_amount: '1.200,00', files: [{ data: tinyPng() }] })).data;
+  let fPaid = (await fAna('POST', `/finance/items/${fIt.id}/pay`, { paid_date: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()), paid_amount: '1.200,00', files: [{ data: tinyPng() }] })).data;
   ok(fPaid.status === 'paga' && fPaid.paid_amount === 1200 && fPaid.files.length === 1, 'pagamento registrado com valor e comprovante');
   ok((await fAna('GET', `/tasks/${fIt.task_id}`)).data.status === 'concluida', 'a tarefa da parcela fica concluída');
   ok((await fAna('POST', `/finance/items/${fIt.id}/pay`, {})).status === 400, 'não paga duas vezes');
@@ -1598,6 +1599,32 @@ async function main() {
   const ffItem2 = (await fo('GET', `/finance/items/${ffNov.id}`)).data;
   ok(ffRe.status === 'aberta' && ffItem2.amount_expected === 4200 && ffItem2.estimated === 1, 'reabrir volta a parcela ao valor estimado');
   ok((await fo('POST', '/payroll/months', { ref: '2027-01', finance_item_id: 'nenhuma' })).status === 201, 'sem folha pré-lançada: “Nenhuma” gera pagamentos por pessoa');
+  // Reembolsos: a pessoa lança no Meu painel; a Folha puxa para o pagamento
+  const rbCam = await login('camila@charao.eng.br');
+  ok((await rbCam('POST', '/reimbursements', { expense_date: '2026-10-01', amount: '50', description: 'Táxi' })).status === 400, 'reembolso exige comprovante');
+  ok((await rbCam('POST', '/reimbursements', { expense_date: '2099-01-01', amount: 50, description: 'Táxi', files: [{ data: tinyPng() }] })).status === 400, 'data da despesa não pode ser futura');
+  const rb1 = (await rbCam('POST', '/reimbursements', { expense_date: '2026-10-10', amount: '120.50', description: 'Material de escritório', files: [{ data: tinyPng(), name: 'nota.png' }] })).data;
+  const rb2 = (await rbCam('POST', '/reimbursements', { expense_date: '2026-10-11', amount: 30, description: 'Estacionamento', files: [{ data: tinyPng() }] })).data;
+  ok(rb1.status === 'enviado' && rb1.situation === 'enviado' && rb1.files.length === 1 && (await rbCam('GET', '/reimbursements/me')).data.pending_total === 150.5, 'pessoa lança reembolsos com comprovante no Meu painel');
+  ok((await rbCam('GET', `/reimbursement-files/${rb1.files[0].id}`)).status === 200 && (await prFel('GET', `/reimbursement-files/${rb1.files[0].id}`)).status === 404 && (await fo('GET', `/reimbursement-files/${rb1.files[0].id}`)).status === 200, 'comprovante: só a pessoa e quem cuida da folha');
+  ok((await prFel('GET', '/reimbursements/pending')).status === 403 && (await fo('GET', '/reimbursements/pending')).data.some(r => r.id === rb1.id && r.in_payroll), 'Folha vê os reembolsos aguardando');
+  const rbM = (await fo('GET', `/payroll/months/${ffM.id}`)).data;
+  const rbPend = rbM.pending_reimbursements.find(r => r.id === rb1.id);
+  const rbCamEntry = rbM.entries.find(e => e.person_id === foP1.id);
+  const rbOther = rbM.entries.find(e => e.person_id === foP2.id);
+  ok(rbPend && rbPend.entry_id === rbCamEntry.id, 'na montagem da folha aparecem os reembolsos das pessoas da folha');
+  ok((await fo('POST', `/reimbursements/${rb1.id}/include`, { entry_id: rbOther.id })).status === 400, 'reembolso só entra no lançamento da própria pessoa');
+  const rbM2 = (await fo('POST', `/reimbursements/${rb1.id}/include`, { entry_id: rbCamEntry.id })).data;
+  const rbE2 = rbM2.entries.find(e => e.id === rbCamEntry.id);
+  ok(rbE2.requests.length === 1 && rbE2.calc.reimb_requests === 120.5 && rbE2.calc.reimbursement === r2t(rbCamEntry.calc.reimbursement + 120.5) && rbE2.calc.total === r2t(rbCamEntry.calc.total + 120.5), 'reembolso puxado soma no pagamento da pessoa');
+  ok((await rbCam('GET', '/reimbursements/me')).data.items.find(r => r.id === rb1.id).situation === 'incluido' && (await rbCam('POST', `/reimbursements/${rb1.id}/cancel`)).status === 400, 'pessoa vê “incluído na folha” e não cancela mais');
+  ok((await fo('POST', `/reimbursements/${rb1.id}/release`)).data.entries.find(e => e.id === rbCamEntry.id).requests.length === 0, 'tirar da folha devolve o reembolso para aguardar');
+  await fo('POST', `/reimbursements/${rb1.id}/include`, { entry_id: rbCamEntry.id });
+  ok((await fo('POST', `/reimbursements/${rb2.id}/reject`, { note: '' })).status === 400, 'recusar exige o motivo');
+  await fo('POST', `/reimbursements/${rb2.id}/reject`, { note: 'Sem nota fiscal válida' });
+  const rbClosed = (await fo('POST', `/payroll/months/${ffM.id}/close`)).data;
+  const rbMe = (await rbCam('GET', '/reimbursements/me')).data.items;
+  ok(rbClosed.entries.find(e => e.id === rbCamEntry.id).requests.length === 1 && rbMe.find(r => r.id === rb1.id).situation === 'pago' && rbMe.find(r => r.id === rb2.id).decision_note === 'Sem nota fiscal válida', 'folha fechada: reembolso pago; recusado com o motivo para a pessoa');
 
 }
 

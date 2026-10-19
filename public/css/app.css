@@ -2317,3 +2317,26 @@ tr.is-inactive td { opacity: .55; }
 .pf-link-none { background: var(--navy-50); }
 .fin-est { color: #A86F0E; font-weight: 600; }
 .fin-prev { margin-top: 6px; }
+
+/* Reembolsos */
+.rb-row { display: flex; gap: 12px; align-items: center; padding: 10px 16px; flex-wrap: wrap; }
+.rb-row .grow { min-width: 200px; }
+.rb-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.rb-right b { font-variant-numeric: tabular-nums; }
+.rb-st { font-size: 11px; font-weight: 700; border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
+.rb-wait { background: #FBF1DC; color: #8A5A0B; }
+.rb-in { background: #E7F0FA; color: #1F5F9E; }
+.rb-paid { background: #E5F4EC; color: #1F6B41; }
+.rb-no { background: #FBE9E7; color: #A1301F; }
+.rb-off { background: #EEF0F2; color: var(--muted); }
+.rb-why { color: #A1301F; }
+.rb-files { display: inline-flex; gap: 8px; }
+.rb-files a { display: inline-flex; align-items: center; gap: 3px; }
+.rb-files svg { width: 14px; height: 14px; }
+.rb-sum { font-size: 13.5px; padding-top: 10px; padding-bottom: 0; }
+.rb-pend { border-left: 4px solid #A86F0E; }
+.rb-inlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rb-inlist li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13.5px; background: #FCFBF9; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; }
+.rb-inlist li span:first-child { flex: 1; min-width: 160px; }
+.rb-pick { cursor: pointer; justify-self: start; max-width: 100%; }
+.rb-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

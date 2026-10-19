@@ -13,6 +13,7 @@ import { audit } from './audit.js';
 import { workingDaysList } from './calendar.js';
 import { createObligationInternal, obligationPaid, removeObligationInternal, setItemAmountInternal } from './finance.js';
 import { today } from './metrics.js';
+import { entryReimbursements, pendingReimbursements, releaseByEntries } from './reimbursements.js';
 
 export const COMPANIES = {
   charao: { name: 'Charão Engenharia & Construção', logo: '/assets/logo.webp' },
@@ -123,7 +124,7 @@ export function updatePerson(ctx, id, body, ip) {
 
 // ---------- Cálculo ----------
 // Dados da pessoa (ao vivo na folha aberta) + lançamento do mês → valores
-export function compute(month, entry, person) {
+export function compute(month, entry, person, requests = []) {
   const { bolsa, benefit } = periodsOf(month.ref);
   const start = entry.start_date || maxD(bolsa.start, person.start_date);
   const end = entry.end_date || minD(bolsa.end, person.end_date);
@@ -150,12 +151,14 @@ export function compute(month, entry, person) {
   const vt = r2(vtBase - hoDiscount + vtAdjust);
   const vrBase = estagio ? r2(vrDays * daily) : 0;
   const vr = r2(vrBase + vrAdjust);
-  const reimbursement = r2(entry.reimbursement);
+  const reimbManual = r2(entry.reimbursement);
+  const reimbRequests = r2(requests.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+  const reimbursement = r2(reimbManual + reimbRequests);
   return {
     start, end, business_days: business, period_days: periodDays, absences, worked_days: worked, ho_days: ho,
     weight: business ? r2(worked / business) : 0,
     base, vt_days: vtDays, vr_days: vrDays, per_weekday: perWeekday, vt_base: vtBase, ho_discount: hoDiscount, vt_adjust: vtAdjust, vt,
-    vr_base: vrBase, vr_adjust: vrAdjust, vr, reimbursement, total: r2(base + vt + vr + reimbursement),
+    vr_base: vrBase, vr_adjust: vrAdjust, vr, reimbursement, reimb_manual: reimbManual, reimb_requests: reimbRequests, total: r2(base + vt + vr + reimbursement),
   };
 }
 
@@ -164,14 +167,16 @@ const personSnapshot = p => ({
   monthly_value: p.monthly_value, shift: p.shift, regime: p.regime, pix: p.pix, cost_center: p.cost_center, schedule: parseSchedule(p.schedule),
 });
 
+const reqView = r => ({ id: r.id, expense_date: r.expense_date, amount: r.amount, description: r.description, files: r.files });
 function entryView(month, e) {
   if (month.status === 'fechada' && e.snapshot) {
     const s = JSON.parse(e.snapshot);
-    return { id: e.id, person_id: e.person_id, ...s.person, calc: s.calc, input: s.input, reimbursement_note: e.reimbursement_note, notes: e.notes, obligation_id: e.obligation_id };
+    return { id: e.id, person_id: e.person_id, ...s.person, calc: s.calc, input: s.input, requests: s.requests || [], reimbursement_note: e.reimbursement_note, notes: e.notes, obligation_id: e.obligation_id };
   }
   const p = one(`${PERSON_SQL} WHERE p.id = ?`, e.person_id);
+  const requests = entryReimbursements(e.id).map(reqView);
   return {
-    id: e.id, person_id: e.person_id, ...personSnapshot(p), calc: compute(month, e, p),
+    id: e.id, person_id: e.person_id, user_id: p.user_id, ...personSnapshot(p), calc: compute(month, e, p, requests), requests,
     input: { start_date: e.start_date, end_date: e.end_date, absences: e.absences, ho_days: e.ho_days, vt_adjust: e.vt_adjust, vr_adjust: e.vr_adjust, reimbursement: e.reimbursement },
     reimbursement_note: e.reimbursement_note, notes: e.notes, obligation_id: e.obligation_id,
   };
@@ -291,6 +296,7 @@ export function getMonth(ctx, id) {
     closed_by_name: m.closed_by ? one('SELECT name FROM users WHERE id = ?', m.closed_by)?.name : null,
     finance_item: m.finance_item_id ? one(`${ITEM_SQL} WHERE i.id = ?`, m.finance_item_id) : null,
     finance_candidates: m.status === 'aberta' ? financeCandidates(m.id) : [],
+    pending_reimbursements: m.status === 'aberta' ? pendingReimbursements(entries.map(e => e.user_id)).map(r => ({ ...reqView(r), user_id: r.user_id, user_name: r.user_name, entry_id: entries.find(e => e.user_id === r.user_id)?.id })) : [],
     entries, totals: totalsOf(entries),
     available: m.status === 'aberta' ? all(`${PERSON_SQL} WHERE p.active = 1 ORDER BY u.name`).filter(p => !inMonth.has(p.id)).map(p => ({ id: p.id, name: p.name })) : [],
     companies: COMPANIES,
@@ -348,6 +354,7 @@ export function removeEntry(ctx, entryId) {
   if (!e) throw notFound('Lançamento não encontrado.');
   const m = loadMonth(e.month_id);
   openOnly(m);
+  releaseByEntries([e.id]);
   run('DELETE FROM payroll_entries WHERE id = ?', e.id);
   return getMonth(ctx, m.id);
 }
@@ -368,9 +375,9 @@ export function closeMonth(ctx, id, ip) {
   let generated = 0;
   tx(() => {
     if (linked) {
-      const calcs = rows.map(e => { const p = one(`${PERSON_SQL} WHERE p.id = ?`, e.person_id); return { e, p, calc: compute(m, e, p) }; });
-      for (const { e, p, calc } of calcs) {
-        const snap = { person: personSnapshot(p), calc, input: { start_date: e.start_date, end_date: e.end_date, absences: e.absences, ho_days: e.ho_days, vt_adjust: e.vt_adjust, vr_adjust: e.vr_adjust, reimbursement: e.reimbursement } };
+      const calcs = rows.map(e => { const p = one(`${PERSON_SQL} WHERE p.id = ?`, e.person_id); const requests = entryReimbursements(e.id).map(reqView); return { e, p, requests, calc: compute(m, e, p, requests) }; });
+      for (const { e, p, calc, requests } of calcs) {
+        const snap = { person: personSnapshot(p), calc, requests, input: { start_date: e.start_date, end_date: e.end_date, absences: e.absences, ho_days: e.ho_days, vt_adjust: e.vt_adjust, vr_adjust: e.vr_adjust, reimbursement: e.reimbursement } };
         run(`UPDATE payroll_entries SET snapshot = ?, obligation_id = NULL, updated_at = datetime('now') WHERE id = ?`, JSON.stringify(snap), e.id);
       }
       const total = r2(calcs.reduce((s, x) => s + x.calc.total, 0));
@@ -382,8 +389,9 @@ export function closeMonth(ctx, id, ip) {
     }
     for (const e of rows) {
       const p = one(`${PERSON_SQL} WHERE p.id = ?`, e.person_id);
-      const calc = compute(m, e, p);
-      const snap = { person: personSnapshot(p), calc, input: { start_date: e.start_date, end_date: e.end_date, absences: e.absences, ho_days: e.ho_days, vt_adjust: e.vt_adjust, vr_adjust: e.vr_adjust, reimbursement: e.reimbursement } };
+      const requests = entryReimbursements(e.id).map(reqView);
+      const calc = compute(m, e, p, requests);
+      const snap = { person: personSnapshot(p), calc, requests, input: { start_date: e.start_date, end_date: e.end_date, absences: e.absences, ho_days: e.ho_days, vt_adjust: e.vt_adjust, vr_adjust: e.vr_adjust, reimbursement: e.reimbursement } };
       let obligation = null;
       if (calc.total > 0) {
         obligation = createObligationInternal(ctx.user.id, {
@@ -423,6 +431,7 @@ export function deleteMonth(ctx, id, ip) {
   requirePayroll(ctx);
   const m = loadMonth(id);
   openOnly(m);
+  releaseByEntries(all('SELECT id FROM payroll_entries WHERE month_id = ?', m.id).map(r => r.id));
   run('DELETE FROM payroll_months WHERE id = ?', m.id);
   audit(ctx.user.id, 'payroll', m.id, 'Folha excluída', { mes: m.ref }, ip);
   return { ok: true };

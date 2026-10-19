@@ -45,7 +45,9 @@ function dayShare(t, day) {
 const chip = (t, day) => {
   const sp = day && t.due_date ? spanOf(t) : null;
   const multi = sp && sp.begin !== sp.due;
-  const tag = !multi ? '' : day === sp.begin ? `início · até ${dm(sp.due)}` : day === sp.due ? `prazo · desde ${dm(sp.begin)}` : `continua · até ${dm(sp.due)}`;
+  const nDays = multi ? Math.round((parse(sp.due) - parse(sp.begin)) / 864e5) + 1 : 0;
+  const k = multi ? Math.round((parse(day) - parse(sp.begin)) / 864e5) + 1 : 0;
+  const tag = !multi ? '' : day === sp.due ? `prazo · dia ${k} de ${nDays}` : `dia ${k} de ${nDays} · até ${dm(sp.due)}`;
   const part = !multi ? '' : day === sp.begin ? 'is-first' : day === sp.due ? 'is-last' : 'is-mid';
   const sh = day ? dayShare(t, day) : null;
   const shCls = !sh ? '' : sh.fill >= 1 ? 'is-share-done' : sh.fill > 0 ? 'is-share-part' : 'is-share-todo';
@@ -54,6 +56,42 @@ const chip = (t, day) => {
   <span class="dot" style="--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'}"></span>
   <span class="wp-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span>${tag ? html` · <em>${tag}</em>` : ''}</small>
     ${sh ? html`<small class="wp-share">${sh.fill >= 1 ? '✓ parcela feita' : sh.fill > 0 ? `parcela ${Math.round(sh.fill * 100)}% feita` : 'parcela a fazer'} · ${sh.pct}% executado</small>` : ''}</span></a>`;
+};
+
+// ---------- Computador: faixas contínuas para tarefas de vários dias ----------
+// Cada tarefa de vários dias vira uma barra única do início ao prazo (recortada na semana), sempre na mesma linha.
+// Linhas por grupo (principais abertas → principais concluídas → subtarefas abertas → subtarefas concluídas),
+// para que ocultar concluídas/subtarefas não deixe buracos.
+function laneBars(tasks, days) {
+  const start = days[0], end = days[6];
+  const col = x => days.indexOf(x);
+  const groups = [[false, false], [false, true], [true, false], [true, true]];
+  const lanes = [];
+  for (const [isSub, isDone] of groups) {
+    const list = tasks.filter(t => !!t.parent_id === isSub && (t.status === 'concluida') === isDone)
+      .map(t => { const sp = spanOf(t); return { t, sp, a: col(sp.begin < start ? start : sp.begin), b: col(sp.due > end ? end : sp.due) }; })
+      .sort((x, y) => x.a - y.a || y.b - x.b || x.t.code.localeCompare(y.t.code));
+    const mine = [];
+    for (const it of list) {
+      let lane = mine.find(l => l.every(o => it.a > o.b || it.b < o.a));
+      if (!lane) { lane = []; mine.push(lane); }
+      lane.push(it);
+    }
+    lanes.push(...mine);
+  }
+  return lanes;
+}
+
+const bar = ({ t, sp, a, b }, row, days) => {
+  const pct = ['concluida', 'aguardando_conferencia'].includes(t.eff_status) ? 100 : (t.progress_pct || 0);
+  const before = sp.begin < days[0], after = sp.due > days[6];
+  return html`<a href="#/tarefas/${t.id}" class="wp-span ${t.status === 'concluida' ? 'is-done' : ''} ${t.eff_status === 'atrasada' ? 'is-late' : ''} ${before ? 'cut-l' : ''} ${after ? 'cut-r' : ''}"
+    ${t.status === 'concluida' ? 'data-done' : ''} ${t.parent_id ? 'data-wp-sub' : ''}
+    style="grid-row:${row};grid-column:${a + 1} / ${b + 2};--c:${STATUS_COLOR[t.eff_status] || '#9AA3AD'};--p:${pct}%"
+    title="${t.code} · ${t.title} · ${fmtDate(sp.begin)} → ${fmtDate(sp.due)} · ${STATUS[t.eff_status]?.label || ''} · ${pct}% executado">
+    ${before ? html`<span class="wp-cut">◀</span>` : ''}<span class="dot"></span>
+    <span class="wp-span-txt"><b>${t.parent_id ? '↳ ' : ''}${t.title}</b><small><span class="mono">${t.code}</span> · ${dm(sp.begin)} → ${dm(sp.due)} · ${pct}%</small></span>
+    ${after ? html`<span class="wp-cut">▶ ${dm(sp.due)}</span>` : ''}</a>`;
 };
 
 export function weekPlanSection(d, { week, canPlan, firstName }) {
@@ -65,7 +103,9 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
   // A tarefa aparece em todos os dias do período (início → prazo); prazo do dia primeiro
   const dated = tasks.filter(t => t.due_date);
   const byDay = new Map(days.map(x => [x, dated.filter(t => { const sp = spanOf(t); return sp.begin <= x && x <= sp.due; })
-    .sort((a, b) => (a.due_date === x ? 0 : 1) - (b.due_date === x ? 0 : 1) || a.due_date.localeCompare(b.due_date) || a.code.localeCompare(b.code))]));
+    // Vários dias primeiro, sempre na mesma ordem (início, prazo, código); depois as de um dia
+    .sort((a, b) => { const sa = spanOf(a), sb = spanOf(b), ma = sa.begin !== sa.due, mb = sb.begin !== sb.due;
+      return (mb - ma) || (ma ? sa.begin.localeCompare(sb.begin) || sa.due.localeCompare(sb.due) : 0) || a.due_date.localeCompare(b.due_date) || a.code.localeCompare(b.code); })]));
   const inWeek = new Set(days.flatMap(x => byDay.get(x).filter(open).map(t => t.id)));
   const late = tasks.filter(t => open(t) && t.eff_status === 'atrasada' && t.due_date < start);
   const undated = tasks.filter(t => open(t) && !t.due_date);
@@ -100,7 +140,31 @@ export function weekPlanSection(d, { week, canPlan, firstName }) {
           return n ? html`<button type="button" class="btn btn-ghost btn-sm done-toggle" data-wp-subs aria-pressed="false">${icon('tasks')}<span>Mostrar subtarefas (${n})</span></button>` : ''; })()}
         ${canPlan ? html`<button type="button" class="btn btn-accent btn-sm" data-wp-add="${days.includes(today) ? today : start}">${icon('plus')}Nova tarefa</button>` : ''}
       </div>
-      <div class="wp-grid">${days.map(dayCol)}</div>
+      ${(() => {
+        // Computador: cabeçalho dos dias + faixas das tarefas de vários dias + tarefas de um dia por coluna
+        const isMulti = t => { const sp = spanOf(t); return sp.begin !== sp.due; };
+        const weekMulti = dated.filter(t => { const sp = spanOf(t); return isMulti(t) && sp.begin <= end && sp.due >= start; });
+        const lanes = laneBars(weekMulti, days);
+        const L = lanes.length;
+        const head = (x, i) => {
+          const dt = parse(x);
+          const list = byDay.get(x);
+          const main = list.filter(t => !t.parent_id).length;
+          return html`<div class="wp-day-head wp-h ${x === today ? 'is-today' : ''}" style="grid-row:1;grid-column:${i + 1}"><span><b>${DOW[dt.getDay()]}</b> ${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}</span>
+            ${list.length ? html`<span class="n ${main ? '' : 'n-subonly'}"><span class="n-main">${main}</span><span class="n-all">${list.length}</span></span>` : ''}</div>`;
+        };
+        const cell = (x, i) => html`<div class="wp-cell" style="grid-row:${L + 2};grid-column:${i + 1}" data-day="${x}">
+            <div class="wp-list">${byDay.get(x).filter(t => !isMulti(t)).map(t => chip(t, x))}</div>
+            ${canPlan ? html`<button type="button" class="wp-add" data-wp-add="${x}" aria-label="Nova tarefa para ${fmtDate(x)}">${icon('plus')}<span>Tarefa</span></button>` : ''}</div>`;
+        const colBg = (x, i) => { const g = parse(x).getDay();
+          return html`<div class="wp-colbg ${x === today ? 'is-today' : ''} ${g === 0 || g === 6 ? 'is-weekend' : ''} ${x < today ? 'is-past' : ''}" style="grid-row:1 / ${L + 3};grid-column:${i + 1}"></div>`; };
+        return html`<div class="wp-cal" style="grid-template-rows:auto ${L ? `repeat(${L}, auto) ` : ''}minmax(120px, auto)">
+          ${days.map(colBg)}${days.map(head)}
+          ${lanes.map((lane, k) => lane.map(it => bar(it, k + 2, days)))}
+          ${days.map(cell)}
+        </div>`;
+      })()}
+      <div class="wp-grid wp-mob">${days.map(dayCol)}</div>
       ${late.length ? html`<details class="wp-extra wp-late"><summary>Atrasadas de semanas anteriores <span class="n">${late.length}</span></summary>
         <p class="muted wp-hint">Para trazer uma atrasada para esta semana, abra a tarefa e use <b>Reagendar</b> (pede a justificativa).</p>
         <div class="wp-list wp-list-row">${late.map(t => html`<div class="wp-row">${chip(t)}<span class="muted">venceu ${fmtDate(t.due_date)}</span></div>`)}</div></details>` : ''}

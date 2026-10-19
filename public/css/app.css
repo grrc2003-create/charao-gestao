@@ -2381,3 +2381,31 @@ tr.is-inactive td { opacity: .55; }
 .week-plan.show-subs .wp-day-head .n-all { display: inline; }
 .week-plan.show-subs .wp-day-head .n-main { display: none; }
 .week-plan:not(.show-subs) .wp-day-head .n-subonly { display: none; }
+
+/* Planejamento da semana (computador): faixas contínuas para tarefas de vários dias */
+.wp-cal { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) repeat(2, minmax(0, .75fr)); column-gap: 8px; position: relative; }
+.wp-colbg { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); z-index: 0; }
+.wp-colbg.is-weekend { background: var(--bg, #F6F4F0); }
+.wp-colbg.is-today { border-color: var(--orange, #E07B39); box-shadow: inset 0 3px 0 var(--orange, #E07B39); }
+.wp-h { z-index: 1; padding: 8px 8px 6px; }
+.wp-cell { z-index: 1; display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; min-width: 0; }
+.wp-cell .wp-list { flex: 1; }
+.wp-span { z-index: 2; position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; margin: 2px 4px; padding: 4px 8px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, #fff); border-left: 4px solid var(--c); color: inherit; text-decoration: none; font-size: 12px;
+  background: linear-gradient(90deg, color-mix(in srgb, #2E8B57 16%, #fff) 0 var(--p), #fff var(--p)); }
+.wp-span:hover { border-color: var(--navy); }
+.wp-span .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.wp-span-txt { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.wp-span-txt b { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.wp-span-txt small { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.wp-span.cut-l { border-left-style: dashed; border-top-left-radius: 2px; border-bottom-left-radius: 2px; }
+.wp-span.cut-r { border-top-right-radius: 2px; border-bottom-right-radius: 2px; }
+.wp-cut { font-size: 10.5px; font-weight: 700; color: var(--ink-2); flex: none; margin-left: auto; }
+.wp-span .wp-cut:first-child { margin-left: 0; }
+.wp-span.is-late { border-color: #E9A59B; border-left-color: #C0392B; }
+.wp-span.is-done b { text-decoration: line-through; color: var(--muted); }
+.wp-mob { display: none; }
+@media (max-width: 899px) {
+  .wp-cal { display: none; }
+  .wp-mob { display: grid; }
+}

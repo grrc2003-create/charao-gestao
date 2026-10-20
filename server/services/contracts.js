@@ -311,7 +311,8 @@ export function getMeasurement(ctx, id) {
       issue: m.status === 'rascunho',
       reopen: m.status === 'emitida' && !later,
       bill: m.status === 'emitida',
-      receive: m.status === 'faturada',
+      // Recebimento direto do boletim emitido (quando não há nota fiscal)
+      receive: m.status === 'faturada' || m.status === 'emitida',
       undo: (m.status === 'faturada' || m.status === 'recebida'),
       delete: m.status === 'rascunho',
       // Correção direta (administrador): qualquer boletim já emitido, sem desfazer NF/recebimento
@@ -427,17 +428,20 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
         break;
       case 'bill': {
         if (!can.bill) throw badRequest('Só uma medição emitida pode ser faturada.');
-        const nf = str(body.nf_number, { max: 40, required: true, label: 'Nº da nota fiscal' });
+        // Nota fiscal opcional: "sem NF" fatura com a data de faturamento/cobrança
+        const noNf = body.no_nf === true || body.no_nf === 'on' || body.no_nf === '1';
+        const nf = noNf ? null : str(body.nf_number, { max: 40, required: true, label: 'Nº da nota fiscal (ou marque "Sem nota fiscal")' });
         const nfDate = date(body.nf_date, 'Data da nota fiscal') || today();
         run(`UPDATE measurements SET status = 'faturada', nf_number = ?, nf_date = ?, updated_at = datetime('now') WHERE id = ?`, nf, nfDate, id);
-        log('Medição faturada', { nf, data: nfDate, valor: view.totals.to_bill });
+        log(nf ? 'Medição faturada' : 'Medição faturada sem nota fiscal', { nf: nf || 'sem NF', data: nfDate, valor: view.totals.to_bill });
         break;
       }
       case 'receive': {
-        if (!can.receive) throw badRequest('Só uma medição faturada pode ser marcada como recebida.');
+        if (!can.receive) throw badRequest('Só uma medição emitida ou faturada pode ser marcada como recebida.');
         const pd = date(body.paid_date, 'Data do recebimento') || today();
         const amount = body.paid_amount === '' || body.paid_amount === undefined || body.paid_amount === null ? view.totals.to_bill : r2(num(body.paid_amount, 'Valor recebido', { min: 0 }));
-        run(`UPDATE measurements SET status = 'recebida', paid_date = ?, paid_amount = ?, updated_at = datetime('now') WHERE id = ?`, pd, amount, id);
+        // Recebido direto do emitido (sem NF): a data do recebimento vale como data de faturamento
+        run(`UPDATE measurements SET status = 'recebida', paid_date = ?, paid_amount = ?, nf_date = COALESCE(nf_date, ?), updated_at = datetime('now') WHERE id = ?`, pd, amount, pd, id);
         log('Recebimento registrado', { data: pd, valor: amount });
         break;
       }
@@ -553,10 +557,10 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
     }
   }
   for (const m of ms.filter(x => x.status === 'emitida')) {
-    actions.push({ kind: 'faturar', severity: 'serious', text: `Boletim ${m.code} emitido aguardando NF · ${totalOf.get(m.id).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: code.get(m.contract_id)?.client, code: m.code, href: `#/medicoes/${m.id}` });
+    actions.push({ kind: 'faturar', severity: 'serious', text: `Boletim ${m.code} emitido aguardando faturamento · ${totalOf.get(m.id).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: code.get(m.contract_id)?.client, code: m.code, href: `#/medicoes/${m.id}` });
   }
   for (const o of open.filter(x => x.days > 30)) {
-    actions.push({ kind: 'cobrar', severity: o.days > 90 ? 'critical' : 'serious', text: `NF ${o.nf} sem recebimento há ${o.days} dias · ${o.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: o.contract, code: o.code, href: `#/medicoes/${o.id}` });
+    actions.push({ kind: 'cobrar', severity: o.days > 90 ? 'critical' : 'serious', text: `${o.nf ? `NF ${o.nf}` : `Cobrança ${o.code} (sem NF)`} sem recebimento há ${o.days} dias · ${o.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: o.contract, code: o.code, href: `#/medicoes/${o.id}` });
   }
   const sev = { critical: 0, serious: 1, warning: 2 };
   actions.sort((a, b) => sev[a.severity] - sev[b.severity]);

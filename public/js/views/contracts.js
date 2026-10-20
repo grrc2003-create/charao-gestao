@@ -92,7 +92,7 @@ function compositionBar(parts, total, { big = false } = {}) {
 const pipeParts = s => [
   { label: 'Recebido', v: Math.max(0, s.received), cls: 's-rec' },
   { label: 'A receber (faturado)', v: Math.max(0, s.to_receive), cls: 's-fat' },
-  { label: 'Emitido aguardando NF', v: Math.max(0, s.to_bill), cls: 's-med' },
+  { label: 'Emitido aguardando faturamento', v: Math.max(0, s.to_bill), cls: 's-med' },
   { label: 'Saldo a medir', v: Math.max(0, s.balance), cls: 's-none' },
 ];
 
@@ -255,13 +255,13 @@ function bindRanking(root, d) {
     if (rest.length) top.push({ client: `Outros (${rest.length})`, total: rest.reduce((s, r) => s + r.total, 0), received: rest.reduce((s, r) => s + r.received, 0), nfs: rest.reduce((s, r) => s + r.nfs, 0), contracts: new Set(), other: true });
     const label = k === 'tudo' ? 'todo o período' : `${a.split('-').reverse().join('/')} a ${b.split('-').reverse().join('/')}`;
     body.innerHTML = (rows.length ? html`
-      <div class="ct-rk-head"><span>Faturado (pela data da NF) · ${label}</span><b>${money(total)}</b><small>${rows.length} cliente(s)</small></div>
+      <div class="ct-rk-head"><span>Faturado (pela data do faturamento) · ${label}</span><b>${money(total)}</b><small>${rows.length} cliente(s)</small></div>
       <ol class="ct-rk-list">${top.map((r, i) => html`<li class="${r.other ? 'is-other' : ''}">${r.other
         ? html`<button type="button" class="ct-rk-a" data-rk-more title="Ver os outros ${rest.length} clientes">`
         : html`<a class="ct-rk-a" href="#/contratos/cliente?nome=${encodeURIComponent(r.client)}" title="Abrir ${r.client}">`}
         <span class="ct-rk-pos">${r.other ? '' : `${i + 1}º`}</span>
         <div class="ct-rk-main">
-          <div class="ct-rk-name"><b>${r.client}</b><span>${r.nfs} NF · recebido ${money(r.received)}</span></div>
+          <div class="ct-rk-name"><b>${r.client}</b><span>${r.nfs} lanç. · recebido ${money(r.received)}</span></div>
           <div class="ct-rk-bar"><i style="width:calc((100% - 120px) * ${Math.max(0.015, r.total / max).toFixed(4)})"></i><em>${money(r.total)}</em></div>
         </div>
         <span class="ct-rk-share">${String(total ? Math.round((r.total / total) * 1000) / 10 : 0).replace('.', ',')}%</span>${r.other ? html`</button>` : html`</a>`}</li>`)}</ol>
@@ -278,7 +278,7 @@ function bindRanking(root, d) {
 }
 
 // ---------- Linha de contrato e tabela com filtros (painel e tela do cliente) ----------
-// "Concluído" = 100% medido e nada pendente (sem boletim aguardando NF e nada a receber)
+// "Concluído" = 100% medido e nada pendente (sem boletim aguardando faturamento e nada a receber)
 const isFull = c => c.summary.value > 0 && c.summary.balance <= 0.005 && c.summary.to_bill <= 0.005 && c.summary.to_receive <= 0.005;
 const contractRow = c => {
   const s = c.summary;
@@ -286,7 +286,7 @@ const contractRow = c => {
     <div class="ct-row-id"><span class="ct-row-tags"><span class="mono">${c.code}</span>${coBadge(c)}${typePill(c)}</span><b>${c.client}</b><small>${c.title}</small></div>
     <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
       <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
-    <div class="ct-row-nums"><span><small>Contratado</small><b>${money(s.value)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b>${s.to_bill > 0.005 ? html`<em class="ct-row-nf">+ ${money(s.to_bill)} aguardando NF</em>` : ''}</span><span><small>Saldo a medir</small><b>${money(s.balance)}</b></span></div>
+    <div class="ct-row-nums"><span><small>Contratado</small><b>${money(s.value)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b>${s.to_bill > 0.005 ? html`<em class="ct-row-nf">+ ${money(s.to_bill)} aguardando faturamento</em>` : ''}</span><span><small>Saldo a medir</small><b>${money(s.balance)}</b></span></div>
     <span class="chev">${icon('chevron')}</span></a>`;
 };
 const contractTable = (contracts, { filter, hideFull, title = 'Contratos', emptyText = 'Nenhum contrato cadastrado. Comece em “Novo contrato”.' }) => html`<section class="card ct-list-card">
@@ -294,7 +294,7 @@ const contractTable = (contracts, { filter, hideFull, title = 'Contratos', empty
     <div class="ct-list-filters">
       <div class="chips" role="group" aria-label="Filtrar contratos por situação">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
         html`<button type="button" class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n" data-ctn="${k}"></span></button>`)}</div>
-      <button type="button" class="chip ct-full-chip" data-ctfull aria-pressed="${hideFull}" title="Oculta os contratos 100% medidos sem nada pendente (nenhum boletim aguardando NF e nada a receber)">${icon('check')}Ocultar 100% medidos e recebidos<span class="n" data-ctn-full></span></button>
+      <button type="button" class="chip ct-full-chip" data-ctfull aria-pressed="${hideFull}" title="Oculta os contratos 100% medidos sem nada pendente (nenhum boletim aguardando faturamento e nada a receber)">${icon('check')}Ocultar 100% medidos e recebidos<span class="n" data-ctn-full></span></button>
     </div></div>
   <ul class="ct-port-legend is-inline">${pipeParts({ received: 1, to_receive: 1, to_bill: 1, balance: 1 }).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span></li>`)}</ul>
   ${contracts.length ? html`<div class="ct-rows">${contracts.map(contractRow)}</div><div class="card-body muted" data-ct-empty hidden>Nenhum contrato neste filtro.</div>`
@@ -336,7 +336,7 @@ export async function list({ state, query, setQuery, render }) {
   const t = d.totals;
   const Y = d.year;
 
-  // Carteira: só contratos vigentes (recebido + a receber + aguardando NF + saldo = contratado)
+  // Carteira: só contratos vigentes (recebido + a receber + aguardando faturamento + saldo = contratado)
   const vig = d.contracts.filter(c => c.status === 'vigente');
   const vsum = k => vig.reduce((x, c) => x + (c.summary[k] || 0), 0);
   const port = { received: vsum('received'), to_receive: vsum('to_receive'), to_bill: vsum('to_bill'), balance: vsum('balance') };
@@ -381,7 +381,7 @@ export async function list({ state, query, setQuery, render }) {
         <div class="ct-tiles">
           ${[['Contratado (vigentes)', money(t.value), `${t.active} de ${t.contracts} contrato(s)`],
             ['Medido (total)', money(t.measured), 'boletins emitidos'],
-            ['Faturado (total)', money(t.billed), `${money(t.to_bill)} aguardando NF`],
+            ['Faturado (total)', money(t.billed), `${money(t.to_bill)} aguardando faturamento`],
             ['Recebido (total)', money(t.received), ''],
             ['A receber', money(t.to_receive), 'faturado e não recebido'],
             ['Saldo a medir', money(t.balance), t.drafts ? `${t.drafts} medição(ões) em rascunho` : 'contratos vigentes']]
@@ -405,13 +405,13 @@ export async function list({ state, query, setQuery, render }) {
 
         <div class="ct-two">
           <section class="card">
-            <div class="card-head"><h2>${icon('clock')}A receber por antiguidade</h2><span class="sub">dias desde a NF</span></div>
+            <div class="card-head"><h2>${icon('clock')}A receber por antiguidade</h2><span class="sub">dias desde o faturamento</span></div>
             <div class="card-body ct-aging">
               ${d.aging.map((a, i) => html`<div class="ct-age ${i === 3 && a.total ? 'is-crit' : ''}">
                 <span class="ct-age-l">${i === 3 && a.total ? html`${icon('alert')} ` : ''}${a.label}</span>
                 <div class="ct-age-bar"><i style="width:${(a.total / agingMax) * 100}%"></i></div>
-                <span class="ct-age-v"><b>${money(a.total)}</b><small>${a.count} NF</small></span></div>`)}
-              ${!t.to_receive ? html`<p class="muted" style="margin:6px 0 0">Nenhuma nota fiscal em aberto.</p>` : ''}
+                <span class="ct-age-v"><b>${money(a.total)}</b><small>${a.count} boletim(ns)</small></span></div>`)}
+              ${!t.to_receive ? html`<p class="muted" style="margin:6px 0 0">Nada faturado em aberto.</p>` : ''}
             </div>
           </section>
           <section class="card">
@@ -449,12 +449,12 @@ export async function list({ state, query, setQuery, render }) {
           const row = (b, i) => html`<li class="ct-cl-li" data-open="${b.open ? 1 : 0}" data-rank="${i}"><a class="ct-cl" href="#/contratos/cliente?nome=${encodeURIComponent(b.client)}" title="Abrir ${b.client}">
             <div class="ct-cl-id"><b title="${b.client}">${b.client}</b><small>${b.contracts} contrato(s) · ${String(b.pct).replace('.', ',')}% medido</small></div>
             <div class="ct-cl-bar"><div class="ct-cl-fill" style="width:${Math.max(1.5, (b.value / max) * 100).toFixed(2)}%">${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: b.to_bill, balance: b.balance }), b.value)}</div></div>
-            <div class="ct-cl-num"><b class="ct-cl-val">${money(b.value)}</b><span class="ct-cl-sub"><small>${b.balance > 0.005 ? html`saldo a medir <span>${money(b.balance)}</span>` : 'todo medido'}</small>${b.to_bill > 0.005 ? html`<small>aguardando NF <span>${money(b.to_bill)}</span></small>` : ''}${b.to_receive > 0.005 ? html`<small>a receber <span>${money(b.to_receive)}</span></small>` : ''}</span></div>
+            <div class="ct-cl-num"><b class="ct-cl-val">${money(b.value)}</b><span class="ct-cl-sub"><small>${b.balance > 0.005 ? html`saldo a medir <span>${money(b.balance)}</span>` : 'todo medido'}</small>${b.to_bill > 0.005 ? html`<small>aguardando faturamento <span>${money(b.to_bill)}</span></small>` : ''}${b.to_receive > 0.005 ? html`<small>a receber <span>${money(b.to_receive)}</span></small>` : ''}</span></div>
           </a></li>`;
           return html`<section class="card ct-cli-card">
             <div class="card-head"><h2>${icon('team')}Por cliente</h2>
               <div class="chips" role="group" aria-label="Filtrar clientes">
-                <button type="button" class="chip" data-clf="open" aria-pressed="true" title="Clientes com saldo a medir, boletim aguardando NF ou valor a receber">Em aberto<span class="n">${cl.filter(b => b.open).length}</span></button>
+                <button type="button" class="chip" data-clf="open" aria-pressed="true" title="Clientes com saldo a medir, boletim aguardando faturamento ou valor a receber">Em aberto<span class="n">${cl.filter(b => b.open).length}</span></button>
                 <button type="button" class="chip" data-clf="all" aria-pressed="false">Todos<span class="n">${cl.length}</span></button></div></div>
             <div class="card-body">
               <p class="ct-cl-hint">Barra proporcional ao valor contratado (o maior cliente ocupa a barra inteira) · cores: ${pipeParts({ received: 1, to_receive: 1, to_bill: 1, balance: 1 }).map(p => html`<i class="k ${p.cls}"></i>${p.label.replace(' (faturado)', '').toLowerCase()} `)}</p>
@@ -567,7 +567,7 @@ export async function client({ state, query, setQuery }) {
         ${kpi({ label: 'Medido', value: money(sum('measured_total')), color: '#2F6FB3', foot: value ? `${pct(Math.round((measured / value) * 1000) / 10)} do contratado` : '' })}
         ${kpi({ label: 'Faturado', value: money(sum('billed')), color: '#8E6CB0' })}
         ${kpi({ label: 'Recebido', value: money(sum('received')), color: '#2E8B57' })}
-        ${kpi({ label: 'A receber', value: money(sum('to_receive')), color: '#C0392B', foot: sum('to_bill') > 0.005 ? `+ ${money(sum('to_bill'))} aguardando NF` : 'faturado e não recebido' })}
+        ${kpi({ label: 'A receber', value: money(sum('to_receive')), color: '#C0392B', foot: sum('to_bill') > 0.005 ? `+ ${money(sum('to_bill'))} aguardando faturamento` : 'faturado e não recebido' })}
         ${kpi({ label: 'Saldo a medir', value: money(balance), color: '#707E8B' })}
       </div>
       <div class="ct-client-comp card"><div class="card-body">${compositionBar(pipeParts({ received: sum('received'), to_receive: sum('to_receive'), to_bill: sum('to_bill'), balance }), sum('received') + sum('to_receive') + sum('to_bill') + balance, { big: true })}
@@ -720,7 +720,7 @@ export async function view({ params, state, navigate }) {
         <div class="card-head"><h2>${icon('file')}Medições (boletins)</h2><span class="sub">${c.measurements.length} medição(ões)</span></div>
         ${c.measurements.length ? html`<div class="table-wrap"><table class="data ct-table"><thead><tr><th>Boletim</th><th>Referência</th><th>Período</th><th class="num">A faturar</th><th>Situação</th><th>NF</th><th>Recebido</th></tr></thead>
           <tbody>${[...c.measurements].reverse().map(m => html`<tr data-href="#/medicoes/${m.id}" tabindex="0"><td class="mono"><b>${m.code}</b></td><td>${ym(m.ref_month)}</td><td class="nowrap">${fmtDate(m.period_start)} → ${fmtDate(m.period_end)}</td>
-            <td class="num">${money(m.total)}</td><td>${mBadge(m.status)}</td><td>${m.nf_number ? html`${m.nf_number}<div class="t-sub">${fmtDate(m.nf_date)}</div>` : '—'}</td>
+            <td class="num">${money(m.total)}</td><td>${mBadge(m.status)}</td><td>${m.nf_number ? html`${m.nf_number}<div class="t-sub">${fmtDate(m.nf_date)}</div>` : ['faturada', 'recebida'].includes(m.status) ? html`<span class="muted">sem NF</span>${m.nf_date ? html`<div class="t-sub">${fmtDate(m.nf_date)}</div>` : ''}` : '—'}</td>
             <td>${m.paid_date ? html`${money(m.paid_amount ?? m.total)}<div class="t-sub">${fmtDate(m.paid_date)}</div>` : '—'}</td></tr>`)}</tbody></table></div>`
           : html`<div class="card-body muted">Nenhuma medição ainda. Use “Nova medição”.</div>`}
       </section>
@@ -773,7 +773,7 @@ export async function measurement({ params, query, state, render, navigate }) {
     title: `Boletim ${m.code}`,
     html: html`
       ${pageHead({ back: { href: `#/contratos/${c.id}`, label: c.code }, eyebrow: `${c.client} · ${c.code}`, title: html`Medição ${m.ref_label} · ${m.code}`,
-        sub: html`Período ${fmtDate(m.period_start)} → ${fmtDate(m.period_end)} · ${mBadge(m.status)}${m.nf_number ? html` · NF ${m.nf_number} (${fmtDate(m.nf_date)})` : ''}${m.paid_date ? html` · recebido ${money(m.paid_amount)} em ${fmtDate(m.paid_date)}` : ''}`,
+        sub: html`Período ${fmtDate(m.period_start)} → ${fmtDate(m.period_end)} · ${mBadge(m.status)}${m.nf_number ? html` · NF ${m.nf_number} (${fmtDate(m.nf_date)})` : ['faturada', 'recebida'].includes(m.status) ? html` · sem NF${m.nf_date ? ` (faturado em ${fmtDate(m.nf_date)})` : ''}` : ''}${m.paid_date ? html` · recebido ${money(m.paid_amount)} em ${fmtDate(m.paid_date)}` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/imprimir/medicao/${m.id}">${icon('print')}Boletim (PDF)</a>
           ${!correcting && m.can.issue ? html`<button type="button" class="btn btn-primary" data-ma="issue">${icon('send')}Emitir</button>` : ''}
           ${!correcting && m.can.bill ? html`<button type="button" class="btn btn-primary" data-ma="bill">${icon('file')}Registrar faturamento</button>` : ''}
@@ -881,16 +881,24 @@ export async function measurement({ params, query, state, render, navigate }) {
           const fresh = await api(`/measurements/${m.id}`);
           if (await confirmSheet('Emitir medição', `Emitir o boletim ${fresh.code} com total a faturar de ${money(fresh.totals.to_bill)}? Depois de emitida, a medição só pode ser corrigida reabrindo-a.`, 'Emitir')) act('issue');
         } else if (a === 'bill') {
+          setTimeout(() => {
+            const cb = document.querySelector('#nonf');
+            cb?.addEventListener('change', () => {
+              document.querySelector('#nf-field').hidden = cb.checked;
+              document.querySelector('#nfd-label').textContent = cb.checked ? 'Data do faturamento/cobrança' : 'Data da NF';
+            });
+          }, 60);
           const r = await sheet({ title: 'Registrar faturamento', submitLabel: 'Registrar',
-            body: html`<div class="form-row"><div class="field"><label class="req" for="nf">Nº da nota fiscal</label><input id="nf" name="nf_number" maxlength="40" required></div>
-              <div class="field"><label for="nfd">Data da NF</label><input type="date" id="nfd" name="nf_date" value="${new Date().toISOString().slice(0, 10)}"></div></div>
+            body: html`<label class="check-row m-nonf"><input type="checkbox" name="no_nf" value="1" id="nonf"> Sem nota fiscal <small>(cobrança sem NF)</small></label>
+              <div class="form-row"><div class="field" id="nf-field"><label class="req" for="nf">Nº da nota fiscal</label><input id="nf" name="nf_number" maxlength="40"></div>
+              <div class="field"><label for="nfd" id="nfd-label">Data da NF</label><input type="date" id="nfd" name="nf_date" value="${new Date().toISOString().slice(0, 10)}"></div></div>
               <span class="hint">Valor faturado: <b>${money(T.to_bill)}</b>.</span>` });
-          if (r) act('bill', r);
+          if (r) act('bill', { ...r, no_nf: r.no_nf === '1' });
         } else if (a === 'receive') {
           const r = await sheet({ title: 'Registrar recebimento', submitLabel: 'Registrar',
             body: html`<div class="form-row"><div class="field"><label for="pd">Data do recebimento</label><input type="date" id="pd" name="paid_date" value="${new Date().toISOString().slice(0, 10)}"></div>
               <div class="field"><label for="pa">Valor recebido (R$)</label><input id="pa" name="paid_amount" inputmode="decimal" value="${String(T.to_bill).replace('.', ',')}"></div></div>
-              <span class="hint">Em branco = valor do boletim (${money(T.to_bill)}).</span>` });
+              <span class="hint">Em branco = valor do boletim (${money(T.to_bill)}).${m.status === 'emitida' ? ' Boletim sem faturamento registrado: o recebimento é lançado sem nota fiscal e a data do recebimento vale como data de faturamento.' : ''}</span>` });
           if (r) act('receive', { ...r, paid_amount: r.paid_amount ? parseNum(r.paid_amount) : '' });
         } else if (a === 'delete') {
           if (await confirmSheet('Excluir rascunho', `Excluir a medição ${m.code}? A numeração será reaproveitada.`, 'Excluir', true)) act('delete');

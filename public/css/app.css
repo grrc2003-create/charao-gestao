@@ -2666,3 +2666,6 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .ct-rk-list li:hover .ct-rk-name b { color: var(--navy); text-decoration: underline; }
 .ct-rk-list li.is-other:hover .ct-rk-name b::after { content: ' — ver todos'; font-weight: 400; color: var(--muted); }
 .ct-rk-less { margin-top: 8px; border: 0; background: none; padding: 6px 0; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--navy); cursor: pointer; }
+
+.m-nonf { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-weight: 600; font-size: 13.5px; }
+.m-nonf small { font-weight: 400; color: var(--muted); }

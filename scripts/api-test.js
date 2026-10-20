@@ -1894,6 +1894,21 @@ async function main() {
   ok((await fo('GET', '/audit')).data.some(a => a.action === 'Medição corrigida (boletim já emitido)'), 'correção registrada na auditoria com motivo');
   const crCam = await login('camila@charao.eng.br');
   ok((await crCam('PUT', `/measurements/${csM}/correction`, { reason: 'x' })).status === 403, 'quem não é administrador não corrige');
+  // Nota fiscal não é pré-requisito: faturar sem NF e receber direto do boletim emitido
+  const nfCt = (await fo('POST', '/contracts', { client: 'Cliente Sem NF', title: 'Serviço sem nota', bulletin_prefix: 'SNF', items: [{ description: 'Serviço', unit: 'vb', unit_price: 1000, quantity: 3 }] })).data.id;
+  const nfIt = (await fo('GET', `/contracts/${nfCt}`)).data.items[0].id;
+  const nfNew = async ref => { const id = (await fo('POST', `/contracts/${nfCt}/measurements`, { ref_month: ref })).data.id; await fo('PUT', `/measurements/${id}`, { lines: { [nfIt]: 1 } }); await fo('POST', `/measurements/${id}/actions/issue`); return id; };
+  const nfA = await nfNew('2026-01');
+  const nfAv = (await fo('POST', `/measurements/${nfA}/actions/bill`, { no_nf: true, nf_date: '2026-02-03' })).data;
+  ok(nfAv.status === 'faturada' && nfAv.nf_number === null && nfAv.nf_date === '2026-02-03', 'faturar sem nota fiscal (data do faturamento/cobrança)');
+  const nfB = await nfNew('2026-02');
+  ok((await fo('GET', `/measurements/${nfB}`)).data.can.receive, 'boletim emitido já pode registrar recebimento');
+  const nfBv = (await fo('POST', `/measurements/${nfB}/actions/receive`, { paid_date: '2026-03-10' })).data;
+  ok(nfBv.status === 'recebida' && nfBv.nf_number === null && nfBv.nf_date === '2026-03-10' && nfBv.paid_amount === 1000, 'recebido direto do emitido, sem NF: data do recebimento vale como faturamento');
+  const nfD = (await fo('GET', '/contracts/dashboard')).data;
+  const nfAnn = nfD.annual.find(y => y.year === '2026');
+  ok(nfD.contracts.find(c => c.id === nfCt).summary.billed === 2000 && nfAnn.billed[2] >= 1000 && nfAnn.received[2] >= 1000, 'sem NF também conta no faturado e recebido do painel');
+  ok((await fo('POST', `/measurements/${nfB}/actions/undo`)).data.status === 'faturada' && (await fo('POST', `/measurements/${nfB}/actions/undo`)).data.status === 'emitida', 'desfazer volta para faturada e depois emitida');
 
 }
 

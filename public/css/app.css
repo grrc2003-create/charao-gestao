@@ -2765,3 +2765,7 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .sch-det .mono { color: var(--muted); font-size: 11.5px; margin-right: 4px; }
 .sch-det b.is-late { color: #B03A2E; }
 .sch-det b.is-early { color: #1F7A4A; }
+
+.sch-end { font-weight: 600; color: inherit; }
+.sch-end.is-late { color: #B03A2E; font-weight: 700; }
+.sch-end.is-early { color: #1F7A4A; font-weight: 700; }

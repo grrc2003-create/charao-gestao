@@ -318,5 +318,8 @@ export function scheduleLine(p) {
   const d = sc?.net_days || 0;
   const eff = sc && sc.impacting_count ? html`<span class="sch-imp ${d > 0 ? 'is-late' : d < 0 ? 'is-early' : ''}" title="Reagendamentos (e deslocamentos por dependência) que mudaram o fim do projeto, desde o prazo original das tarefas (${fmtDate(sc.end_original)})">
       ${icon('reschedule')}${sc.impacting_count} reagendada(s) · ${d > 0 ? `+${d} d de atraso` : d < 0 ? `${-d} d antecipado(s)` : 'sem efeito no fim'}${sc.delayed_days && sc.advanced_days ? ` (+${sc.delayed_days} / −${sc.advanced_days})` : ''}</span>` : '';
-  return html`<span class="sch-dates" title="Início e fim pelas tarefas e subtarefas">${icon('calendar')} ${fmtDate(start)} → ${fmtDate(end)}</span>${planned}${eff}`;
+  // Data final: vermelha se os reagendamentos empurraram o fim (vs prazo original das tarefas); verde se anteciparam
+  const endCls = sc && sc.end && sc.end_original ? (sc.end > sc.end_original ? 'is-late' : sc.end < sc.end_original ? 'is-early' : '') : '';
+  const endTitle = endCls ? `${endCls === 'is-late' ? 'Atrasada' : 'Antecipada'} em relação ao prazo original das tarefas (${fmtDate(sc.end_original)})` : '';
+  return html`<span class="sch-dates" title="Início e fim pelas tarefas e subtarefas">${icon('calendar')} ${fmtDate(start)} → <b class="sch-end ${endCls}" title="${endTitle}">${fmtDate(end)}</b></span>${planned}${eff}`;
 }

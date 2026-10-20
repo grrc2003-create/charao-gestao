@@ -31,7 +31,7 @@ async function payFlow(it, done) {
   const r = await sheet({
     title: `Pagar · ${it.title}`,
     submitLabel: 'Registrar pagamento',
-    body: html`<p class="muted" style="margin:0 0 10px">${it.category}${it.payee ? ` · ${it.payee}` : ''} · vencimento ${fmtDate(it.due_date)} · previsto <b>${money(it.amount_expected)}</b></p>
+    body: html`<p class="muted" style="margin:0 0 10px">${it.category} · vencimento ${fmtDate(it.due_date)} · previsto <b>${money(it.amount_expected)}</b></p>
       <div class="form-row"><div class="field"><label class="req" for="fp-d">Data do pagamento</label><input type="date" id="fp-d" name="paid_date" required max="${new Date().toISOString().slice(0, 10)}" value="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field"><label for="fp-v">Valor pago (R$)</label><input id="fp-v" name="paid_amount" inputmode="decimal" value="${String(it.amount_expected).replace('.', ',')}"></div></div>
       <div class="field"><label for="fp-f">Comprovante (foto ou PDF)</label><input type="file" id="fp-f" accept="image/*,application/pdf,.pdf" multiple class="fin-file"><span class="hint">Opcional. Fica anexado à tarefa da parcela.</span></div>
@@ -108,7 +108,7 @@ export async function view({ state, query, setQuery, render }) {
     ['paga', 'Pagas no mês', inMonth.filter(i => i.situation === 'paga')],
   ];
   const row = i => html`<li class="fin-row ${SIT[i.situation].cls}">
-    <div class="fin-row-main"><b>${i.title}</b><small>${i.category}${i.payee ? ` · ${i.payee}` : ''} · ${i.frequency_label}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></div>
+    <div class="fin-row-main"><b>${i.title}</b><small>${i.category} · ${i.frequency_label}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></div>
     <div class="fin-row-due"><span>${fmtDate(i.due_date)}</span>${sitBadge(i.situation)}</div>
     <div class="fin-row-val"><b>${money(i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected)}</b>${i.status === 'paga' ? html`<small>pago em ${fmtDate(i.paid_date)}</small>` : i.estimated ? html`<small class="fin-est">valor estimado</small>` : i.variable ? html`<small>valor variável</small>` : ''}${i.payroll_ref ? html`<small>Folha ${i.payroll_ref.slice(5, 7)}/${i.payroll_ref.slice(0, 4)} vinculada</small>` : ''}</div>
     <div class="fin-row-act">
@@ -156,7 +156,7 @@ export async function view({ state, query, setQuery, render }) {
           <section class="card"><div class="card-head"><h2>${icon('calendar')}Calendário de vencimentos</h2>
             <div class="fin-leg">${['atrasada', 'hoje', 'semana', 'futura', 'paga'].map(s => html`<span><i class="k ${SIT[s].cls}-k"></i>${SIT[s].label}</span>`)}</div></div>
             <div class="card-body">${cal}</div></section>
-          <section class="card"><div class="card-head"><h2>${icon('reports')}Por categoria</h2><span class="sub">previsto x pago</span></div>
+          <section class="card"><div class="card-head"><h2>${icon('reports')}Por tipo de despesa</h2><span class="sub">previsto x pago</span></div>
             <div class="card-body fin-cats">${d.categories.length ? d.categories.map(c => html`<div class="fin-cat">
               <div class="fin-cat-h"><b>${c.category}</b><span>${money(c.paid)} de ${money(c.expected)}</span></div>
               <div class="fin-cat-bar"><span style="width:${(c.expected / maxCat) * 100}%"><i style="width:${c.expected ? (c.paid / c.expected) * 100 : 0}%"></i></span></div>
@@ -194,9 +194,9 @@ export async function obligations({ state }) {
       ${pageHead({ back: { href: '#/financeiro', label: 'Tarefas financeiras' }, eyebrow: 'Gestão da Empresa', title: 'Obrigações financeiras',
         sub: 'Cada obrigação gera as parcelas do período (até 2 meses à frente) e a tarefa de cada parcela.',
         actions: html`<a class="btn btn-ghost" href="#/financeiro/importar">${icon('file')}Importar planilha</a><a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova obrigação</a>` })}
-      ${list.length ? html`<section class="card"><div class="table-wrap"><table class="data ct-table"><thead><tr><th>Obrigação</th><th>Categoria</th><th>Periodicidade</th><th>Vencimento</th><th class="num">Valor</th><th>Responsável</th><th>Situação</th></tr></thead>
+      ${list.length ? html`<section class="card"><div class="table-wrap"><table class="data ct-table"><thead><tr><th>Obrigação</th><th>Tipo da despesa</th><th>Periodicidade</th><th>Vencimento</th><th class="num">Valor</th><th>Responsável</th><th>Situação</th></tr></thead>
         <tbody>${list.map(o => html`<tr data-href="#/financeiro/obrigacoes/${o.id}/editar" tabindex="0" class="${o.active ? '' : 'is-inactive'}">
-          <td><b>${o.title}</b>${o.payee ? html`<div class="t-sub">${o.payee}</div>` : ''}</td><td>${o.category}</td><td>${o.frequency_label}</td>
+          <td><b>${o.title}</b></td><td>${o.category}</td><td>${o.frequency_label}</td>
           <td>dia ${o.due_day}${o.next_due ? html`<div class="t-sub">próx. ${fmtDate(o.next_due)}</div>` : ''}</td>
           <td class="num">${money(o.amount)}${o.variable ? html`<div class="t-sub">variável</div>` : ''}</td><td>${o.assignee_name || '—'}</td>
           <td>${!o.active ? html`<span class="pill pill-sand">Inativa</span>` : o.overdue ? html`<span class="fs-badge fs-late">${icon('alert')}${o.overdue} atrasada(s)</span>` : html`<span class="fs-badge fs-paid">${icon('check')}Em dia</span>`}</td></tr>`)}</tbody></table></div></section>`
@@ -223,11 +223,8 @@ export async function form({ params, state, navigate }) {
       ${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: editing ? 'Editar obrigação' : 'Nova obrigação financeira' })}
       <form class="card card-pad form" id="fo-form" novalidate style="max-width:760px">
         <div class="field"><label class="req" for="title">Descrição</label><input type="text" id="title" name="title" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: DAS Simples Nacional, Aluguel do escritório, Folha de pagamento"></div>
-        <div class="form-row">
-          <div class="field"><label for="category">Categoria</label><input type="text" id="category" name="category" list="fo-cats" maxlength="60" value="${v.category || ''}" placeholder="Escolha ou digite">
-            <datalist id="fo-cats">${meta.category_options.map(c => html`<option value="${c}"></option>`)}</datalist></div>
-          <div class="field"><label for="payee">Favorecido</label><input type="text" id="payee" name="payee" maxlength="160" value="${v.payee || ''}" placeholder="Órgão, fornecedor, banco…"></div>
-        </div>
+        <div class="field" style="max-width:420px"><label for="category">Tipo da despesa</label><input type="text" id="category" name="category" list="fo-cats" maxlength="60" value="${v.category || ''}" placeholder="Escolha ou digite (ex.: Impostos, Aluguel e condomínio)">
+          <datalist id="fo-cats">${meta.category_options.map(c => html`<option value="${c}"></option>`)}</datalist></div>
         <div class="form-row form-row-3">
           <div class="field"><label class="req" for="amount">Valor previsto (R$)</label><input type="text" id="amount" name="amount" required inputmode="decimal" value="${v.amount !== undefined ? String(v.amount).replace('.', ',') : ''}" placeholder="0,00"></div>
           <div class="field"><label for="frequency">Periodicidade</label><select id="frequency" name="frequency">${Object.entries(FREQ).map(([k, l]) => opt(k, l, v.frequency))}</select></div>
@@ -352,7 +349,7 @@ export async function analysis({ state, query, setQuery, render }) {
             ${!sb ? html`<p class="muted" style="font-size:12.5px;margin:10px 0 0">O faturado aparece para quem também tem a liberação de Contratos.</p>` : ''}
           </div></section>
         <section class="card"><div class="card-head"><h2>${icon('tasks')}Gastos por categoria</h2><span class="sub">${a.current} x ${a.previous}${yoy ? ` x ${a.last_year}` : ''}</span></div>
-          ${a.categories.length ? html`<div class="table-wrap"><table class="data ct-table fa-table"><thead><tr><th>Categoria</th><th class="num">${a.current}</th><th class="num">${a.previous}</th><th class="num">Variação</th>${yoy ? html`<th class="num">${a.last_year}</th><th class="num">Variação</th>` : ''}</tr></thead>
+          ${a.categories.length ? html`<div class="table-wrap"><table class="data ct-table fa-table"><thead><tr><th>Tipo da despesa</th><th class="num">${a.current}</th><th class="num">${a.previous}</th><th class="num">Variação</th>${yoy ? html`<th class="num">${a.last_year}</th><th class="num">Variação</th>` : ''}</tr></thead>
             <tbody>${a.categories.map(c => html`<tr><td>${c.category}</td><td class="num"><b>${money(c.current)}</b></td><td class="num">${money(c.previous)}</td><td class="num">${varBadge(c.vs_prev, false)}</td>${yoy ? html`<td class="num">${money(c.last_year)}</td><td class="num">${varBadge(c.vs_yoy, false)}</td>` : ''}</tr>`)}</tbody></table></div>`
             : html`<div class="card-body muted">Sem gastos nos períodos comparados.</div>`}
         </section>

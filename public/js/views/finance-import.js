@@ -35,9 +35,9 @@ function previewHtml(p) {
         <input type="checkbox" data-fiok="${r.line}" ${r.status === 'ok' ? 'checked' : 'disabled'} aria-label="Importar linha ${r.line}">
         <span class="fi-line">linha ${r.line}</span>
         <span class="fi-main"><b>${r.view.title || '(sem descrição)'}</b>
-          <small>${[r.view.category + (r.view.category_new ? ' (categoria nova)' : ''), r.view.payee, r.view.frequency_label, r.view.due_day ? `vence dia ${r.view.due_day}` : '', r.view.start_month ? `${ym(r.view.start_month)}${r.view.end_month ? ` → ${ym(r.view.end_month)}` : ' em diante'}` : '', r.view.assignee_name ? `resp. ${r.view.assignee_name}` : ''].filter(Boolean).join(' · ')}</small>
+          <small>${[r.view.category + (r.view.category_new ? ' (tipo novo)' : ''), r.view.frequency_label, r.view.due_day ? `vence dia ${r.view.due_day}` : '', r.view.start_month ? `${ym(r.view.start_month)}${r.view.end_month ? ` → ${ym(r.view.end_month)}` : ' em diante'}` : '', r.view.assignee_name ? `resp. ${r.view.assignee_name}` : ''].filter(Boolean).join(' · ')}</small>
           ${r.errors.length ? html`<em class="fi-errs">${r.errors.join(' · ')}</em>` : ''}
-          ${r.status === 'existe' ? html`<em class="fi-note">Já existe uma tarefa com esta descrição e favorecido.</em>` : r.status === 'repetida' ? html`<em class="fi-note">Repetida na planilha (igual à linha ${r.repeated_line}).</em>` : ''}</span>
+          ${r.status === 'existe' ? html`<em class="fi-note">Já existe uma tarefa com esta descrição e tipo da despesa.</em>` : r.status === 'repetida' ? html`<em class="fi-note">Repetida na planilha (igual à linha ${r.repeated_line}).</em>` : ''}</span>
         <span class="fi-val"><b>${money(r.view.amount)}</b>${r.view.variable ? html`<small>variável${r.view.repeat_last ? ' · mês anterior' : ''}</small>` : ''}<span class="m-badge ${ST[r.status][1]}">${ST[r.status][0]}</span></span>
       </label></li>`)}</ul>
     </section>
@@ -53,7 +53,7 @@ export async function importPage({ state, navigate }) {
       <section class="card section">
         <div class="card-body bi-pick">
           <div class="fi-steps">
-            <div class="fi-step"><span class="fi-n">1</span><div><b>Baixe a planilha modelo</b><small>já vem com as listas de categoria, periodicidade e responsáveis, e uma aba de instruções</small>
+            <div class="fi-step"><span class="fi-n">1</span><div><b>Baixe a planilha modelo</b><small>já vem com as listas de tipo da despesa, periodicidade e responsáveis, e uma aba de instruções</small>
               <button type="button" class="btn btn-ghost btn-sm" data-fi-template>${icon('file')}Baixar planilha modelo</button></div></div>
             <div class="fi-step"><span class="fi-n">2</span><div><b>Preencha e envie</b><small>uma linha por tarefa, a partir da linha 2 da aba "Tarefas"</small>
               <label class="bi-drop" for="fi-file">${icon('file')}<span><b>Escolher planilha preenchida</b><small>arquivo .xlsx</small></span></label>

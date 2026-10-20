@@ -1,6 +1,6 @@
 // Tarefas financeiras: planilha modelo (.xlsx) para preencher e importação com prévia.
 // Cada linha vira uma tarefa financeira (mesmas regras de "Nova tarefa"); as parcelas mês a mês são geradas como hoje.
-// Tarefa que já existe (mesma descrição e favorecido) é pulada e avisada; linhas com erro não entram.
+// Tarefa que já existe (mesma descrição e tipo da despesa) é pulada e avisada; linhas com erro não entram.
 import { all, one, tx } from '../db.js';
 import { badRequest, str } from '../lib/http.js';
 import { readXlsx, serialToDate } from '../lib/xlsx.js';
@@ -9,8 +9,8 @@ import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { requireFinance, CATEGORIES, FREQ_LABEL, readObligation, insertObligation, generateItems } from './finance.js';
 
-const HEAD = ['Descrição *', 'Categoria', 'Favorecido', 'Valor previsto (R$) *', 'Valor variável?', 'Usar valor do mês anterior?', 'Periodicidade *', 'Dia do vencimento *', 'Início (mês/ano) *', 'Término (mês/ano)', 'Responsável', 'Observações'];
-const KEYS = ['title', 'category', 'payee', 'amount', 'variable', 'repeat_last', 'frequency', 'due_day', 'start_month', 'end_month', 'assignee', 'notes'];
+const HEAD = ['Descrição *', 'Tipo da despesa', 'Valor previsto (R$) *', 'Valor variável?', 'Usar valor do mês anterior?', 'Periodicidade *', 'Dia do vencimento *', 'Início (mês/ano) *', 'Término (mês/ano)', 'Responsável', 'Observações'];
+const KEYS = ['title', 'category', 'amount', 'variable', 'repeat_last', 'frequency', 'due_day', 'start_month', 'end_month', 'assignee', 'notes'];
 const MAX_ROWS = 1000;
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const hkey = s => norm(s).replace(/[^a-z0-9]/g, '');
@@ -22,7 +22,7 @@ export function templateXlsx(ctx) {
   const people = all('SELECT name FROM users WHERE active = 1 AND can_finance = 1 ORDER BY name').map(u => u.name);
   const freqs = Object.values(FREQ_LABEL);
   const lists = Math.max(CATEGORIES.length, freqs.length, people.length, 2);
-  const listRows = [['Categorias', 'Periodicidade', 'Sim/Não', 'Responsáveis']];
+  const listRows = [['Tipos de despesa', 'Periodicidade', 'Sim/Não', 'Responsáveis']];
   for (let i = 0; i < lists; i++) listRows.push([CATEGORIES[i] ?? null, freqs[i] ?? null, ['Sim', 'Não'][i] ?? null, people[i] ?? null]);
   const last = MAX_ROWS + 1;
   const ref = today();
@@ -30,13 +30,13 @@ export function templateXlsx(ctx) {
   return writeXlsx([
     {
       name: 'Tarefas', header: true, freeze: true, rows: [HEAD],
-      widths: [34, 24, 26, 18, 15, 22, 16, 17, 17, 17, 24, 36],
+      widths: [34, 26, 18, 15, 22, 16, 17, 17, 17, 24, 36],
       validations: [
         { col: 1, rows: [2, last], source: `Listas!$A$2:$A$${CATEGORIES.length + 1}` },
+        { col: 3, rows: [2, last], source: 'Listas!$C$2:$C$3' },
         { col: 4, rows: [2, last], source: 'Listas!$C$2:$C$3' },
-        { col: 5, rows: [2, last], source: 'Listas!$C$2:$C$3' },
-        { col: 6, rows: [2, last], source: `Listas!$B$2:$B$${freqs.length + 1}` },
-        ...(people.length ? [{ col: 10, rows: [2, last], source: `Listas!$D$2:$D$${people.length + 1}` }] : []),
+        { col: 5, rows: [2, last], source: `Listas!$B$2:$B$${freqs.length + 1}` },
+        ...(people.length ? [{ col: 9, rows: [2, last], source: `Listas!$D$2:$D$${people.length + 1}` }] : []),
       ],
     },
     {
@@ -46,8 +46,7 @@ export function templateXlsx(ctx) {
         [],
         ['Uma linha por tarefa', 'Preencha a aba "Tarefas" a partir da linha 2 (não altere o cabeçalho). Campos com * são obrigatórios.'],
         ['Descrição *', 'Nome da tarefa (ex.: DAS Simples Nacional, Aluguel do escritório).'],
-        ['Categoria', `Escolha na lista: ${CATEGORIES.join(', ')}. Em branco = Outros.`],
-        ['Favorecido', 'Quem recebe o pagamento (órgão, fornecedor, locador…).'],
+        ['Tipo da despesa', `Escolha na lista: ${CATEGORIES.join(', ')}. Em branco = Outros.`],
         ['Valor previsto (R$) *', 'Valor de cada parcela. Use número (ex.: 1500 ou 1.500,00).'],
         ['Valor variável?', 'Sim quando o valor muda a cada mês (ajustado na parcela). Em branco = Não.'],
         ['Usar valor do mês anterior?', 'Só para valor variável: Sim para a nova parcela já vir com o valor do mês anterior.'],
@@ -58,8 +57,8 @@ export function templateXlsx(ctx) {
         ['Responsável', 'Escolha na lista (pessoas com acesso às Tarefas financeiras). Em branco = quem importar.'],
         ['Observações', 'Texto livre (opcional).'],
         [],
-        ['Exemplo', `DAS Simples Nacional · Impostos · Receita Federal · 1.850,00 · Sim · Sim · Mensal · 20 · ${mm} · (em branco) · (responsável) · Guia no portal do Simples`],
-        ['Repetidas', 'Tarefa que já existe no sistema (mesma descrição e favorecido) não é importada de novo: a prévia avisa.'],
+        ['Exemplo', `DAS Simples Nacional · Impostos · 1.850,00 · Sim · Sim · Mensal · 20 · ${mm} · (em branco) · (responsável) · Guia no portal do Simples`],
+        ['Repetidas', 'Tarefa que já existe no sistema (mesma descrição e tipo da despesa) não é importada de novo: a prévia avisa.'],
         ['Importar', 'Em Tarefas financeiras › Importar planilha: envie o arquivo, confira a prévia (erros por linha) e confirme.'],
       ],
     },
@@ -103,10 +102,15 @@ function parse(ctx, file) {
   const hi = grid.findIndex(r => r.some(v => hkey(v).startsWith('descricao')) && r.some(v => hkey(v).startsWith('periodicidade')));
   if (hi < 0) throw badRequest('Não encontrei o cabeçalho da planilha modelo (Descrição, Periodicidade…). Use "Baixar planilha modelo".');
   const col = {};
-  grid[hi].forEach((v, i) => { const k = HEAD.findIndex(h => hkey(h) === hkey(v)); if (k >= 0 && col[KEYS[k]] === undefined) col[KEYS[k]] = i; });
+  const ALIASES = { categoria: 'category', favorecido: 'payee' };
+  grid[hi].forEach((v, i) => {
+    const k = HEAD.findIndex(h => hkey(h) === hkey(v));
+    const key = k >= 0 ? KEYS[k] : ALIASES[hkey(v)];
+    if (key && col[key] === undefined) col[key] = i;
+  });
   for (const k of ['title', 'amount', 'frequency', 'due_day', 'start_month']) if (col[k] === undefined) throw badRequest(`Falta a coluna "${HEAD[KEYS.indexOf(k)]}".`);
   const people = all('SELECT id, name, email FROM users WHERE active = 1 AND can_finance = 1');
-  const existing = new Set(all('SELECT title, payee FROM finance_obligations').map(o => `${hkey(o.title)}|${hkey(o.payee)}`));
+  const existing = new Set(all('SELECT title, category FROM finance_obligations').map(o => `${hkey(o.title)}|${hkey(o.category)}`));
   const seen = new Map();
   const rows = [];
   for (let i = hi + 1; i < grid.length && rows.length < MAX_ROWS; i++) {
@@ -134,7 +138,7 @@ function parse(ctx, file) {
       assignee_id: assignee?.id || ctx.user.id, notes: txt(v('notes')) || null,
     };
     if (!errors.length) { try { readObligation(body); } catch (e) { errors.push(e.message); } }
-    const key = `${hkey(body.title)}|${hkey(body.payee)}`;
+    const key = `${hkey(body.title)}|${hkey(body.category)}`;
     const status = errors.length ? 'erro' : existing.has(key) ? 'existe' : seen.has(key) ? 'repetida' : 'ok';
     if (status === 'ok') seen.set(key, i + 1);
     rows.push({

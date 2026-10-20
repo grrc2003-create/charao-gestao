@@ -1787,20 +1787,20 @@ async function main() {
   const fiTpl = await fetch(BASE + '/api/finance/import/template', { headers: { 'X-Requested-With': 'charao-app', cookie: fiCookie } });
   const fiBuf = Buffer.from(await fiTpl.arrayBuffer());
   const fiGrid = readXlsx(fiBuf);
-  ok(fiTpl.status === 200 && fiTpl.headers.get('content-type').includes('spreadsheetml') && fiBuf.slice(0, 2).toString() === 'PK' && fiGrid[0][0] === 'Descrição *' && fiGrid[0][6] === 'Periodicidade *' && fiGrid.length === 1,
+  ok(fiTpl.status === 200 && fiTpl.headers.get('content-type').includes('spreadsheetml') && fiBuf.slice(0, 2).toString() === 'PK' && fiGrid[0][0] === 'Descrição *' && fiGrid[0][5] === 'Periodicidade *' && !fiGrid[0].includes('Favorecido') && fiGrid.length === 1,
     'planilha modelo: cabeçalho na aba Tarefas, sem linhas de exemplo');
   ok((await (await fetch(BASE + '/api/finance/import/template', { headers: { 'X-Requested-With': 'charao-app', cookie: await cookieOf('marcos@charao.eng.br') } })).status) === 403, 'planilha modelo só para quem tem Tarefas financeiras');
-  await fo('POST', '/finance/obligations', { title: 'Aluguel teste importação', payee: 'Locador Exemplo', amount: 2000, frequency: 'mensal', due_day: 5, start_month: '2099-01' });
+  await fo('POST', '/finance/obligations', { title: 'Aluguel teste importação', category: 'Aluguel e condomínio', amount: 2000, frequency: 'mensal', due_day: 5, start_month: '2099-01' });
   const fiAna = (await fo('GET', '/auth/me')).data.user;
   const fiHead = fiGrid[0];
   const fiFile = writeXlsx([{ name: 'Tarefas', header: true, rows: [fiHead,
-    ['DAS teste importação', 'Impostos', 'Receita Federal', '1.850,00', 'Sim', 'Sim', 'Mensal', 20, '01/2099', null, fiAna.name, 'Guia no portal'],
-    ['Seguro anual teste', 'Seguros', 'Seguradora Exemplo', 3600, 'Não', null, 'Anual', 15, 'mar/2099', '12/2101', null, null],
-    ['Taxa única teste', null, null, 120.5, null, null, 'Única', 31, 72718, null, null, null],
-    [null, 'Impostos', null, null, null, null, 'Quinzenal', 40, '13/2099', null, 'Pessoa Inexistente', null],
-    ['Aluguel teste importação', 'Aluguel e condomínio', 'Locador Exemplo', 2000, null, null, 'Mensal', 5, '01/2099', null, null, null],
-    ['DAS teste importação', 'Impostos', 'Receita Federal', 1850, null, null, 'Mensal', 20, '02/2099', null, null, null],
-    ['Linha desmarcada teste', 'Outros', null, 10, null, null, 'Mensal', 1, '01/2099', null, null, null],
+    ['DAS teste importação', 'Impostos', '1.850,00', 'Sim', 'Sim', 'Mensal', 20, '01/2099', null, fiAna.name, 'Guia no portal'],
+    ['Seguro anual teste', 'Seguros', 3600, 'Não', null, 'Anual', 15, 'mar/2099', '12/2101', null, null],
+    ['Taxa única teste', null, 120.5, null, null, 'Única', 31, 72718, null, null, null],
+    [null, 'Impostos', null, null, null, 'Quinzenal', 40, '13/2099', null, 'Pessoa Inexistente', null],
+    ['Aluguel teste importação', 'Aluguel e condomínio', 2000, null, null, 'Mensal', 5, '01/2099', null, null, null],
+    ['DAS teste importação', 'Impostos', 1850, null, null, 'Mensal', 20, '02/2099', null, null, null],
+    ['Linha desmarcada teste', 'Outros', 10, null, null, 'Mensal', 1, '01/2099', null, null, null],
   ] }]).toString('base64');
   const fiPv = (await fo('POST', '/finance/import/preview', { file: { name: 'teste.xlsx', data: fiFile } })).data;
   const fiRow = n => fiPv.rows.find(r => r.line === n);

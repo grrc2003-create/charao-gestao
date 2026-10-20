@@ -2,6 +2,7 @@
 import { api, html, icon, avatar, setAvatars, ROLE, brandMark } from './core.js';
 import { toast } from './ui.js';
 import './required.js';
+import { autoPdfButtons } from './section-pdf.js';
 import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';
@@ -338,6 +339,7 @@ export async function render() {
   }
   markNav(path);
   const root = document.getElementById('view');
+  if (!root.dataset.pdf) { root.dataset.pdf = '1'; autoPdfButtons(root); }
   root.innerHTML = '<div class="loading" aria-busy="true"><span></span>Carregando…</div>';
   const ctx = { params, query, state, navigate, render, setQuery, reloadMeta, path };
   try {

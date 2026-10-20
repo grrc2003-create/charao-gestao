@@ -39,7 +39,16 @@ async function printCard(card, ctx) {
   const wrap = document.createElement('div');
   wrap.className = 'po-body';
   if (scale < 1) { wrap.style.zoom = String(scale); }
-  wrap.appendChild(clone);
+  // Mantém as classes dos contêineres da tela (variáveis de cor e estilos do painel, ex.: .ct-dash) sem o layout deles
+  let inner = clone;
+  for (let el = card.parentElement; el && el.id !== 'view' && el !== document.body; el = el.parentElement) {
+    if (!el.className || typeof el.className !== 'string') continue;
+    const anc = document.createElement('div');
+    anc.className = `${el.className} po-anc`;
+    anc.appendChild(inner);
+    inner = anc;
+  }
+  wrap.appendChild(inner);
   box.appendChild(wrap);
   document.body.appendChild(box);
   document.body.classList.add('print-one');
@@ -53,18 +62,35 @@ async function printCard(card, ctx) {
   window.print();
 }
 
+// Contexto padrão do PDF: título e "sobrancelha" da página (ex.: Contratos · Gestão da Empresa)
+function pageCtx(root) {
+  const h1 = root.querySelector('.page-head h1')?.textContent.trim();
+  const eb = root.querySelector('.page-head .eyebrow')?.textContent.trim();
+  return { title: h1 || document.title.replace(/ · Charão$/, ''), sub: eb || '' };
+}
+
 // Coloca o botão "PDF" em todos os quadros (card com cabeçalho) dentro de root
-export function addPdfButtons(root, ctx = {}) {
+// (fora de janelas/formulários: o quadro precisa ser um visual, não um cadastro)
+export function addPdfButtons(root, ctx) {
   root.querySelectorAll('.card').forEach(card => {
     const head = [...card.children].find(el => el.classList?.contains('card-head'));
     if (!head || head.querySelector('.sec-pdf')) return;
+    if (card.tagName === 'FORM' || card.closest('.sheet, .modal, [role=dialog], form') || card.querySelector(':scope > form, :scope > .card-body > form')) return;
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'sec-pdf no-print';
     b.title = 'Gerar PDF só deste quadro';
     b.setAttribute('aria-label', `Gerar PDF: ${head.querySelector('h2')?.textContent.trim() || 'quadro'}`);
     b.innerHTML = `${icon('print')}<span>PDF</span>`;
-    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); printCard(card, ctx); });
+    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); printCard(card, ctx || pageCtx(root)); });
     head.appendChild(b);
   });
+}
+
+// Todas as telas: acompanha o conteúdo da tela (inclusive quadros redesenhados por filtros) e coloca o botão
+export function autoPdfButtons(root) {
+  let queued = false;
+  const run = () => { queued = false; if (!document.body.classList.contains('print-mode')) addPdfButtons(root); };
+  new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } }).observe(root, { childList: true, subtree: true });
+  run();
 }

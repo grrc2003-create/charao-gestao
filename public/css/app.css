@@ -2487,3 +2487,24 @@ tr.is-inactive td { opacity: .55; }
   .ct-filter-type select { flex: 1; min-width: 0; }
   .bi-group-f .bi-co, .bi-group-f .bi-ty { flex: 1 1 45%; }
 }
+
+/* Contratos: fontes grandes um pouco menores e proporcionais à tela; blocos de valores se reorganizam ao estreitar */
+.ct-hero-value { font-size: clamp(24px, 1.8vw + 12px, 38px); }
+.ct-hero-main { padding: 18px 22px; }
+.ct-tiles, .ct-kpis.kpis-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.ct-kpis.kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1319px) {
+  .ct-tiles, .ct-kpis.kpis-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ct-port-legend { grid-template-columns: 1fr; }
+}
+@media (max-width: 899px) { .ct-kpis.kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ct-tile b { font-size: clamp(14px, .45vw + 10px, 17px); }
+.ct-kpis .kpi-value { font-size: clamp(15px, .55vw + 10px, 19px); }
+.ct-rk-head b { font-size: clamp(16px, .45vw + 11px, 18px); }
+.ct-row-id b { font-size: clamp(13.5px, .2vw + 11.5px, 14.5px); }
+.ct-row-nums b { font-size: clamp(12.5px, .15vw + 11px, 13.5px); }
+@media (max-width: 599px) {
+  .ct-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ct-kpis.kpis-6, .ct-kpis.kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ct-tile b, .ct-kpis .kpi-value { white-space: normal; overflow-wrap: anywhere; }
+}

@@ -554,7 +554,7 @@ export async function view({ params, state, navigate }) {
     html: html`
       ${pageHead({ back: { href: '#/contratos', label: 'Contratos' }, eyebrow: `${c.code} · ${CT_STATUS[c.status]} · ${CO_SHORT[c.company] || ''}${c.type_name ? ` · ${c.type_name}` : ''}`, title: c.client, sub: `${c.title}${c.number ? ` · contrato ${c.number}` : ''}${c.start_date ? ` · ${fmtDate(c.start_date)} → ${fmtDate(c.end_date)}` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/contratos/${c.id}/editar">${icon('edit')}Editar</a>${c.status !== 'encerrado' ? html`<button type="button" class="btn btn-accent" id="new-m">${icon('plus')}Nova medição</button>` : ''}` })}
-      <div class="kpis kpis-6">
+      <div class="kpis kpis-6 ct-kpis">
         ${kpi({ label: 'Valor do contrato', value: money(s.value), color: '#2A3D50', foot: `${c.items.length} item(ns)` })}
         ${kpi({ label: 'Medido', value: money(s.measured_total), color: '#2F6FB3', foot: `${pct(s.pct)} do contrato` })}
         ${kpi({ label: 'Faturado', value: money(s.billed), color: '#8E6CB0' })}
@@ -625,7 +625,7 @@ export async function measurement({ params, state, render, navigate }) {
           ${m.can.reopen ? html`<button type="button" class="btn btn-ghost" data-ma="reopen">${icon('history')}Reabrir</button>` : ''}
           ${m.can.undo ? html`<button type="button" class="btn btn-ghost" data-ma="undo">${icon('history')}${m.status === 'recebida' ? 'Desfazer recebimento' : 'Desfazer faturamento'}</button>` : ''}
           ${m.can.delete ? html`<button type="button" class="btn btn-ghost" data-ma="delete">${icon('trash')}Excluir rascunho</button>` : ''}` })}
-      <div class="kpis kpis-4">
+      <div class="kpis kpis-4 ct-kpis">
         ${kpi({ label: 'Medição do mês', value: money(T.measured), color: '#2F6FB3' })}
         ${kpi({ label: 'Descontos / acréscimos', value: money(T.adj), color: '#B7791F' })}
         ${kpi({ label: 'Total a faturar', value: money(T.to_bill), color: '#2A3D50', hero: true })}

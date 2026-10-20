@@ -17,7 +17,7 @@ export async function view({ params, state }) {
     title: `Boletim ${m.code}`,
     html: html`${printToolbar({ back: `#/medicoes/${m.id}`, title: `Boletim de medição ${m.code} — ${c.client}` })}
     <div class="doc-stage">
-      <article class="doc a4 bm-doc">
+      <article class="doc a4 bm-doc bm-co-${c.company || 'charao'}">
         <header class="bm-head">
           <img src="${c.company_logo || '/assets/logo.webp'}" alt="${c.company_name || 'Charão Engenharia & Construção'}" class="bm-logo bm-logo-${c.company || 'charao'}">
           <div class="bm-title">

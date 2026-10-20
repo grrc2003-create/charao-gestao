@@ -431,3 +431,17 @@
 .rc-sign span { display: block; border-top: 1px solid #46535F; margin-bottom: 4px; }
 .rc-foot { margin-top: 18px; }
 @media screen and (max-width: 700px) { .rc-info { grid-template-columns: 1fr; } .rc-head { flex-wrap: wrap; } }
+
+/* Boletim da LuS (Ludimila Siqueira Arquitetura & Design): paleta do logo — petróleo #0B2228, azul-claro #87CDDE, cinza-azulado #93A7AC */
+.bm-co-lus .bm-head { border-bottom-color: #0B2228; }
+.bm-co-lus .bm-logo { height: 58px; }
+.bm-co-lus .bm-kicker { color: #4E8E9E; }
+.bm-co-lus .bm-title h1, .bm-co-lus .bm-client b { color: #0B2228; }
+.bm-co-lus .bm-meta th, .bm-co-lus .bm-meta td, .bm-co-lus .bm-table th, .bm-co-lus .bm-table td, .bm-co-lus .bm-pay { border-color: #93A7AC; }
+.bm-co-lus .bm-meta th, .bm-co-lus .bm-table thead th { background: #0B2228; }
+.bm-co-lus .bm-table thead th.bm-hl { background: #87CDDE; color: #0B2228; }
+.bm-co-lus .bm-table td.bm-hl { background: #EAF6F9; }
+.bm-co-lus .bm-table tr.bm-sub td { background: #EEF3F4; }
+.bm-co-lus .bm-table tr.bm-total td { background: #DCE6E8; }
+.bm-co-lus .bm-table tr.bm-total td.bm-hl { background: #87CDDE; color: #0B2228; }
+.bm-co-lus .bm-sign span { border-top-color: #0B2228; }

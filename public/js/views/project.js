@@ -8,6 +8,7 @@ import { impactRankingSection } from './deps-ui.js';
 import { ganttSection, bindGanttSections } from './gantt.js';
 import { calendarSection, bindCalendar } from './calendar-ui.js';
 import { recordsCard, bindRecordsCard } from './records.js';
+import { addPdfButtons } from '../section-pdf.js';
 
 export async function view({ params, query, setQuery, render, navigate }) {
   const [p, impactRank, recs] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
@@ -122,6 +123,8 @@ export async function view({ params, query, setQuery, render, navigate }) {
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
+      // Botão "PDF" em cada quadro: imprime só aquele visual
+      addPdfButtons(root, { title: `${p.code} · ${p.name}`, sub: p.client });
       bindGanttSections(root, url => api(url));
       bindCalendar(root, p);
       if (recs) bindRecordsCard(root, recs, navigate);

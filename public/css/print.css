@@ -445,3 +445,21 @@
 .bm-co-lus .bm-table tr.bm-total td { background: #DCE6E8; }
 .bm-co-lus .bm-table tr.bm-total td.bm-hl { background: #87CDDE; color: #0B2228; }
 .bm-co-lus .bm-sign span { border-top-color: #0B2228; }
+
+/* PDF de um quadro só (botão "PDF" no cabeçalho do quadro) */
+@media print {
+  body.print-one > *:not(#print-one) { display: none !important; }
+  body.print-one #print-one { display: block !important; }
+  #print-one.is-land { page: paisagem; }
+  #print-one .po-head { display: flex; align-items: center; gap: 14px; padding-bottom: 8px; margin-bottom: 10px; border-bottom: 2px solid #2A3D50; }
+  #print-one .po-logo { height: 34px; }
+  #print-one .po-t { display: flex; flex-direction: column; flex: 1; }
+  #print-one .po-t b { font-size: 14pt; color: #1E2933; }
+  #print-one .po-t span { font-size: 9pt; color: #46535F; }
+  #print-one .po-d { font-size: 8pt; color: #6E7A86; }
+  #print-one .card { box-shadow: none !important; border: 1px solid #E4E1DA; break-inside: auto; }
+  #print-one .table-wrap, #print-one .gantt, #print-one .fy-wrap { overflow: visible !important; }
+  #print-one details > summary { list-style: none; }
+  #print-one details > summary::-webkit-details-marker { display: none; }
+  #print-one tr, #print-one .kpi { break-inside: avoid; }
+}

@@ -376,11 +376,29 @@ export async function list({ state, query, setQuery, render }) {
           </section>
         </div>
 
-        ${d.by_client.length > 1 ? html`<section class="card">
-          <div class="card-head"><h2>${icon('team')}Por cliente</h2><span class="sub">composição da carteira de cada cliente</span></div>
-          <div class="card-body ct-clients">${d.by_client.map(b => html`<div class="ct-client"><div class="ct-client-h"><b>${b.client}</b><span>${money(b.value)} · ${b.contracts} contrato(s)</span></div>
-            ${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: Math.max(0, b.measured - b.billed), balance: Math.max(0, b.value - b.measured) }), b.value)}</div>`)}</div>
-        </section>` : ''}
+        ${d.by_client.length > 1 ? (() => {
+          // Ranking de clientes: barra proporcional ao contratado (o maior cliente = barra cheia), com a composição dentro
+          const cl = d.by_client.map(b => ({ ...b, balance: Math.max(0, b.value - b.measured), to_bill: Math.max(0, b.measured - b.billed), pct: b.value ? Math.min(100, Math.round((b.measured / b.value) * 1000) / 10) : 0 }))
+            .sort((a, b) => b.value - a.value);
+          const max = Math.max(1, ...cl.map(b => b.value));
+          const row = (b, i) => html`<li class="ct-cl" data-open="${b.balance > 0.005 ? 1 : 0}" data-rank="${i}">
+            <div class="ct-cl-id"><b title="${b.client}">${b.client}</b><small>${b.contracts} contrato(s) · ${String(b.pct).replace('.', ',')}% medido</small></div>
+            <div class="ct-cl-bar"><div class="ct-cl-fill" style="width:${Math.max(1.5, (b.value / max) * 100).toFixed(2)}%">${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: b.to_bill, balance: b.balance }), b.value)}</div></div>
+            <div class="ct-cl-num"><b class="ct-cl-val">${money(b.value)}</b><span class="ct-cl-sub"><small>${b.balance > 0.005 ? html`saldo a medir <span>${money(b.balance)}</span>` : 'todo medido'}</small>${b.to_receive ? html`<small>a receber <span>${money(b.to_receive)}</span></small>` : ''}</span></div>
+          </li>`;
+          return html`<section class="card ct-cli-card">
+            <div class="card-head"><h2>${icon('team')}Por cliente</h2>
+              <div class="chips" role="group" aria-label="Filtrar clientes">
+                <button type="button" class="chip" data-clf="open" aria-pressed="true">Com saldo a medir<span class="n">${cl.filter(b => b.balance > 0.005).length}</span></button>
+                <button type="button" class="chip" data-clf="all" aria-pressed="false">Todos<span class="n">${cl.length}</span></button></div></div>
+            <div class="card-body">
+              <p class="ct-cl-hint">Barra proporcional ao valor contratado (o maior cliente ocupa a barra inteira) · cores: ${pipeParts({ received: 1, to_receive: 1, to_bill: 1, balance: 1 }).map(p => html`<i class="k ${p.cls}"></i>${p.label.replace(' (faturado)', '').toLowerCase()} `)}</p>
+              <ol class="ct-cl-list">${cl.map(row)}</ol>
+              <p class="muted ct-cl-empty" hidden>Nenhum cliente com saldo a medir.</p>
+              <button type="button" class="btn btn-ghost btn-sm ct-cl-more" data-clmore hidden></button>
+            </div>
+          </section>`;
+        })() : ''}
 
         <section class="card ct-list-card">
           <div class="card-head"><h2>${icon('contract')}Contratos</h2>
@@ -395,6 +413,26 @@ export async function list({ state, query, setQuery, render }) {
         </section>
       </div>`,
     mount(root) {
+      // Por cliente: filtro e "ver todos" só nesta lista
+      const cliCard = root.querySelector('.ct-cli-card');
+      if (cliCard) {
+        let clf = 'open', expanded = false;
+        const TOP = 10;
+        const items = [...cliCard.querySelectorAll('.ct-cl')];
+        const more = cliCard.querySelector('[data-clmore]');
+        const drawCli = () => {
+          const pass = items.filter(li => clf === 'all' || li.dataset.open === '1');
+          items.forEach(li => { li.hidden = true; });
+          pass.forEach((li, i) => { li.hidden = !expanded && i >= TOP; });
+          cliCard.querySelector('.ct-cl-empty').hidden = pass.length > 0;
+          more.hidden = pass.length <= TOP;
+          more.textContent = expanded ? 'Mostrar só os 10 maiores' : `Ver todos (${pass.length})`;
+          cliCard.querySelectorAll('[data-clf]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.clf === clf)));
+        };
+        cliCard.querySelectorAll('[data-clf]').forEach(b => b.addEventListener('click', () => { clf = b.dataset.clf; drawCli(); }));
+        more.addEventListener('click', () => { expanded = !expanded; drawCli(); });
+        drawCli();
+      }
       // Tabela de contratos: filtra só as linhas da tabela (o restante do painel não muda)
       const rows = [...root.querySelectorAll('.ct-rows .ct-row')];
       const applyTable = () => {

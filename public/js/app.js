@@ -102,6 +102,7 @@ const routes = [
   ['/projetos/:id/registros/:rid/editar', Records.form],
   ['/contratos', Contracts.list],
   ['/contratos/novo', Contracts.form],
+  ['/contratos/cliente', Contracts.client],
   ['/contratos/importar-bms', BmImport.importBms],
   ['/contratos/:id', Contracts.view],
   ['/contratos/:id/editar', Contracts.form],

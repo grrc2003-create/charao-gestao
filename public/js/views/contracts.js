@@ -266,6 +266,53 @@ function bindRanking(root, d) {
   draw('ano');
 }
 
+// ---------- Linha de contrato e tabela com filtros (painel e tela do cliente) ----------
+// "Concluído" = 100% medido e nada pendente (sem boletim aguardando NF e nada a receber)
+const isFull = c => c.summary.value > 0 && c.summary.balance <= 0.005 && c.summary.to_bill <= 0.005 && c.summary.to_receive <= 0.005;
+const contractRow = c => {
+  const s = c.summary;
+  return html`<a class="ct-row" href="#/contratos/${c.id}" data-st="${c.status}" data-full="${isFull(c) ? 1 : 0}">
+    <div class="ct-row-id"><span class="ct-row-tags"><span class="mono">${c.code}</span>${coBadge(c)}${typePill(c)}</span><b>${c.client}</b><small>${c.title}</small></div>
+    <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
+      <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
+    <div class="ct-row-nums"><span><small>Contratado</small><b>${money(s.value)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b>${s.to_bill > 0.005 ? html`<em class="ct-row-nf">+ ${money(s.to_bill)} aguardando NF</em>` : ''}</span><span><small>Saldo a medir</small><b>${money(s.balance)}</b></span></div>
+    <span class="chev">${icon('chevron')}</span></a>`;
+};
+const contractTable = (contracts, { filter, hideFull, title = 'Contratos', emptyText = 'Nenhum contrato cadastrado. Comece em “Novo contrato”.' }) => html`<section class="card ct-list-card">
+  <div class="card-head"><h2>${icon('contract')}${title}</h2>
+    <div class="ct-list-filters">
+      <div class="chips" role="group" aria-label="Filtrar contratos por situação">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
+        html`<button type="button" class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n" data-ctn="${k}"></span></button>`)}</div>
+      <button type="button" class="chip ct-full-chip" data-ctfull aria-pressed="${hideFull}" title="Oculta os contratos 100% medidos sem nada pendente (nenhum boletim aguardando NF e nada a receber)">${icon('check')}Ocultar 100% medidos e recebidos<span class="n" data-ctn-full></span></button>
+    </div></div>
+  <ul class="ct-port-legend is-inline">${pipeParts({ received: 1, to_receive: 1, to_bill: 1, balance: 1 }).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span></li>`)}</ul>
+  ${contracts.length ? html`<div class="ct-rows">${contracts.map(contractRow)}</div><div class="card-body muted" data-ct-empty hidden>Nenhum contrato neste filtro.</div>`
+    : html`<div class="card-body muted">${emptyText}</div>`}
+</section>`;
+// Filtros da tabela: só mexem nas linhas da tabela (sem recarregar a página)
+function bindContractTable(root, state, onChange = () => {}) {
+  const rows = [...root.querySelectorAll('.ct-rows .ct-row')];
+  const apply = () => {
+    const { filter, hideFull } = state;
+    const passSt = r => filter === 'todos' || r.dataset.st === filter;
+    let n = 0;
+    for (const r of rows) { const on = passSt(r) && !(hideFull && r.dataset.full === '1'); r.hidden = !on; if (on) n++; }
+    root.querySelector('[data-ct-empty]')?.toggleAttribute('hidden', n > 0);
+    root.querySelectorAll('[data-ctn]').forEach(el => {
+      const k = el.dataset.ctn;
+      el.textContent = rows.filter(r => (k === 'todos' || r.dataset.st === k) && !(hideFull && r.dataset.full === '1')).length;
+    });
+    const full = root.querySelector('[data-ctn-full]');
+    if (full) full.textContent = rows.filter(r => r.dataset.full === '1' && (filter === 'todos' || r.dataset.st === filter)).length;
+    root.querySelectorAll('[data-ctf]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.ctf === filter)));
+    root.querySelector('[data-ctfull]')?.setAttribute('aria-pressed', String(hideFull));
+    onChange(state);
+  };
+  root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { state.filter = b.dataset.ctf; apply(); }));
+  root.querySelector('[data-ctfull]')?.addEventListener('click', () => { state.hideFull = !state.hideFull; apply(); });
+  apply();
+}
+
 export async function list({ state, query, setQuery, render }) {
   denied(state);
   const months = query.get('meses') || '12';
@@ -275,8 +322,6 @@ export async function list({ state, query, setQuery, render }) {
   let filter = query.get('status') || 'vigente';
   let hideFull = query.get('medidos') !== '1';
   const qs = (over = {}) => ({ meses: months, empresa, tipo, status: filter, medidos: hideFull ? '' : '1', ...over });
-  // "Concluído" = 100% medido e nada pendente (sem boletim aguardando NF e nada a receber)
-  const isFull = c => c.summary.value > 0 && c.summary.balance <= 0.005 && c.summary.to_bill <= 0.005 && c.summary.to_receive <= 0.005;
   const t = d.totals;
   const Y = d.year;
 
@@ -287,16 +332,6 @@ export async function list({ state, query, setQuery, render }) {
   const portTotal = port.received + port.to_receive + port.to_bill + Math.max(0, port.balance);
   const agingMax = Math.max(1, ...d.aging.map(a => a.total));
   const sumSeries = k => d.series.reduce((s, x) => s + x[k], 0);
-
-  const contractRow = c => {
-    const s = c.summary;
-    return html`<a class="ct-row" href="#/contratos/${c.id}" data-st="${c.status}" data-full="${isFull(c) ? 1 : 0}">
-      <div class="ct-row-id"><span class="ct-row-tags"><span class="mono">${c.code}</span>${coBadge(c)}${typePill(c)}</span><b>${c.client}</b><small>${c.title}</small></div>
-      <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
-        <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
-      <div class="ct-row-nums"><span><small>Contratado</small><b>${money(s.value)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b>${s.to_bill > 0.005 ? html`<em class="ct-row-nf">+ ${money(s.to_bill)} aguardando NF</em>` : ''}</span><span><small>Saldo a medir</small><b>${money(s.balance)}</b></span></div>
-      <span class="chev">${icon('chevron')}</span></a>`;
-  };
 
   return {
     title: 'Contratos',
@@ -400,11 +435,11 @@ export async function list({ state, query, setQuery, render }) {
           const cl = d.by_client.map(b => ({ ...b, open: b.balance > 0.005 || b.to_bill > 0.005 || b.to_receive > 0.005, pct: b.value ? Math.min(100, Math.round((b.measured / b.value) * 1000) / 10) : 0 }))
             .sort((a, b) => b.value - a.value);
           const max = Math.max(1, ...cl.map(b => b.value));
-          const row = (b, i) => html`<li class="ct-cl" data-open="${b.open ? 1 : 0}" data-rank="${i}">
+          const row = (b, i) => html`<li class="ct-cl-li" data-open="${b.open ? 1 : 0}" data-rank="${i}"><a class="ct-cl" href="#/contratos/cliente?nome=${encodeURIComponent(b.client)}" title="Abrir ${b.client}">
             <div class="ct-cl-id"><b title="${b.client}">${b.client}</b><small>${b.contracts} contrato(s) · ${String(b.pct).replace('.', ',')}% medido</small></div>
             <div class="ct-cl-bar"><div class="ct-cl-fill" style="width:${Math.max(1.5, (b.value / max) * 100).toFixed(2)}%">${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: b.to_bill, balance: b.balance }), b.value)}</div></div>
             <div class="ct-cl-num"><b class="ct-cl-val">${money(b.value)}</b><span class="ct-cl-sub"><small>${b.balance > 0.005 ? html`saldo a medir <span>${money(b.balance)}</span>` : 'todo medido'}</small>${b.to_bill > 0.005 ? html`<small>aguardando NF <span>${money(b.to_bill)}</span></small>` : ''}${b.to_receive > 0.005 ? html`<small>a receber <span>${money(b.to_receive)}</span></small>` : ''}</span></div>
-          </li>`;
+          </a></li>`;
           return html`<section class="card ct-cli-card">
             <div class="card-head"><h2>${icon('team')}Por cliente</h2>
               <div class="chips" role="group" aria-label="Filtrar clientes">
@@ -419,17 +454,7 @@ export async function list({ state, query, setQuery, render }) {
           </section>`;
         })() : ''}
 
-        <section class="card ct-list-card">
-          <div class="card-head"><h2>${icon('contract')}Contratos</h2>
-            <div class="ct-list-filters">
-              <div class="chips" role="group" aria-label="Filtrar contratos por situação">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
-                html`<button type="button" class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n" data-ctn="${k}"></span></button>`)}</div>
-              <button type="button" class="chip ct-full-chip" data-ctfull aria-pressed="${hideFull}" title="Oculta os contratos 100% medidos sem nada pendente (nenhum boletim aguardando NF e nada a receber)">${icon('check')}Ocultar 100% medidos e recebidos<span class="n" data-ctn-full></span></button>
-            </div></div>
-          <ul class="ct-port-legend is-inline">${pipeParts(port).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span></li>`)}</ul>
-          ${d.contracts.length ? html`<div class="ct-rows">${d.contracts.map(contractRow)}</div><div class="card-body muted" data-ct-empty hidden>Nenhum contrato neste filtro.</div>`
-            : html`<div class="card-body muted">Nenhum contrato cadastrado. Comece em “Novo contrato”.</div>`}
-        </section>
+        ${contractTable(d.contracts, { filter, hideFull })}
       </div>`,
     mount(root) {
       // Próximas ações: filtro por tipo e "+N pendências" (só este quadro)
@@ -455,7 +480,7 @@ export async function list({ state, query, setQuery, render }) {
       if (cliCard) {
         let clf = 'open', expanded = false;
         const TOP = 10;
-        const items = [...cliCard.querySelectorAll('.ct-cl')];
+        const items = [...cliCard.querySelectorAll('.ct-cl-li')];
         const more = cliCard.querySelector('[data-clmore]');
         const drawCli = () => {
           const pass = items.filter(li => clf === 'all' || li.dataset.open === '1');
@@ -471,25 +496,8 @@ export async function list({ state, query, setQuery, render }) {
         drawCli();
       }
       // Tabela de contratos: filtra só as linhas da tabela (o restante do painel não muda)
-      const rows = [...root.querySelectorAll('.ct-rows .ct-row')];
-      const applyTable = () => {
-        const passSt = r => filter === 'todos' || r.dataset.st === filter;
-        let n = 0;
-        for (const r of rows) { const on = passSt(r) && !(hideFull && r.dataset.full === '1'); r.hidden = !on; if (on) n++; }
-        root.querySelector('[data-ct-empty]')?.toggleAttribute('hidden', n > 0);
-        root.querySelectorAll('[data-ctn]').forEach(el => {
-          const k = el.dataset.ctn;
-          el.textContent = rows.filter(r => (k === 'todos' || r.dataset.st === k) && !(hideFull && r.dataset.full === '1')).length;
-        });
-        const full = root.querySelector('[data-ctn-full]');
-        if (full) full.textContent = rows.filter(r => r.dataset.full === '1' && (filter === 'todos' || r.dataset.st === filter)).length;
-        root.querySelectorAll('[data-ctf]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.ctf === filter)));
-        root.querySelector('[data-ctfull]')?.setAttribute('aria-pressed', String(hideFull));
-        setQuery(qs());
-      };
-      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { filter = b.dataset.ctf; applyTable(); }));
-      root.querySelector('[data-ctfull]')?.addEventListener('click', () => { hideFull = !hideFull; applyTable(); });
-      applyTable();
+      const tbl = { filter, hideFull };
+      bindContractTable(root, tbl, st => { filter = st.filter; hideFull = st.hideFull; setQuery(qs()); });
       root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ meses: b.dataset.meses })); render(); }));
       root.querySelectorAll('[data-emp]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ empresa: b.dataset.emp })); render(); }));
       root.querySelector('#ct-tipo')?.addEventListener('change', e => { setQuery(qs({ tipo: e.target.value })); render(); });
@@ -522,6 +530,41 @@ export async function list({ state, query, setQuery, render }) {
         g.querySelector('.g-hit').addEventListener('focus', () => show(g));
       });
       box?.addEventListener('pointerleave', () => { tip.hidden = true; box.querySelectorAll('.g-month.is-on').forEach(x => x.classList.remove('is-on')); });
+    },
+  };
+}
+
+// ---------- Tela do cliente: totais e todos os contratos dele ----------
+export async function client({ state, query, setQuery }) {
+  denied(state);
+  const name = query.get('nome') || '';
+  const all = await api('/contracts');
+  const cs = all.filter(c => c.client === name);
+  if (!cs.length) throw new Error('Cliente não encontrado nos contratos.');
+  const sum = k => cs.reduce((x, c) => x + (c.summary[k] || 0), 0);
+  const value = sum('value'), measured = sum('measured'), balance = cs.reduce((x, c) => x + Math.max(0, c.summary.balance || 0), 0);
+  const companies = [...new Set(cs.map(c => CO_SHORT[c.company] || c.company))];
+  const types = [...new Set(cs.map(c => c.type_name).filter(Boolean))];
+  const tbl = { filter: query.get('status') || 'todos', hideFull: query.get('medidos') === '0' ? false : query.get('medidos') === '1' };
+  return {
+    title: name,
+    html: html`${pageHead({ back: { href: '#/contratos', label: 'Contratos' }, eyebrow: `Cliente · ${companies.join(' · ')}${types.length ? ` · ${types.join(', ')}` : ''}`, title: name,
+        sub: `${cs.length} contrato(s) · ${cs.filter(c => c.status === 'vigente').length} vigente(s)` })}
+      <div class="ct-dash">
+      <div class="kpis kpis-6 ct-kpis">
+        ${kpi({ label: 'Contratado', value: money(value), color: '#2A3D50', foot: `${cs.length} contrato(s)` })}
+        ${kpi({ label: 'Medido', value: money(sum('measured_total')), color: '#2F6FB3', foot: value ? `${pct(Math.round((measured / value) * 1000) / 10)} do contratado` : '' })}
+        ${kpi({ label: 'Faturado', value: money(sum('billed')), color: '#8E6CB0' })}
+        ${kpi({ label: 'Recebido', value: money(sum('received')), color: '#2E8B57' })}
+        ${kpi({ label: 'A receber', value: money(sum('to_receive')), color: '#C0392B', foot: sum('to_bill') > 0.005 ? `+ ${money(sum('to_bill'))} aguardando NF` : 'faturado e não recebido' })}
+        ${kpi({ label: 'Saldo a medir', value: money(balance), color: '#707E8B' })}
+      </div>
+      <div class="ct-client-comp card"><div class="card-body">${compositionBar(pipeParts({ received: sum('received'), to_receive: sum('to_receive'), to_bill: sum('to_bill'), balance }), sum('received') + sum('to_receive') + sum('to_bill') + balance, { big: true })}
+        <ul class="ct-port-legend is-inline">${pipeParts({ received: sum('received'), to_receive: sum('to_receive'), to_bill: sum('to_bill'), balance }).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span><b>${money(p.v)}</b></li>`)}</ul></div></div>
+      ${contractTable(cs, { ...tbl, title: 'Contratos do cliente', emptyText: 'Nenhum contrato.' })}
+      </div>`,
+    mount(root) {
+      bindContractTable(root, tbl, st => setQuery({ nome: name, status: st.filter, medidos: st.hideFull ? '1' : '0' }));
     },
   };
 }

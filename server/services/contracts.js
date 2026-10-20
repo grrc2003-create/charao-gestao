@@ -2,6 +2,7 @@
 // Somente usuários liberados (users.can_contracts) acessam; a área interna restrita "Contratos" segue a mesma liberação.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
+import { isAdmin } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { defaultStageId } from './stages.js';
@@ -313,6 +314,8 @@ export function getMeasurement(ctx, id) {
       receive: m.status === 'faturada',
       undo: (m.status === 'faturada' || m.status === 'recebida'),
       delete: m.status === 'rascunho',
+      // Correção direta (administrador): qualquer boletim já emitido, sem desfazer NF/recebimento
+      correct: m.status !== 'rascunho' && isAdmin(ctx.user),
     },
   };
 }
@@ -348,6 +351,57 @@ export function updateMeasurement(ctx, id, body, ip) {
       run('DELETE FROM measurement_adjustments WHERE measurement_id = ?', id);
       for (const a of adjustments) run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', id, a.seq, a.description, a.unit, a.amount);
     }
+  });
+  return getMeasurement(ctx, id);
+}
+
+// Leitura das quantidades e descontos/acréscimos (rascunho e correção)
+function readLinesAdjustments(m, body) {
+  const items = new Set(all('SELECT id FROM contract_items WHERE contract_id = ?', m.contract_id).map(i => i.id));
+  const lines = body.lines && typeof body.lines === 'object' ? Object.entries(body.lines).map(([k, v]) => {
+    const itemId = intOrNull(k);
+    if (!items.has(itemId)) throw badRequest('Item da medição inválido.');
+    return [itemId, r4(num(v, 'Quantidade medida'))];
+  }) : null;
+  const adjustments = Array.isArray(body.adjustments) ? body.adjustments.map((a, k) => ({
+    seq: k + 1,
+    description: str(a?.description, { max: 200, required: true, label: 'Descrição do desconto/acréscimo' }),
+    unit: str(a?.unit, { max: 12, label: 'Unidade' }) || 'vb',
+    amount: r2(num(a?.amount, 'Valor do desconto/acréscimo')),
+  })) : null;
+  return { lines, adjustments };
+}
+
+// Correção de boletim já emitido/faturado/recebido (somente administrador): mantém situação, NF e recebimento.
+// Motivo obrigatório; auditoria com antes/depois. paid: 'total' = valor recebido acompanha o novo total; 'keep' = mantém.
+export function correctMeasurement(ctx, id, body, ip) {
+  const m = loadMeasurement(ctx, id);
+  if (!isAdmin(ctx.user)) throw forbidden('Só administradores corrigem um boletim já emitido. Para os demais, use Reabrir / Desfazer.');
+  if (m.status === 'rascunho') throw badRequest('Rascunho é editado normalmente (Salvar medição).');
+  const reason = str(body.reason, { max: 500, required: true, label: 'Motivo da correção' });
+  const before = getMeasurement(ctx, id);
+  const { lines, adjustments } = readLinesAdjustments(m, body);
+  const ps = body.period_start !== undefined ? date(body.period_start, 'Início do período') : m.period_start;
+  const pe = body.period_end !== undefined ? date(body.period_end, 'Fim do período') : m.period_end;
+  if (ps && pe && pe < ps) throw badRequest('O fim do período deve ser posterior ao início.');
+  tx(() => {
+    run(`UPDATE measurements SET period_start = ?, period_end = ?, notes = ?, updated_at = datetime('now') WHERE id = ?`,
+      ps, pe, body.notes !== undefined ? str(body.notes, { max: 2000, label: 'Observações' }) : m.notes, id);
+    if (lines) for (const [itemId, q] of lines) run(`INSERT INTO measurement_lines (measurement_id, item_id, quantity) VALUES (?,?,?)
+      ON CONFLICT(measurement_id, item_id) DO UPDATE SET quantity = excluded.quantity`, id, itemId, q);
+    if (adjustments) {
+      run('DELETE FROM measurement_adjustments WHERE measurement_id = ?', id);
+      for (const a of adjustments) run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', id, a.seq, a.description, a.unit, a.amount);
+    }
+    const after = getMeasurement(ctx, id);
+    if (m.status === 'recebida' && body.paid === 'total') run('UPDATE measurements SET paid_amount = ? WHERE id = ?', after.totals.to_bill, id);
+    const changedItems = after.rows.filter(r => r.qty !== (before.rows.find(x => x.item_id === r.item_id)?.qty ?? 0)).map(r => `${r.seq}. ${r.description}: ${before.rows.find(x => x.item_id === r.item_id)?.qty ?? 0} → ${r.qty}`);
+    audit(ctx.user.id, 'measurement', id, 'Medição corrigida (boletim já emitido)', {
+      boletim: m.code, situacao: m.status, motivo: reason,
+      total_antes: before.totals.to_bill, total_depois: after.totals.to_bill,
+      itens_alterados: changedItems, descontos_acrescimos: after.adjustments.filter(a => a.amount).map(a => `${a.description}: ${a.amount}`),
+      ...(m.status === 'recebida' ? { recebido: body.paid === 'total' ? `${m.paid_amount} → ${after.totals.to_bill}` : `mantido ${m.paid_amount}` } : {}),
+    }, ip);
   });
   return getMeasurement(ctx, id);
 }

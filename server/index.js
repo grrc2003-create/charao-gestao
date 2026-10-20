@@ -334,6 +334,7 @@ api.post('/api/contracts/import-bms/preview', (req, res, { ctx, body }) => send(
 api.post('/api/contracts/import-bms', (req, res, { ctx, body }) => send(res, 200, BmImport.applyImport(ctx, body, clientIp(req))));
 api.get('/api/measurements/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getMeasurement(ctx, intOrNull(params.id))));
 api.put('/api/measurements/:id', (req, res, { ctx, params, body }) => send(res, 200, Contracts.updateMeasurement(ctx, intOrNull(params.id), body, clientIp(req))));
+api.put('/api/measurements/:id/correction', (req, res, { ctx, params, body }) => send(res, 200, Contracts.correctMeasurement(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/measurements/:id/actions/:action', (req, res, { ctx, params, body }) => send(res, 200, Contracts.measurementAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 
 // ---------- Projetos ----------

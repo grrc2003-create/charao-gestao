@@ -2654,3 +2654,6 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .ct-client-comp .ct-port-legend.is-inline li { gap: 6px; }
 .ct-client-comp .ct-port-legend b { font-variant-numeric: tabular-nums; }
 .ct-dash > .ct-client-comp { margin: 0; }
+
+.m-correct-note { margin: 0 0 14px; }
+.m-correct-note a { font-weight: 700; color: inherit; }

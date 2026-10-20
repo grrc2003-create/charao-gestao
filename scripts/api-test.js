@@ -1879,6 +1879,21 @@ async function main() {
   const csC = csD.contracts.find(c => c.id === csId), csB = csD.by_client.find(b => b.client === 'Cliente Consistência');
   ok(csC.summary.to_bill === 4700 && csC.summary.balance === 0 && csB.to_bill === 4700 && csB.balance === 0, `aguardando NF igual no contrato e por cliente, mesmo com desconto (${csC.summary.to_bill}/${csB.to_bill})`);
   ok(csD.actions.some(a => a.kind === 'faturar' && a.client === 'Cliente Consistência') && !csD.actions.some(a => a.kind === 'encerrar' && a.code === csC.code), '100% medido com boletim aguardando NF: aparece em Faturar e não em "encerrar"');
+  // Corrigir medição já emitida/recebida (somente administrador), mantendo situação, NF e recebimento
+  const crM = (await fo('GET', `/measurements/${csM}`)).data;
+  ok(crM.can.correct && crM.status === 'emitida', 'administrador pode corrigir boletim emitido');
+  ok((await fo('PUT', `/measurements/${csM}/correction`, { adjustments: [{ description: 'Desconto comercial', amount: -500 }] })).status === 400, 'correção exige motivo');
+  const crM2 = (await fo('PUT', `/measurements/${csM}/correction`, { reason: 'Desconto combinado era 500', adjustments: [{ description: 'Desconto comercial', amount: -500 }] })).data;
+  ok(crM2.status === 'emitida' && crM2.totals.to_bill === 4500 && crM2.code === crM.code, 'boletim emitido corrigido: total novo, mesma situação e número');
+  const crR = (await fo('GET', `/measurements/${kM1}`)).data;
+  const crLines = Object.fromEntries(crR.rows.map(r => [r.item_id, r.qty]));
+  const crKeep = (await fo('PUT', `/measurements/${kM1}/correction`, { reason: 'Inclui reajuste', lines: crLines, adjustments: [...crR.adjustments.filter(a => a.id).map(a => ({ description: a.description, amount: a.amount })), { description: 'Reajuste', amount: 100 }], paid: 'keep' })).data;
+  ok(crKeep.status === 'recebida' && crKeep.totals.to_bill === r2t(crR.totals.to_bill + 100) && crKeep.paid_amount === crR.paid_amount && crKeep.nf_number === crR.nf_number, 'boletim recebido corrigido mantendo NF e valor recebido');
+  const crTot = (await fo('PUT', `/measurements/${kM1}/correction`, { reason: 'Recebido com o reajuste', paid: 'total' })).data;
+  ok(crTot.paid_amount === crTot.totals.to_bill, 'opção: valor recebido acompanha o novo total');
+  ok((await fo('GET', '/audit')).data.some(a => a.action === 'Medição corrigida (boletim já emitido)'), 'correção registrada na auditoria com motivo');
+  const crCam = await login('camila@charao.eng.br');
+  ok((await crCam('PUT', `/measurements/${csM}/correction`, { reason: 'x' })).status === 403, 'quem não é administrador não corrige');
 
 }
 

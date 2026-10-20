@@ -743,12 +743,14 @@ export async function view({ params, state, navigate }) {
 }
 
 // ---------- Medição (boletim) ----------
-export async function measurement({ params, state, render, navigate }) {
+export async function measurement({ params, query, state, render, navigate }) {
   denied(state);
   const m = await api(`/measurements/${params.id}`);
   const c = m.contract;
   const T = m.totals;
-  const edit = m.can.edit;
+  // Correção (administrador): edita boletim já emitido mantendo situação, NF e recebimento
+  const correcting = m.can.correct && query?.get('corrigir') === '1';
+  const edit = m.can.edit || correcting;
   const qIn = r => html`<input type="text" inputmode="decimal" class="ct-num m-qty" data-item="${r.item_id}" value="${r.qty ? String(r.qty).replace('.', ',') : ''}" placeholder="0" aria-label="Quantidade medida — ${r.description}">`;
   const adjRow = a => html`<tr class="m-adj" data-adj>
     <td>${edit ? html`<input type="text" data-a="description" maxlength="200" value="${a.description || ''}" placeholder="Ex.: Desconto AMIL" aria-label="Descrição" required>` : a.description}</td>
@@ -762,12 +764,15 @@ export async function measurement({ params, state, render, navigate }) {
       ${pageHead({ back: { href: `#/contratos/${c.id}`, label: c.code }, eyebrow: `${c.client} · ${c.code}`, title: html`Medição ${m.ref_label} · ${m.code}`,
         sub: html`Período ${fmtDate(m.period_start)} → ${fmtDate(m.period_end)} · ${mBadge(m.status)}${m.nf_number ? html` · NF ${m.nf_number} (${fmtDate(m.nf_date)})` : ''}${m.paid_date ? html` · recebido ${money(m.paid_amount)} em ${fmtDate(m.paid_date)}` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/imprimir/medicao/${m.id}">${icon('print')}Boletim (PDF)</a>
-          ${m.can.issue ? html`<button type="button" class="btn btn-primary" data-ma="issue">${icon('send')}Emitir</button>` : ''}
-          ${m.can.bill ? html`<button type="button" class="btn btn-primary" data-ma="bill">${icon('file')}Registrar faturamento</button>` : ''}
-          ${m.can.receive ? html`<button type="button" class="btn btn-success" data-ma="receive">${icon('check')}Registrar recebimento</button>` : ''}
-          ${m.can.reopen ? html`<button type="button" class="btn btn-ghost" data-ma="reopen">${icon('history')}Reabrir</button>` : ''}
-          ${m.can.undo ? html`<button type="button" class="btn btn-ghost" data-ma="undo">${icon('history')}${m.status === 'recebida' ? 'Desfazer recebimento' : 'Desfazer faturamento'}</button>` : ''}
-          ${m.can.delete ? html`<button type="button" class="btn btn-ghost" data-ma="delete">${icon('trash')}Excluir rascunho</button>` : ''}` })}
+          ${!correcting && m.can.issue ? html`<button type="button" class="btn btn-primary" data-ma="issue">${icon('send')}Emitir</button>` : ''}
+          ${!correcting && m.can.bill ? html`<button type="button" class="btn btn-primary" data-ma="bill">${icon('file')}Registrar faturamento</button>` : ''}
+          ${!correcting && m.can.receive ? html`<button type="button" class="btn btn-success" data-ma="receive">${icon('check')}Registrar recebimento</button>` : ''}
+          ${!correcting && m.can.reopen ? html`<button type="button" class="btn btn-ghost" data-ma="reopen">${icon('history')}Reabrir</button>` : ''}
+          ${!correcting && m.can.undo ? html`<button type="button" class="btn btn-ghost" data-ma="undo">${icon('history')}${m.status === 'recebida' ? 'Desfazer recebimento' : 'Desfazer faturamento'}</button>` : ''}
+          ${!correcting && m.can.delete ? html`<button type="button" class="btn btn-ghost" data-ma="delete">${icon('trash')}Excluir rascunho</button>` : ''}
+          ${m.can.correct && !correcting ? html`<a class="btn btn-ghost" href="#/medicoes/${m.id}?corrigir=1">${icon('edit')}Corrigir medição</a>` : ''}` })}
+      ${correcting ? html`<div class="notice notice-warn m-correct-note">${icon('alert')}<span><b>Corrigindo o boletim ${m.code} (${M_STATUS[m.status].label}).</b> Situação, NF e recebimento ficam como estão; as medições seguintes recalculam o acumulado e o saldo.
+        A correção exige motivo e fica registrada na auditoria. <a href="#/medicoes/${m.id}">Cancelar</a></span></div>` : ''}
       <div class="kpis kpis-4 ct-kpis">
         ${kpi({ label: 'Medição do mês', value: money(T.measured), color: '#2F6FB3' })}
         ${kpi({ label: 'Descontos / acréscimos', value: money(T.adj), color: '#B7791F' })}
@@ -776,7 +781,7 @@ export async function measurement({ params, state, render, navigate }) {
       </div>
       <form id="m-form" novalidate>
         ${edit ? html`<section class="card section"><div class="card-body form"><div class="form-row form-row-3">
-          <div class="field"><label for="m-ref">Mês de referência</label><input type="month" id="m-ref" name="ref_month" value="${m.ref_month}"></div>
+          <div class="field"><label for="m-ref">Mês de referência</label><input type="month" id="m-ref" name="ref_month" value="${m.ref_month}" ${correcting ? 'disabled title="O mês de referência define o número do boletim e não muda na correção"' : ''}></div>
           <div class="field"><label for="m-ps">Período — de</label><input type="date" id="m-ps" name="period_start" value="${m.period_start || ''}"></div>
           <div class="field"><label for="m-pe">até</label><input type="date" id="m-pe" name="period_end" value="${m.period_end || ''}"></div></div></div></section>` : ''}
         <section class="card section">
@@ -804,7 +809,12 @@ export async function measurement({ params, state, render, navigate }) {
         </section>
         <section class="card section"><div class="card-body form">
           <div class="field"><label for="m-notes">Observações do boletim</label>${edit ? html`<textarea id="m-notes" name="notes" rows="2" maxlength="2000">${m.notes || ''}</textarea>` : html`<div>${m.notes || '—'}</div>`}</div>
-          ${edit ? html`<div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar medição</button></div>` : ''}
+          ${correcting ? html`<div class="field"><label class="req" for="m-reason">Motivo da correção</label><textarea id="m-reason" name="reason" rows="2" maxlength="500" required placeholder="Ex.: quantidade do item 2 lançada errada no boletim"></textarea></div>
+            ${m.status === 'recebida' ? html`<div class="field"><span class="lbl">Valor recebido (hoje ${money(m.paid_amount)})</span><div class="segmented">
+              <label><input type="radio" name="paid" value="keep" checked>Manter ${money(m.paid_amount)}<small>o recebimento não muda</small></label>
+              <label><input type="radio" name="paid" value="total">Acompanhar o novo total<small>valor recebido = total corrigido do boletim</small></label></div></div>` : ''}
+            <div class="form-actions" style="justify-content:flex-start"><a class="btn btn-ghost" href="#/medicoes/${m.id}">Cancelar</a><button type="submit" class="btn btn-primary">${icon('check')}Salvar correção</button></div>`
+          : edit ? html`<div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar medição</button></div>` : ''}
         </div></section>
       </form>`,
     mount(root) {
@@ -835,6 +845,14 @@ export async function measurement({ params, state, render, navigate }) {
       const save = () => api(`/measurements/${m.id}`, { method: 'PUT', body: collect() });
       f.addEventListener('submit', async e => {
         e.preventDefault();
+        if (correcting) {
+          const reason = f.reason.value.trim();
+          if (!reason) { toast('Informe o motivo da correção.', 'err'); return f.reason.focus(); }
+          const body = { ...collect(), reason, paid: f.querySelector('[name=paid]:checked')?.value || 'keep' };
+          delete body.ref_month;
+          try { await api(`/measurements/${m.id}/correction`, { method: 'PUT', body }); toast('Medição corrigida.'); navigate(`/medicoes/${m.id}`); } catch (ex) { toast(ex.message, 'err'); }
+          return;
+        }
         try { await save(); toast('Medição salva.'); render(); } catch (ex) { toast(ex.message, 'err'); }
       });
       const act = async (a, body) => {

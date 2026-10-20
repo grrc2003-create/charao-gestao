@@ -26,7 +26,7 @@ function previewHtml(p) {
       <div class="card-body">
         <div class="ct-tiles fi-tiles pl-tiles">
           <div class="ct-tile"><span>Linhas</span><b>${t.rows}</b><small>${t.ok - t.subtasks} tarefa(s) · ${t.subtasks} subtarefa(s)</small></div>
-          <div class="ct-tile"><span>Dependências</span><b>${t.deps}</b><small>datas ajustadas pela dependência</small></div>
+          <div class="ct-tile"><span>Dependências</span><b>${t.deps}</b><small>${t.auto ? `${t.auto} completada(s) automaticamente (*)` : 'datas ajustadas pela dependência'}</small></div>
           <div class="ct-tile"><span>Com erro</span><b class="${t.erro ? 'is-neg' : ''}">${t.erro}</b><small>${t.erro ? 'corrija na planilha e envie de novo' : 'nenhum'}</small></div>
           <div class="ct-tile"><span>Acesso ao projeto</span><b>${t.access}</b><small>responsável(is) que ganham acesso</small></div>
         </div>
@@ -36,7 +36,10 @@ function previewHtml(p) {
         <span class="fi-line">ID ${r.ref || '—'}<br>linha ${r.line}</span>
         <span class="fi-main"><b>${r.parent ? '↳ ' : ''}${r.view.title || '(sem título)'}</b>
           <small>${[r.view.stage, r.view.assignee ? `resp. ${r.view.assignee}` : '', r.view.start_date || r.view.due_date ? `${fmtDate(r.view.start_date)} → ${fmtDate(r.view.due_date)}` : 'sem datas', r.view.priority, r.view.proof !== 'Nenhuma' ? `comprovação: ${r.view.proof}` : '',
-            r.parent ? `subtarefa de ${r.parent}` : '', r.view.deps.length ? `depende de ${r.view.deps.join(', ')}${r.view.lag ? ` (+${r.view.lag} d)` : ''}` : ''].filter(Boolean).join(' · ')}</small>
+            r.parent ? `subtarefa de ${r.parent}` : ''].filter(Boolean).join(' · ')}</small>
+          ${r.view.preds.length || r.view.succs.length ? html`<span class="pl-links">
+            ${r.view.preds.length ? html`<span>Predecessoras: ${r.view.preds.map(x => html`<b class="${x.auto ? 'is-auto' : ''}" title="${x.auto ? 'completada automaticamente (vem da sucessora preenchida na outra linha)' : ''}">${x.ref}${x.auto ? '*' : ''}</b>`)}${r.view.lag ? ` · folga ${r.view.lag} d` : ''}</span>` : ''}
+            ${r.view.succs.length ? html`<span>Sucessoras: ${r.view.succs.map(x => html`<b class="${x.auto ? 'is-auto' : ''}" title="${x.auto ? 'completada automaticamente (vem da predecessora preenchida na outra linha)' : ''}">${x.ref}${x.auto ? '*' : ''}</b>`)}</span>` : ''}</span>` : ''}
           ${r.errors.length ? html`<em class="fi-errs">${r.errors.join(' · ')}</em>` : ''}
           ${r.notes.length ? html`<em class="fi-note">${r.notes.join(' · ')}</em>` : ''}</span>
         <span class="fi-val"><span class="m-badge ${r.status === 'ok' ? 'm-paid' : 'fi-err'}">${r.status === 'ok' ? 'Pronta' : 'Com erro'}</span></span>
@@ -58,7 +61,7 @@ export async function importPage({ params, state, navigate }) {
           <div class="fi-steps">
             <div class="fi-step"><span class="fi-n">1</span><div><b>Baixe a planilha modelo deste projeto</b><small>já vem com as classificações do projeto (${p.stages.map(s => s.name).join(', ')}), os responsáveis e as listas de prioridade e comprovação</small>
               <button type="button" class="btn btn-ghost btn-sm" data-pl-template>${icon('file')}Baixar planilha modelo</button></div></div>
-            <div class="fi-step"><span class="fi-n">2</span><div><b>Preencha e envie</b><small>uma linha por tarefa na aba "Planejamento"; subtarefa = informe o ID da tarefa principal</small>
+            <div class="fi-step"><span class="fi-n">2</span><div><b>Preencha e envie</b><small>uma linha por tarefa na aba "Planejamento"; subtarefa = informe o ID da tarefa principal; dependência = preencha a predecessora ou a sucessora (o outro lado é completado)</small>
               <label class="bi-drop" for="pl-file">${icon('file')}<span><b>Escolher planilha preenchida</b><small>arquivo .xlsx</small></span></label>
               <input type="file" id="pl-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
               <ul class="bi-files" data-pl-name></ul></div></div>

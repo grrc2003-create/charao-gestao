@@ -1,6 +1,7 @@
 // Planejamento do projeto por planilha (.xlsx): modelo para preencher e importação com prévia.
 // Uma linha por tarefa (ID da linha; "Tarefa principal" = ID da mãe para subtarefas), com classificação, responsável,
-// datas, prioridade, comprovação e dependências ("Depende de" = IDs das predecessoras + folga em dias).
+// datas, prioridade, comprovação e dependências (Predecessoras e/ou Sucessoras = IDs; basta preencher um dos lados:
+// o outro é completado automaticamente; a folga da ligação é a da tarefa sucessora).
 // Mesmas regras do cadastro: classificação precisa existir no projeto; responsável sem acesso ganha acesso ao projeto
 // (quem importa precisa poder dar acesso); descrição em branco = título. Check-lists continuam sendo criados no sistema.
 import { all, one, run, tx } from '../db.js';
@@ -14,8 +15,10 @@ import { insertTask, PRIORITIES, PROOF_TYPES } from './tasks.js';
 import { addDependency } from './dependencies.js';
 import { defaultStageId } from './stages.js';
 
-const HEAD = ['ID *', 'Tarefa principal (ID)', 'Título *', 'Descrição', 'Classificação', 'Responsável', 'Início previsto', 'Prazo', 'Prioridade', 'Comprovação', 'Depende de (IDs)', 'Folga (dias)', 'Observações'];
-const KEYS = ['ref', 'parent', 'title', 'description', 'stage', 'assignee', 'start_date', 'due_date', 'priority', 'proof', 'deps', 'lag', 'notes'];
+const HEAD = ['ID *', 'Tarefa principal (ID)', 'Título *', 'Descrição', 'Classificação', 'Responsável', 'Início previsto', 'Prazo', 'Prioridade', 'Comprovação', 'Predecessoras (IDs)', 'Sucessoras (IDs)', 'Folga (dias)', 'Observações'];
+const KEYS = ['ref', 'parent', 'title', 'description', 'stage', 'assignee', 'start_date', 'due_date', 'priority', 'proof', 'deps', 'succs', 'lag', 'notes'];
+// Nomes antigos de coluna ainda aceitos
+const HEAD_ALIASES = { dependedeids: 'deps', dependede: 'deps', predecessoras: 'deps', sucessoras: 'succs' };
 const PRIORITY_LABELS = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
 const PROOF_LABELS = { nenhuma: 'Nenhuma', foto: 'Foto', descricao: 'Descrição', foto_descricao: 'Foto e descrição' };
 const MAX_ROWS = 2000;
@@ -47,7 +50,7 @@ export function templateXlsx(ctx, projectId = null) {
   return writeXlsx([
     {
       name: 'Planejamento', header: true, freeze: true, rows: [HEAD],
-      widths: [8, 12, 40, 44, 22, 24, 15, 15, 12, 18, 16, 11, 34],
+      widths: [8, 12, 40, 44, 22, 24, 15, 15, 12, 18, 16, 16, 11, 34],
       validations: [
         ...(stages.length ? [{ col: 4, rows: [2, last], source: `Listas!$A$2:$A$${stages.length + 1}` }] : []),
         ...(people.length ? [{ col: 5, rows: [2, last], source: `Listas!$B$2:$B$${people.length + 1}` }] : []),
@@ -70,13 +73,15 @@ export function templateXlsx(ctx, projectId = null) {
         ['Início previsto / Prazo', `Datas no formato DD/MM/AAAA (ex.: ${ref}). Início não pode ser depois do prazo. A tarefa principal acompanha o início e o prazo das subtarefas.`],
         ['Prioridade', `${pri.join(', ')}. Em branco = Média.`],
         ['Comprovação', `${prf.join(', ')}. Em branco = Nenhuma.`],
-        ['Depende de (IDs)', 'IDs das tarefas que precisam terminar antes, separados por ponto e vírgula (ex.: 2;3). As datas da sucessora são ajustadas pela dependência.'],
-        ['Folga (dias)', 'Dias entre o fim da predecessora e o início desta (0 a 365). Vale para todas as dependências da linha.'],
+        ['Predecessoras (IDs)', 'IDs das tarefas que precisam terminar ANTES desta, separados por ponto e vírgula (ex.: 2;3).'],
+        ['Sucessoras (IDs)', 'IDs das tarefas que só começam DEPOIS desta (ex.: 5;6).'],
+        ['Predecessora x sucessora', 'Basta preencher um dos lados: se a linha 3 tem a 1 como predecessora, a linha 1 já fica com a 3 como sucessora (e vice-versa). Preencher os dois lados não duplica. As datas da sucessora são ajustadas pela dependência.'],
+        ['Folga (dias)', 'Dias entre o fim da predecessora e o início desta tarefa (0 a 365). Vale para todas as ligações em que esta tarefa é a sucessora.'],
         ['Observações', 'Texto livre (opcional).'],
         [],
-        ['Exemplo', '1 | (em branco) | Fundação | Executar fundação conforme projeto | Bloco A | Fulano | 03/11/2026 | 28/11/2026 | Alta | Foto | (em branco) | | '],
-        ['', '2 | 1 | Escavação | | Bloco A | Fulano | 03/11/2026 | 10/11/2026 | | Foto | | | (subtarefa da linha 1)'],
-        ['', '3 | (em branco) | Estrutura | Pilares e vigas | Bloco A | Beltrano | | 20/12/2026 | Alta | Foto | 1 | 2 | (começa 2 dias depois da Fundação)'],
+        ['Exemplo', '1 | (em branco) | Fundação | Executar fundação conforme projeto | Bloco A | Fulano | 03/11/2026 | 28/11/2026 | Alta | Foto | | 3 | | (sucessora: 3)'],
+        ['', '2 | 1 | Escavação | | Bloco A | Fulano | 03/11/2026 | 10/11/2026 | | Foto | | | | (subtarefa da linha 1)'],
+        ['', '3 | (em branco) | Estrutura | Pilares e vigas | Bloco A | Beltrano | | 20/12/2026 | Alta | Foto | (em branco: vem da linha 1) | | 2 | (começa 2 dias depois da Fundação)'],
         ['Importar', 'No projeto › Importar planejamento (ou no cadastro de um projeto novo): envie o arquivo, confira a prévia (erros por linha) e confirme.'],
       ],
     },
@@ -106,7 +111,11 @@ function parse(ctx, project, file) {
   const hi = grid.findIndex(r => r.some(v => hkey(v).startsWith('titulo')) && r.some(v => hkey(v) === 'id'));
   if (hi < 0) throw badRequest('Não encontrei o cabeçalho da planilha modelo (ID, Título…). Use "Baixar planilha modelo".');
   const col = {};
-  grid[hi].forEach((v, i) => { const k = HEAD.findIndex(h => hkey(h) === hkey(v)); if (k >= 0 && col[KEYS[k]] === undefined) col[KEYS[k]] = i; });
+  grid[hi].forEach((v, i) => {
+    const k = HEAD.findIndex(h => hkey(h) === hkey(v));
+    const key = k >= 0 ? KEYS[k] : HEAD_ALIASES[hkey(v)];
+    if (key && col[key] === undefined) col[key] = i;
+  });
   for (const k of ['ref', 'title']) if (col[k] === undefined) throw badRequest(`Falta a coluna "${HEAD[KEYS.indexOf(k)]}".`);
   const stages = new Map(all('SELECT id, name FROM project_stages WHERE project_id = ?', project.id).map(s => [hkey(s.name), s]));
   const users = all('SELECT id, name, email FROM users WHERE active = 1');
@@ -144,18 +153,19 @@ function parse(ctx, project, file) {
     const proof = prfTxt ? PROOF_BY[hkey(prfTxt)] : 'nenhuma';
     if (!priority) errors.push(`Prioridade "${priTxt}" não existe`);
     if (!proof) errors.push(`Comprovação "${prfTxt}" não existe`);
-    const deps = txt(v('deps')).split(/[;,\s]+/).map(s => s.trim()).filter(Boolean);
+    const ids = k => [...new Set(txt(v(k)).split(/[;,\s]+/).map(s => s.trim()).filter(Boolean))];
+    const deps = ids('deps'), succs = ids('succs');
     const lagTxt = txt(v('lag'));
     const lag = lagTxt ? Number(lagTxt.replace(',', '.')) : 0;
     if (!Number.isInteger(lag) || lag < 0 || lag > 365) errors.push('Folga: de 0 a 365 dias');
     const notesTxt = txt(v('notes'));
     if (notesTxt.length > 2000) errors.push('Observações muito longas');
     rows.push({
-      line: i + 1, ref, parentRef, errors, notes, deps, lag: Number.isInteger(lag) ? lag : 0, grantAccess,
+      line: i + 1, ref, parentRef, errors, notes, deps, succs, typedDeps: deps, lag: Number.isInteger(lag) ? lag : 0, grantAccess,
       data: { title, description, notes: notesTxt || null, start_date: start || null, due_date: due || null, priority: priority || 'media', proof_type: proof || 'nenhuma',
         assignee_id: assignee?.id || ctx.user.id, stage_id: stage?.id || null },
       view: { title, description: txt(v('description')) ? description : null, stage: stage?.name || (st || 'Geral'), assignee: assignee?.name || (who || null), start_date: start || null, due_date: due || null,
-        priority: PRIORITY_LABELS[priority] || priTxt, proof: PROOF_LABELS[proof] || prfTxt, deps, lag },
+        priority: PRIORITY_LABELS[priority] || priTxt, proof: PROOF_LABELS[proof] || prfTxt, lag },
     });
   }
   if (!rows.length) throw badRequest('A planilha não tem linhas preenchidas na aba "Planejamento".');
@@ -173,12 +183,24 @@ function parse(ctx, project, file) {
       else if (p === r) r.errors.push('A tarefa não pode ser a própria tarefa principal');
       else if (p.parentRef) r.errors.push(`A linha ${r.parentRef} já é subtarefa (subtarefa não tem subtarefas)`);
     }
-    for (const d of r.deps) {
+    for (const [list, label] of [[r.typedDeps, 'Predecessora'], [r.succs, 'Sucessora']]) for (const d of list) {
       const p = byRef.get(d);
-      if (!p) r.errors.push(`Depende de ${d}, que não está na planilha`);
+      if (!p) r.errors.push(`${label} ${d} não está na planilha`);
       else if (p === r) r.errors.push('A tarefa não pode depender dela mesma');
       else if (p.ref === r.parentRef || p.parentRef === r.ref) r.errors.push(`Subtarefa e sua tarefa principal não se ligam por dependência (${d})`);
     }
+  }
+  // Predecessora x sucessora: basta um lado; junta os dois (sem repetir) e marca o que foi completado automaticamente
+  for (const r of rows) {
+    if (!r.ref || byRef.get(r.ref) !== r) continue;
+    const fromSucc = rows.filter(x => x !== r && x.ref && byRef.get(x.ref) === x && x.succs.includes(r.ref)).map(x => x.ref);
+    r.deps = [...new Set([...r.typedDeps.filter(d => byRef.has(d) && byRef.get(d) !== r), ...fromSucc])];
+    r.autoDeps = fromSucc.filter(d => !r.typedDeps.includes(d));
+  }
+  for (const r of rows) {
+    if (!r.ref || byRef.get(r.ref) !== r) { r.allSuccs = []; r.autoSuccs = []; continue; }
+    r.allSuccs = rows.filter(x => x.ref && byRef.get(x.ref) === x && (x.deps || []).includes(r.ref)).map(x => x.ref);
+    r.autoSuccs = r.allSuccs.filter(s => !r.succs.includes(s));
   }
   // Ciclo nas dependências: a linha alcança a si mesma seguindo as predecessoras (todas as do ciclo são marcadas)
   const reaches = (start) => {
@@ -213,8 +235,9 @@ export function previewImport(ctx, projectId, body) {
   const ok = rows.filter(r => r.status === 'ok');
   return {
     file: name, project: { id: project.id, code: project.code, name: project.name },
-    rows: rows.map(r => ({ line: r.line, ref: r.ref, parent: r.parentRef || null, status: r.status, errors: r.errors, notes: r.notes, view: r.view })),
-    totals: { rows: rows.length, ok: ok.length, erro: rows.length - ok.length, subtasks: ok.filter(r => r.parentRef).length, deps: ok.reduce((s, r) => s + r.deps.length, 0), access: [...new Set(ok.filter(r => r.grantAccess).map(r => r.data.assignee_id))].length },
+    rows: rows.map(r => ({ line: r.line, ref: r.ref, parent: r.parentRef || null, status: r.status, errors: r.errors, notes: r.notes,
+      view: { ...r.view, preds: (r.deps || []).map(d => ({ ref: d, auto: (r.autoDeps || []).includes(d) })), succs: (r.allSuccs || []).map(s => ({ ref: s, auto: (r.autoSuccs || []).includes(s) })) } })),
+    totals: { rows: rows.length, ok: ok.length, erro: rows.length - ok.length, subtasks: ok.filter(r => r.parentRef).length, deps: ok.reduce((s, r) => s + (r.deps || []).length, 0), auto: ok.reduce((s, r) => s + (r.autoDeps || []).length + (r.autoSuccs || []).length, 0), access: [...new Set(ok.filter(r => r.grantAccess).map(r => r.data.assignee_id))].length },
   };
 }
 

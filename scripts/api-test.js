@@ -1821,30 +1821,36 @@ async function main() {
   const plPid = (await fo('POST', '/projects', { name: 'Obra Planejamento Planilha', client: 'Cliente Plan', stages: [{ name: 'Fundação' }, { name: 'Bloco A' }] })).data.id;
   const plTplRes = await fetch(BASE + `/api/planning/template?projeto=${plPid}`, { headers: { 'X-Requested-With': 'charao-app', cookie: fiCookie } });
   const plTpl = readXlsx(Buffer.from(await plTplRes.arrayBuffer()));
-  ok(plTplRes.status === 200 && plTpl[0][0] === 'ID *' && plTpl[0][2] === 'Título *' && plTpl[0][10] === 'Depende de (IDs)', 'planilha modelo do planejamento');
+  ok(plTplRes.status === 200 && plTpl[0][0] === 'ID *' && plTpl[0][2] === 'Título *' && plTpl[0][10] === 'Predecessoras (IDs)' && plTpl[0][11] === 'Sucessoras (IDs)', 'planilha modelo do planejamento (predecessoras e sucessoras)');
   const plCam = (await fo('GET', '/users')).data.find(u => u.email === 'camila@charao.eng.br');
   const plHead = plTpl[0];
   const plRows = [
-    ['1', null, 'Fundação', 'Executar fundação', 'Fundação', null, '03/11/2099', '28/11/2099', 'Alta', 'Foto', null, null, null],
-    ['2', '1', 'Escavação', null, 'Fundação', plCam.name, '03/11/2099', '10/11/2099', null, 'Foto', null, null, 'subtarefa'],
-    ['3', '1', 'Concretagem', null, 'Fundação', null, '11/11/2099', '28/11/2099', 'Urgente', null, null, null, null],
-    ['4', null, 'Estrutura', 'Pilares e vigas', 'Bloco A', null, '01/11/2099', '20/12/2099', 'Média', 'Foto e descrição', '1', '2', null],
+    ['1', null, 'Fundação', 'Executar fundação', 'Fundação', null, '03/11/2099', '28/11/2099', 'Alta', 'Foto', null, '4', null, null],
+    ['2', '1', 'Escavação', null, 'Fundação', plCam.name, '03/11/2099', '10/11/2099', null, 'Foto', null, null, null, 'subtarefa'],
+    ['3', '1', 'Concretagem', null, 'Fundação', null, '11/11/2099', '28/11/2099', 'Urgente', null, null, null, null, null],
+    ['4', null, 'Estrutura', 'Pilares e vigas', 'Bloco A', null, '01/11/2099', '20/12/2099', 'Média', 'Foto e descrição', null, null, '2', null],
   ];
   const plFile = rows => ({ name: 'plan.xlsx', data: writeXlsx([{ name: 'Planejamento', header: true, rows: [plHead, ...rows] }]).toString('base64') });
   const plPv = (await fo('POST', `/projects/${plPid}/planning/preview`, { file: plFile(plRows) })).data;
   ok(plPv.totals.ok === 4 && plPv.totals.erro === 0 && plPv.totals.subtasks === 2 && plPv.totals.deps === 1, `prévia do planejamento: 2 tarefas, 2 subtarefas, 1 dependência (${JSON.stringify(plPv.totals)})`);
+  const plP4 = plPv.rows.find(r => r.ref === '4').view, plP1 = plPv.rows.find(r => r.ref === '1').view;
+  ok(plP4.preds.length === 1 && plP4.preds[0].ref === '1' && plP4.preds[0].auto && plP1.succs[0].ref === '4' && !plP1.succs[0].auto && plPv.totals.auto === 1, 'sucessora preenchida: a predecessora do outro lado é completada automaticamente');
+  const plBoth = (await fo('POST', `/projects/${plPid}/planning/preview`, { file: plFile([plRows[0], ['4', null, 'Estrutura', 'x', null, null, null, null, null, null, '1', null, '2', null]]) })).data;
+  ok(plBoth.totals.deps === 1 && plBoth.totals.auto === 0, 'predecessora e sucessora preenchidas nos dois lados: uma ligação só');
+  const plOnlyPred = (await fo('POST', `/projects/${plPid}/planning/preview`, { file: plFile([['1', null, 'A', 'x', null, null, null, null, null, null, null, null, null, null], ['2', null, 'B', 'x', null, null, null, null, null, null, '1', null, null, null]]) })).data;
+  ok(plOnlyPred.rows.find(r => r.ref === '1').view.succs.some(x => x.ref === '2' && x.auto), 'predecessora preenchida: a sucessora do outro lado é completada automaticamente');
   ok(plPv.rows.find(r => r.ref === '2').view.description === null && plPv.rows.find(r => r.ref === '4').view.proof === 'Foto e descrição', 'descrição em branco e comprovação por nome');
   const plBad = (await fo('POST', `/projects/${plPid}/planning/preview`, { file: plFile([...plRows,
-    ['5', '2', 'Neta', null, 'Bloco C', 'Ninguém Existe', '40/11/2099', null, 'Altíssima', null, '9', null, null],
-    ['6', null, 'Ciclo A', 'x', null, null, null, null, null, null, '7', null, null],
-    ['7', null, 'Ciclo B', 'x', null, null, null, null, null, null, '6', null, null],
-    ['8', null, 'Depende de erro', 'x', null, null, null, null, null, null, '5', null, null],
-    ['1', null, 'ID repetido', 'x', null, null, null, null, null, null, null, null, null],
+    ['5', '2', 'Neta', null, 'Bloco C', 'Ninguém Existe', '40/11/2099', null, 'Altíssima', null, '9', null, null, null],
+    ['6', null, 'Ciclo A', 'x', null, null, null, null, null, null, null, '7', null, null],
+    ['7', null, 'Ciclo B', 'x', null, null, null, null, null, null, null, '6', null, null],
+    ['8', null, 'Depende de erro', 'x', null, null, null, null, null, null, '5', null, null, null],
+    ['1', null, 'ID repetido', 'x', null, null, null, null, null, null, null, null, null, null],
   ]) })).data;
   const plErr = ref => plBad.rows.filter(r => r.ref === ref).flatMap(r => r.errors).join(' | ');
   ok(plErr('5').includes('já é subtarefa') && plErr('5').includes('Bloco C') && plErr('5').includes('Ninguém Existe') && plErr('5').includes('Início previsto inválido') && plErr('5').includes('Prioridade') && plErr('5').includes('9'), `erros por linha (subtarefa de subtarefa, classificação, responsável, prioridade, dependência inexistente): ${plErr('5')}`);
   ok(plErr('6').includes('circular') && plErr('7').includes('circular') && plErr('8').includes('erro') && plBad.rows.some(r => r.errors.some(e => e.includes('repetido'))), 'dependência circular, ID repetido e linha ligada a linha com erro');
-  ok((await fo('POST', `/projects/${plPid}/planning`, { file: plFile([...plRows, ['9', null, 'Com erro', 'x', 'Inexistente', null, null, null, null, null, null, null, null]]) })).status === 400, 'com qualquer erro, nada é importado');
+  ok((await fo('POST', `/projects/${plPid}/planning`, { file: plFile([...plRows, ['9', null, 'Com erro', 'x', 'Inexistente', null, null, null, null, null, null, null, null, null]]) })).status === 400, 'com qualquer erro, nada é importado');
   ok((await fo('GET', `/projects/${plPid}`)).data.tasks.length === 0, 'nada gravado quando há erro');
   ok((await biNo('POST', `/projects/${plPid}/planning/preview`, { file: plFile(plRows) })).status === 403, 'sem acesso ao projeto não importa');
   const plImp = (await fo('POST', `/projects/${plPid}/planning`, { file: plFile(plRows) })).data;

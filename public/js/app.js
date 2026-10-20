@@ -30,6 +30,7 @@ import * as Recurrences from './views/recurrences.js';
 import * as Contracts from './views/contracts.js';
 import * as BmImport from './views/bm-import.js';
 import * as Finance from './views/finance.js';
+import * as FinanceYear from './views/finance-year.js';
 import * as FinanceImport from './views/finance-import.js';
 import * as ReportMeasurement from './views/report-measurement.js';
 import * as Processes from './views/processes.js';
@@ -113,7 +114,8 @@ const routes = [
   ['/folha/pessoas/:id', Payroll.personForm],
   ['/folha/:id', Payroll.month],
   ['/imprimir/folha/:id', PayrollPrint.view, { print: true }],
-  ['/financeiro', Finance.view],
+  ['/financeiro', FinanceYear.view],
+  ['/financeiro/mes', Finance.view],
   ['/financeiro/analise', Finance.analysis],
   ['/financeiro/obrigacoes', Finance.obligations],
   ['/financeiro/obrigacoes/nova', Finance.form],

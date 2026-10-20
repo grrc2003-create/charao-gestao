@@ -33,9 +33,9 @@ async function payFlow(it, done) {
     submitLabel: 'Registrar pagamento',
     body: html`<p class="muted" style="margin:0 0 10px">${it.category} · vencimento ${fmtDate(it.due_date)} · previsto <b>${money(it.amount_expected)}</b></p>
       <div class="form-row"><div class="field"><label class="req" for="fp-d">Data do pagamento</label><input type="date" id="fp-d" name="paid_date" required max="${new Date().toISOString().slice(0, 10)}" value="${new Date().toISOString().slice(0, 10)}"></div>
-        <div class="field"><label for="fp-v">Valor pago (R$)</label><input id="fp-v" name="paid_amount" inputmode="decimal" value="${String(it.amount_expected).replace('.', ',')}"></div></div>
+        <div class="field"><label for="fp-v">Valor pago (R$)</label><input type="text" id="fp-v" name="paid_amount" inputmode="decimal" value="${String(it.amount_expected).replace('.', ',')}"></div></div>
       <div class="field"><label for="fp-f">Comprovante (foto ou PDF)</label><input type="file" id="fp-f" accept="image/*,application/pdf,.pdf" multiple class="fin-file"><span class="hint">Opcional. Fica anexado à tarefa da parcela.</span></div>
-      <div class="field"><label for="fp-n">Observação</label><input id="fp-n" name="notes" maxlength="1000"></div>`,
+      <div class="field"><label for="fp-n">Observação</label><input type="text" id="fp-n" name="notes" maxlength="1000"></div>`,
     onSubmit: async (d, form) => {
       const files = await readAttachments(form.querySelector('input[type=file]')?.files || []);
       return api(`/finance/items/${it.id}/pay`, { method: 'POST', body: { paid_date: d.paid_date, paid_amount: parseNum(d.paid_amount), notes: d.notes, files: files.map(f => ({ data: f.data, name: f.name })) } });
@@ -124,8 +124,9 @@ export async function view({ state, query, setQuery, render }) {
     title: 'Tarefas financeiras',
     html: html`
       ${pageHead({
+        back: { href: '#/financeiro', label: 'Planejamento anual' },
         eyebrow: 'Acesso restrito · Gestão da Empresa',
-        title: 'Tarefas financeiras',
+        title: 'Tarefas financeiras · visão do mês',
         actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas do financeiro</a>` : ''}
           <a class="btn btn-ghost" href="#/financeiro/analise">${icon('reports')}Análise comparativa</a>
           <a class="btn btn-ghost" href="#/financeiro/obrigacoes">${icon('settings')}Obrigações</a>
@@ -220,21 +221,25 @@ export async function form({ params, state, navigate }) {
   return {
     title: editing ? `Editar ${o.title}` : 'Nova obrigação',
     html: html`
-      ${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: editing ? 'Editar obrigação' : 'Nova obrigação financeira' })}
+      ${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: editing ? 'Editar tarefa financeira' : 'Nova tarefa financeira' })}
       <form class="card card-pad form" id="fo-form" novalidate style="max-width:760px">
+        <div class="segmented fo-kind" role="radiogroup" aria-label="Tipo de tarefa">
+          <label><input type="radio" name="fo_kind" value="pontual" ${v.frequency === 'unica' ? 'checked' : ''}>Pontual<small>acontece uma vez (ex.: IPVA, taxa, compra)</small></label>
+          <label><input type="radio" name="fo_kind" value="recorrente" ${v.frequency !== 'unica' ? 'checked' : ''}>Recorrente<small>repete (mensal, trimestral, anual…)</small></label>
+        </div>
         <div class="field"><label class="req" for="title">Descrição</label><input type="text" id="title" name="title" maxlength="160" required value="${v.title || ''}" placeholder="Ex.: DAS Simples Nacional, Aluguel do escritório, Folha de pagamento"></div>
         <div class="field" style="max-width:420px"><label for="category">Tipo da despesa</label><input type="text" id="category" name="category" list="fo-cats" maxlength="60" value="${v.category || ''}" placeholder="Escolha ou digite (ex.: Impostos, Aluguel e condomínio)">
           <datalist id="fo-cats">${meta.category_options.map(c => html`<option value="${c}"></option>`)}</datalist></div>
         <div class="form-row form-row-3">
           <div class="field"><label class="req" for="amount">Valor previsto (R$)</label><input type="text" id="amount" name="amount" required inputmode="decimal" value="${v.amount !== undefined ? String(v.amount).replace('.', ',') : ''}" placeholder="0,00"></div>
-          <div class="field"><label for="frequency">Periodicidade</label><select id="frequency" name="frequency">${Object.entries(FREQ).map(([k, l]) => opt(k, l, v.frequency))}</select></div>
+          <div class="field fo-rec"><label for="frequency">Periodicidade</label><select id="frequency" name="frequency">${Object.entries(FREQ).filter(([k]) => k !== 'unica' || v.frequency === 'unica').map(([k, l]) => opt(k, l, v.frequency))}</select></div>
           <div class="field"><label class="req" for="due_day">Dia do vencimento</label><input id="due_day" name="due_day" type="number" min="1" max="31" required value="${v.due_day}"></div>
         </div>
         <label class="switch"><input type="checkbox" name="variable" ${v.variable ? 'checked' : ''}>Valor variável (ajusto o valor de cada parcela)</label>
         <label class="switch fin-repeat" ${v.variable ? '' : 'hidden'}><input type="checkbox" name="repeat_last" ${v.repeat_last ? 'checked' : ''}>Estimar cada parcela com o valor do mês anterior (ex.: folha de pagamento, corrigida no fechamento da Folha)</label>
         <div class="form-row form-row-3">
-          <div class="field"><label class="req" for="start_month">Início</label><input id="start_month" name="start_month" type="month" required value="${v.start_month}"></div>
-          <div class="field"><label for="end_month">Término (opcional)</label><input id="end_month" name="end_month" type="month" value="${v.end_month || ''}"></div>
+          <div class="field"><label class="req" for="start_month" id="fo-start-l">${v.frequency === 'unica' ? 'Mês' : 'Início'}</label><input id="start_month" name="start_month" type="month" required value="${v.start_month}"></div>
+          <div class="field fo-rec"><label for="end_month">Término (opcional)</label><input id="end_month" name="end_month" type="month" value="${v.end_month || ''}"></div>
           <div class="field"><label for="assignee_id">Responsável</label><select id="assignee_id" name="assignee_id">${people.map(p => opt(p.id, p.name, v.assignee_id))}</select>
             <span class="hint">Só aparecem usuários com a liberação de Tarefas financeiras.</span></div>
         </div>
@@ -242,11 +247,24 @@ export async function form({ params, state, navigate }) {
         ${editing ? html`<label class="switch"><input type="checkbox" name="active" ${v.active ? 'checked' : ''}>Obrigação ativa (desmarque para parar de gerar parcelas)</label>` : ''}
         <span class="hint">As parcelas são geradas até 2 meses à frente, cada uma com a sua tarefa (responsável e prazo) na área “Financeiro (restrito)”. Alterações valem para as parcelas pendentes do mês atual em diante.</span>
         <div class="form-error" hidden></div>
-        <div class="form-actions"><a class="btn btn-ghost" href="#/financeiro/obrigacoes">Cancelar</a><button class="btn btn-primary" type="submit">${icon('check')}${editing ? 'Salvar' : 'Cadastrar obrigação'}</button></div>
+        <div class="form-actions"><a class="btn btn-ghost" href="#/financeiro/obrigacoes">Cancelar</a><button class="btn btn-primary" type="submit">${icon('check')}${editing ? 'Salvar' : 'Cadastrar tarefa'}</button></div>
       </form>`,
     mount(root) {
       const f = root.querySelector('#fo-form');
       f.variable.addEventListener('change', () => { f.querySelector('.fin-repeat').hidden = !f.variable.checked; });
+      // Pontual = periodicidade "Única" (sem término); recorrente escolhe a periodicidade
+      const kindSync = () => {
+        const pontual = f.querySelector('[name=fo_kind]:checked')?.value === 'pontual';
+        f.querySelectorAll('.fo-rec').forEach(el => { el.hidden = pontual; });
+        const sel = f.frequency;
+        if (pontual) {
+          if (![...sel.options].some(o => o.value === 'unica')) sel.add(new Option('Única', 'unica'));
+          sel.value = 'unica'; f.end_month.value = '';
+        } else if (sel.value === 'unica') sel.value = 'mensal';
+        root.querySelector('#fo-start-l').textContent = pontual ? 'Mês' : 'Início';
+      };
+      f.querySelectorAll('[name=fo_kind]').forEach(r => r.addEventListener('change', kindSync));
+      kindSync();
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));

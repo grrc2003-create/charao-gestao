@@ -1817,6 +1817,28 @@ async function main() {
   ok((await fo('POST', '/finance/import', { file: { name: 'teste.xlsx', data: fiFile } })).data.imported === 1, 'reenviar: só a que ficou de fora entra (as importadas viram "já existe")');
   ok((await fo('POST', '/finance/import/preview', { file: { name: 'x.xlsx', data: writeXlsx([{ name: 'A', rows: [['outra coisa']] }]).toString('base64') } })).status === 400, 'planilha fora do modelo é recusada');
 
+  // ---------- Tarefas financeiras › Planejamento anual ----------
+  const pyRec = (await fo('POST', '/finance/obligations', { title: 'Planejamento recorrente teste', category: 'Impostos', amount: 1000, frequency: 'mensal', due_day: 10, start_month: '2099-01' })).data.id;
+  const pyOne = (await fo('POST', '/finance/obligations', { title: 'Planejamento pontual teste', category: 'Outros', amount: 350, frequency: 'unica', due_day: 5, start_month: '2099-06' })).data.id;
+  let pyY = (await fo('GET', '/finance/year?ano=2099')).data;
+  const pyRow = id => pyY.groups.flatMap(g => g.rows).find(r => r.id === id);
+  ok(pyRow(pyRec).cells.every(c => c && c.status === 'projetado' && c.planned === 1000) && pyRow(pyRec).planned === 12000, 'recorrente: o ano inteiro projetado pela recorrência');
+  ok(pyRow(pyOne).cells.filter(Boolean).length === 1 && pyRow(pyOne).cells[5].planned === 350, 'pontual: só no mês dela');
+  await fo('PUT', '/finance/plan', { obligation_id: pyRec, ref_month: '2099-03', amount: '1.500,00' });
+  pyY = (await fo('GET', '/finance/year?ano=2099')).data;
+  ok(pyRow(pyRec).cells[2].planned === 1500 && pyRow(pyRec).cells[2].custom && pyRow(pyRec).cells[3].planned === 1000, 'previsto ajustado só no mês escolhido');
+  ok((await fo('PUT', '/finance/plan', { obligation_id: pyOne, ref_month: '2099-07', amount: 10 })).status === 400, 'não ajusta mês sem vencimento');
+  const pyIt = (await fo('POST', `/finance/obligations/${pyRec}/months/2099-03`)).data;
+  ok(pyIt.amount_expected === 1500 && pyIt.status === 'pendente', 'parcela gerada no mês ajustado nasce com o previsto do planejamento');
+  await fo('POST', `/finance/items/${pyIt.id}/pay`, { paid_amount: 1480.5 });
+  const pyIt2 = (await fo('POST', `/finance/obligations/${pyRec}/months/2099-04`)).data;
+  await fo('PUT', '/finance/plan', { obligation_id: pyRec, ref_month: '2099-04', amount: 1200 });
+  pyY = (await fo('GET', '/finance/year?ano=2099')).data;
+  const pyC = pyRow(pyRec).cells;
+  ok(pyC[2].status === 'pago' && pyC[2].real === 1480.5 && pyC[3].status === 'pendente' && pyC[3].planned === 1200 && pyC[3].item_id === pyIt2.id, 'real lançado no mês (pago) e previsto de parcela pendente ajustado');
+  ok(pyY.month_totals[2].real === 1480.5 && pyY.totals.real >= 1480.5 && pyRow(pyRec).real === 1480.5, 'totais do mês e do ano com o real');
+  ok((await biNo('GET', '/finance/year?ano=2099')).status === 403, 'planejamento só para quem tem Tarefas financeiras');
+
   // ---------- Projeto: planejamento por planilha (tarefas, subtarefas, dependências) ----------
   const plPid = (await fo('POST', '/projects', { name: 'Obra Planejamento Planilha', client: 'Cliente Plan', stages: [{ name: 'Fundação' }, { name: 'Bloco A' }] })).data.id;
   const plTplRes = await fetch(BASE + `/api/planning/template?projeto=${plPid}`, { headers: { 'X-Requested-With': 'charao-app', cookie: fiCookie } });

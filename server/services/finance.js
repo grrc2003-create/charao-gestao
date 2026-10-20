@@ -86,7 +86,9 @@ export function previousAmount(obligationId, ref) {
 function createItem(o, ref, userId) {
   const area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId());
   const due = dueOf(ref, o.due_day);
-  const amount = o.variable && o.repeat_last ? previousAmount(o.id, ref) ?? o.amount : o.amount;
+  // Previsto do mês ajustado no Planejamento anual tem prioridade
+  const plan = one('SELECT amount FROM finance_plan WHERE obligation_id = ? AND ref_month = ?', o.id, ref);
+  const amount = plan ? plan.amount : o.variable && o.repeat_last ? previousAmount(o.id, ref) ?? o.amount : o.amount;
   const r = run('INSERT INTO finance_items (obligation_id, ref_month, due_date, amount_expected, estimated) VALUES (?,?,?,?,?)', o.id, ref, due, amount, o.variable ? 1 : 0);
   const itemId = Number(r.lastInsertRowid);
   const assignee = o.assignee_id && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', o.assignee_id) ? o.assignee_id : null;
@@ -124,6 +126,98 @@ function pruneFuture(o, userId) {
     }
     run('DELETE FROM finance_items WHERE id = ?', it.id);
   }
+}
+
+// ---------- Planejamento anual: tarefas x 12 meses (previsto e real) ----------
+// Cada célula: parcela existente (pendente / atrasada / paga, com o valor real) ou mês projetado pela recorrência
+// (previsto = ajuste do mês no planejamento, ou o valor da tarefa).
+export function financeYear(ctx, y) {
+  requireFinance(ctx.user);
+  const year = /^\d{4}$/.test(String(y || '')) ? String(y) : today().slice(0, 4);
+  const keys = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  const ref = today();
+  const items = new Map();
+  for (const it of all(`SELECT i.*, (SELECT COUNT(*) FROM task_files f WHERE f.task_id = i.task_id AND f.kind = 'execucao') AS files FROM finance_items i WHERE ref_month BETWEEN ? AND ?`, keys[0], keys[11])) {
+    if (!items.has(it.obligation_id)) items.set(it.obligation_id, new Map());
+    items.get(it.obligation_id).set(it.ref_month, it);
+  }
+  const plans = new Map(all('SELECT * FROM finance_plan WHERE ref_month BETWEEN ? AND ?', keys[0], keys[11]).map(p => [`${p.obligation_id}|${p.ref_month}`, p.amount]));
+  const rows = [];
+  for (const o of all(`SELECT o.*, u.name AS assignee_name FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.category, o.title`)) {
+    const due = new Set(o.active ? monthsOf(o, keys[11]).filter(k => k >= keys[0]) : []);
+    const mine = items.get(o.id) || new Map();
+    const cells = keys.map(k => {
+      const it = mine.get(k);
+      if (it) {
+        const paid = it.status === 'paga';
+        return { ym: k, item_id: it.id, planned: r2(it.amount_expected), real: paid ? r2(it.paid_amount ?? it.amount_expected) : null, paid_date: it.paid_date, due_date: it.due_date,
+          status: paid ? 'pago' : it.due_date < ref ? 'atrasada' : 'pendente', estimated: !!it.estimated, files: it.files };
+      }
+      if (!due.has(k)) return null;
+      const p = plans.get(`${o.id}|${k}`);
+      return { ym: k, item_id: null, planned: r2(p ?? o.amount), custom: p != null, real: null, due_date: dueOf(k, o.due_day), status: 'projetado' };
+    });
+    if (!cells.some(Boolean)) continue;
+    const sum = f => r2(cells.reduce((s, c) => s + (c ? f(c) : 0), 0));
+    rows.push({ id: o.id, title: o.title, category: o.category, frequency: o.frequency, frequency_label: FREQ_LABEL[o.frequency], due_day: o.due_day, amount: o.amount,
+      variable: !!o.variable, active: !!o.active, assignee_name: o.assignee_name, cells, planned: sum(c => c.planned), real: sum(c => c.real || 0) });
+  }
+  const cats = [];
+  for (const r of rows) {
+    let g = cats.find(c => c.category === r.category);
+    if (!g) { g = { category: r.category, rows: [] }; cats.push(g); }
+    g.rows.push(r);
+  }
+  const monthTot = keys.map((k, i) => {
+    const cs = rows.map(r => r.cells[i]).filter(Boolean);
+    return { ym: k, planned: r2(cs.reduce((s, c) => s + c.planned, 0)), real: r2(cs.reduce((s, c) => s + (c.real || 0), 0)),
+      paid: cs.filter(c => c.status === 'pago').length, count: cs.length, late: cs.filter(c => c.status === 'atrasada').length };
+  });
+  const late = rows.flatMap(r => r.cells.filter(c => c && c.status === 'atrasada'));
+  return {
+    year, current: ref.slice(0, 7), months: keys,
+    groups: cats.map(g => ({ ...g, planned: r2(g.rows.reduce((s, r) => s + r.planned, 0)), real: r2(g.rows.reduce((s, r) => s + r.real, 0)),
+      months: keys.map((k, i) => ({ planned: r2(g.rows.reduce((s, r) => s + (r.cells[i]?.planned || 0), 0)), real: r2(g.rows.reduce((s, r) => s + (r.cells[i]?.real || 0), 0)) })) })),
+    totals: { planned: r2(monthTot.reduce((s, m) => s + m.planned, 0)), real: r2(monthTot.reduce((s, m) => s + m.real, 0)),
+      planned_to_date: r2(monthTot.filter(m => m.ym <= ref.slice(0, 7)).reduce((s, m) => s + m.planned, 0)),
+      late: late.length, late_amount: r2(late.reduce((s, c) => s + c.planned, 0)) },
+    month_totals: monthTot,
+    categories: CATEGORIES,
+  };
+}
+
+// Ajusta o previsto de um mês: parcela pendente → altera a parcela; mês ainda não gerado → guarda no planejamento
+export function setPlan(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const o = one('SELECT * FROM finance_obligations WHERE id = ?', intOrNull(body.obligation_id));
+  if (!o) throw notFound('Tarefa financeira não encontrada.');
+  const ym = /^\d{4}-\d{2}$/.test(String(body.ref_month || '')) ? body.ref_month : null;
+  if (!ym) throw badRequest('Mês inválido.');
+  const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', o.id, ym);
+  if (it) {
+    if (it.status === 'paga') throw badRequest('Parcela paga: desfaça o pagamento para alterar o previsto.');
+    return setItemAmount(ctx, it.id, { amount_expected: body.amount }, ip);
+  }
+  if (!monthsOf(o, ym).includes(ym)) throw badRequest('Esta tarefa não tem vencimento neste mês.');
+  const clear = body.amount === '' || body.amount === null || body.amount === undefined;
+  tx(() => {
+    if (clear) run('DELETE FROM finance_plan WHERE obligation_id = ? AND ref_month = ?', o.id, ym);
+    else run(`INSERT INTO finance_plan (obligation_id, ref_month, amount, updated_by) VALUES (?,?,?,?)
+      ON CONFLICT(obligation_id, ref_month) DO UPDATE SET amount = excluded.amount, updated_by = excluded.updated_by, updated_at = datetime('now')`, o.id, ym, r2(num(body.amount, 'Valor previsto')), ctx.user.id);
+    audit(ctx.user.id, 'finance', o.id, clear ? 'Previsto do mês voltou ao valor da tarefa' : 'Previsto do mês ajustado (planejamento)', { tarefa: o.title, mes: monthLabel(ym), valor: clear ? o.amount : r2(num(body.amount, 'Valor previsto')) }, ip);
+  });
+  return { ok: true };
+}
+
+// Lança o real de um mês ainda não gerado (pagamento antecipado): cria a parcela do mês
+export function ensureItem(ctx, obligationId, ym) {
+  requireFinance(ctx.user);
+  const o = one('SELECT * FROM finance_obligations WHERE id = ?', obligationId);
+  if (!o) throw notFound('Tarefa financeira não encontrada.');
+  if (!/^\d{4}-\d{2}$/.test(String(ym || '')) || !monthsOf(o, ym).includes(ym)) throw badRequest('Esta tarefa não tem vencimento neste mês.');
+  const it = one('SELECT id FROM finance_items WHERE obligation_id = ? AND ref_month = ?', o.id, ym);
+  const id = it ? it.id : tx(() => createItem(o, ym, ctx.user.id));
+  return getItem(ctx, id);
 }
 
 // ---------- Obrigações ----------

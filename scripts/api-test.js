@@ -1869,6 +1869,16 @@ async function main() {
   ok(!acD.actions.some(a => a.kind === 'medir' && a.code === acA1.code), '100% medido não é cobrado de medição mensal');
   ok(acA2.summary.balance > 0 && !acD.actions.some(a => a.kind === 'medir' && a.code === acA2.code), 'contrato com saldo, mas sem medição mês a mês recente, não é cobrado de medição');
   ok(acD.actions.filter(a => a.kind === 'medir').every(a => a.group && a.group.startsWith('Sem medição de')), 'avisos de medição agrupáveis pelo mês');
+  // Consistência: boletim emitido (aguardando NF) aparece igual no painel, no contrato e por cliente; contrato com pendência não é "encerrar"
+  const csId = (await fo('POST', '/contracts', { client: 'Cliente Consistência', title: 'Serviço único', bulletin_prefix: 'CONS', items: [{ description: 'Serviço', unit: 'vb', unit_price: 5000, quantity: 1 }] })).data.id;
+  const csM = (await fo('POST', `/contracts/${csId}/measurements`, { ref_month: '2026-01' })).data.id;
+  const csIt = (await fo('GET', `/contracts/${csId}`)).data.items[0].id;
+  await fo('PUT', `/measurements/${csM}`, { lines: { [csIt]: 1 }, adjustments: [{ description: 'Desconto comercial', amount: -300 }] });
+  await fo('POST', `/measurements/${csM}/actions/issue`);
+  const csD = (await fo('GET', '/contracts/dashboard')).data;
+  const csC = csD.contracts.find(c => c.id === csId), csB = csD.by_client.find(b => b.client === 'Cliente Consistência');
+  ok(csC.summary.to_bill === 4700 && csC.summary.balance === 0 && csB.to_bill === 4700 && csB.balance === 0, `aguardando NF igual no contrato e por cliente, mesmo com desconto (${csC.summary.to_bill}/${csB.to_bill})`);
+  ok(csD.actions.some(a => a.kind === 'faturar' && a.client === 'Cliente Consistência') && !csD.actions.some(a => a.kind === 'encerrar' && a.code === csC.code), '100% medido com boletim aguardando NF: aparece em Faturar e não em "encerrar"');
 
 }
 

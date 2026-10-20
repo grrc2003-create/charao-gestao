@@ -445,10 +445,12 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   const byClient = new Map();
   for (const c of list) {
     const k = c.client;
-    if (!byClient.has(k)) byClient.set(k, { client: k, contracts: 0, value: 0, measured: 0, billed: 0, received: 0, to_receive: 0 });
+    if (!byClient.has(k)) byClient.set(k, { client: k, contracts: 0, value: 0, measured: 0, measured_total: 0, billed: 0, received: 0, to_receive: 0, to_bill: 0, balance: 0 });
     const b = byClient.get(k);
     b.contracts++;
-    for (const f of ['value', 'measured', 'billed', 'received', 'to_receive']) b[f] = r2(b[f] + (c.summary[f] || 0));
+    // Mesmos totais por contrato do restante do painel (aguardando NF = boletins emitidos; saldo = contratado − medido)
+    for (const f of ['value', 'measured', 'measured_total', 'billed', 'received', 'to_receive', 'to_bill']) b[f] = r2(b[f] + (c.summary[f] || 0));
+    b.balance = r2(b.balance + Math.max(0, c.summary.balance || 0));
   }
   // Ano corrente x mesmo período do ano anterior (faturado pela data da NF, recebido pela data do pagamento)
   const ref = today();
@@ -480,6 +482,9 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   const recent = [prevMonth(1), prevMonth(2)];
   for (const c of active) {
     const s = c.summary;
+    // 100% medido e nada pendente (sem boletim aguardando NF, nada a receber, sem rascunho): sugere encerrar
+    const pending = s.to_bill > 0.005 || s.to_receive > 0.005 || s.drafts;
+    if (s.value > 0 && s.balance <= 0.005 && pending) continue;
     if (s.value > 0 && s.balance <= 0.005) {
       actions.push({ kind: 'encerrar', severity: 'warning', text: '100% medido — encerrar contrato?', group: '100% medido — encerrar contrato?', client: c.client, code: c.code, href: `#/contratos/${c.id}/editar` });
       continue;

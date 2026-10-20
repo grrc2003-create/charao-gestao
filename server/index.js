@@ -17,6 +17,7 @@ import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
 import * as Contracts from './services/contracts.js';
+import * as BmImport from './services/bm-import.js';
 import * as Finance from './services/finance.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
@@ -312,6 +313,8 @@ api.post('/api/contracts', (req, res, { ctx, body }) => send(res, 201, { id: Con
 api.get('/api/contracts/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))));
 api.put('/api/contracts/:id', (req, res, { ctx, params, body }) => { Contracts.updateContract(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))); });
 api.post('/api/contracts/:id/measurements', (req, res, { ctx, params, body }) => send(res, 201, { id: Contracts.createMeasurement(ctx, intOrNull(params.id), body, clientIp(req)) }));
+api.post('/api/contracts/import-bms/preview', (req, res, { ctx, body }) => send(res, 200, BmImport.previewImport(ctx, body)));
+api.post('/api/contracts/import-bms', (req, res, { ctx, body }) => send(res, 200, BmImport.applyImport(ctx, body, clientIp(req))));
 api.get('/api/measurements/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getMeasurement(ctx, intOrNull(params.id))));
 api.put('/api/measurements/:id', (req, res, { ctx, params, body }) => send(res, 200, Contracts.updateMeasurement(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/measurements/:id/actions/:action', (req, res, { ctx, params, body }) => send(res, 200, Contracts.measurementAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));

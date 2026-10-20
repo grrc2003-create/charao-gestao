@@ -294,7 +294,7 @@ export async function list({ state, query, setQuery, render }) {
       ${pageHead({
         eyebrow: 'Acesso restrito · liberação por usuário',
         title: 'Contratos e faturamento',
-        actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas de contratos</a>` : ''}<a class="btn btn-accent" href="#/contratos/novo">${icon('plus')}Novo contrato</a>`,
+        actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas de contratos</a>` : ''}<a class="btn btn-ghost" href="#/contratos/importar-bms">${icon('file')}Importar BMs</a><a class="btn btn-accent" href="#/contratos/novo">${icon('plus')}Novo contrato</a>`,
       })}
       <div class="ct-dash">
         <section class="card ct-hero">

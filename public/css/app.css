@@ -2426,3 +2426,40 @@ tr.is-inactive td { opacity: .55; }
 .wp-legend-i i { width: 14px; height: 14px; border-radius: 4px; background: var(--pc); flex: none; }
 .wp-legend-i b { font-family: var(--mono); font-size: 11.5px; color: var(--ink); }
 @media (max-width: 899px) { .wp-legend { font-size: 12px; gap: 6px 12px; } }
+
+/* Contratos: importar BMs das planilhas de recebimentos */
+.bi-pick { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.bi-drop { display: flex; align-items: center; gap: 12px; width: 100%; padding: 18px; border: 2px dashed var(--line-strong); border-radius: var(--radius); background: var(--navy-50); cursor: pointer; }
+.bi-drop:hover { border-color: var(--navy); }
+.bi-drop svg { width: 26px; height: 26px; color: var(--navy); flex: none; }
+.bi-drop span { display: flex; flex-direction: column; }
+.bi-drop small { color: var(--muted); font-size: 12.5px; }
+.bi-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.bi-files li { display: flex; align-items: center; gap: 6px; }
+.bi-files svg { width: 15px; height: 15px; color: var(--muted); }
+.bi-files small { color: var(--muted); }
+.bi-tiles { margin-bottom: 4px; }
+.bi-warn { display: flex; gap: 10px; margin-top: 12px; padding: 10px 12px; border-radius: var(--radius); background: #FBF1DC; color: #7A520A; font-size: 13px; }
+.bi-warn ul { margin: 4px 0 0; padding-left: 18px; }
+.bi-group { padding: 12px 16px; border-top: 1px solid var(--line); }
+.bi-group.is-done { background: var(--navy-50); }
+.bi-group-h { display: flex; justify-content: space-between; gap: 12px; }
+.bi-group-t { display: flex; flex-direction: column; min-width: 0; }
+.bi-group-t b { font-size: 14px; }
+.bi-group-t small, .bi-group-n span, .bi-group-n small { font-size: 12px; color: var(--muted); }
+.bi-group-n { display: flex; flex-direction: column; align-items: flex-end; text-align: right; flex: none; }
+.bi-group-n b { font-variant-numeric: tabular-nums; }
+.bi-group-f { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
+.bi-group-f select { flex: 1 1 280px; max-width: 520px; }
+.bi-group details summary { cursor: pointer; font-size: 12.5px; color: var(--navy); font-weight: 600; }
+.bi-table td, .bi-table th { font-size: 12.5px; vertical-align: top; }
+.bi-table tr.is-exists td { color: var(--muted); }
+.bi-confirm { position: sticky; bottom: 0; display: flex; justify-content: flex-end; padding: 12px 0; background: linear-gradient(transparent, var(--bg) 30%); z-index: 3; }
+@media (max-width: 899px) {
+  .bi-confirm { bottom: calc(var(--bottombar-h) + env(safe-area-inset-bottom, 0px)); }
+  .bi-confirm .btn { width: 100%; justify-content: center; }
+}
+@media (max-width: 560px) {
+  .bi-group-h { flex-direction: column; gap: 4px; }
+  .bi-group-n { align-items: flex-start; text-align: left; }
+}

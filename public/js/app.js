@@ -27,6 +27,7 @@ import * as Audit from './views/audit.js';
 import * as Settings from './views/settings.js';
 import * as Recurrences from './views/recurrences.js';
 import * as Contracts from './views/contracts.js';
+import * as BmImport from './views/bm-import.js';
 import * as Finance from './views/finance.js';
 import * as ReportMeasurement from './views/report-measurement.js';
 import * as Processes from './views/processes.js';
@@ -98,6 +99,7 @@ const routes = [
   ['/projetos/:id/registros/:rid/editar', Records.form],
   ['/contratos', Contracts.list],
   ['/contratos/novo', Contracts.form],
+  ['/contratos/importar-bms', BmImport.importBms],
   ['/contratos/:id', Contracts.view],
   ['/contratos/:id/editar', Contracts.form],
   ['/medicoes/:id', Contracts.measurement],

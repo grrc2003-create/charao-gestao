@@ -2,6 +2,7 @@
 import { html, raw, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
+import { receiptsCard, bindReceipts } from './receipts.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 export const money = v => BRL.format(Number(v) || 0);
@@ -248,15 +249,15 @@ function bindRanking(root, d) {
     if (rest.length) top.push({ client: `Outros (${rest.length})`, total: rest.reduce((s, r) => s + r.total, 0), received: rest.reduce((s, r) => s + r.received, 0), nfs: rest.reduce((s, r) => s + r.nfs, 0), contracts: new Set(), other: true });
     const label = k === 'tudo' ? 'todo o período' : `${a.split('-').reverse().join('/')} a ${b.split('-').reverse().join('/')}`;
     body.innerHTML = (rows.length ? html`
-      <div class="ct-rk-head"><span>Faturado (pela data da NF) · ${label}</span><b>${money(total)}</b><small>${rows.length} cliente(s)</small></div>
+      <div class="ct-rk-head"><span>Faturado (data da NF ou vencimento da parcela) · ${label}</span><b>${money(total)}</b><small>${rows.length} cliente(s)</small></div>
       <ol class="ct-rk-list">${top.map((r, i) => html`<li class="${r.other ? 'is-other' : ''}">
         <span class="ct-rk-pos">${r.other ? '' : `${i + 1}º`}</span>
         <div class="ct-rk-main">
-          <div class="ct-rk-name"><b>${r.client}</b><span>${r.nfs} NF · recebido ${money(r.received)}</span></div>
+          <div class="ct-rk-name"><b>${r.client}</b><span>${r.nfs} lanç. · recebido ${money(r.received)}</span></div>
           <div class="ct-rk-bar"><i style="width:calc((100% - 120px) * ${Math.max(0.015, r.total / max).toFixed(4)})"></i><em>${money(r.total)}</em></div>
         </div>
         <span class="ct-rk-share">${String(total ? Math.round((r.total / total) * 1000) / 10 : 0).replace('.', ',')}%</span></li>`)}</ol>`
-      : html`<p class="muted" style="margin:0">Nenhuma nota fiscal emitida neste período.</p>`).toString();
+      : html`<p class="muted" style="margin:0">Nada faturado neste período.</p>`).toString();
   };
   sec.querySelectorAll('[data-rk]').forEach(b => b.addEventListener('click', () => { sec.querySelectorAll('[data-rk]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(b.dataset.rk); }));
   draw('ano');
@@ -280,7 +281,17 @@ export async function list({ state, query, setQuery, render }) {
 
   const contractRow = c => {
     const s = c.summary;
-    return html`<a class="ct-row" href="#/contratos/${c.id}">
+    const rc = s.receipts;
+    if (!s.items && !s.measurements) {
+      // Contrato só de recebimentos (ex.: importado das planilhas): recebido x a receber
+      return html`<a class="ct-row" href="#/contratos/${c.id}" data-ct-q="${`${c.code} ${c.client} ${c.title}`.toLowerCase()}">
+        <div class="ct-row-id"><span class="mono">${c.code}</span><b>${c.client}</b><small>${c.title}</small></div>
+        <div class="ct-row-bar">${compositionBar(pipeParts({ received: s.received, to_receive: s.to_receive, to_bill: 0, balance: 0 }), s.received + s.to_receive)}
+          <div class="ct-row-meta"><span><b>${rc.count}</b> recebimento(s)</span>${rc.last_received ? html`<span>último ${fmtDate(rc.last_received)}</span>` : ''}${rc.overdue_count ? html`<span class="m-badge rc-late">${rc.overdue_count} vencido(s)</span>` : ''}${rc.rt_received ? html`<span>RT ${money(rc.rt_received)}</span>` : ''}</div></div>
+        <div class="ct-row-nums"><span><small>Recebido</small><b>${money(s.received)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b></span><span><small>Vencido</small><b class="${rc.overdue ? 'is-neg' : ''}">${money(rc.overdue)}</b></span></div>
+        <span class="chev">${icon('chevron')}</span></a>`;
+    }
+    return html`<a class="ct-row" href="#/contratos/${c.id}" data-ct-q="${`${c.code} ${c.client} ${c.title}`.toLowerCase()}">
       <div class="ct-row-id"><span class="mono">${c.code}</span><b>${c.client}</b><small>${c.title}</small></div>
       <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
         <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
@@ -294,7 +305,7 @@ export async function list({ state, query, setQuery, render }) {
       ${pageHead({
         eyebrow: 'Acesso restrito · liberação por usuário',
         title: 'Contratos e faturamento',
-        actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas de contratos</a>` : ''}<a class="btn btn-accent" href="#/contratos/novo">${icon('plus')}Novo contrato</a>`,
+        actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas de contratos</a>` : ''}<a class="btn btn-ghost" href="#/contratos/outras-entradas">${icon('wallet')}Outras entradas</a><a class="btn btn-ghost" href="#/contratos/importar">${icon('file')}Importar recebimentos</a><a class="btn btn-accent" href="#/contratos/novo">${icon('plus')}Novo contrato</a>`,
       })}
       <div class="ct-dash">
         <section class="card ct-hero">
@@ -319,7 +330,7 @@ export async function list({ state, query, setQuery, render }) {
             ['Medido (total)', money(t.measured), 'boletins emitidos'],
             ['Faturado (total)', money(t.billed), `${money(t.to_bill)} aguardando NF`],
             ['Recebido (total)', money(t.received), ''],
-            ['A receber', money(t.to_receive), 'faturado e não recebido'],
+            ['A receber', money(t.to_receive), 'faturado/parcelas não recebidas'],
             ['Saldo a medir', money(t.balance), t.drafts ? `${t.drafts} medição(ões) em rascunho` : 'contratos vigentes']]
             .map(([l, v, f]) => html`<div class="ct-tile"><span>${l}</span><b>${v}</b>${f ? html`<small>${f}</small>` : ''}</div>`)}
         </div>
@@ -341,13 +352,13 @@ export async function list({ state, query, setQuery, render }) {
 
         <div class="ct-two">
           <section class="card">
-            <div class="card-head"><h2>${icon('clock')}A receber por antiguidade</h2><span class="sub">dias desde a NF</span></div>
+            <div class="card-head"><h2>${icon('clock')}A receber por antiguidade</h2><span class="sub">dias desde a NF ou o vencimento</span></div>
             <div class="card-body ct-aging">
               ${d.aging.map((a, i) => html`<div class="ct-age ${i === 3 && a.total ? 'is-crit' : ''}">
                 <span class="ct-age-l">${i === 3 && a.total ? html`${icon('alert')} ` : ''}${a.label}</span>
                 <div class="ct-age-bar"><i style="width:${(a.total / agingMax) * 100}%"></i></div>
-                <span class="ct-age-v"><b>${money(a.total)}</b><small>${a.count} NF</small></span></div>`)}
-              ${!t.to_receive ? html`<p class="muted" style="margin:6px 0 0">Nenhuma nota fiscal em aberto.</p>` : ''}
+                <span class="ct-age-v"><b>${money(a.total)}</b><small>${[a.count ? `${a.count} NF` : '', a.receipts ? `${a.receipts} parcela(s)` : ''].filter(Boolean).join(' · ') || '0'}</small></span></div>`)}
+              ${!t.to_receive ? html`<p class="muted" style="margin:6px 0 0">Nada em aberto.</p>` : ''}
             </div>
           </section>
           <section class="card">
@@ -362,8 +373,14 @@ export async function list({ state, query, setQuery, render }) {
 
         ${d.by_client.length > 1 ? html`<section class="card">
           <div class="card-head"><h2>${icon('team')}Por cliente</h2><span class="sub">composição da carteira de cada cliente</span></div>
-          <div class="card-body ct-clients">${d.by_client.map(b => html`<div class="ct-client"><div class="ct-client-h"><b>${b.client}</b><span>${money(b.value)} · ${b.contracts} contrato(s)</span></div>
-            ${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: Math.max(0, b.measured - b.billed), balance: Math.max(0, b.value - b.measured) }), b.value)}</div>`)}</div>
+          ${(() => {
+            const tot = b => Math.max(b.value, b.received + b.to_receive);
+            const cl = [...d.by_client].sort((x, y) => tot(y) - tot(x));
+            const one = b => html`<div class="ct-client"><div class="ct-client-h"><b>${b.client}</b><span>${money(b.value || b.received + b.to_receive)}${b.value ? '' : ' recebido + a receber'} · ${b.contracts} contrato(s)</span></div>
+              ${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: Math.max(0, b.measured - b.billed + 0), balance: Math.max(0, b.value - b.measured) }), tot(b))}</div>`;
+            return html`<div class="card-body ct-clients">${cl.slice(0, 10).map(one)}
+              ${cl.length > 10 ? html`<details class="ct-more-clients"><summary>Ver os outros ${cl.length - 10} cliente(s)</summary><div class="ct-clients">${cl.slice(10).map(one)}</div></details>` : ''}</div>`;
+          })()}
         </section>` : ''}
 
         <section class="card">
@@ -371,12 +388,17 @@ export async function list({ state, query, setQuery, render }) {
             <div class="chips" role="group" aria-label="Filtrar contratos">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
               html`<button class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n">${k === 'todos' ? d.contracts.length : d.contracts.filter(c => c.status === k).length}</span></button>`)}</div></div>
           <ul class="ct-port-legend is-inline">${pipeParts(port).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span></li>`)}</ul>
+          ${d.contracts.length > 6 ? html`<div class="ct-search"><input type="search" id="ct-q" placeholder="Buscar contrato, cliente ou obra" aria-label="Buscar contrato"></div>` : ''}
           ${shown.length ? html`<div class="ct-rows">${shown.map(contractRow)}</div>`
             : html`<div class="card-body muted">${d.contracts.length ? 'Nenhum contrato neste filtro.' : 'Nenhum contrato cadastrado. Comece em “Novo contrato”.'}</div>`}
         </section>
       </div>`,
     mount(root) {
       root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.ctf, meses: months }); render(); }));
+      root.querySelector('#ct-q')?.addEventListener('input', e => {
+        const q = e.target.value.trim().toLowerCase();
+        root.querySelectorAll('.ct-rows .ct-row').forEach(a => { a.hidden = !!q && !a.dataset.ctQ.includes(q); });
+      });
       root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery({ status: filter, meses: b.dataset.meses }); render(); }));
       bindAnnual(root, d);
       bindRanking(root, d);
@@ -511,10 +533,12 @@ export async function form({ params, state, navigate }) {
 }
 
 // ---------- Contrato: itens e medições ----------
-export async function view({ params, state, navigate }) {
+export async function view({ params, state, navigate, render }) {
   denied(state);
   const c = await api(`/contracts/${params.id}`);
   const s = c.summary;
+  const rc = s.receipts;
+  const onlyReceipts = !c.items.length && !c.measurements.length;
   const today = new Date();
   const nextRef = (() => {
     const last = c.measurements.at(-1)?.ref_month;
@@ -526,17 +550,25 @@ export async function view({ params, state, navigate }) {
   return {
     title: `${c.code} · ${c.client}`,
     html: html`
-      ${pageHead({ back: { href: '#/contratos', label: 'Contratos' }, eyebrow: `${c.code} · ${CT_STATUS[c.status]}`, title: c.client, sub: `${c.title}${c.number ? ` · contrato ${c.number}` : ''}${c.start_date ? ` · ${fmtDate(c.start_date)} → ${fmtDate(c.end_date)}` : ''}`,
-        actions: html`<a class="btn btn-ghost" href="#/contratos/${c.id}/editar">${icon('edit')}Editar</a>${c.status !== 'encerrado' ? html`<button type="button" class="btn btn-accent" id="new-m">${icon('plus')}Nova medição</button>` : ''}` })}
-      <div class="kpis kpis-6">
+      ${pageHead({ back: { href: '#/contratos', label: 'Contratos' }, eyebrow: `${c.code} · ${CT_STATUS[c.status]}`, title: c.client, sub: `${c.title}${c.number ? ` · contrato ${c.number}` : ''}${c.start_date ? (c.end_date ? ` · ${fmtDate(c.start_date)} → ${fmtDate(c.end_date)}` : ` · desde ${fmtDate(c.start_date)}`) : ''}`,
+        actions: html`<a class="btn btn-ghost" href="#/contratos/${c.id}/editar">${icon('edit')}Editar</a>${c.status !== 'encerrado' && c.items.length ? html`<button type="button" class="btn btn-accent" id="new-m">${icon('plus')}Nova medição</button>` : ''}` })}
+      ${onlyReceipts ? html`<div class="kpis kpis-6">
+        ${kpi({ label: 'Recebido', value: money(s.received), color: '#2E8B57', foot: `${rc.count} lançamento(s)` })}
+        ${kpi({ label: 'A receber', value: money(s.to_receive), color: '#8E6CB0', foot: rc.next_due ? `próximo ${fmtDate(rc.next_due)}` : `${rc.open_count} em aberto` })}
+        ${kpi({ label: 'Vencido', value: money(rc.overdue), color: '#C0392B', foot: `${rc.overdue_count} parcela(s)` })}
+        ${kpi({ label: 'RT recebida', value: money(rc.rt_received), color: '#A86F0E', foot: 'reserva técnica (fornecedores)' })}
+        ${kpi({ label: 'Último recebimento', value: rc.last_received ? fmtDate(rc.last_received) : '—', color: '#2A3D50' })}
+        ${kpi({ label: 'Total (recebido + a receber)', value: money(s.received + s.to_receive), color: '#707E8B' })}
+      </div>` : html`<div class="kpis kpis-6">
         ${kpi({ label: 'Valor do contrato', value: money(s.value), color: '#2A3D50', foot: `${c.items.length} item(ns)` })}
         ${kpi({ label: 'Medido', value: money(s.measured_total), color: '#2F6FB3', foot: `${pct(s.pct)} do contrato` })}
         ${kpi({ label: 'Faturado', value: money(s.billed), color: '#8E6CB0' })}
         ${kpi({ label: 'Recebido', value: money(s.received), color: '#2E8B57' })}
         ${kpi({ label: 'A receber', value: money(s.to_receive), color: '#C0392B' })}
         ${kpi({ label: 'Saldo a medir', value: money(s.balance), color: '#707E8B' })}
-      </div>
-      <section class="card section">
+      </div>`}
+      ${receiptsCard(c.receipts, { client: c.client })}
+      ${onlyReceipts ? html`<p class="hint ct-norm">Contrato sem planilha contratual (só recebimentos). Para medir por boletim, use <a href="#/contratos/${c.id}/editar">Editar</a> e cadastre os itens.</p>` : html`<section class="card section">
         <div class="card-head"><h2>${icon('file')}Medições (boletins)</h2><span class="sub">${c.measurements.length} medição(ões)</span></div>
         ${c.measurements.length ? html`<div class="table-wrap"><table class="data ct-table"><thead><tr><th>Boletim</th><th>Referência</th><th>Período</th><th class="num">A faturar</th><th>Situação</th><th>NF</th><th>Recebido</th></tr></thead>
           <tbody>${[...c.measurements].reverse().map(m => html`<tr data-href="#/medicoes/${m.id}" tabindex="0"><td class="mono"><b>${m.code}</b></td><td>${ym(m.ref_month)}</td><td class="nowrap">${fmtDate(m.period_start)} → ${fmtDate(m.period_end)}</td>
@@ -549,12 +581,13 @@ export async function view({ params, state, navigate }) {
         <div class="table-wrap"><table class="data ct-table"><thead><tr><th>Item</th><th>Descrição</th><th>Unid.</th><th class="num">Preço unit.</th><th class="num">Qtd. contrato</th><th class="num">Valor</th><th class="num">Qtd. medida</th><th class="num">Saldo (qtd.)</th><th class="num">Saldo (R$)</th></tr></thead>
           <tbody>${c.items.map(i => html`<tr><td class="mono">${i.seq}</td><td>${i.description}${i.additive ? html` <span class="pill pill-sand">Aditivo</span>` : ''}</td><td>${i.unit}</td><td class="num">${money(i.unit_price)}</td>
             <td class="num">${qty(i.quantity)}</td><td class="num">${money(i.value)}</td><td class="num">${qty(i.measured_qty)}</td><td class="num ${i.balance_qty < 0 ? 'is-neg' : ''}">${qty(i.balance_qty)}</td><td class="num ${i.balance_value < 0 ? 'is-neg' : ''}">${money(i.balance_value)}</td></tr>`)}</tbody></table></div>
-      </section>
+      </section>`}
       ${c.scope || c.payment_info || c.notes ? html`<section class="card section"><div class="card-body"><dl class="kv">
         ${c.scope ? html`<dt>Escopo</dt><dd>${c.scope}</dd>` : ''}${c.payment_info ? html`<dt>Pagamento</dt><dd style="white-space:pre-line">${c.payment_info}</dd>` : ''}
         ${c.project_code ? html`<dt>Obra</dt><dd><a href="#/projetos/${c.project_id}">${c.project_code} · ${c.project_name}</a></dd>` : ''}${c.notes ? html`<dt>Observações</dt><dd style="white-space:pre-line">${c.notes}</dd>` : ''}</dl></div></section>` : ''}`,
     mount(root) {
       root.querySelectorAll('tr[data-href]').forEach(tr => tr.addEventListener('click', () => (location.hash = tr.dataset.href)));
+      bindReceipts(root, c.receipts, { contractId: c.id, client: c.client, onChange: render });
       root.querySelector('#new-m')?.addEventListener('click', async () => {
         const [y, m] = nextRef.split('-').map(Number);
         const last = new Date(Date.UTC(y, m, 0)).getUTCDate();

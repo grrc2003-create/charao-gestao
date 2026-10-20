@@ -11,7 +11,7 @@ import { badRequest, str } from '../lib/http.js';
 import { readXlsx, serialToDate } from '../lib/xlsx.js';
 import { audit } from './audit.js';
 import { today, addDays } from './metrics.js';
-import { requireContracts, monthLabel } from './contracts.js';
+import { requireContracts, monthLabel, suggestContractType, COMPANY_KEYS } from './contracts.js';
 
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -19,7 +19,7 @@ const hkey = s => norm(s).replace(/[^a-z0-9]/g, '');
 const COLS = {
   due: 'datadevencimento', received_date: 'dataderecebimento', amount: 'totaldaparcela', received_amount: 'totalrecebido',
   interest: 'jurosmultas', discount: 'descontos', received: 'recebido', nature: 'natureza', description: 'descricao', doc: 'ndocumento',
-  client: 'cliente', obra: 'obra', installment: 'condicoesderecebimento',
+  client: 'cliente', obra: 'obra', installment: 'condicoesderecebimento', account: 'contabancaria',
 };
 const OTHER_NATURES = new Set(['aportedecapital', 'emprestimo', 'reembolso']);
 const cellDate = v => {
@@ -73,7 +73,7 @@ function parseFiles(files) {
       seen.set(base, occ);
       rows.push({
         import_key: createHash('sha1').update(`${base}|${occ}`).digest('hex').slice(0, 32),
-        file: name, line, obra, payer: txt(v('client')), nature, description, doc: txt(v('doc')), installment: txt(v('installment')),
+        file: name, line, obra, payer: txt(v('client')), nature, description, doc: txt(v('doc')), installment: txt(v('installment')), account: txt(v('account')),
         kind: !obra || OTHER_NATURES.has(hkey(nature)) ? 'outra' : hkey(description) === 'rt' || hkey(nature) === 'outrasreceitas' ? 'rt' : 'parcela',
         due_date: due, amount, received,
         received_date: received ? cellDate(v('received_date')) || due : null,
@@ -95,6 +95,11 @@ const mainClient = rows => {
 const initials = client => (String(client).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().match(/[A-Z0-9]+/g) || ['BM'])
   .filter(w => w.length > 2 || /\d/.test(w)).map(w => w[0]).join('').slice(0, 4) || 'BM';
 const natureLabel = n => txt(n) || 'Serviços';
+// Empresa sugerida: LuS quando a maior parte do valor caiu numa conta "(LUS)"
+const suggestCompany = rows => {
+  const lus = rows.filter(r => /\blus\b/i.test(norm(r.account))).reduce((s, r) => s + r.amount, 0);
+  return lus > rows.reduce((s, r) => s + r.amount, 0) / 2 ? 'lus' : 'charao';
+};
 
 // BMs de uma lista de linhas recebidas: um por mês do vencimento
 function monthsOf(rows) {
@@ -154,7 +159,7 @@ function analyze(rows, contractId) {
 
 function plan(files) {
   const { rows, warnings, files: info } = parseFiles(files);
-  const contracts = all('SELECT id, code, client, title, status, bulletin_prefix FROM contracts ORDER BY code');
+  const contracts = all('SELECT id, code, client, title, status, bulletin_prefix, company, company_auto, type_id FROM contracts ORDER BY code');
   const byTitle = new Map(contracts.map(c => [hkey(c.title), c]));
   const groups = new Map();
   for (const r of rows.filter(x => x.kind !== 'outra')) {
@@ -165,9 +170,14 @@ function plan(files) {
   const out = [...groups.values()].map(g => {
     const match = byTitle.get(g.key) || null;
     const a = analyze(g.rows, match?.id || null);
+    // Classificação: contrato novo usa a sugestão; já cadastrado mantém o que tem (empresa escolhida à mão não muda)
+    const sugCompany = suggestCompany(g.rows), sugType = suggestContractType(g.obra);
+    const company = match ? (match.company_auto ? sugCompany : match.company) : sugCompany;
+    const type_id = match ? (match.type_id || sugType) : sugType;
     return {
+      company, type_id, reclassify: !!match && (company !== match.company || (type_id || null) !== (match.type_id || null)),
       key: g.key, obra: g.obra, client: mainClient(g.rows), payers: [...new Set(g.rows.map(r => r.payer).filter(Boolean))], rows: g.rows,
-      match: match && { id: match.id, code: match.code, client: match.client, title: match.title },
+      match: match && { id: match.id, code: match.code, client: match.client, title: match.title, company: match.company, type_id: match.type_id },
       months: a.months.map(({ rows: _r, ...m }) => m), bms: a.months.length, total: r2(a.months.reduce((s, m) => s + m.total, 0)),
       rt: r2(a.months.reduce((s, m) => s + m.adjustments.filter(x => x.description.startsWith('RT - ')).reduce((t, x) => t + x.amount, 0), 0)),
       value_add: a.value_add, natures: a.natures, open_add: a.open_add, open_count: a.open_count, open_total: a.open_total,
@@ -180,6 +190,7 @@ function plan(files) {
     files: info, warnings, total_rows: rows.length, groups: out,
     skipped: { others: others.length, others_total: r2(others.reduce((s, r) => s + (r.received_amount ?? r.amount), 0)) },
     contracts: contracts.map(c => ({ id: c.id, code: c.code, client: c.client, title: c.title })),
+    types: all('SELECT id, name FROM contract_types WHERE active = 1 ORDER BY sort_order, id'),
   };
 }
 
@@ -190,21 +201,44 @@ export function previewImport(ctx, body) {
   return { ...p, groups: p.groups.map(({ rows: _r, ...g }) => g) };
 }
 
-// Confirma. mapping: { [obra]: 'new' | id do contrato | 'skip' }
+// Confirma. mapping: { [obra]: 'new' | id do contrato | 'skip' } · classify: { [obra]: { company, type_id } }
 export function applyImport(ctx, body, ip) {
   requireContracts(ctx.user);
   const p = plan(body.files);
   const mapping = body.mapping && typeof body.mapping === 'object' ? body.mapping : {};
+  const classify = body.classify && typeof body.classify === 'object' ? body.classify : {};
+  const typeIds = new Set(all('SELECT id FROM contract_types').map(t => t.id));
+  const classOf = g => {
+    const c = classify[g.key] || {};
+    const company = COMPANY_KEYS.includes(c.company) ? c.company : g.company;
+    const t = c.type_id === '' || c.type_id === null ? null : c.type_id === undefined ? g.type_id : Number(c.type_id);
+    if (t && !typeIds.has(t)) throw badRequest(`Tipo de contrato inválido em "${g.obra}".`);
+    return { company, type_id: t || null };
+  };
   const ref = today();
   return tx(() => {
+    let reclassified = 0;
     const usedPrefixes = new Set(all('SELECT bulletin_prefix FROM contracts').map(r => r.bulletin_prefix));
     const created = [], used = new Set();
     let bms = 0, skippedMonths = 0, valueAdded = 0;
-    const track = (r, contractId, status, mid = null) => run(`INSERT INTO contract_import_rows (import_key, contract_id, kind, nature, amount, status, measurement_id) VALUES (?,?,?,?,?,?,?)
-      ON CONFLICT(import_key) DO UPDATE SET status = excluded.status, measurement_id = excluded.measurement_id, updated_at = datetime('now')`, r.import_key, contractId, r.kind, natureLabel(r.nature), r.amount, status, mid);
+    const track = (r, contractId, status, mid = null) => run(`INSERT INTO contract_import_rows (import_key, contract_id, kind, nature, amount, status, measurement_id, account) VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(import_key) DO UPDATE SET status = excluded.status, measurement_id = excluded.measurement_id, account = COALESCE(excluded.account, account), updated_at = datetime('now')`, r.import_key, contractId, r.kind, natureLabel(r.nature), r.amount, status, mid, r.account);
     for (const g of p.groups) {
       const m = mapping[g.key] === undefined || mapping[g.key] === null || mapping[g.key] === '' ? (g.match ? g.match.id : 'new') : mapping[g.key];
-      if (m === 'skip' || !g.pending) continue;
+      if (m === 'skip') continue;
+      const cls = classOf(g);
+      if (!g.pending) {
+        // Nada novo da obra: só a empresa/tipo, se mudou
+        if (m !== 'new') {
+          const c = one('SELECT id, company, type_id FROM contracts WHERE id = ?', Number(m));
+          if (c && (c.company !== cls.company || (c.type_id || null) !== cls.type_id)) {
+            run(`UPDATE contracts SET company = ?, type_id = ?, updated_at = datetime('now') WHERE id = ?`, cls.company, cls.type_id, c.id);
+            reclassified++;
+          }
+          if (c) for (const r of g.rows) run('UPDATE contract_import_rows SET account = COALESCE(account, ?) WHERE import_key = ?', r.account, r.import_key);
+        }
+        continue;
+      }
       let contract;
       if (m === 'new') {
         const n = one(`SELECT MAX(CAST(SUBSTR(code, 4) AS INTEGER)) AS n FROM contracts WHERE code LIKE 'CT-%'`)?.n || 0;
@@ -214,16 +248,21 @@ export function applyImport(ctx, body, ip) {
         while (usedPrefixes.has(prefix)) prefix = `${base}${k++}`;
         usedPrefixes.add(prefix);
         const active = g.open_count > 0 || g.last_activity >= addDays(ref, -90);
-        const r = run(`INSERT INTO contracts (code, client, title, start_date, bulletin_prefix, notes, status, created_by) VALUES (?,?,?,?,?,?,?,?)`,
+        const r = run(`INSERT INTO contracts (code, client, title, start_date, bulletin_prefix, notes, status, company, type_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`,
           code, g.client, g.obra, g.first_due, prefix,
           `Criado pela importação das planilhas de recebimentos em ${ref.split('-').reverse().join('/')}.${g.payers.length > 1 ? ` Pagadores: ${g.payers.join(', ')}.` : ''}`,
-          active ? 'vigente' : 'encerrado', ctx.user.id);
+          active ? 'vigente' : 'encerrado', cls.company, cls.type_id, ctx.user.id);
         contract = { id: Number(r.lastInsertRowid), code, bulletin_prefix: prefix, fresh: true };
         created.push(code);
       } else {
         const c = one('SELECT id, code, bulletin_prefix, source_import FROM (SELECT c.*, EXISTS(SELECT 1 FROM contract_import_rows i WHERE i.contract_id = c.id) AS source_import FROM contracts c) WHERE id = ?', Number(m));
         if (!c) throw badRequest(`Contrato escolhido para "${g.obra}" não existe.`);
         contract = { ...c, fresh: false };
+        const cur = one('SELECT company, type_id FROM contracts WHERE id = ?', c.id);
+        if (cur.company !== cls.company || (cur.type_id || null) !== cls.type_id) {
+          run(`UPDATE contracts SET company = ?, type_id = ?, updated_at = datetime('now') WHERE id = ?`, cls.company, cls.type_id, c.id);
+          reclassified++;
+        }
       }
       used.add(contract.id);
       const a = analyze(g.rows, contract.fresh ? null : contract.id);
@@ -268,7 +307,7 @@ export function applyImport(ctx, body, ip) {
         bms++;
       }
     }
-    const result = { files: p.files.map(f => f.name), bms, value_added: valueAdded, skipped_months: skippedMonths, contracts_created: created, contracts_used: used.size, others_ignored: p.skipped.others };
+    const result = { files: p.files.map(f => f.name), bms, value_added: valueAdded, reclassified, skipped_months: skippedMonths, contracts_created: created, contracts_used: used.size, others_ignored: p.skipped.others };
     audit(ctx.user.id, 'contract', null, 'BMs importados das planilhas de recebimentos', { arquivos: result.files, bms, valor_somado: valueAdded, meses_com_bm_manual: skippedMonths, contratos_criados: created }, ip);
     return result;
   });

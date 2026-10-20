@@ -5,6 +5,29 @@ import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '..
 import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { defaultStageId } from './stages.js';
+import { validContractTypeId } from './settings.js';
+import { COMPANIES } from '../lib/companies.js';
+
+export const COMPANY_KEYS = Object.keys(COMPANIES);
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+// Tipo sugerido pelo início do nome (ex.: "Fiscalização - …" → Fiscalização); o nome mais longo que casar vence
+export function suggestContractType(title) {
+  const t = norm(title);
+  return all('SELECT id, name FROM contract_types WHERE active = 1').map(x => ({ ...x, n: norm(x.name) }))
+    .filter(x => x.n && (t === x.n || t.startsWith(`${x.n} `))).sort((a, b) => b.n.length - a.n.length)[0]?.id || null;
+}
+// Classificação única dos contratos existentes: tipo pelo nome (os sem tipo)
+export function classifyExistingContracts() {
+  const changed = [];
+  for (const c of all('SELECT id, code, title FROM contracts WHERE type_id IS NULL')) {
+    const t = suggestContractType(c.title);
+    if (t) { run('UPDATE contracts SET type_id = ? WHERE id = ?', t, c.id); changed.push(c.code); }
+  }
+  return changed;
+}
+const withNames = c => c && ({ ...c, company_name: COMPANIES[c.company]?.name || c.company, company_logo: COMPANIES[c.company]?.logo || COMPANIES.charao.logo });
+const CT_SELECT = `SELECT c.*, p.code AS project_code, p.name AS project_name, t.name AS type_name FROM contracts c
+  LEFT JOIN projects p ON p.id = c.project_id LEFT JOIN contract_types t ON t.id = c.type_id`;
 
 export const STATUSES = ['vigente', 'suspenso', 'encerrado'];
 export const MEASUREMENT_STATUSES = ['rascunho', 'emitida', 'faturada', 'recebida'];
@@ -89,13 +112,12 @@ function contractSummary(c) {
 // ---------- Contratos ----------
 export function listContracts(ctx) {
   requireContracts(ctx.user);
-  return all(`SELECT c.*, p.code AS project_code, p.name AS project_name FROM contracts c LEFT JOIN projects p ON p.id = c.project_id
-    ORDER BY c.status = 'encerrado', c.code`).map(c => ({ ...c, summary: contractSummary(c) }));
+  return all(`${CT_SELECT} ORDER BY c.status = 'encerrado', c.code`).map(c => ({ ...withNames(c), summary: contractSummary(c) }));
 }
 
 export function getContract(ctx, id) {
   requireContracts(ctx.user);
-  const c = one(`SELECT c.*, p.code AS project_code, p.name AS project_name FROM contracts c LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?`, id);
+  const c = withNames(one(`${CT_SELECT} WHERE c.id = ?`, id));
   if (!c) throw notFound('Contrato não encontrado.');
   const items = itemsOf(id);
   const issuedIds = all(`SELECT id FROM measurements WHERE contract_id = ? AND status <> 'rascunho'`, id).map(m => m.id);
@@ -126,6 +148,8 @@ function readContract(body) {
     payment_info: str(body.payment_info, { max: 1000, label: 'Dados para pagamento' }),
     notes: str(body.notes, { max: 3000, label: 'Observações' }),
     status: oneOf(body.status, STATUSES, 'Situação', 'vigente'),
+    company: oneOf(body.company, COMPANY_KEYS, 'Empresa', 'charao'),
+    type_id: validContractTypeId(body.type_id, body.current_type_id ?? null),
   };
   if (!d.bulletin_prefix) throw badRequest('Prefixo do boletim: use letras e números (ex.: ORBE).');
   if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('O término deve ser posterior ao início.');
@@ -165,8 +189,8 @@ export function createContract(ctx, body, ip) {
   return tx(() => {
     const n = one(`SELECT MAX(CAST(SUBSTR(code, 4) AS INTEGER)) AS n FROM contracts WHERE code LIKE 'CT-%'`)?.n || 0;
     const code = `CT-${String(n + 1).padStart(3, '0')}`;
-    const r = run(`INSERT INTO contracts (code, client, client_doc, number, title, scope, project_id, start_date, end_date, bulletin_prefix, payment_info, notes, status, created_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, code, d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, ctx.user.id);
+    const r = run(`INSERT INTO contracts (code, client, client_doc, number, title, scope, project_id, start_date, end_date, bulletin_prefix, payment_info, notes, status, company, company_auto, type_id, created_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`, code, d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, d.company, d.type_id, ctx.user.id);
     const id = Number(r.lastInsertRowid);
     syncItems(id, items);
     audit(ctx.user.id, 'contract', id, 'Contrato cadastrado', { codigo: code, cliente: d.client, objeto: d.title, itens: items.length }, ip);
@@ -178,10 +202,12 @@ export function updateContract(ctx, id, body, ip) {
   requireContracts(ctx.user);
   const c = one('SELECT * FROM contracts WHERE id = ?', id);
   if (!c) throw notFound('Contrato não encontrado.');
-  const { d, items } = readContract({ ...c, ...body });
+  const { d, items } = readContract({ ...c, current_type_id: c.type_id, ...body });
   tx(() => {
-    run(`UPDATE contracts SET client=?, client_doc=?, number=?, title=?, scope=?, project_id=?, start_date=?, end_date=?, bulletin_prefix=?, payment_info=?, notes=?, status=?, updated_at=datetime('now') WHERE id=?`,
-      d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, id);
+    // Empresa escolhida à mão: a importação das planilhas não muda mais
+    const auto = body.company !== undefined && body.company !== c.company ? 0 : c.company_auto;
+    run(`UPDATE contracts SET client=?, client_doc=?, number=?, title=?, scope=?, project_id=?, start_date=?, end_date=?, bulletin_prefix=?, payment_info=?, notes=?, status=?, company=?, company_auto=?, type_id=?, updated_at=datetime('now') WHERE id=?`,
+      d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, d.company, auto, d.type_id, id);
     if (body.items !== undefined) syncItems(id, items);
     audit(ctx.user.id, 'contract', id, 'Contrato atualizado', { codigo: c.code, campos: Object.keys(d).filter(k => (d[k] ?? null) !== (c[k] ?? null)), itens: items.length }, ip);
   });
@@ -233,7 +259,7 @@ export function createMeasurement(ctx, contractId, body, ip) {
 // Boletim completo: por item, Contrato · Acumulado anterior · Medição · Acumulado atual · Saldo (quantidade e valor)
 export function getMeasurement(ctx, id) {
   const m = loadMeasurement(ctx, id);
-  const c = one(`SELECT c.*, p.code AS project_code, p.name AS project_name FROM contracts c LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?`, m.contract_id);
+  const c = withNames(one(`${CT_SELECT} WHERE c.id = ?`, m.contract_id));
   const items = itemsOf(c.id);
   const prevIds = all(`SELECT id FROM measurements WHERE contract_id = ? AND seq < ? AND status <> 'rascunho'`, c.id, m.seq).map(r => r.id);
   const inList = ids => ids.map(() => '?').join(',');
@@ -391,14 +417,19 @@ export function billedByMonth() {
 }
 
 // ---------- Faturamento global ----------
-export function contractsDashboard(ctx, { months = 12 } = {}) {
+export function contractsDashboard(ctx, { months = 12, company = '', type = '' } = {}) {
   requireContracts(ctx.user);
   months = [6, 12, 24].includes(Number(months)) ? Number(months) : 12;
-  const list = listContracts(ctx);
+  // Filtro do painel inteiro: empresa (charao/lus) e tipo (id ou "sem")
+  company = COMPANY_KEYS.includes(company) ? company : '';
+  type = type === 'sem' || /^\d+$/.test(String(type || '')) ? String(type) : '';
+  const all0 = listContracts(ctx);
+  const list = all0.filter(c => (!company || c.company === company) && (!type || (type === 'sem' ? !c.type_id : c.type_id === Number(type))));
+  const inList = new Set(list.map(c => c.id));
   const sum = k => r2(list.reduce((s, c) => s + (c.summary[k] || 0), 0));
   const active = list.filter(c => c.status === 'vigente');
   // Série mensal: medido (mês de referência), faturado (mês da NF) e recebido (mês do pagamento)
-  const ms = all('SELECT * FROM measurements WHERE status <> \'rascunho\'');
+  const ms = all('SELECT * FROM measurements WHERE status <> \'rascunho\'').filter(m => inList.has(m.contract_id));
   const totalOf = new Map(ms.map(m => [m.id, measurementTotals(m).total]));
   const end = today().slice(0, 7);
   const keys = [];
@@ -479,6 +510,10 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   });
   return {
     months,
+    filter: { company, type },
+    companies: Object.entries(COMPANIES).map(([key, c]) => ({ key, name: c.name, contracts: all0.filter(x => x.company === key).length })),
+    types: all('SELECT id, name, active FROM contract_types ORDER BY sort_order, id').map(t => ({ ...t, contracts: all0.filter(x => x.type_id === t.id).length }))
+      .filter(t => t.active || t.contracts).concat([{ id: 'sem', name: 'Sem tipo', contracts: all0.filter(x => !x.type_id).length }]),
     annual,
     billing,
     year: { year, prev: prevYear, through: md, billed: billedIn(year), billed_prev: billedIn(prevYear), received: receivedIn(year), received_prev: receivedIn(prevYear), measured: measuredIn(year), measured_prev: measuredIn(prevYear) },

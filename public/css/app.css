@@ -2463,3 +2463,27 @@ tr.is-inactive td { opacity: .55; }
   .bi-group-h { flex-direction: column; gap: 4px; }
   .bi-group-n { align-items: flex-start; text-align: left; }
 }
+
+/* Contratos: empresa (Charão / LuS) e tipo */
+.co-badge { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; border-radius: 999px; padding: 1px 8px; border: 1px solid transparent; }
+.co-badge.co-charao { background: #FFF1E8; color: #B4460B; border-color: #F7CFB6; }
+.co-badge.co-lus { background: #EEF0F6; color: #3E4A78; border-color: #CBD1E6; }
+.ct-row-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ct-row-tags .pill { font-size: 10.5px; padding: 0 7px; }
+.pill-warn { background: #FBF1DC; color: #8A5A07; border-color: #F0DDB0; }
+.ct-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 14px; }
+.ct-filter .chip.co-chip[aria-pressed="true"].co-charao { background: #C9520F; border-color: #C9520F; color: #fff; }
+.ct-filter .chip.co-chip[aria-pressed="true"].co-lus { background: #3E4A78; border-color: #3E4A78; color: #fff; }
+.ct-filter-type { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.ct-filter-type select { min-width: 200px; }
+.ct-filter-on { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.ct-company { margin-bottom: 4px; }
+.bi-group-f .bi-co { flex: 0 0 110px; }
+.bi-group-f .bi-ty { flex: 0 1 200px; }
+.bm-logo-lus { object-fit: contain; }
+@media (max-width: 560px) {
+  .ct-filter { gap: 8px; }
+  .ct-filter-type { width: 100%; }
+  .ct-filter-type select { flex: 1; min-width: 0; }
+  .bi-group-f .bi-co, .bi-group-f .bi-ty { flex: 1 1 45%; }
+}

@@ -1723,6 +1723,44 @@ async function main() {
   ok(biBx.bms === 1 && biBx.value_added === 0 && biAbr && biAbr.paid_amount === 10150 && biA1v.summary.value === 40000 && biA1v.summary.balance === 0, 'parcela recebida depois ganha o BM (com juros) e o saldo zera, sem mudar o valor do contrato');
   ok((await fo('GET', '/audit')).data.some(a => a.action === 'BMs importados das planilhas de recebimentos'), 'importação registrada na auditoria');
 
+  // ---------- Contratos: empresa (Charão / LuS) e tipo ----------
+  const ctTypes = (await fo('GET', '/settings/contract-types')).data;
+  ok(Array.isArray(ctTypes) && ctTypes.length === 9 && ctTypes[0].name === 'Administração', 'tipos de contrato já vêm cadastrados');
+  ok((await biNo('GET', '/settings/contract-types')).status === 403, 'tipos de contrato só para quem tem Contratos');
+  const tyId = n => ctTypes.find(t => t.name === n).id;
+  const biCtsCls = (await fo('GET', '/contracts')).data;
+  const clsA1 = biCtsCls.find(c => c.title === 'Reforma - Casa Exemplo A1'), clsB1 = biCtsCls.find(c => c.title === 'Orçamento - Estudo Exemplo B1');
+  ok(clsA1.company === 'charao' && clsA1.type_id === tyId('Reforma') && clsA1.type_name === 'Reforma', 'importação: tipo pelo início do nome (Reforma) e empresa Charão');
+  ok(clsB1.company === 'lus' && clsB1.company_name.startsWith('Ludimila') && clsB1.type_id === tyId('Orçamento'), 'importação: recebimento na conta "(LUS)" → contrato da LuS');
+  const clsBm = (await fo('GET', `/measurements/${(await fo('GET', `/contracts/${clsB1.id}`)).data.measurements[0].id}`)).data;
+  ok(clsBm.contract.company_logo === '/assets/logo-lus.png' && clsBm.contract.company_name.startsWith('Ludimila'), 'boletim do contrato LuS sai com o logo e o nome da LuS');
+  const ctLus = (await fo('POST', '/contracts', { client: 'Cliente Teste LuS', title: 'Projeto de interiores', bulletin_prefix: 'LUS', company: 'lus', type_id: tyId('Projeto'), items: [{ description: 'Projeto', unit: 'vb', unit_price: 1000, quantity: 1 }] })).data.id;
+  let ctLusV = (await fo('GET', `/contracts/${ctLus}`)).data;
+  ok(ctLusV.company === 'lus' && ctLusV.company_auto === 0 && ctLusV.type_name === 'Projeto', 'contrato cadastrado com empresa e tipo');
+  ok((await fo('POST', '/contracts', { client: 'X', title: 'Y', bulletin_prefix: 'X', company: 'outra' })).status === 400, 'empresa inválida é recusada');
+  ok((await fo('PUT', `/contracts/${ctLus}`, { type_id: '' })).data.type_id === null, 'contrato pode ficar sem tipo');
+  // Painel filtrado por empresa e tipo
+  const dCoLus = (await fo('GET', '/contracts/dashboard?empresa=lus')).data;
+  ok(dCoLus.contracts.length >= 2 && dCoLus.contracts.every(c => c.company === 'lus') && dCoLus.filter.company === 'lus', 'painel filtrado: só contratos da LuS');
+  const dCoAll = (await fo('GET', '/contracts/dashboard')).data;
+  ok(dCoAll.totals.contracts > dCoLus.totals.contracts && dCoLus.companies.find(c => c.key === 'lus').contracts === dCoLus.contracts.length, 'totais seguem o filtro; contagem por empresa sempre completa');
+  const dTySem = (await fo('GET', '/contracts/dashboard?tipo=sem')).data;
+  ok(dTySem.contracts.every(c => !c.type_id) && dTySem.contracts.some(c => c.id === ctLus), 'filtro "Sem tipo" para revisar');
+  const dTyRef = (await fo('GET', `/contracts/dashboard?tipo=${tyId('Reforma')}`)).data;
+  ok(dTyRef.contracts.length && dTyRef.contracts.every(c => c.type_id === tyId('Reforma')), 'filtro por tipo');
+  // Reenviar a planilha ajusta empresa/tipo do contrato importado (empresa automática), sem duplicar nada
+  await fo('PUT', `/contracts/${clsA1.id}`, { company: 'lus' });
+  ok((await fo('GET', `/contracts/${clsA1.id}`)).data.company_auto === 0, 'empresa escolhida à mão deixa de ser automática');
+  const clsPv = (await fo('POST', '/contracts/import-bms/preview', { files: biFiles })).data;
+  ok(clsPv.groups.find(g => g.obra === 'Reforma - Casa Exemplo A1').company === 'lus', 'reenvio respeita a empresa escolhida à mão');
+  const clsApply = (await fo('POST', '/contracts/import-bms', { files: biFiles, mapping: { [biA2.key]: 'skip' }, classify: { [biA1.key]: { company: 'charao', type_id: tyId('Construção') } } })).data;
+  const clsA1b = (await fo('GET', `/contracts/${clsA1.id}`)).data;
+  ok(clsApply.bms === 0 && clsApply.reclassified >= 1 && clsA1b.company === 'charao' && clsA1b.type_name === 'Construção', 'na prévia dá para corrigir empresa e tipo dos contratos já importados');
+  // Configurações: tipos de contrato
+  const ctTypes2 = (await fo('PUT', '/settings/contract-types', { types: [...ctTypes.map(t => ({ id: t.id, name: t.name, active: true })), { name: 'Laudo técnico', active: true }] })).data;
+  ok(ctTypes2.length === 10 && ctTypes2.at(-1).name === 'Laudo técnico', 'novo tipo de contrato em Configurações');
+  ok((await fo('PUT', '/settings/contract-types', { types: ctTypes2.filter(t => t.name !== 'Orçamento').map(t => ({ id: t.id, name: t.name, active: true })) })).status === 400, 'tipo em uso não pode ser excluído');
+
 }
 
 main()

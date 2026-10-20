@@ -12,11 +12,11 @@ const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' :
   <button type="button" class="icon-btn" data-rm aria-disabled="${r.use_count ? 'true' : 'false'}" aria-label="Excluir justificativa"
     title="${r.use_count ? 'Já usada: inative em vez de excluir' : 'Excluir'}">✕</button></li>`;
 
-const typeItem = t => html`<li class="stage-item reason-item type-item ${t.active ? '' : 'is-inactive'}" data-id="${t.id || ''}">
+const typeItem = (t, unit = 'projeto(s)') => html`<li class="stage-item reason-item type-item ${t.active ? '' : 'is-inactive'}" data-id="${t.id || ''}">
   <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
   <input type="text" maxlength="60" value="${t.name}" aria-label="Nome do tipo" required>
   <label class="reason-active" title="Inativos não aparecem para novos projetos"><input type="checkbox" data-active ${t.active ? 'checked' : ''}><span>Ativo</span></label>
-  <span class="stage-count">${t.use_count ? `${t.use_count} projeto(s)` : 'nenhum projeto'}</span>
+  <span class="stage-count">${t.use_count ? `${t.use_count} ${unit}` : `nenhum ${unit.replace('(s)', '')}`}</span>
   <button type="button" class="icon-btn" data-rm aria-disabled="${t.use_count ? 'true' : 'false'}" aria-label="Excluir tipo"
     title="${t.use_count ? 'Em uso: troque o tipo nesses projetos ou inative-o' : 'Excluir'}">✕</button></li>`;
 
@@ -58,6 +58,7 @@ export async function view({ state, reloadMeta }) {
   const [reasons, general, templates, stageTpls, cal, types] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
     api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar'), api('/settings/project-types', { query: { all: '1' } })]);
   const recTypes = await api('/settings/record-types', { query: { all: '1' } });
+  const ctTypes = state.meta.can.contracts ? await api('/settings/contract-types', { query: { all: '1' } }).catch(() => null) : null;
 
   return {
     title: 'Configurações',
@@ -89,6 +90,20 @@ export async function view({ state, reloadMeta }) {
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos</button></div>
         </form>
       </section>
+      ${ctTypes ? html`<section class="card" id="ctypes-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('contract')}Tipos de contrato</h2><span class="sub">${ctTypes.filter(t => t.active).length} ativo(s)</span></div>
+        <form class="card-body form" id="ctypes-form" novalidate>
+          <p class="muted" style="margin:0">Classificação dos contratos (ex.: Administração, Fiscalização, Projeto, Orçamento). O tipo é escolhido no cadastro do contrato
+            e o painel de Contratos filtra por tipo e por empresa. A ordem abaixo é a ordem de exibição. Tipos em uso não podem ser excluídos — inative-os.</p>
+          <ul class="stage-list" id="ctype-list">${ctTypes.map(t => typeItem(t, 'contrato(s)'))}</ul>
+          <div class="stage-add">
+            <input type="text" id="ctype-new" maxlength="60" placeholder="Novo tipo (ex.: Laudo técnico)" aria-label="Novo tipo de contrato">
+            <button type="button" class="btn btn-ghost" id="ctype-add">${icon('plus')}Adicionar</button>
+          </div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos de contrato</button></div>
+        </form>
+      </section>` : ''}
       <section class="card" id="rtypes-card" style="max-width:900px;margin-bottom:16px">
         <div class="card-head"><h2>${icon('note')}Tipos de registro do projeto</h2><span class="sub">${recTypes.filter(t => t.active).length} ativo(s)</span></div>
         <form class="card-body form" id="rtypes-form" novalidate>
@@ -241,51 +256,56 @@ export async function view({ state, reloadMeta }) {
           ctx.render();
         } catch (ex) { rerr.textContent = ex.message; rerr.hidden = false; }
       });
-      // Tipos de projeto
-      const tf = root.querySelector('#types-form');
-      const tl = root.querySelector('#type-list');
-      const tIn = root.querySelector('#type-new');
-      const addType = () => {
-        const name = tIn.value.replace(/\s+/g, ' ').trim();
-        if (!name) return tIn.focus();
-        if ([...tl.querySelectorAll('input[type=text]')].some(i => i.value.trim().toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'))) {
-          toast('Esse tipo já existe.', 'warn');
-          return tIn.select();
-        }
-        tl.insertAdjacentHTML('beforeend', typeItem({ name, active: 1, use_count: 0 }).toString());
-        tIn.value = '';
-        tIn.focus();
+      // Tipos de projeto e tipos de contrato (mesma edição)
+      const bindTypes = (formSel, listSel, inSel, addSel, url, unit, okMsg) => {
+        const tf = root.querySelector(formSel);
+        if (!tf) return;
+        const tl = root.querySelector(listSel);
+        const tIn = root.querySelector(inSel);
+        const addType = () => {
+          const name = tIn.value.replace(/\s+/g, ' ').trim();
+          if (!name) return tIn.focus();
+          if ([...tl.querySelectorAll('input[type=text]')].some(i => i.value.trim().toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'))) {
+            toast('Esse tipo já existe.', 'warn');
+            return tIn.select();
+          }
+          tl.insertAdjacentHTML('beforeend', typeItem({ name, active: 1, use_count: 0 }, unit).toString());
+          tIn.value = '';
+          tIn.focus();
+        };
+        root.querySelector(addSel).addEventListener('click', addType);
+        tIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addType(); } });
+        tl.addEventListener('click', e => {
+          const li = e.target.closest('.type-item');
+          if (!li) return;
+          if (e.target.closest('[data-rm]')) li.remove();
+          const mv = e.target.closest('[data-move]');
+          if (mv) {
+            const sib = Number(mv.dataset.move) < 0 ? li.previousElementSibling : li.nextElementSibling;
+            if (sib) Number(mv.dataset.move) < 0 ? sib.before(li) : sib.after(li);
+          }
+        });
+        tl.addEventListener('change', e => {
+          if (e.target.matches('[data-active]')) e.target.closest('.type-item').classList.toggle('is-inactive', !e.target.checked);
+        });
+        tf.addEventListener('submit', async e => {
+          e.preventDefault();
+          const terr = tf.querySelector('.form-error');
+          terr.hidden = true;
+          const payload = [...tl.querySelectorAll('.type-item')].map(li => ({
+            id: li.dataset.id ? Number(li.dataset.id) : null,
+            name: li.querySelector('input[type=text]').value,
+            active: li.querySelector('[data-active]').checked,
+          }));
+          try {
+            await api(url, { method: 'PUT', body: { types: payload } });
+            toast(okMsg);
+            ctx.render();
+          } catch (ex) { terr.textContent = ex.message; terr.hidden = false; }
+        });
       };
-      root.querySelector('#type-add').addEventListener('click', addType);
-      tIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addType(); } });
-      tl.addEventListener('click', e => {
-        const li = e.target.closest('.type-item');
-        if (!li) return;
-        if (e.target.closest('[data-rm]')) li.remove();
-        const mv = e.target.closest('[data-move]');
-        if (mv) {
-          const sib = Number(mv.dataset.move) < 0 ? li.previousElementSibling : li.nextElementSibling;
-          if (sib) Number(mv.dataset.move) < 0 ? sib.before(li) : sib.after(li);
-        }
-      });
-      tl.addEventListener('change', e => {
-        if (e.target.matches('[data-active]')) e.target.closest('.type-item').classList.toggle('is-inactive', !e.target.checked);
-      });
-      tf.addEventListener('submit', async e => {
-        e.preventDefault();
-        const terr = tf.querySelector('.form-error');
-        terr.hidden = true;
-        const payload = [...tl.querySelectorAll('.type-item')].map(li => ({
-          id: li.dataset.id ? Number(li.dataset.id) : null,
-          name: li.querySelector('input[type=text]').value,
-          active: li.querySelector('[data-active]').checked,
-        }));
-        try {
-          await api('/settings/project-types', { method: 'PUT', body: { types: payload } });
-          toast('Tipos de projeto salvos.');
-          ctx.render();
-        } catch (ex) { terr.textContent = ex.message; terr.hidden = false; }
-      });
+      bindTypes('#types-form', '#type-list', '#type-new', '#type-add', '/settings/project-types', 'projeto(s)', 'Tipos de projeto salvos.');
+      bindTypes('#ctypes-form', '#ctype-list', '#ctype-new', '#ctype-add', '/settings/contract-types', 'contrato(s)', 'Tipos de contrato salvos.');
       bindTemplates('#specs-form', '#spec-list', '#spec-add', 'specialty', '/settings/specialties', 'Modelos de especialidades salvos.');
       bindTemplates('#stage-tpl-form', '#stage-tpl-list', '#stage-tpl-add', 'stage', '/settings/stage-templates', 'Modelos de classificação salvos.');
       const gf = root.querySelector('#general-form');

@@ -14,6 +14,7 @@ function previewHtml(p) {
   const nBms = sum(p.groups, g => g.bms), total = sum(p.groups, g => g.total);
   const created = p.groups.filter(g => !g.match && g.pending).length;
   const pending = p.groups.filter(g => g.pending).length;
+  const matched = p.groups.filter(g => g.match).length;
   const opts = g => html`<option value="new" ${!g.match ? 'selected' : ''}>Criar contrato novo</option>
     <option value="skip">Não importar esta obra</option>
     ${p.contracts.length ? html`<optgroup label="Contrato já cadastrado">${p.contracts.map(c => html`<option value="${c.id}" ${g.match?.id === c.id ? 'selected' : ''}>${c.code} · ${c.client} · ${c.title}</option>`)}</optgroup>` : ''}`;
@@ -42,12 +43,16 @@ function previewHtml(p) {
       <div class="bi-groups">${p.groups.map(g => html`<div class="bi-group ${g.pending ? '' : 'is-done'}">
         <div class="bi-group-h"><div class="bi-group-t"><b>${g.obra}</b><small>${g.client}${g.payers.length > 1 ? ` · +${g.payers.length - 1} pagador(es)` : ''}${g.open_count ? ` · ${g.open_count} parcela(s) em aberto (${money(g.open_total)})` : ''}</small></div>
           <div class="bi-group-n"><span>${g.value_add ? `contrato +${money(g.value_add)}` : 'valor já lançado'}${g.open_add ? ` · a medir ${money(g.open_add)}` : ''}</span><b>${g.bms} BM(s) · ${money(g.total)}</b>${g.rt ? html`<small>RT ${money(g.rt)}</small>` : ''}${g.skipped_months ? html`<small>${g.skipped_months} mês(es) com BM lançado à mão — ignorado(s)</small>` : ''}</div></div>
-        ${g.pending ? html`<div class="bi-group-f"><label class="sr-only" for="bim-${g.key}">Contrato de ${g.obra}</label><select id="bim-${g.key}" data-bimap="${g.key}">${opts(g)}</select></div>
+        ${g.pending || g.match ? html`<div class="bi-group-f"><label class="sr-only" for="bim-${g.key}">Contrato de ${g.obra}</label><select id="bim-${g.key}" data-bimap="${g.key}">${opts(g)}</select>
+          <select class="bi-co" data-bico="${g.key}" aria-label="Empresa de ${g.obra}"><option value="charao" ${g.company === 'charao' ? 'selected' : ''}>Charão</option><option value="lus" ${g.company === 'lus' ? 'selected' : ''}>LuS</option></select>
+          <select class="bi-ty" data-bity="${g.key}" aria-label="Tipo de ${g.obra}"><option value="">Sem tipo</option>${p.types.map(t => html`<option value="${t.id}" ${g.type_id === t.id ? 'selected' : ''}>${t.name}</option>`)}</select>
+          ${g.reclassify ? html`<span class="pill pill-sand">empresa/tipo serão atualizados</span>` : ''}</div>` : ''}
+        ${g.pending ? html`
         ${g.months.length ? html`<details><summary>Ver BMs</summary>${bmTable(g)}</details>` : html`<p class="hint" style="margin:6px 0 0">Nada recebido ainda: o contrato é criado com o valor e fica todo a medir.</p>`}`
-        : html`<p class="hint" style="margin:6px 0 0">Tudo desta obra já foi importado.</p>`}
+        : html`<p class="hint" style="margin:6px 0 0">Tudo desta obra já foi importado${g.match ? ' — você ainda pode ajustar a empresa e o tipo' : ''}.</p>`}
       </div>`)}</div>
     </section>
-    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-bi-apply ${pending ? '' : 'disabled'}>${icon('check')}${pending ? `Importar ${pending} contrato(s) e ${nBms} BM(s)` : 'Nada novo para importar'}</button></div>`;
+    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-bi-apply ${pending || matched ? '' : 'disabled'}>${icon('check')}${pending ? `Importar ${pending} contrato(s) e ${nBms} BM(s)` : matched ? 'Salvar empresa e tipo dos contratos' : 'Nada novo para importar'}</button></div>`;
 }
 
 export async function importBms({ state, navigate }) {
@@ -86,10 +91,11 @@ export async function importBms({ state, navigate }) {
           out.querySelector('[data-bi-apply]')?.addEventListener('click', async ev => {
             const btn = ev.currentTarget;
             const mapping = Object.fromEntries([...out.querySelectorAll('[data-bimap]')].map(s => [s.dataset.bimap, /^\d+$/.test(s.value) ? Number(s.value) : s.value]));
+            const classify = Object.fromEntries([...out.querySelectorAll('[data-bico]')].map(s => [s.dataset.bico, { company: s.value, type_id: out.querySelector(`[data-bity="${s.dataset.bico}"]`).value }]));
             btn.disabled = true; btn.textContent = 'Criando BMs…';
             try {
-              const r = await api('/contracts/import-bms', { method: 'POST', body: { files: payload, mapping } });
-              toast(`${r.bms} BM(s) criado(s)${r.contracts_created.length ? ` · ${r.contracts_created.length} contrato(s) novo(s)` : ''}${r.value_added ? ` · ${money(r.value_added)} somado aos contratos` : ''}.`);
+              const r = await api('/contracts/import-bms', { method: 'POST', body: { files: payload, mapping, classify } });
+              toast(`${r.bms} BM(s) criado(s)${r.contracts_created.length ? ` · ${r.contracts_created.length} contrato(s) novo(s)` : ''}${r.value_added ? ` · ${money(r.value_added)} somado aos contratos` : ''}${r.reclassified ? ` · ${r.reclassified} contrato(s) reclassificado(s)` : ''}.`);
               navigate('/contratos?status=todos');
             } catch (ex) { toast(ex.message, 'error'); btn.disabled = false; btn.textContent = 'Tentar de novo'; }
           });

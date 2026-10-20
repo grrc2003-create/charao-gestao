@@ -65,26 +65,30 @@ export function saveReasons(ctx, input, ip) {
   return listReasons({ includeInactive: true });
 }
 
-// ---------- Tipos de projeto (Orçamento, Consultoria, Obra, Reforma…) ----------
-export function listProjectTypes({ includeInactive = false } = {}) {
-  return all(`SELECT t.id, t.name, t.active, t.sort_order, (SELECT COUNT(*) FROM projects p WHERE p.type_id = t.id) AS use_count
-    FROM project_types t ${includeInactive ? '' : 'WHERE t.active = 1'} ORDER BY t.sort_order, t.id`);
+// ---------- Tipos de projeto (Orçamento, Consultoria, Obra, Reforma…) e tipos de contrato ----------
+// Mesma rotina para as duas listas: cria, renomeia, ordena, ativa/inativa e exclui (somente sem uso)
+const TYPE_LISTS = {
+  project: { table: 'project_types', usage: 'SELECT COUNT(*) FROM projects p WHERE p.type_id = t.id', label: 'Tipo de projeto', plural: 'Tipos de projeto', unit: 'projeto(s)' },
+  contract: { table: 'contract_types', usage: 'SELECT COUNT(*) FROM contracts c WHERE c.type_id = t.id', label: 'Tipo de contrato', plural: 'Tipos de contrato', unit: 'contrato(s)' },
+};
+function listTypes(kind, { includeInactive = false } = {}) {
+  const L = TYPE_LISTS[kind];
+  return all(`SELECT t.id, t.name, t.active, t.sort_order, (${L.usage}) AS use_count
+    FROM ${L.table} t ${includeInactive ? '' : 'WHERE t.active = 1'} ORDER BY t.sort_order, t.id`);
 }
-
-// Tipo escolhido no projeto: precisa existir e estar ativo (o tipo atual do projeto continua válido mesmo inativo)
-export function validProjectTypeId(v, current = null) {
+// Tipo escolhido: precisa existir e estar ativo (o tipo atual continua válido mesmo inativo)
+function validTypeId(kind, v, current = null) {
   const id = intOrNull(v);
   if (!id) return null;
-  const t = one('SELECT id, active FROM project_types WHERE id = ?', id);
-  if (!t || (!t.active && id !== current)) throw badRequest('Tipo de projeto inválido.');
+  const t = one(`SELECT id, active FROM ${TYPE_LISTS[kind].table} WHERE id = ?`, id);
+  if (!t || (!t.active && id !== current)) throw badRequest(`${TYPE_LISTS[kind].label} inválido.`);
   return id;
 }
-
-// Sincroniza a lista editada em Configurações: cria, renomeia, ordena, ativa/inativa e exclui (somente sem projetos)
-export function saveProjectTypes(ctx, input, ip) {
+function saveTypes(kind, ctx, input, ip) {
+  const L = TYPE_LISTS[kind];
   requireSettingsManager(ctx.user);
   if (!Array.isArray(input)) throw badRequest('Lista de tipos inválida.');
-  const current = listProjectTypes({ includeInactive: true });
+  const current = listTypes(kind, { includeInactive: true });
   const byId = new Map(current.map(t => [t.id, t]));
   const items = input.slice(0, 50).map((x, i) => ({
     id: intOrNull(x?.id),
@@ -104,28 +108,34 @@ export function saveProjectTypes(ctx, input, ip) {
   const keep = new Set(items.filter(x => x.id).map(x => x.id));
   const removed = current.filter(t => !keep.has(t.id));
   for (const t of removed) {
-    if (t.use_count) throw badRequest(`"${t.name}" está em ${t.use_count} projeto(s). Troque o tipo nesses projetos ou inative-o em vez de excluir.`);
+    if (t.use_count) throw badRequest(`"${t.name}" está em ${t.use_count} ${L.unit}. Troque o tipo nesses ${L.unit.replace('(s)', 's')} ou inative-o em vez de excluir.`);
   }
   const log = { criados: [], renomeados: [], inativados: [], reativados: [], excluidos: removed.map(t => t.name) };
   tx(() => {
-    for (const t of removed) run('DELETE FROM project_types WHERE id = ?', t.id);
-    for (const x of items.filter(x => x.id)) run('UPDATE project_types SET name = ? WHERE id = ?', `~tmp~${x.id}`, x.id);
+    for (const t of removed) run(`DELETE FROM ${L.table} WHERE id = ?`, t.id);
+    for (const x of items.filter(x => x.id)) run(`UPDATE ${L.table} SET name = ? WHERE id = ?`, `~tmp~${x.id}`, x.id);
     for (const x of items) {
       if (x.id) {
         const old = byId.get(x.id);
         if (old.name !== x.name) log.renomeados.push(`${old.name} → ${x.name}`);
         if (old.active && !x.active) log.inativados.push(x.name);
         if (!old.active && x.active) log.reativados.push(x.name);
-        run(`UPDATE project_types SET name = ?, active = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, x.active, x.order, x.id);
+        run(`UPDATE ${L.table} SET name = ?, active = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, x.active, x.order, x.id);
       } else {
-        run('INSERT INTO project_types (name, active, sort_order) VALUES (?, ?, ?)', x.name, x.active, x.order);
+        run(`INSERT INTO ${L.table} (name, active, sort_order) VALUES (?, ?, ?)`, x.name, x.active, x.order);
         log.criados.push(x.name);
       }
     }
-    audit(ctx.user.id, 'settings', null, 'Tipos de projeto atualizados', log, ip);
+    audit(ctx.user.id, 'settings', null, `${L.plural} atualizados`, log, ip);
   });
-  return listProjectTypes({ includeInactive: true });
+  return listTypes(kind, { includeInactive: true });
 }
+export const listProjectTypes = opts => listTypes('project', opts);
+export const validProjectTypeId = (v, current = null) => validTypeId('project', v, current);
+export const saveProjectTypes = (ctx, input, ip) => saveTypes('project', ctx, input, ip);
+export const listContractTypes = opts => listTypes('contract', opts);
+export const validContractTypeId = (v, current = null) => validTypeId('contract', v, current);
+export const saveContractTypes = (ctx, input, ip) => saveTypes('contract', ctx, input, ip);
 
 // ---------- Configurações gerais (chave/valor) ----------
 const GENERAL = {

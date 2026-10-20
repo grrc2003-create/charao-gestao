@@ -10,6 +10,9 @@ export const qty = v => qtyFmt.format(Number(v) || 0);
 const pct = v => (v === null || v === undefined ? '—' : `${String(v).replace('.', ',')}%`);
 
 const CT_STATUS = { vigente: 'Vigente', suspenso: 'Suspenso', encerrado: 'Encerrado' };
+export const CO_SHORT = { charao: 'Charão', lus: 'LuS' };
+const coBadge = c => html`<span class="co-badge co-${c.company}" title="${c.company_name || ''}">${CO_SHORT[c.company] || c.company}</span>`;
+const typePill = c => (c.type_name ? html`<span class="pill">${c.type_name}</span>` : html`<span class="pill pill-warn">sem tipo</span>`);
 export const M_STATUS = {
   rascunho: { label: 'Rascunho', cls: 'm-draft' },
   emitida: { label: 'Emitida', cls: 'm-issued' },
@@ -265,7 +268,9 @@ function bindRanking(root, d) {
 export async function list({ state, query, setQuery, render }) {
   denied(state);
   const months = query.get('meses') || '12';
-  const d = await api('/contracts/dashboard', { query: { meses: months } });
+  const empresa = query.get('empresa') || '', tipo = query.get('tipo') || '';
+  const d = await api('/contracts/dashboard', { query: { meses: months, empresa, tipo } });
+  const qs = (over = {}) => ({ meses: months, empresa, tipo, status: query.get('status') || 'vigente', ...over });
   const t = d.totals;
   const Y = d.year;
   const filter = query.get('status') || 'vigente';
@@ -281,7 +286,7 @@ export async function list({ state, query, setQuery, render }) {
   const contractRow = c => {
     const s = c.summary;
     return html`<a class="ct-row" href="#/contratos/${c.id}">
-      <div class="ct-row-id"><span class="mono">${c.code}</span><b>${c.client}</b><small>${c.title}</small></div>
+      <div class="ct-row-id"><span class="ct-row-tags"><span class="mono">${c.code}</span>${coBadge(c)}${typePill(c)}</span><b>${c.client}</b><small>${c.title}</small></div>
       <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
         <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
       <div class="ct-row-nums"><span><small>Contratado</small><b>${money(s.value)}</b></span><span><small>A receber</small><b>${money(s.to_receive)}</b></span><span><small>Saldo a medir</small><b>${money(s.balance)}</b></span></div>
@@ -296,6 +301,14 @@ export async function list({ state, query, setQuery, render }) {
         title: 'Contratos e faturamento',
         actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas de contratos</a>` : ''}<a class="btn btn-ghost" href="#/contratos/importar-bms">${icon('file')}Importar BMs</a><a class="btn btn-accent" href="#/contratos/novo">${icon('plus')}Novo contrato</a>`,
       })}
+      <div class="ct-filter" role="group" aria-label="Filtrar o painel">
+        <div class="chips" role="group" aria-label="Empresa">${[['', 'Todas as empresas', d.companies.reduce((s, x) => s + x.contracts, 0)], ...d.companies.map(x => [x.key, CO_SHORT[x.key] || x.name, x.contracts])].map(([k, l, n]) =>
+          html`<button class="chip ${k ? `co-chip co-${k}` : ''}" data-emp="${k}" aria-pressed="${empresa === k}" title="${d.companies.find(x => x.key === k)?.name || ''}">${l}<span class="n">${n}</span></button>`)}</div>
+        <label class="ct-filter-type"><span>Tipo</span><select id="ct-tipo" aria-label="Tipo de contrato"><option value="">Todos os tipos</option>
+          ${d.types.map(t => html`<option value="${t.id}" ${String(tipo) === String(t.id) ? 'selected' : ''}>${t.name} (${t.contracts})</option>`)}</select></label>
+        ${empresa || tipo ? html`<span class="ct-filter-on">Mostrando: ${[empresa ? d.companies.find(x => x.key === empresa)?.name : '', tipo ? d.types.find(t => String(t.id) === String(tipo))?.name : ''].filter(Boolean).join(' · ')}
+          <button type="button" class="btn btn-ghost btn-sm" data-emp-clear>Limpar</button></span>` : ''}
+      </div>
       <div class="ct-dash">
         <section class="card ct-hero">
           <div class="ct-hero-main">
@@ -376,8 +389,11 @@ export async function list({ state, query, setQuery, render }) {
         </section>
       </div>`,
     mount(root) {
-      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.ctf, meses: months }); render(); }));
-      root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery({ status: filter, meses: b.dataset.meses }); render(); }));
+      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ status: b.dataset.ctf })); render(); }));
+      root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ status: filter, meses: b.dataset.meses })); render(); }));
+      root.querySelectorAll('[data-emp]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ status: filter, empresa: b.dataset.emp })); render(); }));
+      root.querySelector('#ct-tipo')?.addEventListener('change', e => { setQuery(qs({ status: filter, tipo: e.target.value })); render(); });
+      root.querySelector('[data-emp-clear]')?.addEventListener('click', () => { setQuery(qs({ status: filter, empresa: '', tipo: '' })); render(); });
       bindAnnual(root, d);
       bindRanking(root, d);
       // Dica do gráfico: mês + os três valores (valor em destaque, série em seguida)
@@ -426,7 +442,8 @@ const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return 0; cons
 export async function form({ params, state, navigate }) {
   denied(state);
   const editing = !!params.id;
-  const c = editing ? await api(`/contracts/${params.id}`) : { status: 'vigente', items: [{}], bulletin_prefix: '' };
+  const [c, ctypes] = await Promise.all([editing ? api(`/contracts/${params.id}`) : { status: 'vigente', items: [{}], bulletin_prefix: '', company: 'charao' },
+    api('/settings/contract-types', { query: { all: '1' } }).catch(() => [])]);
   const projects = state.meta.projects || [];
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
   return {
@@ -434,6 +451,15 @@ export async function form({ params, state, navigate }) {
     html: html`
       ${pageHead({ back: { href: editing ? `#/contratos/${c.id}` : '#/contratos', label: editing ? c.code : 'Contratos' }, eyebrow: editing ? c.code : 'Código gerado automaticamente (CT-000)', title: editing ? 'Editar contrato' : 'Novo contrato' })}
       <form class="card card-pad form" id="ct-form" novalidate style="max-width:1000px">
+        <fieldset class="fieldset form"><legend>Empresa e tipo</legend>
+          <div class="segmented ct-company" role="radiogroup" aria-label="Empresa">
+            <label><input type="radio" name="company" value="charao" ${c.company !== 'lus' ? 'checked' : ''}>Charão<small>Charão Engenharia & Construção</small></label>
+            <label><input type="radio" name="company" value="lus" ${c.company === 'lus' ? 'checked' : ''}>LuS<small>Ludimila Siqueira Arquitetura & Design</small></label>
+          </div>
+          <div class="field" style="max-width:420px"><label for="type_id">Tipo de contrato</label><select id="type_id" name="type_id"><option value="">Sem tipo</option>
+            ${ctypes.filter(t => t.active || t.id === c.type_id).map(t => opt(t.id, `${t.name}${t.active ? '' : ' (inativo)'}`, c.type_id))}</select>
+            <span class="hint">Os tipos são cadastrados em <b>Configurações → Tipos de contrato</b>. O boletim sai com o logo e o nome da empresa escolhida.</span></div>
+        </fieldset>
         <fieldset class="fieldset form"><legend>Contrato</legend>
           <div class="form-row">
             <div class="field"><label class="req" for="client">Cliente</label><input id="client" name="client" maxlength="160" required value="${c.client || ''}"></div>
@@ -526,7 +552,7 @@ export async function view({ params, state, navigate }) {
   return {
     title: `${c.code} · ${c.client}`,
     html: html`
-      ${pageHead({ back: { href: '#/contratos', label: 'Contratos' }, eyebrow: `${c.code} · ${CT_STATUS[c.status]}`, title: c.client, sub: `${c.title}${c.number ? ` · contrato ${c.number}` : ''}${c.start_date ? ` · ${fmtDate(c.start_date)} → ${fmtDate(c.end_date)}` : ''}`,
+      ${pageHead({ back: { href: '#/contratos', label: 'Contratos' }, eyebrow: `${c.code} · ${CT_STATUS[c.status]} · ${CO_SHORT[c.company] || ''}${c.type_name ? ` · ${c.type_name}` : ''}`, title: c.client, sub: `${c.title}${c.number ? ` · contrato ${c.number}` : ''}${c.start_date ? ` · ${fmtDate(c.start_date)} → ${fmtDate(c.end_date)}` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/contratos/${c.id}/editar">${icon('edit')}Editar</a>${c.status !== 'encerrado' ? html`<button type="button" class="btn btn-accent" id="new-m">${icon('plus')}Nova medição</button>` : ''}` })}
       <div class="kpis kpis-6">
         ${kpi({ label: 'Valor do contrato', value: money(s.value), color: '#2A3D50', foot: `${c.items.length} item(ns)` })}

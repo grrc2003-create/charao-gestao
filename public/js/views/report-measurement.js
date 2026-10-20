@@ -19,7 +19,7 @@ export async function view({ params, state }) {
     <div class="doc-stage">
       <article class="doc a4 bm-doc">
         <header class="bm-head">
-          <img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="bm-logo">
+          <img src="${c.company_logo || '/assets/logo.webp'}" alt="${c.company_name || 'Charão Engenharia & Construção'}" class="bm-logo bm-logo-${c.company || 'charao'}">
           <div class="bm-title">
             <div class="bm-kicker">BOLETIM DE MEDIÇÃO${m.status === 'rascunho' ? ' · RASCUNHO' : ''}</div>
             <h1>MEDIÇÃO ${m.ref_label}</h1>
@@ -55,7 +55,7 @@ export async function view({ params, state }) {
           ${c.payment_info ? html`<div class="bm-pay"><b>CONTA PARA PAGAMENTO</b><div>${c.payment_info}</div></div>` : ''}
         </div>
         <div class="bm-sign">
-          <div><span></span>Charão Engenharia e Construção</div>
+          <div><span></span>${c.company_name || 'Charão Engenharia & Construção'}</div>
           <div><span></span>${c.client}</div>
         </div>
       </article>

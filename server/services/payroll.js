@@ -15,10 +15,8 @@ import { createObligationInternal, obligationPaid, removeObligationInternal, set
 import { today } from './metrics.js';
 import { entryReimbursements, pendingReimbursements, releaseByEntries } from './reimbursements.js';
 
-export const COMPANIES = {
-  charao: { name: 'Charão Engenharia & Construção', logo: '/assets/logo.webp' },
-  lus: { name: 'Ludimila Siqueira Arquitetura & Design', logo: '/assets/logo-lus.png' },
-};
+export { COMPANIES } from '../lib/companies.js';
+import { COMPANIES } from '../lib/companies.js';
 export const KINDS = { estagio: 'Estágio (bolsa + VT/VR)', profissional: 'Profissional (valor proporcional, sem VT/VR)' };
 const WEEK = [1, 2, 3, 4, 5];
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;

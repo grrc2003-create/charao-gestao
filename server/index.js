@@ -37,6 +37,13 @@ import { all } from './db.js';
 
 migrate();
 bootstrap();
+// Uma vez: contratos existentes ganham o tipo pelo início do nome (ex.: "Fiscalização - …")
+if (one('SELECT COUNT(*) AS n FROM users').n > 0 && !one(`SELECT value FROM app_settings WHERE key = 'contracts_classified'`)) {
+  const changed = Contracts.classifyExistingContracts();
+  db.prepare(`INSERT INTO app_settings (key, value) VALUES ('contracts_classified', ?)`).run(new Date().toISOString());
+  if (changed.length) audit(null, 'contract', null, 'Tipo dos contratos existentes classificado pelo nome', { contratos: changed });
+  console.log(`[init] tipo de ${changed.length} contrato(s) classificado pelo nome`);
+}
 // Uma vez: status e avanço das tarefas principais existentes passam a vir das subtarefas
 if (one('SELECT COUNT(*) AS n FROM users').n > 0 && !one(`SELECT value FROM app_settings WHERE key = 'parent_status_synced'`)) {
   const changed = Tasks.syncAllParentStatus();
@@ -307,7 +314,7 @@ api.post('/api/finance/items/:id/unpay', (req, res, { ctx, params }) => send(res
 api.put('/api/finance/items/:id/amount', (req, res, { ctx, params, body }) => send(res, 200, Finance.setItemAmount(ctx, intOrNull(params.id), body, clientIp(req))));
 
 // ---------- Contratos (liberação por usuário) ----------
-api.get('/api/contracts/dashboard', (req, res, { ctx, query }) => send(res, 200, Contracts.contractsDashboard(ctx, { months: query.get('meses') })));
+api.get('/api/contracts/dashboard', (req, res, { ctx, query }) => send(res, 200, Contracts.contractsDashboard(ctx, { months: query.get('meses'), company: query.get('empresa') || '', type: query.get('tipo') || '' })));
 api.get('/api/contracts', (req, res, { ctx }) => send(res, 200, Contracts.listContracts(ctx)));
 api.post('/api/contracts', (req, res, { ctx, body }) => send(res, 201, { id: Contracts.createContract(ctx, body, clientIp(req)) }));
 api.get('/api/contracts/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))));
@@ -513,6 +520,8 @@ api.put('/api/settings/general', (req, res, { ctx, body }) => send(res, 200, Set
 api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
 api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listSpecialtyTemplates()));
 api.put('/api/settings/specialties', (req, res, { ctx, body }) => send(res, 200, Settings.saveSpecialtyTemplates(ctx, body.templates, clientIp(req))));
+api.get('/api/settings/contract-types', (req, res, { ctx, query }) => { Contracts.requireContracts(ctx.user); send(res, 200, Settings.listContractTypes({ includeInactive: query.get('all') === '1' })); });
+api.put('/api/settings/contract-types', (req, res, { ctx, body }) => { Contracts.requireContracts(ctx.user); send(res, 200, Settings.saveContractTypes(ctx, body.types, clientIp(req))); });
 api.get('/api/settings/project-types', (req, res, { query }) => send(res, 200, Settings.listProjectTypes({ includeInactive: query.get('all') === '1' })));
 api.put('/api/settings/project-types', (req, res, { ctx, body }) => send(res, 200, Settings.saveProjectTypes(ctx, body.types, clientIp(req))));
 api.get('/api/settings/record-types', (req, res, { query }) => send(res, 200, Records.listRecordTypes({ includeInactive: query.get('all') === '1' })));

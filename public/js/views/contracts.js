@@ -270,11 +270,14 @@ export async function list({ state, query, setQuery, render }) {
   const months = query.get('meses') || '12';
   const empresa = query.get('empresa') || '', tipo = query.get('tipo') || '';
   const d = await api('/contracts/dashboard', { query: { meses: months, empresa, tipo } });
-  const qs = (over = {}) => ({ meses: months, empresa, tipo, status: query.get('status') || 'vigente', ...over });
+  // Filtros da tabela de contratos (situação e "ocultar 100% medidos"): só mexem na tabela, sem recarregar a página
+  let filter = query.get('status') || 'vigente';
+  let hideFull = query.get('medidos') !== '1';
+  const qs = (over = {}) => ({ meses: months, empresa, tipo, status: filter, medidos: hideFull ? '' : '1', ...over });
+  const isFull = c => c.summary.value > 0 && c.summary.balance <= 0.005;
   const t = d.totals;
   const Y = d.year;
-  const filter = query.get('status') || 'vigente';
-  const shown = d.contracts.filter(c => filter === 'todos' || c.status === filter);
+
   // Carteira: só contratos vigentes (recebido + a receber + aguardando NF + saldo = contratado)
   const vig = d.contracts.filter(c => c.status === 'vigente');
   const vsum = k => vig.reduce((x, c) => x + (c.summary[k] || 0), 0);
@@ -285,7 +288,7 @@ export async function list({ state, query, setQuery, render }) {
 
   const contractRow = c => {
     const s = c.summary;
-    return html`<a class="ct-row" href="#/contratos/${c.id}">
+    return html`<a class="ct-row" href="#/contratos/${c.id}" data-st="${c.status}" data-full="${isFull(c) ? 1 : 0}">
       <div class="ct-row-id"><span class="ct-row-tags"><span class="mono">${c.code}</span>${coBadge(c)}${typePill(c)}</span><b>${c.client}</b><small>${c.title}</small></div>
       <div class="ct-row-bar">${compositionBar(pipeParts(s), s.value)}
         <div class="ct-row-meta"><span><b>${pct(s.pct)}</b> medido</span>${s.last ? html`<span>último ${s.last.code} ${mBadge(s.last.status)}</span>` : html`<span>sem medições</span>`}${s.drafts ? html`<span class="m-badge m-draft">rascunho</span>` : ''}</div></div>
@@ -379,21 +382,43 @@ export async function list({ state, query, setQuery, render }) {
             ${compositionBar(pipeParts({ received: b.received, to_receive: b.to_receive, to_bill: Math.max(0, b.measured - b.billed), balance: Math.max(0, b.value - b.measured) }), b.value)}</div>`)}</div>
         </section>` : ''}
 
-        <section class="card">
+        <section class="card ct-list-card">
           <div class="card-head"><h2>${icon('contract')}Contratos</h2>
-            <div class="chips" role="group" aria-label="Filtrar contratos">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
-              html`<button class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n">${k === 'todos' ? d.contracts.length : d.contracts.filter(c => c.status === k).length}</span></button>`)}</div></div>
+            <div class="ct-list-filters">
+              <div class="chips" role="group" aria-label="Filtrar contratos por situação">${[['vigente', 'Vigentes'], ['suspenso', 'Suspensos'], ['encerrado', 'Encerrados'], ['todos', 'Todos']].map(([k, l]) =>
+                html`<button type="button" class="chip" data-ctf="${k}" aria-pressed="${filter === k}">${l}<span class="n" data-ctn="${k}"></span></button>`)}</div>
+              <button type="button" class="chip ct-full-chip" data-ctfull aria-pressed="${hideFull}" title="Oculta os contratos com 100% do valor medido (saldo a medir zerado)">${icon('check')}Ocultar 100% medidos<span class="n" data-ctn-full></span></button>
+            </div></div>
           <ul class="ct-port-legend is-inline">${pipeParts(port).map(p => html`<li><i class="k ${p.cls}"></i><span>${p.label}</span></li>`)}</ul>
-          ${shown.length ? html`<div class="ct-rows">${shown.map(contractRow)}</div>`
-            : html`<div class="card-body muted">${d.contracts.length ? 'Nenhum contrato neste filtro.' : 'Nenhum contrato cadastrado. Comece em “Novo contrato”.'}</div>`}
+          ${d.contracts.length ? html`<div class="ct-rows">${d.contracts.map(contractRow)}</div><div class="card-body muted" data-ct-empty hidden>Nenhum contrato neste filtro.</div>`
+            : html`<div class="card-body muted">Nenhum contrato cadastrado. Comece em “Novo contrato”.</div>`}
         </section>
       </div>`,
     mount(root) {
-      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ status: b.dataset.ctf })); render(); }));
-      root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ status: filter, meses: b.dataset.meses })); render(); }));
-      root.querySelectorAll('[data-emp]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ status: filter, empresa: b.dataset.emp })); render(); }));
-      root.querySelector('#ct-tipo')?.addEventListener('change', e => { setQuery(qs({ status: filter, tipo: e.target.value })); render(); });
-      root.querySelector('[data-emp-clear]')?.addEventListener('click', () => { setQuery(qs({ status: filter, empresa: '', tipo: '' })); render(); });
+      // Tabela de contratos: filtra só as linhas da tabela (o restante do painel não muda)
+      const rows = [...root.querySelectorAll('.ct-rows .ct-row')];
+      const applyTable = () => {
+        const passSt = r => filter === 'todos' || r.dataset.st === filter;
+        let n = 0;
+        for (const r of rows) { const on = passSt(r) && !(hideFull && r.dataset.full === '1'); r.hidden = !on; if (on) n++; }
+        root.querySelector('[data-ct-empty]')?.toggleAttribute('hidden', n > 0);
+        root.querySelectorAll('[data-ctn]').forEach(el => {
+          const k = el.dataset.ctn;
+          el.textContent = rows.filter(r => (k === 'todos' || r.dataset.st === k) && !(hideFull && r.dataset.full === '1')).length;
+        });
+        const full = root.querySelector('[data-ctn-full]');
+        if (full) full.textContent = rows.filter(r => r.dataset.full === '1' && (filter === 'todos' || r.dataset.st === filter)).length;
+        root.querySelectorAll('[data-ctf]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.ctf === filter)));
+        root.querySelector('[data-ctfull]')?.setAttribute('aria-pressed', String(hideFull));
+        setQuery(qs());
+      };
+      root.querySelectorAll('[data-ctf]').forEach(b => b.addEventListener('click', () => { filter = b.dataset.ctf; applyTable(); }));
+      root.querySelector('[data-ctfull]')?.addEventListener('click', () => { hideFull = !hideFull; applyTable(); });
+      applyTable();
+      root.querySelectorAll('[data-meses]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ meses: b.dataset.meses })); render(); }));
+      root.querySelectorAll('[data-emp]').forEach(b => b.addEventListener('click', () => { setQuery(qs({ empresa: b.dataset.emp })); render(); }));
+      root.querySelector('#ct-tipo')?.addEventListener('change', e => { setQuery(qs({ tipo: e.target.value })); render(); });
+      root.querySelector('[data-emp-clear]')?.addEventListener('click', () => { setQuery(qs({ empresa: '', tipo: '' })); render(); });
       bindAnnual(root, d);
       bindRanking(root, d);
       // Dica do gráfico: mês + os três valores (valor em destaque, série em seguida)

@@ -2576,3 +2576,16 @@ tr.is-inactive td { opacity: .55; }
 .pl-links { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12px; color: var(--ink-2); }
 .pl-links b { display: inline-block; min-width: 18px; margin: 0 2px; padding: 0 5px; border-radius: 6px; background: var(--navy-50); font-weight: 700; text-align: center; }
 .pl-links b.is-auto { background: #EAF6F9; color: #2E6F80; border: 1px dashed #87BFCF; }
+
+/* Contratos: filtros da tabela (situação + ocultar 100% medidos) */
+.ct-list-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 12px; }
+.ct-full-chip svg { width: 14px; height: 14px; opacity: 0; }
+.ct-full-chip[aria-pressed="true"] svg { opacity: 1; }
+.ct-rows .ct-row[hidden] { display: none; }
+@media (max-width: 599px) { .ct-list-filters { justify-content: flex-start; } }
+
+.ct-list-card .card-head { flex-wrap: wrap; gap: 10px; }
+.ct-list-card .ct-list-filters .chips { flex-wrap: wrap; }
+@media (max-width: 899px) {
+  .ct-list-card .ct-list-filters { width: 100%; justify-content: flex-start; }
+}

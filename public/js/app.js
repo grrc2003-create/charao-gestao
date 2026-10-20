@@ -12,6 +12,7 @@ import * as TeamVacations from './views/team-vacations.js';
 import * as ReportAta from './views/report-ata.js';
 import * as ReportHistory from './views/report-history.js';
 import * as Projects from './views/projects.js';
+import * as PlanningImport from './views/planning-import.js';
 import * as Project from './views/project.js';
 import * as Tasks from './views/tasks.js';
 import * as Task from './views/task.js';
@@ -66,6 +67,7 @@ const routes = [
   ['/projetos/novo', Projects.form],
   ['/projetos/:id', Project.view],
   ['/projetos/:id/editar', Projects.form],
+  ['/projetos/:id/importar', PlanningImport.importPage],
   ['/tarefas', Tasks.view],
   ['/tarefas/nova', TaskForm.view],
   ['/tarefas/:id', Task.view],

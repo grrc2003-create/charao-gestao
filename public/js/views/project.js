@@ -37,7 +37,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
           ${p.can_edit ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/editar">${icon('edit')}Editar</a>` : ''}
           <a class="btn btn-ghost" href="#/imprimir/relatorio?type=projeto&id=${p.id}&level=detalhado">${icon('print')}Relatório</a>
           <a class="btn btn-ghost" href="#/imprimir/historia/${p.id}">${icon('history')}História</a>
-          ${p.can_create_task ? html`<a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
+          ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar">${icon('file')}Importar planejamento</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
       ${kpiBlock(p.summary)}

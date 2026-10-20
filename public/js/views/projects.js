@@ -1,6 +1,7 @@
 import { html, api, icon, PROJECT_STATUS, fmtDate, fmtPct, progress, todayISO } from '../core.js';
 import { toast } from '../ui.js';
 import { pageHead, stackBar, bindCommon, STATUS_COLOR, execInline } from './shared.js';
+import { setPendingPlanning, downloadPlanningTemplate } from './planning-import.js';
 
 export async function list({ state, query, setQuery }) {
   const [projects, types] = await Promise.all([api('/projects'), api('/settings/project-types', { query: { all: '1' } }).catch(() => [])]);
@@ -188,6 +189,16 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
               <span class="muted" style="font-size:12px">${full ? 'acesso a todos os projetos' : u.is_external ? `Terceirizado${u.company ? ` · ${u.company}` : ''}` : u.job_title || ''}</span></label>`;
           })}</div>
         </fieldset>
+        ${!editing ? html`<fieldset class="fieldset form" id="plan-fs"><legend>Planejamento (opcional)</legend>
+          <span class="hint">Suba o planejamento completo por planilha: tarefas, subtarefas, responsáveis, datas e dependências. Depois de cadastrar o projeto, a prévia abre para você conferir antes de importar.
+            Cadastre as classificações acima antes (a planilha usa os mesmos nomes).</span>
+          <div class="plan-pick">
+            <button type="button" class="btn btn-ghost btn-sm" id="plan-tpl">${icon('file')}Baixar planilha modelo</button>
+            <label class="btn btn-ghost btn-sm" for="plan-file">${icon('plus')}Escolher planilha preenchida</label>
+            <input type="file" id="plan-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+            <span class="plan-name muted" id="plan-name"></span>
+          </div>
+        </fieldset>` : ''}
         <div class="form-error" hidden></div>
         <div class="form-actions">
           <a class="btn btn-ghost" href="${editing ? `#/projetos/${p.id}` : '#/projetos'}">Cancelar</a>
@@ -265,6 +276,18 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           if (sib && !sib.classList.contains('stage-default')) dir < 0 ? sib.before(li) : sib.after(li);
         }
       });
+      // Planejamento por planilha (projeto novo): modelo e arquivo escolhido
+      const planFile = root.querySelector('#plan-file');
+      root.querySelector('#plan-tpl')?.addEventListener('click', async ev => {
+        const b = ev.currentTarget; b.disabled = true;
+        try { await downloadPlanningTemplate(); toast('Planilha modelo baixada.'); } catch (ex) { toast(ex.message, 'error'); }
+        b.disabled = false;
+      });
+      planFile?.addEventListener('change', () => {
+        const fl = planFile.files[0];
+        if (fl && !/\.xlsx$/i.test(fl.name)) { toast('Envie um arquivo .xlsx.', 'error'); planFile.value = ''; }
+        root.querySelector('#plan-name').textContent = planFile.files[0] ? planFile.files[0].name : '';
+      });
       const err = f.querySelector('.form-error');
       f.addEventListener('submit', async e => {
         e.preventDefault();
@@ -284,6 +307,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           if (hol) setTimeout(() => toast(hol.ok ? (hol.municipal_found ? `Feriados do estado e do município carregados (${hol.count}).` : 'Feriados do estado carregados. Não encontramos feriados municipais desta cidade: confira e inclua no calendário da obra.')
             : hol.message, hol.ok && hol.municipal_found ? undefined : 'warn'), 600);
           toast(editing ? 'Projeto atualizado.' : 'Projeto cadastrado.');
+          if (!editing && planFile?.files[0]) { setPendingPlanning(planFile.files[0], id); navigate(`/projetos/${id}/importar`); return; }
           navigate(`/projetos/${id}`);
         } catch (ex) {
           err.textContent = ex.message;

@@ -2560,3 +2560,15 @@ tr.is-inactive td { opacity: .55; }
   .fi-line { grid-column: 2 / 4; }
   .fi-list input { grid-row: 1 / 3; }
 }
+
+/* Projeto › Importar planejamento */
+.pl-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 16px; }
+.pl-list li.is-sub .pl-row { padding-left: 40px; background: #FCFBF9; }
+.pl-list li.is-erro .pl-row { background: #FDF6F5; }
+.plan-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plan-name { font-size: 13px; }
+@media (max-width: 560px) {
+  .pl-row { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 14px; }
+  .pl-row .fi-line { grid-column: 1 / 3; }
+  .pl-list li.is-sub .pl-row { padding-left: 26px; }
+}

@@ -20,6 +20,7 @@ import * as Contracts from './services/contracts.js';
 import * as BmImport from './services/bm-import.js';
 import * as Finance from './services/finance.js';
 import * as FinanceImport from './services/finance-import.js';
+import * as TaskImport from './services/task-import.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
@@ -305,6 +306,10 @@ api.get('/api/record-files/:id', (req, res, { ctx, params }) => sendFile(req, re
 api.get('/api/finance/month', (req, res, { ctx, query }) => send(res, 200, Finance.financeMonth(ctx, query.get('mes'))));
 api.get('/api/finance/assignees', (req, res, { ctx }) => send(res, 200, Finance.financeAssignees(ctx)));
 api.get('/api/finance/analysis', (req, res, { ctx, query }) => send(res, 200, Finance.financeAnalysis(ctx, query.get('por'))));
+api.get('/api/planning/template', (req, res, { ctx, query }) => send(res, 200, TaskImport.templateXlsx(ctx, intOrNull(query.get('projeto'))), {
+  'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="planejamento-modelo.xlsx"' }));
+api.post('/api/projects/:id/planning/preview', (req, res, { ctx, params, body }) => send(res, 200, TaskImport.previewImport(ctx, TaskImport.projectIdParam(params.id), body)));
+api.post('/api/projects/:id/planning', (req, res, { ctx, params, body }) => send(res, 200, TaskImport.applyImport(ctx, TaskImport.projectIdParam(params.id), body, clientIp(req))));
 api.get('/api/finance/import/template', (req, res, { ctx }) => send(res, 200, FinanceImport.templateXlsx(ctx), {
   'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="tarefas-financeiras-modelo.xlsx"' }));
 api.post('/api/finance/import/preview', (req, res, { ctx, body }) => send(res, 200, FinanceImport.previewImport(ctx, body)));

@@ -1733,7 +1733,7 @@ async function main() {
   ok(clsA1.company === 'charao' && clsA1.type_id === tyId('Reforma') && clsA1.type_name === 'Reforma', 'importação: tipo pelo início do nome (Reforma) e empresa Charão');
   ok(clsB1.company === 'lus' && clsB1.company_name.startsWith('Ludimila') && clsB1.type_id === tyId('Orçamento'), 'importação: recebimento na conta "(LUS)" → contrato da LuS');
   const clsBm = (await fo('GET', `/measurements/${(await fo('GET', `/contracts/${clsB1.id}`)).data.measurements[0].id}`)).data;
-  ok(clsBm.contract.company_logo === '/assets/logo-lus.png' && clsBm.contract.company_name.startsWith('Ludimila'), 'boletim do contrato LuS sai com o logo e o nome da LuS');
+  ok(clsBm.contract.company_logo === '/assets/logo-lus-h.png' && clsBm.contract.company_name.startsWith('Ludimila'), 'boletim do contrato LuS sai com o logo e o nome da LuS');
   const ctLus = (await fo('POST', '/contracts', { client: 'Cliente Teste LuS', title: 'Projeto de interiores', bulletin_prefix: 'LUS', company: 'lus', type_id: tyId('Projeto'), items: [{ description: 'Projeto', unit: 'vb', unit_price: 1000, quantity: 1 }] })).data.id;
   let ctLusV = (await fo('GET', `/contracts/${ctLus}`)).data;
   ok(ctLusV.company === 'lus' && ctLusV.company_auto === 0 && ctLusV.type_name === 'Projeto', 'contrato cadastrado com empresa e tipo');

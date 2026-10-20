@@ -434,7 +434,7 @@
 
 /* Boletim da LuS (Ludimila Siqueira Arquitetura & Design): paleta do logo — petróleo #0B2228, azul-claro #87CDDE, cinza-azulado #93A7AC */
 .bm-co-lus .bm-head { border-bottom-color: #0B2228; }
-.bm-co-lus .bm-logo { height: 58px; }
+.bm-co-lus .bm-logo { height: 50px; max-width: 70mm; object-fit: contain; }
 .bm-co-lus .bm-kicker { color: #4E8E9E; }
 .bm-co-lus .bm-title h1, .bm-co-lus .bm-client b { color: #0B2228; }
 .bm-co-lus .bm-meta th, .bm-co-lus .bm-meta td, .bm-co-lus .bm-table th, .bm-co-lus .bm-table td, .bm-co-lus .bm-pay { border-color: #93A7AC; }

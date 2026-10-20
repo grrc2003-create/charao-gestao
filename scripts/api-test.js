@@ -1681,52 +1681,6 @@ async function main() {
   const mvPv = (await fo('GET', `/tasks/${mvP}`)).data, mvSv = (await fo('GET', `/tasks/${mvS}`)).data;
   ok(mvPv.start_date > '2099-07-15' && mvSv.start_date === mvPv.start_date && mvSv.due_date === mvPv.due_date && mvSv.reschedule_count === 0, 'mãe empurrada por dependência leva as subtarefas junto (sem contar como reagendamento)');
 
-  // ---------- Contratos: recebimentos (importação das planilhas do financeiro + lançamento manual) ----------
-  const rcFile = n => ({ name: n, data: fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', n)).toString('base64') });
-  const rcFiles = [rcFile('recebimentos-exemplo.xlsx')];
-  const rcNo = await login('marcos@charao.eng.br');
-  ok((await rcNo('POST', '/receipts/import/preview', { files: rcFiles })).status === 403, 'sem liberação de Contratos não importa recebimentos');
-  ok((await fo('POST', '/receipts/import/preview', { files: [{ name: 'x.xlsx', data: Buffer.from('não é planilha').toString('base64') }] })).status === 400, 'arquivo que não é .xlsx é recusado');
-  const rcPv = (await fo('POST', '/receipts/import/preview', { files: rcFiles })).data;
-  const rcA1 = rcPv.groups.find(g => g.obra === 'Reforma - Casa Exemplo A1'), rcA2 = rcPv.groups.find(g => g.obra === 'Projeto - Sala Exemplo A2'), rcGer = rcPv.groups.find(g => g.obra === 'Gerenciamento');
-  ok(rcPv.total_rows === 12 && rcPv.groups.length === 4 && rcPv.others.count === 2, `prévia: 12 linhas, 4 obras (contratos) e 2 outras entradas (${rcPv.total_rows}/${rcPv.groups.length}/${rcPv.others.count})`);
-  ok(rcA1.client === 'Cliente Exemplo Alfa' && rcA1.count === 5 && rcA1.rt_count === 1 && rcA1.received === 30550.5 && rcA1.overdue === 10000 && rcA1.payers.includes('Fornecedor Exemplo Móveis'), 'obra: cliente principal, RT do fornecedor, recebido (com desconto) e vencido');
-  ok(rcA2.count === 3 && rcA2.received === 5000 && rcA2.open === 4000 && rcA2.overdue === 0, 'linhas idênticas são lançamentos distintos; parcela futura fica a receber (não vencida)');
-  ok(rcGer.match && rcGer.match.code === 'CT-001' && !rcA1.match, 'obra com o mesmo nome de um contrato existente já vem ligada a ele');
-  ok(rcPv.groups.every(g => g.new_rows === g.count), 'prévia não grava nada (tudo novo)');
-  const rcImp = (await fo('POST', '/receipts/import', { files: rcFiles, mapping: {} })).data;
-  ok(rcImp.inserted === 12 && rcImp.contracts_created.length === 3 && rcImp.linked === 1, `importação: 12 lançamentos, 3 contratos criados e 1 ligado ao boletim já recebido (${JSON.stringify(rcImp)})`);
-  const rcCts = (await fo('GET', '/contracts')).data;
-  const rcCtA1 = rcCts.find(c => c.title === 'Reforma - Casa Exemplo A1');
-  ok(rcCtA1 && rcCtA1.client === 'Cliente Exemplo Alfa' && rcCtA1.source === 'importacao' && rcCtA1.status === 'vigente', 'contrato = cliente + obra, criado pela importação (vigente por ter parcela em aberto)');
-  ok(rcCts.find(c => c.title === 'Orçamento - Estudo Exemplo B1').status === 'encerrado', 'contrato antigo, sem parcelas em aberto, nasce encerrado');
-  let rcCt = (await fo('GET', `/contracts/${rcCtA1.id}`)).data;
-  ok(rcCt.receipts.length === 5 && rcCt.summary.receipts.received === 30550.5 && rcCt.summary.receipts.overdue_count === 1 && rcCt.summary.receipts.rt_received === 750.5 && rcCt.summary.received === 30550.5 && rcCt.summary.to_receive === 10000,
-    'contrato: recebimentos, RT, vencido e totais (recebido / a receber)');
-  ok(rcCt.receipts.find(r => r.installment === '4/4 parcelas').status === 'vencido' && rcCt.receipts.find(r => r.kind === 'rt').payer === 'Fornecedor Exemplo Móveis', 'situação "vencido" e RT com o fornecedor como pagador');
-  ok((await fo('GET', `/contracts/${kCtId}`)).data.summary.received === 9841.05, 'recebimento ligado ao boletim não soma duas vezes no contrato');
-  ok((await fo('POST', '/receipts/import/preview', { files: rcFiles })).data.groups.every(g => g.match && g.same_rows === g.count), 'reenviar a planilha: tudo já importado e cada obra ligada ao seu contrato');
-  const rcAgain = (await fo('POST', '/receipts/import', { files: rcFiles })).data;
-  ok(rcAgain.inserted === 0 && rcAgain.skipped === 12 && rcAgain.contracts_created.length === 0, 'reenviar não duplica');
-  const rcBx = (await fo('POST', '/receipts/import', { files: [rcFile('recebimentos-exemplo-baixa.xlsx')] })).data;
-  rcCt = (await fo('GET', `/contracts/${rcCtA1.id}`)).data;
-  const rc44 = rcCt.receipts.find(r => r.installment === '4/4 parcelas');
-  ok(rcBx.updated === 1 && rcBx.inserted === 0 && rc44.status === 'recebido' && rc44.received_date === '2025-04-18' && rc44.net === 10150 && rcCt.summary.receipts.overdue_count === 0, 'planilha mais nova dá baixa na parcela que estava em aberto (com juros)');
-  const rcOut = (await fo('GET', '/receipts/outras')).data;
-  ok(rcOut.totals.count === 2 && rcOut.receipts.every(r => r.kind === 'outra') && rcOut.totals.received === 5300, 'outras entradas (aporte, sem obra) ficam sem contrato');
-  // Lançamento manual, baixa e exclusão
-  ok((await fo('POST', '/receipts', { contract_id: rcCtA1.id, due_date: '2030-01-10' })).status === 400, 'valor é obrigatório');
-  const rcMan = (await fo('POST', '/receipts', { contract_id: rcCtA1.id, due_date: '2030-01-10', amount: '1.500,00', description: 'Aditivo', installment: '1/1' })).data.id;
-  ok((await fo('PUT', `/receipts/${rcMan}`, { received_date: '2030-01-12', discount: '100' })).status === 200, 'baixa do recebimento');
-  const rcManV = (await fo('GET', `/contracts/${rcCtA1.id}`)).data.receipts.find(r => r.id === rcMan);
-  ok(rcManV.status === 'recebido' && rcManV.received_amount === 1400 && rcManV.amount === 1500, 'baixa sem valor informado: valor − desconto');
-  ok((await fo('PUT', `/receipts/${rcMan}`, { received_date: '' })).status === 200 && (await fo('GET', `/contracts/${rcCtA1.id}`)).data.receipts.find(r => r.id === rcMan).status === 'a_receber', 'baixa desfeita');
-  ok((await rcNo('DELETE', `/receipts/${rcMan}`)).status === 403 && (await fo('DELETE', `/receipts/${rcMan}`)).status === 200, 'só quem tem Contratos exclui recebimento');
-  const rcDsh = (await fo('GET', '/contracts/dashboard')).data;
-  ok(!rcDsh.actions.some(a => a.text.startsWith('Sem medição') && a.code === rcCtA1.code), 'contrato só de recebimentos não cobra medição mensal');
-  ok(rcDsh.annual.find(y => y.year === '2025').totals.received >= 30550.5 + 5000 + 6000 + 10150 - 0.01 && rcDsh.billing.some(b => b.receipt && b.client === 'Cliente Exemplo Alfa'), 'recebimentos entram no comparativo anual e no ranking de clientes');
-  ok((await fo('GET', '/audit')).data.some(a => a.entity === 'receipt' && a.action === 'Recebimentos importados de planilha'), 'importação registrada na auditoria');
-
 }
 
 main()

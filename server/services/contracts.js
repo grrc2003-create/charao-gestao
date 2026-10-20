@@ -5,7 +5,6 @@ import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '..
 import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { defaultStageId } from './stages.js';
-import { receiptsSummary, receiptsOf, countedReceipts } from './receipts.js';
 
 export const STATUSES = ['vigente', 'suspenso', 'encerrado'];
 export const MEASUREMENT_STATUSES = ['rascunho', 'emitida', 'faturada', 'recebida'];
@@ -71,17 +70,13 @@ function contractSummary(c) {
   const received = ms.filter(m => m.status === 'recebida');
   const value = r2(items.reduce((s, i) => s + i.quantity * i.unit_price, 0));
   const measured = sum(issued, 'measured');
-  // Recebimentos (parcelas/RT lançadas ou importadas) entram no faturado, recebido e a receber
-  const rc = receiptsSummary(c.id);
   return {
     value,
-    items: items.length,
-    receipts: rc,
     measured,
     measured_total: sum(issued, 'total'),
-    billed: r2(sum(billed, 'total') + rc.billed),
-    received: r2(received.reduce((s, m) => s + (m.paid_amount ?? m.total), 0) + rc.received),
-    to_receive: r2(sum(billed.filter(m => m.status === 'faturada'), 'total') + rc.open),
+    billed: sum(billed, 'total'),
+    received: r2(received.reduce((s, m) => s + (m.paid_amount ?? m.total), 0)),
+    to_receive: r2(sum(billed.filter(m => m.status === 'faturada'), 'total')),
     to_bill: r2(sum(ms.filter(m => m.status === 'emitida'), 'total')),
     balance: r2(value - measured),
     pct: value ? Math.round((measured / value) * 1000) / 10 : null,
@@ -113,7 +108,6 @@ export function getContract(ctx, id) {
       return { ...i, value: r2(i.quantity * i.unit_price), measured_qty: mq, measured_value: r2(mq * i.unit_price), balance_qty: r4(i.quantity - mq), balance_value: r2((i.quantity - mq) * i.unit_price), used: used.has(i.id) };
     }),
     measurements: measurementsOf(id).map(m => ({ ...m, ...measurementTotals(m, items) })),
-    receipts: receiptsOf(id),
     summary: contractSummary(c),
   };
 }
@@ -406,10 +400,6 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   // Série mensal: medido (mês de referência), faturado (mês da NF) e recebido (mês do pagamento)
   const ms = all('SELECT * FROM measurements WHERE status <> \'rascunho\'');
   const totalOf = new Map(ms.map(m => [m.id, measurementTotals(m).total]));
-  // Recebimentos dos contratos: faturado pelo vencimento, recebido pela data do recebimento
-  const rcs = countedReceipts();
-  const rcBilled = test => rcs.filter(r => test(r.due_date)).reduce((s, r) => s + r.amount, 0);
-  const rcReceived = test => rcs.filter(r => r.received_date && test(r.received_date)).reduce((s, r) => s + r.net, 0);
   const end = today().slice(0, 7);
   const keys = [];
   let [y, mo] = end.split('-').map(Number);
@@ -417,8 +407,8 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   const series = keys.map(k => ({
     month: k, label: monthLabel(k),
     measured: r2(ms.filter(m => m.ref_month === k).reduce((s, m) => s + totalOf.get(m.id), 0)),
-    billed: r2(ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === k).reduce((s, m) => s + totalOf.get(m.id), 0) + rcBilled(d => d.slice(0, 7) === k)),
-    received: r2(ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === k).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0) + rcReceived(d => d.slice(0, 7) === k)),
+    billed: r2(ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === k).reduce((s, m) => s + totalOf.get(m.id), 0)),
+    received: r2(ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === k).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0)),
   }));
   // Por cliente
   const byClient = new Map();
@@ -435,8 +425,8 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   const prevYear = String(Number(year) - 1);
   const md = ref.slice(5);
   const inYear = (d, y) => d && d.slice(0, 4) === y && d.slice(5) <= md;
-  const billedIn = y => r2(ms.filter(m => inYear(m.nf_date, y)).reduce((s, m) => s + totalOf.get(m.id), 0) + rcBilled(d => inYear(d, y)));
-  const receivedIn = y => r2(ms.filter(m => m.status === 'recebida' && inYear(m.paid_date, y)).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0) + rcReceived(d => inYear(d, y)));
+  const billedIn = y => r2(ms.filter(m => inYear(m.nf_date, y)).reduce((s, m) => s + totalOf.get(m.id), 0));
+  const receivedIn = y => r2(ms.filter(m => m.status === 'recebida' && inYear(m.paid_date, y)).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0));
   const measuredIn = y => r2(ms.filter(m => m.ref_month.slice(0, 4) === y && m.ref_month <= `${y}-${md.slice(0, 2)}`).reduce((s, m) => s + totalOf.get(m.id), 0));
   // A receber por antiguidade (dias desde a NF)
   const code = new Map(list.map(c => [c.id, c]));
@@ -444,13 +434,10 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
     id: m.id, code: m.code, contract: code.get(m.contract_id)?.client, contract_id: m.contract_id, nf: m.nf_number, nf_date: m.nf_date,
     total: totalOf.get(m.id), days: m.nf_date ? Math.max(0, Math.round((Date.parse(ref) - Date.parse(m.nf_date)) / 86400e3)) : 0,
   }));
-  // Parcelas a receber: dias desde o vencimento (ainda não vencidas contam como 0)
-  const openRc = rcs.filter(r => !r.received_date).map(r => ({ total: r.amount, days: Math.max(0, Math.round((Date.parse(ref) - Date.parse(r.due_date)) / 86400e3)) }));
   const BUCKETS = [['0–30 dias', 0, 30], ['31–60 dias', 31, 60], ['61–90 dias', 61, 90], ['Mais de 90 dias', 91, 1e9]];
   const aging = BUCKETS.map(([label, a, b]) => {
     const it = open.filter(x => x.days >= a && x.days <= b);
-    const ir = openRc.filter(x => x.days >= a && x.days <= b);
-    return { label, count: it.length, receipts: ir.length, total: r2(it.reduce((s, x) => s + x.total, 0) + ir.reduce((s, x) => s + x.total, 0)) };
+    return { label, count: it.length, total: r2(it.reduce((s, x) => s + x.total, 0)) };
   });
   // Próximas ações
   const [py, pm] = (() => { let [y2, m2] = ref.slice(0, 7).split('-').map(Number); m2--; if (!m2) { m2 = 12; y2--; } return [y2, m2]; })();
@@ -458,8 +445,7 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   const actions = [];
   for (const c of active) {
     if (c.start_date && c.start_date.slice(0, 7) > lastMonth) continue;
-    // Contrato só de recebimentos (sem planilha contratual) não tem medição mensal
-    if (c.summary.items && !one('SELECT 1 FROM measurements WHERE contract_id = ? AND ref_month = ?', c.id, lastMonth)) {
+    if (!one('SELECT 1 FROM measurements WHERE contract_id = ? AND ref_month = ?', c.id, lastMonth)) {
       actions.push({ kind: 'medir', severity: 'warning', text: `Sem medição de ${monthLabel(lastMonth)}`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });
     }
     if (c.end_date && c.end_date >= ref && Math.round((Date.parse(c.end_date) - Date.parse(ref)) / 86400e3) <= 60) {
@@ -472,24 +458,17 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   for (const o of open.filter(x => x.days > 30)) {
     actions.push({ kind: 'cobrar', severity: o.days > 90 ? 'critical' : 'serious', text: `NF ${o.nf} sem recebimento há ${o.days} dias · ${o.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: o.contract, code: o.code, href: `#/medicoes/${o.id}` });
   }
-  // Parcelas vencidas e não recebidas, por contrato
-  for (const c of list.filter(x => x.summary.receipts.overdue_count)) {
-    const late = rcs.filter(r => r.contract_id === c.id && !r.received_date && r.due_date < ref);
-    const days = Math.max(...late.map(r => Math.round((Date.parse(ref) - Date.parse(r.due_date)) / 86400e3)));
-    actions.push({ kind: 'cobrar', severity: days > 90 ? 'critical' : days > 30 ? 'serious' : 'warning', text: `${late.length} parcela(s) vencida(s) · ${c.summary.receipts.overdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} · há até ${days} dia(s)`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });
-  }
   const sev = { critical: 0, serious: 1, warning: 2 };
   actions.sort((a, b) => sev[a.severity] - sev[b.severity]);
   // Comparativo anual: por ano, os 12 meses de medido (referência), faturado (NF) e recebido (pagamento)
   const yearsSet = new Set([year]);
   for (const m of ms) { yearsSet.add(m.ref_month.slice(0, 4)); if (m.nf_date) yearsSet.add(m.nf_date.slice(0, 4)); if (m.paid_date) yearsSet.add(m.paid_date.slice(0, 4)); }
-  for (const r of rcs) { yearsSet.add(r.due_date.slice(0, 4)); if (r.received_date) yearsSet.add(r.received_date.slice(0, 4)); }
   const years = [...yearsSet].sort();
   const annual = years.map(y => {
     const mon = k => Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`).map(key => r2(k(key)));
     const measured = mon(key => ms.filter(m => m.ref_month === key).reduce((s, m) => s + totalOf.get(m.id), 0));
-    const billed = mon(key => ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === key).reduce((s, m) => s + totalOf.get(m.id), 0) + rcBilled(d => d.slice(0, 7) === key));
-    const received = mon(key => ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === key).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0) + rcReceived(d => d.slice(0, 7) === key));
+    const billed = mon(key => ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === key).reduce((s, m) => s + totalOf.get(m.id), 0));
+    const received = mon(key => ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === key).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0));
     const tot = a => r2(a.reduce((s, v) => s + v, 0));
     return { year: y, measured, billed, received, totals: { measured: tot(measured), billed: tot(billed), received: tot(received) } };
   });
@@ -497,7 +476,7 @@ export function contractsDashboard(ctx, { months = 12 } = {}) {
   const billing = ms.filter(m => m.nf_date).map(m => {
     const c = code.get(m.contract_id);
     return { client: c?.client || '—', contract: c?.code, nf_date: m.nf_date, total: totalOf.get(m.id), received: m.status === 'recebida' ? (m.paid_amount ?? totalOf.get(m.id)) : 0 };
-  }).concat(rcs.map(r => ({ client: r.contract_client, contract: r.contract_code, nf_date: r.due_date, total: r.amount, received: r.net || 0, receipt: true })));
+  });
   return {
     months,
     annual,

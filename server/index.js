@@ -17,7 +17,6 @@ import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
 import * as Settings from './services/settings.js';
 import * as Contracts from './services/contracts.js';
-import * as Receipts from './services/receipts.js';
 import * as Finance from './services/finance.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
@@ -313,12 +312,6 @@ api.post('/api/contracts', (req, res, { ctx, body }) => send(res, 201, { id: Con
 api.get('/api/contracts/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))));
 api.put('/api/contracts/:id', (req, res, { ctx, params, body }) => { Contracts.updateContract(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, Contracts.getContract(ctx, intOrNull(params.id))); });
 api.post('/api/contracts/:id/measurements', (req, res, { ctx, params, body }) => send(res, 201, { id: Contracts.createMeasurement(ctx, intOrNull(params.id), body, clientIp(req)) }));
-api.get('/api/receipts/outras', (req, res, { ctx }) => send(res, 200, Receipts.otherReceipts(ctx)));
-api.post('/api/receipts/import/preview', (req, res, { ctx, body }) => send(res, 200, Receipts.previewImport(ctx, body)));
-api.post('/api/receipts/import', (req, res, { ctx, body }) => send(res, 200, Receipts.applyImport(ctx, body, clientIp(req))));
-api.post('/api/receipts', (req, res, { ctx, body }) => send(res, 201, { id: Receipts.createReceipt(ctx, body, clientIp(req)) }));
-api.put('/api/receipts/:id', (req, res, { ctx, params, body }) => { Receipts.updateReceipt(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, { ok: true }); });
-api.delete('/api/receipts/:id', (req, res, { ctx, params }) => send(res, 200, Receipts.deleteReceipt(ctx, intOrNull(params.id), clientIp(req))));
 api.get('/api/measurements/:id', (req, res, { ctx, params }) => send(res, 200, Contracts.getMeasurement(ctx, intOrNull(params.id))));
 api.put('/api/measurements/:id', (req, res, { ctx, params, body }) => send(res, 200, Contracts.updateMeasurement(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/measurements/:id/actions/:action', (req, res, { ctx, params, body }) => send(res, 200, Contracts.measurementAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
@@ -488,7 +481,7 @@ api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
 api.get('/api/audit', (req, res, { user }) => {
   requireSection(user, 'auditoria');
   // Registros de contratos só para quem tem a liberação
-  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement', 'receipt'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance') && (hasSection(user, 'folha') || !['payroll', 'reimbursement'].includes(a.entity))));
+  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance') && (hasSection(user, 'folha') || !['payroll', 'reimbursement'].includes(a.entity))));
 });
 
 // ---------- Tarefas recorrentes ----------

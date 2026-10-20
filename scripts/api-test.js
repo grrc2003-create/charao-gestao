@@ -1862,6 +1862,14 @@ async function main() {
   ok(plT('Estrutura').start_date > '2099-11-28', `dependência ajusta o início da sucessora (fim da Fundação + 2 dias de folga): ${plT('Estrutura').start_date}`);
   ok((await login('camila@charao.eng.br').then(c => c('GET', `/projects/${plPid}`))).status === 200, 'responsável ganhou acesso ao projeto');
 
+  // ---------- Contratos › Próximas ações ----------
+  const acD = (await fo('GET', '/contracts/dashboard')).data;
+  const acA1 = (await fo('GET', `/contracts/${clsA1.id}`)).data, acA2 = (await fo('GET', `/contracts/${dsCt.id}`)).data;
+  ok(acA1.status === 'vigente' && acA1.summary.balance === 0 && acD.actions.some(a => a.kind === 'encerrar' && a.code === acA1.code && a.group), 'contrato vigente 100% medido: sugere encerrar (aviso agrupável)');
+  ok(!acD.actions.some(a => a.kind === 'medir' && a.code === acA1.code), '100% medido não é cobrado de medição mensal');
+  ok(acA2.summary.balance > 0 && !acD.actions.some(a => a.kind === 'medir' && a.code === acA2.code), 'contrato com saldo, mas sem medição mês a mês recente, não é cobrado de medição');
+  ok(acD.actions.filter(a => a.kind === 'medir').every(a => a.group && a.group.startsWith('Sem medição de')), 'avisos de medição agrupáveis pelo mês');
+
 }
 
 main()

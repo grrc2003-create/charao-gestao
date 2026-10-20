@@ -474,10 +474,20 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   const [py, pm] = (() => { let [y2, m2] = ref.slice(0, 7).split('-').map(Number); m2--; if (!m2) { m2 = 12; y2--; } return [y2, m2]; })();
   const lastMonth = `${py}-${String(pm).padStart(2, '0')}`;
   const actions = [];
+  // Medição mensal: só cobra de contrato vigente com saldo a medir que vinha sendo medido mês a mês
+  // (teve BM em um dos 2 meses anteriores ao mês passado). Contrato 100% medido: sugere encerrar.
+  const prevMonth = k => { let [y3, m3] = lastMonth.split('-').map(Number); m3 -= k; while (m3 < 1) { m3 += 12; y3--; } return `${y3}-${String(m3).padStart(2, '0')}`; };
+  const recent = [prevMonth(1), prevMonth(2)];
   for (const c of active) {
+    const s = c.summary;
+    if (s.value > 0 && s.balance <= 0.005) {
+      actions.push({ kind: 'encerrar', severity: 'warning', text: '100% medido — encerrar contrato?', group: '100% medido — encerrar contrato?', client: c.client, code: c.code, href: `#/contratos/${c.id}/editar` });
+      continue;
+    }
     if (c.start_date && c.start_date.slice(0, 7) > lastMonth) continue;
-    if (!one('SELECT 1 FROM measurements WHERE contract_id = ? AND ref_month = ?', c.id, lastMonth)) {
-      actions.push({ kind: 'medir', severity: 'warning', text: `Sem medição de ${monthLabel(lastMonth)}`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });
+    const monthly = one(`SELECT 1 FROM measurements WHERE contract_id = ? AND status <> 'rascunho' AND ref_month IN (?, ?) LIMIT 1`, c.id, recent[0], recent[1]);
+    if (s.balance > 0.005 && monthly && !one('SELECT 1 FROM measurements WHERE contract_id = ? AND ref_month = ?', c.id, lastMonth)) {
+      actions.push({ kind: 'medir', severity: 'warning', text: `Sem medição de ${monthLabel(lastMonth)}`, group: `Sem medição de ${monthLabel(lastMonth)}`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });
     }
     if (c.end_date && c.end_date >= ref && Math.round((Date.parse(c.end_date) - Date.parse(ref)) / 86400e3) <= 60) {
       actions.push({ kind: 'vencendo', severity: 'warning', text: `Contrato termina em ${c.end_date.split('-').reverse().join('/')}`, client: c.client, code: c.code, href: `#/contratos/${c.id}` });

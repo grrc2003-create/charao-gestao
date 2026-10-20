@@ -101,6 +101,7 @@ const delta = (cur, prev, prevYear) => {
   const d = Math.round(((cur - prev) / prev) * 1000) / 10;
   return html`<span class="ct-delta ${d >= 0 ? 'is-up' : 'is-down'}">${d >= 0 ? '▲' : '▼'} ${String(Math.abs(d)).replace('.', ',')}% vs mesmo período de ${prevYear}</span>`;
 };
+const ACT_KINDS = [['cobrar', 'Cobrar'], ['faturar', 'Faturar'], ['medir', 'Medir'], ['encerrar', 'Encerrar'], ['vencendo', 'Vencendo']];
 const SEV = { critical: { label: 'Crítico', ic: 'alert' }, serious: { label: 'Atenção', ic: 'clock' }, warning: { label: 'Pendente', ic: 'info' } };
 
 // ---------- Comparativo anual ----------
@@ -368,11 +369,28 @@ export async function list({ state, query, setQuery, render }) {
           </section>
           <section class="card">
             <div class="card-head"><h2>${icon('alert')}Próximas ações</h2><span class="sub">${d.actions.length} pendência(s)</span></div>
-            ${d.actions.length ? html`<ul class="ct-actions">${d.actions.slice(0, 8).map(a => html`<li class="sev-${a.severity}"><a href="${a.href}">
-              <span class="ct-sev">${icon(SEV[a.severity].ic)}${SEV[a.severity].label}</span>
-              <span class="ct-act-t"><b>${a.text}</b><small>${a.client} · ${a.code}</small></span>${icon('chevron')}</a></li>`)}</ul>
-              ${d.actions.length > 8 ? html`<div class="card-body muted" style="font-size:12.5px">+ ${d.actions.length - 8} pendência(s)</div>` : ''}`
-              : html`<div class="card-body muted">Tudo em dia: medições do mês passado lançadas, boletins faturados e recebimentos em dia.</div>`}
+            ${d.actions.length ? (() => {
+              // Avisos iguais (sem medição, 100% medido) viram uma linha só, que abre a lista de contratos
+              const items = [];
+              const groups = new Map();
+              for (const a of d.actions) {
+                if (!a.group) { items.push({ ...a, list: [a] }); continue; }
+                if (!groups.has(a.group)) { const g = { ...a, list: [] }; groups.set(a.group, g); items.push(g); }
+                groups.get(a.group).list.push(a);
+              }
+              const kinds = ACT_KINDS.filter(([k]) => items.some(i => i.kind === k));
+              const row = i => html`<li class="sev-${i.severity}" data-act="${i.kind}">${i.list.length > 1 ? html`<details class="ct-act-group"><summary>
+                  <span class="ct-sev">${icon(SEV[i.severity].ic)}${SEV[i.severity].label}</span>
+                  <span class="ct-act-t"><b>${i.text}</b><small>${i.list.length} contratos</small></span>${icon('chevron')}</summary>
+                  <ul>${i.list.map(a => html`<li><a href="${a.href}"><span class="mono">${a.code}</span><span>${a.client}</span>${icon('chevron')}</a></li>`)}</ul></details>`
+                : html`<a href="${i.href}"><span class="ct-sev">${icon(SEV[i.severity].ic)}${SEV[i.severity].label}</span>
+                  <span class="ct-act-t"><b>${i.text}</b><small>${i.client} · ${i.code}</small></span>${icon('chevron')}</a>`}</li>`;
+              return html`${kinds.length > 1 ? html`<div class="chips ct-act-chips" role="group" aria-label="Filtrar ações"><button type="button" class="chip" data-actf="" aria-pressed="true">Todas<span class="n">${items.length}</span></button>
+                  ${kinds.map(([k, l]) => html`<button type="button" class="chip" data-actf="${k}" aria-pressed="false">${l}<span class="n">${items.filter(i => i.kind === k).length}</span></button>`)}</div>` : ''}
+                <ul class="ct-actions">${items.map(row)}</ul>
+                <button type="button" class="ct-act-more" data-actmore hidden></button>`;
+            })()
+              : html`<div class="card-body muted">Tudo em dia: medições mensais lançadas, boletins faturados e recebimentos em dia.</div>`}
           </section>
         </div>
 
@@ -413,6 +431,24 @@ export async function list({ state, query, setQuery, render }) {
         </section>
       </div>`,
     mount(root) {
+      // Próximas ações: filtro por tipo e "+N pendências" (só este quadro)
+      const actList = root.querySelector('.ct-actions');
+      if (actList) {
+        const lis = [...actList.children];
+        const more = root.querySelector('[data-actmore]');
+        let kind = '', all = false;
+        const drawAct = () => {
+          const pass = lis.filter(li => !kind || li.dataset.act === kind);
+          lis.forEach(li => { li.hidden = true; });
+          pass.forEach((li, i) => { li.hidden = !all && i >= 8; });
+          more.hidden = pass.length <= 8;
+          more.textContent = all ? 'Mostrar menos' : `+ ${pass.length - 8} pendência(s) — ver todas`;
+          root.querySelectorAll('[data-actf]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.actf === kind)));
+        };
+        root.querySelectorAll('[data-actf]').forEach(b => b.addEventListener('click', () => { kind = b.dataset.actf; drawAct(); }));
+        more.addEventListener('click', () => { all = !all; drawAct(); });
+        drawAct();
+      }
       // Por cliente: filtro e "ver todos" só nesta lista
       const cliCard = root.querySelector('.ct-cli-card');
       if (cliCard) {

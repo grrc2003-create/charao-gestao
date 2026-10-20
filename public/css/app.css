@@ -2623,3 +2623,23 @@ tr.is-inactive td { opacity: .55; }
   .ct-cl-id b { white-space: normal; }
   .ct-cl-sub { grid-row: 3; grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 0 12px; align-items: baseline; }
 }
+
+/* Contratos › Próximas ações: filtro por tipo, avisos agrupados e "+N" clicável */
+.ct-act-chips { padding: 10px 16px 6px; flex-wrap: wrap; }
+.ct-actions li[hidden] { display: none; }
+.ct-act-group > summary { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 16px; cursor: pointer; list-style: none; }
+.ct-act-group > summary::-webkit-details-marker { display: none; }
+.ct-act-group > summary > svg { width: 16px; height: 16px; color: var(--muted); transition: transform .15s; }
+.ct-act-group[open] > summary > svg { transform: rotate(90deg); }
+.ct-act-group > summary:hover { background: #FAF9F6; }
+.ct-act-group ul { list-style: none; margin: 0 0 8px; padding: 0 16px 0 122px; }
+.ct-act-group ul a { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; color: inherit; text-decoration: none; }
+.ct-act-group ul a:hover { background: var(--navy-50); }
+.ct-act-group ul .mono { font-size: 11.5px; color: var(--muted); }
+.ct-act-group ul svg { width: 14px; height: 14px; color: var(--muted); }
+.ct-act-more { display: block; width: 100%; border: 0; border-top: 1px solid var(--line); background: none; padding: 10px 16px; text-align: left; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--navy); cursor: pointer; }
+.ct-act-more:hover { background: var(--navy-50); }
+@media (max-width: 599px) {
+  .ct-act-group > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .ct-act-group ul { padding: 0 12px; }
+}

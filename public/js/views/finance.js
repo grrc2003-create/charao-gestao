@@ -129,6 +129,7 @@ export async function view({ state, query, setQuery, render }) {
         actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas do financeiro</a>` : ''}
           <a class="btn btn-ghost" href="#/financeiro/analise">${icon('reports')}Análise comparativa</a>
           <a class="btn btn-ghost" href="#/financeiro/obrigacoes">${icon('settings')}Obrigações</a>
+          <a class="btn btn-ghost" href="#/financeiro/importar">${icon('file')}Importar planilha</a>
           <a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova obrigação</a>`,
       })}
       <div class="fin">
@@ -192,7 +193,7 @@ export async function obligations({ state }) {
     html: html`
       ${pageHead({ back: { href: '#/financeiro', label: 'Tarefas financeiras' }, eyebrow: 'Gestão da Empresa', title: 'Obrigações financeiras',
         sub: 'Cada obrigação gera as parcelas do período (até 2 meses à frente) e a tarefa de cada parcela.',
-        actions: html`<a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova obrigação</a>` })}
+        actions: html`<a class="btn btn-ghost" href="#/financeiro/importar">${icon('file')}Importar planilha</a><a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova obrigação</a>` })}
       ${list.length ? html`<section class="card"><div class="table-wrap"><table class="data ct-table"><thead><tr><th>Obrigação</th><th>Categoria</th><th>Periodicidade</th><th>Vencimento</th><th class="num">Valor</th><th>Responsável</th><th>Situação</th></tr></thead>
         <tbody>${list.map(o => html`<tr data-href="#/financeiro/obrigacoes/${o.id}/editar" tabindex="0" class="${o.active ? '' : 'is-inactive'}">
           <td><b>${o.title}</b>${o.payee ? html`<div class="t-sub">${o.payee}</div>` : ''}</td><td>${o.category}</td><td>${o.frequency_label}</td>

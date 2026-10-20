@@ -127,7 +127,7 @@ function pruneFuture(o, userId) {
 }
 
 // ---------- Obrigações ----------
-function readObligation(body) {
+export function readObligation(body) {
   const d = {
     title: str(body.title, { max: 160, required: true, label: 'Descrição' }),
     category: str(body.category, { max: 60, label: 'Categoria' }) || 'Outros',
@@ -167,17 +167,21 @@ export function getObligation(ctx, id) {
   return { ...o, frequency_label: FREQ_LABEL[o.frequency], items: all('SELECT * FROM finance_items WHERE obligation_id = ? ORDER BY ref_month DESC', id) };
 }
 
-export function createObligation(ctx, body, ip) {
-  requireFinance(ctx.user);
-  const d = readObligation(body);
+// Grava a obrigação (sem gerar as parcelas — quem chama roda generateItems). Usado no cadastro e na importação.
+export function insertObligation(ctx, d, ip, { imported = false } = {}) {
   if (!d.assignee_id) d.assignee_id = ctx.user.id; // sem responsável: quem cadastrou
-  const id = tx(() => {
+  return tx(() => {
     const r = run(`INSERT INTO finance_obligations (title, category, payee, amount, variable, repeat_last, frequency, due_day, start_month, end_month, assignee_id, notes, active, created_by)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.title, d.category, d.payee, d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, ctx.user.id);
     const nid = Number(r.lastInsertRowid);
-    audit(ctx.user.id, 'finance', nid, 'Obrigação financeira cadastrada', { descricao: d.title, categoria: d.category, valor: d.amount, periodicidade: FREQ_LABEL[d.frequency], vencimento: `dia ${d.due_day}` }, ip);
+    audit(ctx.user.id, 'finance', nid, imported ? 'Obrigação financeira importada de planilha' : 'Obrigação financeira cadastrada', { descricao: d.title, categoria: d.category, valor: d.amount, periodicidade: FREQ_LABEL[d.frequency], vencimento: `dia ${d.due_day}` }, ip);
     return nid;
   });
+}
+
+export function createObligation(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const id = insertObligation(ctx, readObligation(body), ip);
   generateItems(ctx.user.id);
   return id;
 }

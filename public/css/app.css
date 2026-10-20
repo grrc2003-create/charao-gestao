@@ -2530,3 +2530,33 @@ tr.is-inactive td { opacity: .55; }
   .bi-pay-t { grid-column: 2; }
   .bi-pay-list input { grid-row: 1 / 3; }
 }
+
+/* Tarefas financeiras › Importar planilha */
+.fi-steps { display: grid; gap: 14px; width: 100%; }
+.fi-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
+.fi-step > div { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.fi-step small { color: var(--muted); font-size: 12.5px; }
+.fi-n { width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.fi-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.fi-list { list-style: none; margin: 0; padding: 0; }
+.fi-list li { border-top: 1px solid var(--line); }
+.fi-list label { display: grid; grid-template-columns: 22px 64px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 16px; cursor: pointer; }
+.fi-list input { width: 16px; height: 16px; margin-top: 2px; }
+.fi-line { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.fi-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fi-main b { font-size: 13.5px; }
+.fi-main small { font-size: 12px; color: var(--muted); }
+.fi-errs { font-style: normal; font-size: 12px; color: #B03A2E; font-weight: 600; }
+.fi-note { font-style: normal; font-size: 12px; color: #7A520A; }
+.fi-val { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; font-variant-numeric: tabular-nums; }
+.fi-val small { font-size: 11.5px; color: var(--muted); }
+.m-badge.fi-err { background: #FBE9E7; color: #B03A2E; }
+.fi-list li.is-erro { background: #FDF6F5; }
+.fi-list li.is-existe, .fi-list li.is-repetida, .fi-list li.is-off { opacity: .6; }
+.fi-list li.is-erro label, .fi-list li.is-existe label, .fi-list li.is-repetida label { cursor: default; }
+@media (max-width: 899px) { .fi-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) {
+  .fi-list label { grid-template-columns: 22px minmax(0, 1fr) auto; padding: 10px 14px; }
+  .fi-line { grid-column: 2 / 4; }
+  .fi-list input { grid-row: 1 / 3; }
+}

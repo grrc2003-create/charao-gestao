@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { writeXlsx } from '../server/lib/xlsx-write.js';
+import { readXlsx } from '../server/lib/xlsx.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'charao-test-'));
@@ -1779,6 +1781,41 @@ async function main() {
   ok(dsRest.restored === 1 && (await fo('GET', `/contracts/${dsCt.id}`)).data.summary.value === 9000, 'reativado: volta a somar no contrato');
   const dsDone = dsA2.items.find(i => i.received_date);
   ok((await fo('POST', '/contracts/import-bms', { files: biFiles, exclude: [dsDone.key] })).data.discarded === 0, 'pagamento já importado não é descartado');
+
+  // ---------- Tarefas financeiras: planilha modelo e importação ----------
+  const fiCookie = await cookieOf('ana@charao.eng.br');
+  const fiTpl = await fetch(BASE + '/api/finance/import/template', { headers: { 'X-Requested-With': 'charao-app', cookie: fiCookie } });
+  const fiBuf = Buffer.from(await fiTpl.arrayBuffer());
+  const fiGrid = readXlsx(fiBuf);
+  ok(fiTpl.status === 200 && fiTpl.headers.get('content-type').includes('spreadsheetml') && fiBuf.slice(0, 2).toString() === 'PK' && fiGrid[0][0] === 'Descrição *' && fiGrid[0][6] === 'Periodicidade *' && fiGrid.length === 1,
+    'planilha modelo: cabeçalho na aba Tarefas, sem linhas de exemplo');
+  ok((await (await fetch(BASE + '/api/finance/import/template', { headers: { 'X-Requested-With': 'charao-app', cookie: await cookieOf('marcos@charao.eng.br') } })).status) === 403, 'planilha modelo só para quem tem Tarefas financeiras');
+  await fo('POST', '/finance/obligations', { title: 'Aluguel teste importação', payee: 'Locador Exemplo', amount: 2000, frequency: 'mensal', due_day: 5, start_month: '2099-01' });
+  const fiAna = (await fo('GET', '/auth/me')).data.user;
+  const fiHead = fiGrid[0];
+  const fiFile = writeXlsx([{ name: 'Tarefas', header: true, rows: [fiHead,
+    ['DAS teste importação', 'Impostos', 'Receita Federal', '1.850,00', 'Sim', 'Sim', 'Mensal', 20, '01/2099', null, fiAna.name, 'Guia no portal'],
+    ['Seguro anual teste', 'Seguros', 'Seguradora Exemplo', 3600, 'Não', null, 'Anual', 15, 'mar/2099', '12/2101', null, null],
+    ['Taxa única teste', null, null, 120.5, null, null, 'Única', 31, 72718, null, null, null],
+    [null, 'Impostos', null, null, null, null, 'Quinzenal', 40, '13/2099', null, 'Pessoa Inexistente', null],
+    ['Aluguel teste importação', 'Aluguel e condomínio', 'Locador Exemplo', 2000, null, null, 'Mensal', 5, '01/2099', null, null, null],
+    ['DAS teste importação', 'Impostos', 'Receita Federal', 1850, null, null, 'Mensal', 20, '02/2099', null, null, null],
+    ['Linha desmarcada teste', 'Outros', null, 10, null, null, 'Mensal', 1, '01/2099', null, null, null],
+  ] }]).toString('base64');
+  const fiPv = (await fo('POST', '/finance/import/preview', { file: { name: 'teste.xlsx', data: fiFile } })).data;
+  const fiRow = n => fiPv.rows.find(r => r.line === n);
+  ok(fiPv.totals.rows === 7 && fiPv.totals.ok === 4 && fiPv.totals.erro === 1 && fiPv.totals.existe === 1 && fiPv.totals.repetida === 1, `prévia: 4 prontas, 1 com erro, 1 já existe, 1 repetida (${JSON.stringify(fiPv.totals)})`);
+  ok(fiRow(2).view.amount === 1850 && fiRow(2).view.variable && fiRow(2).view.repeat_last && fiRow(2).view.assignee_name === fiAna.name && fiRow(3).view.start_month === '2099-03' && fiRow(3).view.end_month === '2101-12' && fiRow(4).view.start_month === '2099-02' && fiRow(4).view.frequency === 'unica',
+    'valores, Sim/Não, responsável e meses em vários formatos (MM/AAAA, mar/2099, data do Excel)');
+  ok(fiRow(5).errors.length >= 4 && fiRow(5).errors.some(e => e.includes('Descrição')) && fiRow(5).errors.some(e => e.includes('Quinzenal')) && fiRow(5).errors.some(e => e.includes('Pessoa Inexistente')), 'linha com erro mostra o que corrigir');
+  ok(fiRow(7).repeated_line === 2, 'repetida aponta a linha original');
+  ok((await biNo('POST', '/finance/import/preview', { file: { name: 'teste.xlsx', data: fiFile } })).status === 403, 'sem liberação não importa');
+  const fiImp = (await fo('POST', '/finance/import', { file: { name: 'teste.xlsx', data: fiFile }, skip: [8] })).data;
+  const fiObs = (await fo('GET', '/finance/obligations')).data;
+  ok(fiImp.imported === 3 && fiObs.some(o => o.title === 'DAS teste importação' && o.variable && o.repeat_last && o.due_day === 20) && fiObs.some(o => o.title === 'Seguro anual teste' && o.frequency === 'anual' && o.end_month === '2101-12')
+    && !fiObs.some(o => o.title === 'Linha desmarcada teste') && fiObs.filter(o => o.title === 'Aluguel teste importação').length === 1, 'importa só as prontas e marcadas; a que já existia não duplica');
+  ok((await fo('POST', '/finance/import', { file: { name: 'teste.xlsx', data: fiFile } })).data.imported === 1, 'reenviar: só a que ficou de fora entra (as importadas viram "já existe")');
+  ok((await fo('POST', '/finance/import/preview', { file: { name: 'x.xlsx', data: writeXlsx([{ name: 'A', rows: [['outra coisa']] }]).toString('base64') } })).status === 400, 'planilha fora do modelo é recusada');
 
 }
 

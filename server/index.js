@@ -19,6 +19,7 @@ import * as Settings from './services/settings.js';
 import * as Contracts from './services/contracts.js';
 import * as BmImport from './services/bm-import.js';
 import * as Finance from './services/finance.js';
+import * as FinanceImport from './services/finance-import.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
@@ -304,6 +305,10 @@ api.get('/api/record-files/:id', (req, res, { ctx, params }) => sendFile(req, re
 api.get('/api/finance/month', (req, res, { ctx, query }) => send(res, 200, Finance.financeMonth(ctx, query.get('mes'))));
 api.get('/api/finance/assignees', (req, res, { ctx }) => send(res, 200, Finance.financeAssignees(ctx)));
 api.get('/api/finance/analysis', (req, res, { ctx, query }) => send(res, 200, Finance.financeAnalysis(ctx, query.get('por'))));
+api.get('/api/finance/import/template', (req, res, { ctx }) => send(res, 200, FinanceImport.templateXlsx(ctx), {
+  'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="tarefas-financeiras-modelo.xlsx"' }));
+api.post('/api/finance/import/preview', (req, res, { ctx, body }) => send(res, 200, FinanceImport.previewImport(ctx, body)));
+api.post('/api/finance/import', (req, res, { ctx, body }) => send(res, 200, FinanceImport.applyImport(ctx, body, clientIp(req))));
 api.get('/api/finance/obligations', (req, res, { ctx }) => send(res, 200, Finance.listObligations(ctx)));
 api.post('/api/finance/obligations', (req, res, { ctx, body }) => send(res, 201, { id: Finance.createObligation(ctx, body, clientIp(req)) }));
 api.get('/api/finance/obligations/:id', (req, res, { ctx, params }) => send(res, 200, Finance.getObligation(ctx, intOrNull(params.id))));

@@ -29,6 +29,7 @@ import * as Recurrences from './views/recurrences.js';
 import * as Contracts from './views/contracts.js';
 import * as BmImport from './views/bm-import.js';
 import * as Finance from './views/finance.js';
+import * as FinanceImport from './views/finance-import.js';
 import * as ReportMeasurement from './views/report-measurement.js';
 import * as Processes from './views/processes.js';
 import * as ProcessesPrint from './views/processes-print.js';
@@ -113,6 +114,7 @@ const routes = [
   ['/financeiro/analise', Finance.analysis],
   ['/financeiro/obrigacoes', Finance.obligations],
   ['/financeiro/obrigacoes/nova', Finance.form],
+  ['/financeiro/importar', FinanceImport.importPage],
   ['/financeiro/obrigacoes/:id/editar', Finance.form],
   ['/conta', Account.view],
   ['/auditoria', Audit.view],

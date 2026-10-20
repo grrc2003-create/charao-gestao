@@ -49,10 +49,19 @@ function previewHtml(p) {
           ${g.reclassify ? html`<span class="pill pill-sand">empresa/tipo serão atualizados</span>` : ''}</div>` : ''}
         ${g.pending ? html`
         ${g.months.length ? html`<details><summary>Ver BMs</summary>${bmTable(g)}</details>` : html`<p class="hint" style="margin:6px 0 0">Nada recebido ainda: o contrato é criado com o valor e fica todo a medir.</p>`}`
-        : html`<p class="hint" style="margin:6px 0 0">Tudo desta obra já foi importado${g.match ? ' — você ainda pode ajustar a empresa e o tipo' : ''}.</p>`}
+        : html`<p class="hint" style="margin:6px 0 0">${g.discarded && g.discarded === g.items.filter(i => i.state !== 'importado').length && !g.items.some(i => i.state === 'importado') ? 'Todos os pagamentos desta obra estão descartados.' : `Tudo desta obra já foi importado${g.match ? ' — você ainda pode ajustar a empresa e o tipo' : ''}.`}</p>`}
+        <details class="bi-pays" data-bipays="${g.key}" ${g.discarded ? 'open' : ''}><summary>Pagamentos (${g.items.length})${g.discarded ? ` · ${g.discarded} descartado(s)` : ''}</summary>
+          <p class="hint" style="margin:6px 0">Desmarque o pagamento que não deve ser considerado: ele fica fora do valor do contrato e dos BMs (e continua fora se você reenviar a planilha).</p>
+          <ul class="bi-pay-list">${g.items.map(it => html`<li class="is-${it.state}"><label>
+            <input type="checkbox" data-bikey="${it.key}" data-saved="${it.saved_off ? 1 : 0}" ${it.state !== 'descartado' ? 'checked' : ''} ${it.state === 'importado' ? 'disabled' : ''} aria-label="Considerar pagamento de ${fmtDate(it.due_date)}">
+            <span class="bi-pay-d">${fmtDate(it.due_date)}</span>
+            <span class="bi-pay-t">${it.kind === 'rt' ? html`<span class="pill pill-sand">RT</span> ` : ''}${it.payer || '—'}<small>${[it.description, it.installment].filter(Boolean).join(' · ') || '—'}</small></span>
+            <span class="bi-pay-v"><b>${money(it.amount)}</b><small>${it.state === 'importado' ? 'já importado' : it.state === 'descartado' ? 'descartado' : it.received_date ? `recebido ${fmtDate(it.received_date)}` : 'em aberto'}</small></span>
+          </label></li>`)}</ul>
+        </details>
       </div>`)}</div>
     </section>
-    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-bi-apply ${pending || matched ? '' : 'disabled'}>${icon('check')}${pending ? `Importar ${pending} contrato(s) e ${nBms} BM(s)` : matched ? 'Salvar empresa e tipo dos contratos' : 'Nada novo para importar'}</button></div>`;
+    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-bi-apply ${pending || matched || p.groups.some(g => g.discarded) ? '' : 'disabled'}>${icon('check')}${pending ? `Importar ${pending} contrato(s) e ${nBms} BM(s)` : matched ? 'Salvar empresa e tipo dos contratos' : p.groups.some(g => g.discarded) ? 'Salvar descartes' : 'Nada novo para importar'}</button></div>`;
 }
 
 export async function importBms({ state, navigate }) {
@@ -81,24 +90,44 @@ export async function importBms({ state, navigate }) {
         out.innerHTML = '';
         if (files.length < input.files.length) toast('Só arquivos .xlsx são aceitos.', 'error');
       });
+      // Prévia: recalculada a cada pagamento desmarcado/remarcado, mantendo as escolhas de contrato, empresa e tipo
+      const exclude = new Set(), restore = new Set();
+      const show = async () => {
+        const keep = { sel: Object.fromEntries([...out.querySelectorAll('select[data-bimap], select[data-bico], select[data-bity]')].map(s => [`${s.dataset.bimap ? 'm' : s.dataset.bico ? 'c' : 't'}:${s.dataset.bimap || s.dataset.bico || s.dataset.bity}`, s.value])),
+          open: new Set([...out.querySelectorAll('details[open]')].map(d => d.dataset.bipays ? `p:${d.dataset.bipays}` : null).filter(Boolean)), y: window.scrollY };
+        const p = await api('/contracts/import-bms/preview', { method: 'POST', body: { files: payload, exclude: [...exclude], restore: [...restore] } });
+        const first = !out.innerHTML;
+        out.innerHTML = previewHtml(p).toString();
+        out.querySelectorAll('select[data-bimap], select[data-bico], select[data-bity]').forEach(s => {
+          const k = `${s.dataset.bimap ? 'm' : s.dataset.bico ? 'c' : 't'}:${s.dataset.bimap || s.dataset.bico || s.dataset.bity}`;
+          if (keep.sel[k] !== undefined && [...s.options].some(o => o.value === keep.sel[k])) s.value = keep.sel[k];
+        });
+        out.querySelectorAll('details[data-bipays]').forEach(d => { if (keep.open.has(`p:${d.dataset.bipays}`)) d.open = true; });
+        if (first) out.scrollIntoView({ behavior: 'smooth', block: 'start' }); else window.scrollTo(0, keep.y);
+        out.querySelectorAll('[data-bikey]').forEach(cb => cb.addEventListener('change', async () => {
+          const k = cb.dataset.bikey, saved = cb.dataset.saved === '1';
+          if (cb.checked) { exclude.delete(k); if (saved) restore.add(k); } else { restore.delete(k); if (!saved) exclude.add(k); }
+          out.querySelectorAll('[data-bikey]').forEach(x => (x.disabled = true));
+          try { await show(); } catch (ex) { toast(ex.message, 'error'); }
+        }));
+        out.querySelector('[data-bi-apply]')?.addEventListener('click', async ev => {
+          const btn = ev.currentTarget;
+          const mapping = Object.fromEntries([...out.querySelectorAll('[data-bimap]')].map(s => [s.dataset.bimap, /^\d+$/.test(s.value) ? Number(s.value) : s.value]));
+          const classify = Object.fromEntries([...out.querySelectorAll('[data-bico]')].map(s => [s.dataset.bico, { company: s.value, type_id: out.querySelector(`[data-bity="${s.dataset.bico}"]`).value }]));
+          btn.disabled = true; btn.textContent = 'Criando BMs…';
+          try {
+            const r = await api('/contracts/import-bms', { method: 'POST', body: { files: payload, mapping, classify, exclude: [...exclude], restore: [...restore] } });
+            toast(`${r.bms} BM(s) criado(s)${r.contracts_created.length ? ` · ${r.contracts_created.length} contrato(s) novo(s)` : ''}${r.value_added ? ` · ${money(r.value_added)} somado aos contratos` : ''}${r.discarded ? ` · ${r.discarded} pagamento(s) descartado(s)` : ''}${r.reclassified ? ` · ${r.reclassified} contrato(s) reclassificado(s)` : ''}.`);
+            navigate('/contratos?status=todos');
+          } catch (ex) { toast(ex.message, 'error'); btn.disabled = false; btn.textContent = 'Tentar de novo'; }
+        });
+      };
       read.addEventListener('click', async () => {
         read.disabled = true; read.textContent = 'Lendo…';
         try {
           payload = await Promise.all(files.map(async f => ({ name: f.name, data: await readB64(f) })));
-          const p = await api('/contracts/import-bms/preview', { method: 'POST', body: { files: payload } });
-          out.innerHTML = previewHtml(p).toString();
-          out.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          out.querySelector('[data-bi-apply]')?.addEventListener('click', async ev => {
-            const btn = ev.currentTarget;
-            const mapping = Object.fromEntries([...out.querySelectorAll('[data-bimap]')].map(s => [s.dataset.bimap, /^\d+$/.test(s.value) ? Number(s.value) : s.value]));
-            const classify = Object.fromEntries([...out.querySelectorAll('[data-bico]')].map(s => [s.dataset.bico, { company: s.value, type_id: out.querySelector(`[data-bity="${s.dataset.bico}"]`).value }]));
-            btn.disabled = true; btn.textContent = 'Criando BMs…';
-            try {
-              const r = await api('/contracts/import-bms', { method: 'POST', body: { files: payload, mapping, classify } });
-              toast(`${r.bms} BM(s) criado(s)${r.contracts_created.length ? ` · ${r.contracts_created.length} contrato(s) novo(s)` : ''}${r.value_added ? ` · ${money(r.value_added)} somado aos contratos` : ''}${r.reclassified ? ` · ${r.reclassified} contrato(s) reclassificado(s)` : ''}.`);
-              navigate('/contratos?status=todos');
-            } catch (ex) { toast(ex.message, 'error'); btn.disabled = false; btn.textContent = 'Tentar de novo'; }
-          });
+          exclude.clear(); restore.clear(); out.innerHTML = '';
+          await show();
         } catch (ex) { toast(ex.message, 'error'); }
         read.disabled = false; read.textContent = 'Ler e mostrar prévia';
       });

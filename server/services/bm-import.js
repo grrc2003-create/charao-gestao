@@ -133,13 +133,14 @@ function monthsOf(rows) {
 
 // O que fazer com cada linha da obra no contrato escolhido (null = contrato novo):
 // value = soma no valor do contrato · bm = entra num BM agora · track = só registra (em aberto) · skip = mês com BM manual
-function analyze(rows, contractId) {
+function analyze(rows, contractId, off = new Set()) {
   const tracked = new Map(all(`SELECT import_key, status FROM contract_import_rows WHERE import_key IN (${rows.map(() => '?').join(',') || "''"})`, ...rows.map(r => r.import_key)).map(t => [t.import_key, t.status]));
   // Meses com BM lançado fora da importação neste contrato
   const manual = new Set(contractId ? all(`SELECT ref_month FROM measurements WHERE contract_id = ? AND status <> 'rascunho' AND id NOT IN (SELECT measurement_id FROM contract_import_rows WHERE measurement_id IS NOT NULL)`, contractId).map(m => m.ref_month) : []);
   const acts = rows.map(r => {
     const t = tracked.get(r.import_key);
     if (t === 'medido' || t === 'ignorado') return { r, act: 'done' };
+    if (!t && off.has(r.import_key)) return { r, act: 'off' };
     if (t === 'aberto') return { r, act: r.received ? 'bm' : 'done', value: false };
     if (r.received && manual.has(r.due_date.slice(0, 7))) return { r, act: 'skip' };
     return { r, act: r.received ? 'bm' : 'track', value: r.kind === 'parcela' };
@@ -153,12 +154,19 @@ function analyze(rows, contractId) {
     open_add: r2(valueRows.filter(r => !r.received).reduce((s, r) => s + r.amount, 0)),
     open_count: rows.filter(r => !r.received && r.kind === 'parcela').length, open_total: r2(rows.filter(r => !r.received && r.kind === 'parcela').reduce((s, r) => s + r.amount, 0)),
     skipped_months: [...new Set(acts.filter(a => a.act === 'skip').map(a => a.r.due_date.slice(0, 7)))].length,
-    pending: acts.some(a => a.act !== 'done'),
+    pending: acts.some(a => a.act !== 'done' && a.act !== 'off'),
   };
 }
 
-function plan(files) {
+// Pagamentos descartados: os guardados (menos os reativados agora) e os desmarcados agora
+function offKeys({ exclude, restore } = {}) {
+  const rest = new Set(Array.isArray(restore) ? restore.map(String) : []);
+  return new Set([...all('SELECT import_key FROM contract_import_discards').map(d => d.import_key).filter(k => !rest.has(k)), ...(Array.isArray(exclude) ? exclude.map(String) : [])]);
+}
+
+function plan(files, opts = {}) {
   const { rows, warnings, files: info } = parseFiles(files);
+  const off = offKeys(opts);
   const contracts = all('SELECT id, code, client, title, status, bulletin_prefix, company, company_auto, type_id FROM contracts ORDER BY code');
   const byTitle = new Map(contracts.map(c => [hkey(c.title), c]));
   const groups = new Map();
@@ -169,7 +177,7 @@ function plan(files) {
   }
   const out = [...groups.values()].map(g => {
     const match = byTitle.get(g.key) || null;
-    const a = analyze(g.rows, match?.id || null);
+    const a = analyze(g.rows, match?.id || null, off);
     // Classificação: contrato novo usa a sugestão; já cadastrado mantém o que tem (empresa escolhida à mão não muda)
     const sugCompany = suggestCompany(g.rows), sugType = suggestContractType(g.obra);
     const company = match ? (match.company_auto ? sugCompany : match.company) : sugCompany;
@@ -182,6 +190,11 @@ function plan(files) {
       rt: r2(a.months.reduce((s, m) => s + m.adjustments.filter(x => x.description.startsWith('RT - ')).reduce((t, x) => t + x.amount, 0), 0)),
       value_add: a.value_add, natures: a.natures, open_add: a.open_add, open_count: a.open_count, open_total: a.open_total,
       skipped_months: a.skipped_months, pending: a.pending,
+      // Pagamentos da obra, um a um (para descartar algum antes de importar)
+      items: a.acts.map(x => ({ key: x.r.import_key, state: x.act === 'done' ? 'importado' : x.act === 'off' ? 'descartado' : 'novo', kind: x.r.kind,
+        due_date: x.r.due_date, payer: x.r.payer, description: x.r.description, installment: x.r.installment, amount: x.r.amount,
+        received_date: x.r.received_date, received_amount: x.r.received_amount, saved_off: off.has(x.r.import_key) })),
+      discarded: a.acts.filter(x => x.act === 'off').length,
       first_due: g.rows.map(r => r.due_date).sort()[0], last_activity: g.rows.map(r => r.received_date || r.due_date).sort().at(-1),
     };
   }).sort((a, b) => a.client.localeCompare(b.client, 'pt-BR') || a.obra.localeCompare(b.obra, 'pt-BR'));
@@ -197,14 +210,15 @@ function plan(files) {
 // Prévia: nada é gravado
 export function previewImport(ctx, body) {
   requireContracts(ctx.user);
-  const p = plan(body.files);
+  const p = plan(body.files, body);
   return { ...p, groups: p.groups.map(({ rows: _r, ...g }) => g) };
 }
 
 // Confirma. mapping: { [obra]: 'new' | id do contrato | 'skip' } · classify: { [obra]: { company, type_id } }
 export function applyImport(ctx, body, ip) {
   requireContracts(ctx.user);
-  const p = plan(body.files);
+  const p = plan(body.files, body);
+  const off = offKeys(body);
   const mapping = body.mapping && typeof body.mapping === 'object' ? body.mapping : {};
   const classify = body.classify && typeof body.classify === 'object' ? body.classify : {};
   const typeIds = new Set(all('SELECT id FROM contract_types').map(t => t.id));
@@ -218,6 +232,17 @@ export function applyImport(ctx, body, ip) {
   const ref = today();
   return tx(() => {
     let reclassified = 0;
+    // Guarda os descartes (só de pagamentos ainda não importados) e libera os reativados
+    const allRows = new Map(p.groups.flatMap(g => g.rows.map(r => [r.import_key, r])));
+    const isTracked = k => !!one('SELECT 1 FROM contract_import_rows WHERE import_key = ?', k);
+    let discarded = 0, restored = 0;
+    for (const k of Array.isArray(body.restore) ? body.restore.map(String) : []) restored += run('DELETE FROM contract_import_discards WHERE import_key = ?', k).changes;
+    for (const k of Array.isArray(body.exclude) ? body.exclude.map(String) : []) {
+      const r = allRows.get(k);
+      if (!r || isTracked(k)) continue;
+      discarded += run(`INSERT INTO contract_import_discards (import_key, obra, payer, due_date, amount, created_by) VALUES (?,?,?,?,?,?) ON CONFLICT(import_key) DO NOTHING`,
+        k, r.obra, r.payer, r.due_date, r.amount, ctx.user.id).changes;
+    }
     const usedPrefixes = new Set(all('SELECT bulletin_prefix FROM contracts').map(r => r.bulletin_prefix));
     const created = [], used = new Set();
     let bms = 0, skippedMonths = 0, valueAdded = 0;
@@ -265,7 +290,7 @@ export function applyImport(ctx, body, ip) {
         }
       }
       used.add(contract.id);
-      const a = analyze(g.rows, contract.fresh ? null : contract.id);
+      const a = analyze(g.rows, contract.fresh ? null : contract.id, off);
       skippedMonths += a.skipped_months;
       // Valor do contrato: itens por natureza (R$ · preço 1,00). Em contrato lançado à mão entram como aditivo.
       const itemFor = new Map();
@@ -307,8 +332,8 @@ export function applyImport(ctx, body, ip) {
         bms++;
       }
     }
-    const result = { files: p.files.map(f => f.name), bms, value_added: valueAdded, reclassified, skipped_months: skippedMonths, contracts_created: created, contracts_used: used.size, others_ignored: p.skipped.others };
-    audit(ctx.user.id, 'contract', null, 'BMs importados das planilhas de recebimentos', { arquivos: result.files, bms, valor_somado: valueAdded, meses_com_bm_manual: skippedMonths, contratos_criados: created }, ip);
+    const result = { files: p.files.map(f => f.name), bms, value_added: valueAdded, reclassified, discarded, restored, skipped_months: skippedMonths, contracts_created: created, contracts_used: used.size, others_ignored: p.skipped.others };
+    audit(ctx.user.id, 'contract', null, 'BMs importados das planilhas de recebimentos', { arquivos: result.files, bms, pagamentos_descartados: discarded, reativados: restored, valor_somado: valueAdded, meses_com_bm_manual: skippedMonths, contratos_criados: created }, ip);
     return result;
   });
 }

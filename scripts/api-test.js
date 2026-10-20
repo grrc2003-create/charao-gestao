@@ -1761,6 +1761,25 @@ async function main() {
   ok(ctTypes2.length === 10 && ctTypes2.at(-1).name === 'Laudo técnico', 'novo tipo de contrato em Configurações');
   ok((await fo('PUT', '/settings/contract-types', { types: ctTypes2.filter(t => t.name !== 'Orçamento').map(t => ({ id: t.id, name: t.name, active: true })) })).status === 400, 'tipo em uso não pode ser excluído');
 
+  // ---------- Importar BMs: descartar um pagamento antes de importar ----------
+  const dsPv = (await fo('POST', '/contracts/import-bms/preview', { files: biFiles })).data;
+  const dsA2 = dsPv.groups.find(g => g.key === biA2.key);
+  const dsOpen = dsA2.items.find(i => !i.received_date);
+  ok(dsA2.items.length === 3 && dsA2.items.every(i => i.state === 'novo') && dsA2.value_add === 9000, 'prévia lista os pagamentos da obra, um a um');
+  const dsPv2 = (await fo('POST', '/contracts/import-bms/preview', { files: biFiles, exclude: [dsOpen.key] })).data.groups.find(g => g.key === biA2.key);
+  ok(dsPv2.value_add === 5000 && dsPv2.discarded === 1 && dsPv2.items.find(i => i.key === dsOpen.key).state === 'descartado', 'pagamento desmarcado sai do valor do contrato na prévia');
+  const dsImp = (await fo('POST', '/contracts/import-bms', { files: biFiles, exclude: [dsOpen.key] })).data;
+  const dsCt = (await fo('GET', '/contracts')).data.find(c => c.title === 'Projeto - Sala Exemplo A2');
+  ok(dsImp.discarded === 1 && dsCt && dsCt.summary.value === 5000 && dsCt.summary.balance === 0, 'importado sem o pagamento descartado (contrato só com o que ficou)');
+  const dsPv3 = (await fo('POST', '/contracts/import-bms/preview', { files: biFiles })).data.groups.find(g => g.key === biA2.key);
+  ok(!dsPv3.pending && dsPv3.items.find(i => i.key === dsOpen.key).state === 'descartado' && dsPv3.items.find(i => i.key === dsOpen.key).saved_off, 'reenviar a planilha: o descartado continua fora');
+  const dsPv4 = (await fo('POST', '/contracts/import-bms/preview', { files: biFiles, restore: [dsOpen.key] })).data.groups.find(g => g.key === biA2.key);
+  ok(dsPv4.pending && dsPv4.value_add === 4000, 'pagamento descartado pode ser reativado na prévia');
+  const dsRest = (await fo('POST', '/contracts/import-bms', { files: biFiles, restore: [dsOpen.key] })).data;
+  ok(dsRest.restored === 1 && (await fo('GET', `/contracts/${dsCt.id}`)).data.summary.value === 9000, 'reativado: volta a somar no contrato');
+  const dsDone = dsA2.items.find(i => i.received_date);
+  ok((await fo('POST', '/contracts/import-bms', { files: biFiles, exclude: [dsDone.key] })).data.discarded === 0, 'pagamento já importado não é descartado');
+
 }
 
 main()

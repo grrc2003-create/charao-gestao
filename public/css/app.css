@@ -2508,3 +2508,25 @@ tr.is-inactive td { opacity: .55; }
   .ct-kpis.kpis-6, .ct-kpis.kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ct-tile b, .ct-kpis .kpi-value { white-space: normal; overflow-wrap: anywhere; }
 }
+
+/* Importar BMs: pagamentos um a um (descartar antes de importar) */
+.bi-pays { margin-top: 6px; }
+.bi-pays summary { cursor: pointer; font-size: 12.5px; color: var(--navy); font-weight: 600; }
+.bi-pay-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.bi-pay-list li + li { border-top: 1px solid var(--line); }
+.bi-pay-list label { display: grid; grid-template-columns: 22px 84px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 10px; cursor: pointer; font-size: 12.5px; }
+.bi-pay-list input { width: 16px; height: 16px; }
+.bi-pay-t { display: flex; flex-direction: column; min-width: 0; }
+.bi-pay-t small, .bi-pay-v small { color: var(--muted); font-size: 11.5px; }
+.bi-pay-v { display: flex; flex-direction: column; align-items: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
+.bi-pay-list li.is-descartado { background: #FBF1F0; }
+.bi-pay-list li.is-descartado .bi-pay-t, .bi-pay-list li.is-descartado .bi-pay-v b { text-decoration: line-through; color: var(--muted); }
+.bi-pay-list li.is-descartado .bi-pay-v small { color: #B03A2E; font-weight: 600; }
+.bi-pay-list li.is-importado { opacity: .65; }
+.bi-pay-list li.is-importado label { cursor: default; }
+@media (max-width: 560px) {
+  .bi-pay-list label { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .bi-pay-d { grid-column: 2 / 4; font-weight: 600; }
+  .bi-pay-t { grid-column: 2; }
+  .bi-pay-list input { grid-row: 1 / 3; }
+}

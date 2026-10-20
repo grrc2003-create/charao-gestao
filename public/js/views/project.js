@@ -1,5 +1,5 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
-import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline } from './shared.js';
+import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
@@ -40,6 +40,11 @@ export async function view({ params, query, setQuery, render, navigate }) {
           ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar">${icon('file')}Importar planejamento</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
+      ${p.schedule ? html`<section class="card section sch-card"><div class="card-head"><h2>${icon('calendar')}Prazo do projeto</h2><span class="sub">pelas tarefas e subtarefas</span></div>
+        <div class="card-body"><div class="stat-inline sch-line">${scheduleLine(p)}</div>
+          ${p.schedule.impacting.length ? html`<details class="sch-det"><summary>Tarefas reagendadas que mudaram o fim do projeto (prazo original ${fmtDate(p.schedule.end_original)})</summary>
+            <ul>${p.schedule.impacting.map(x => html`<li><a href="#/tarefas/${x.id}"><span class="mono">${x.code}</span> ${x.title}</a><b class="${x.days > 0 ? 'is-late' : 'is-early'}">${x.days > 0 ? `+${x.days}` : x.days} d</b></li>`)}</ul></details>`
+            : html`<p class="muted" style="margin:6px 0 0;font-size:12.5px">${p.schedule.rescheduled_tasks ? `${p.schedule.rescheduled_tasks} tarefa(s) reagendada(s), sem mudar o fim do projeto.` : 'Nenhum reagendamento mudou o fim do projeto.'}</p>`}</div></section>` : ''}
       ${kpiBlock(p.summary)}
       ${execKpis(p.summary)}
       ${recs ? recordsCard(recs) : ''}

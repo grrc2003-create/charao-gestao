@@ -1,4 +1,5 @@
 // Regras de negócio de projetos.
+import { projectSchedule } from './schedule.js';
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } from '../lib/permissions.js';
@@ -44,7 +45,7 @@ export function listProjects(ctx, tasks = listVisible(ctx)) {
   const rows = all(`${BASE} ORDER BY p.kind = 'interno', p.code`).filter(p => canAccessProject(ctx.user, p.id, ctx.projects));
   return rows.map(p => {
     const pt = tasks.filter(t => t.project_id === p.id);
-    return { ...p, members: members(p.id), summary: execSummary(pt), can_edit: canManageProject(ctx, p.id) };
+    return { ...p, members: members(p.id), summary: execSummary(pt), schedule: projectSchedule(p.id), can_edit: canManageProject(ctx, p.id) };
   });
 }
 
@@ -72,6 +73,7 @@ export function getProject(ctx, id) {
     chronic_min: getSetting('chronic_reschedule_threshold'),
     members: members(id),
     summary: execSummary(tasks),
+    schedule: projectSchedule(id),
     checklists: checklistDashboard(tasks),
     tasks,
     people,

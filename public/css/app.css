@@ -2746,3 +2746,22 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fy thead th { padding: 8px 4px; }
 .fy-btn { padding: 5px 4px; }
 .fy .fy-tot { padding: 6px 8px; }
+
+/* Projeto: prazo pelas tarefas e efeito dos reagendamentos */
+.sch-line { flex-wrap: wrap; gap: 4px 12px; }
+.sch-dates { display: inline-flex; align-items: center; gap: 4px; }
+.sch-plan { color: var(--muted); font-size: 11.5px; }
+.sch-imp { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.sch-imp svg { width: 13px; height: 13px; }
+.sch-imp.is-late { color: #B03A2E; }
+.sch-imp.is-early { color: #1F7A4A; }
+.sch-card .card-body { padding-top: 10px; }
+.sch-det { margin-top: 10px; }
+.sch-det summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--navy); }
+.sch-det ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.sch-det li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.sch-det li a { color: inherit; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-det li a:hover { color: var(--navy); text-decoration: underline; }
+.sch-det .mono { color: var(--muted); font-size: 11.5px; margin-right: 4px; }
+.sch-det b.is-late { color: #B03A2E; }
+.sch-det b.is-early { color: #1F7A4A; }

@@ -1839,6 +1839,22 @@ async function main() {
   ok(pyY.month_totals[2].real === 1480.5 && pyY.totals.real >= 1480.5 && pyRow(pyRec).real === 1480.5, 'totais do mês e do ano com o real');
   ok((await biNo('GET', '/finance/year?ano=2099')).status === 403, 'planejamento só para quem tem Tarefas financeiras');
 
+  // ---------- Projeto: datas pelas tarefas e efeito dos reagendamentos no fim do projeto ----------
+  const scP = (await fo('POST', '/projects', { name: 'Obra Prazo Teste', client: 'Cliente Prazo', start_date: '2099-02-01', end_date: '2099-03-31' })).data.id;
+  const scT1 = (await fo('POST', '/tasks', { project_id: scP, title: 'Prazo A', description: 'x', start_date: '2099-03-01', due_date: '2099-03-10' })).data.id;
+  const scT2 = (await fo('POST', '/tasks', { project_id: scP, title: 'Prazo B', description: 'x', start_date: '2099-03-05', due_date: '2099-03-20' })).data.id;
+  let scS = (await fo('GET', `/projects/${scP}`)).data.schedule;
+  ok(scS.start === '2099-03-01' && scS.end === '2099-03-20' && scS.impacting_count === 0, 'datas do projeto pelas tarefas (início mais cedo e maior prazo)');
+  await fo('POST', `/tasks/${scT2}/reschedule`, { due_date: '2099-03-25', reason_id: pdReason });
+  await fo('POST', `/tasks/${scT1}/reschedule`, { due_date: '2099-03-15', reason_id: pdReason });
+  scS = (await fo('GET', `/projects/${scP}`)).data.schedule;
+  ok(scS.end === '2099-03-25' && scS.end_original === '2099-03-20' && scS.delayed_days === 5 && scS.net_days === 5 && scS.impacting_count === 1 && scS.impacting[0].id === scT2 && scS.rescheduled_tasks === 2,
+    `reagendamento que empurrou o fim conta (+5 d); o que não mudou o fim não conta (${JSON.stringify(scS)})`);
+  await fo('POST', `/tasks/${scT2}/reschedule`, { due_date: '2099-03-12', reason_id: pdReason });
+  scS = (await fo('GET', `/projects/${scP}`)).data.schedule;
+  ok(scS.end === '2099-03-15' && scS.net_days === -5 && scS.advanced_days === 10 && scS.delayed_days === 5, 'antecipação também é contada (fim 5 dias antes do original)');
+  ok((await fo('GET', '/projects')).data.find(x => x.id === scP).schedule.end === '2099-03-15', 'cartão do projeto recebe as datas pelas tarefas');
+
   // ---------- Projeto: planejamento por planilha (tarefas, subtarefas, dependências) ----------
   const plPid = (await fo('POST', '/projects', { name: 'Obra Planejamento Planilha', client: 'Cliente Plan', stages: [{ name: 'Fundação' }, { name: 'Bloco A' }] })).data.id;
   const plTplRes = await fetch(BASE + `/api/planning/template?projeto=${plPid}`, { headers: { 'X-Requested-With': 'charao-app', cookie: fiCookie } });

@@ -308,3 +308,15 @@ export const projectOptions = (projects, current, opt) => {
     ? html`<optgroup label="Obras">${obras.map(o)}</optgroup><optgroup label="Interno (empresa)">${internas.map(o)}</optgroup>`
     : html`${obras.map(o)}`;
 };
+
+// Prazo do projeto pelas tarefas + efeito dos reagendamentos no fim do projeto (cartão e página do projeto)
+export function scheduleLine(p) {
+  const sc = p.schedule;
+  const start = sc?.start || p.start_date, end = sc?.end || p.end_date;
+  if (!start && !end) return '';
+  const planned = sc && p.end_date && sc.end && p.end_date !== sc.end ? html`<small class="sch-plan" title="Previsão de término cadastrada no projeto">planejado ${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}</small>` : '';
+  const d = sc?.net_days || 0;
+  const eff = sc && sc.impacting_count ? html`<span class="sch-imp ${d > 0 ? 'is-late' : d < 0 ? 'is-early' : ''}" title="Reagendamentos (e deslocamentos por dependência) que mudaram o fim do projeto, desde o prazo original das tarefas (${fmtDate(sc.end_original)})">
+      ${icon('reschedule')}${sc.impacting_count} reagendada(s) · ${d > 0 ? `+${d} d de atraso` : d < 0 ? `${-d} d antecipado(s)` : 'sem efeito no fim'}${sc.delayed_days && sc.advanced_days ? ` (+${sc.delayed_days} / −${sc.advanced_days})` : ''}</span>` : '';
+  return html`<span class="sch-dates" title="Início e fim pelas tarefas e subtarefas">${icon('calendar')} ${fmtDate(start)} → ${fmtDate(end)}</span>${planned}${eff}`;
+}

@@ -1,8 +1,11 @@
 // Importação das planilhas de recebimentos do financeiro (.xlsx) como contratos e BMs (boletins de medição).
-// Contrato = obra (cliente = quem mais pagou). Só entra o que já foi recebido. Um BM por mês (vencimento) com status
-// Recebida: itens da planilha contratual por natureza (unidade R$, preço 1,00 → quantidade = valor), RT de fornecedor
-// como acréscimo e a diferença do recebimento (desconto/juros) como desconto/acréscimo. Mês que já tem BM no contrato
-// é ignorado, então reenviar a planilha não duplica. Aporte, empréstimo, reembolso e linhas sem obra ficam fora.
+// Contrato = obra (cliente = quem mais pagou). Valor do contrato = todas as parcelas (recebidas e em aberto), com itens
+// por natureza (unidade R$, preço 1,00 → quantidade = valor). BM só do que foi recebido: um por mês (vencimento), status
+// Recebida, RT de fornecedor como acréscimo e a diferença do recebimento (desconto/juros) como desconto/acréscimo.
+// Parcela em aberto fica como saldo a medir. Cada linha considerada fica registrada (contract_import_rows): reenviar não
+// soma de novo e, quando a parcela passa a recebida, ganha o BM. Mês com BM lançado à mão no contrato é ignorado.
+// Aporte, empréstimo, reembolso e linhas sem obra ficam fora.
+import { createHash } from 'node:crypto';
 import { all, one, run, tx } from '../db.js';
 import { badRequest, str } from '../lib/http.js';
 import { readXlsx, serialToDate } from '../lib/xlsx.js';
@@ -53,6 +56,7 @@ function parseFiles(files) {
     grid[hi].forEach((v, i) => { const k = Object.entries(COLS).find(([, h]) => h === hkey(v))?.[0]; if (k && col[k] === undefined) col[k] = i; });
     for (const k of ['due', 'amount', 'client', 'obra', 'received']) if (col[k] === undefined) throw badRequest(`${name}: falta a coluna "${{ due: 'Data de Vencimento', amount: 'Total da Parcela', client: 'Cliente', obra: 'Obra', received: 'Recebido' }[k]}".`);
     let n = 0;
+    const seen = new Map();
     for (let i = hi + 1; i < grid.length; i++) {
       const g = grid[i], v = k => (col[k] === undefined ? null : g[col[k]] ?? null);
       if (!g.some(x => x !== null && x !== '')) continue;
@@ -63,7 +67,12 @@ function parseFiles(files) {
       const obra = txt(v('obra')), nature = txt(v('nature')), description = txt(v('description'));
       const received = hkey(v('received')) === 'sim';
       const discount = cellNum(v('discount')) || 0, interest = cellNum(v('interest')) || 0, recAmt = cellNum(v('received_amount'));
+      // Identifica a linha (sem os dados do recebimento, que mudam quando a parcela é paga)
+      const base = [hkey(obra), hkey(v('client')), due, amount.toFixed(2), hkey(description), hkey(v('installment')), hkey(v('doc'))].join('|');
+      const occ = (seen.get(base) || 0) + 1;
+      seen.set(base, occ);
       rows.push({
+        import_key: createHash('sha1').update(`${base}|${occ}`).digest('hex').slice(0, 32),
         file: name, line, obra, payer: txt(v('client')), nature, description, doc: txt(v('doc')), installment: txt(v('installment')),
         kind: !obra || OTHER_NATURES.has(hkey(nature)) ? 'outra' : hkey(description) === 'rt' || hkey(nature) === 'outrasreceitas' ? 'rt' : 'parcela',
         due_date: due, amount, received,
@@ -87,10 +96,10 @@ const initials = client => (String(client).normalize('NFD').replace(/[̀-ͯ]/g, 
   .filter(w => w.length > 2 || /\d/.test(w)).map(w => w[0]).join('').slice(0, 4) || 'BM';
 const natureLabel = n => txt(n) || 'Serviços';
 
-// BMs de uma obra: por mês do vencimento, só o que foi recebido
+// BMs de uma lista de linhas recebidas: um por mês do vencimento
 function monthsOf(rows) {
   const by = new Map();
-  for (const r of rows.filter(x => x.received)) {
+  for (const r of rows) {
     const k = r.due_date.slice(0, 7);
     if (!by.has(k)) by.set(k, []);
     by.get(k).push(r);
@@ -111,10 +120,36 @@ function monthsOf(rows) {
       month, label: monthLabel(month), lines: [...lines.entries()].map(([nature, value]) => ({ nature, value })), adjustments, measured, total,
       nf_date: rs.map(r => r.due_date).sort()[0], paid_date: rs.map(r => r.received_date).sort().at(-1),
       docs: [...new Set(rs.map(r => r.doc).filter(Boolean))].join(', ').slice(0, 40) || null,
-      count: rs.length,
+      count: rs.length, rows: rs,
       notes: `Importado da planilha de recebimentos: ${rs.map(r => [r.kind === 'rt' ? `RT ${r.payer || ''}`.trim() : r.description, r.installment && !/vista/i.test(r.installment) ? r.installment : '', r.received_date.split('-').reverse().join('/')].filter(Boolean).join(' ')).join('; ')}`.slice(0, 2000),
     };
   });
+}
+
+// O que fazer com cada linha da obra no contrato escolhido (null = contrato novo):
+// value = soma no valor do contrato · bm = entra num BM agora · track = só registra (em aberto) · skip = mês com BM manual
+function analyze(rows, contractId) {
+  const tracked = new Map(all(`SELECT import_key, status FROM contract_import_rows WHERE import_key IN (${rows.map(() => '?').join(',') || "''"})`, ...rows.map(r => r.import_key)).map(t => [t.import_key, t.status]));
+  // Meses com BM lançado fora da importação neste contrato
+  const manual = new Set(contractId ? all(`SELECT ref_month FROM measurements WHERE contract_id = ? AND status <> 'rascunho' AND id NOT IN (SELECT measurement_id FROM contract_import_rows WHERE measurement_id IS NOT NULL)`, contractId).map(m => m.ref_month) : []);
+  const acts = rows.map(r => {
+    const t = tracked.get(r.import_key);
+    if (t === 'medido' || t === 'ignorado') return { r, act: 'done' };
+    if (t === 'aberto') return { r, act: r.received ? 'bm' : 'done', value: false };
+    if (r.received && manual.has(r.due_date.slice(0, 7))) return { r, act: 'skip' };
+    return { r, act: r.received ? 'bm' : 'track', value: r.kind === 'parcela' };
+  });
+  const valueRows = acts.filter(a => a.value).map(a => a.r);
+  const months = monthsOf(acts.filter(a => a.act === 'bm').map(a => a.r));
+  const sums = new Map();
+  for (const r of valueRows) { const k = natureLabel(r.nature); sums.set(k, r2((sums.get(k) || 0) + r.amount)); }
+  return {
+    acts, months, value_add: r2(valueRows.reduce((s, r) => s + r.amount, 0)), natures: [...sums.entries()].map(([nature, value]) => ({ nature, value })),
+    open_add: r2(valueRows.filter(r => !r.received).reduce((s, r) => s + r.amount, 0)),
+    open_count: rows.filter(r => !r.received && r.kind === 'parcela').length, open_total: r2(rows.filter(r => !r.received && r.kind === 'parcela').reduce((s, r) => s + r.amount, 0)),
+    skipped_months: [...new Set(acts.filter(a => a.act === 'skip').map(a => a.r.due_date.slice(0, 7)))].length,
+    pending: acts.some(a => a.act !== 'done'),
+  };
 }
 
 function plan(files) {
@@ -129,22 +164,21 @@ function plan(files) {
   }
   const out = [...groups.values()].map(g => {
     const match = byTitle.get(g.key) || null;
-    const taken = new Set(match ? all(`SELECT ref_month FROM measurements WHERE contract_id = ? AND status <> 'rascunho'`, match.id).map(m => m.ref_month) : []);
-    const months = monthsOf(g.rows).map(m => ({ ...m, exists: taken.has(m.month) }));
-    const open = g.rows.filter(r => !r.received);
+    const a = analyze(g.rows, match?.id || null);
     return {
-      key: g.key, obra: g.obra, client: mainClient(g.rows), payers: [...new Set(g.rows.map(r => r.payer).filter(Boolean))],
+      key: g.key, obra: g.obra, client: mainClient(g.rows), payers: [...new Set(g.rows.map(r => r.payer).filter(Boolean))], rows: g.rows,
       match: match && { id: match.id, code: match.code, client: match.client, title: match.title },
-      months, bms: months.filter(m => !m.exists).length, total: r2(months.filter(m => !m.exists).reduce((s, m) => s + m.total, 0)),
-      rt: r2(months.reduce((s, m) => s + m.adjustments.filter(a => a.description.startsWith('RT - ')).reduce((x, a) => x + a.amount, 0), 0)),
-      open_count: open.length, open_total: r2(open.reduce((s, r) => s + r.amount, 0)),
+      months: a.months.map(({ rows: _r, ...m }) => m), bms: a.months.length, total: r2(a.months.reduce((s, m) => s + m.total, 0)),
+      rt: r2(a.months.reduce((s, m) => s + m.adjustments.filter(x => x.description.startsWith('RT - ')).reduce((t, x) => t + x.amount, 0), 0)),
+      value_add: a.value_add, natures: a.natures, open_add: a.open_add, open_count: a.open_count, open_total: a.open_total,
+      skipped_months: a.skipped_months, pending: a.pending,
       first_due: g.rows.map(r => r.due_date).sort()[0], last_activity: g.rows.map(r => r.received_date || r.due_date).sort().at(-1),
     };
   }).sort((a, b) => a.client.localeCompare(b.client, 'pt-BR') || a.obra.localeCompare(b.obra, 'pt-BR'));
   const others = rows.filter(r => r.kind === 'outra');
   return {
     files: info, warnings, total_rows: rows.length, groups: out,
-    skipped: { open: rows.filter(r => r.kind !== 'outra' && !r.received).length, others: others.length, others_total: r2(others.reduce((s, r) => s + (r.received_amount ?? r.amount), 0)) },
+    skipped: { others: others.length, others_total: r2(others.reduce((s, r) => s + (r.received_amount ?? r.amount), 0)) },
     contracts: contracts.map(c => ({ id: c.id, code: c.code, client: c.client, title: c.title })),
   };
 }
@@ -152,7 +186,8 @@ function plan(files) {
 // Prévia: nada é gravado
 export function previewImport(ctx, body) {
   requireContracts(ctx.user);
-  return plan(body.files);
+  const p = plan(body.files);
+  return { ...p, groups: p.groups.map(({ rows: _r, ...g }) => g) };
 }
 
 // Confirma. mapping: { [obra]: 'new' | id do contrato | 'skip' }
@@ -164,12 +199,12 @@ export function applyImport(ctx, body, ip) {
   return tx(() => {
     const usedPrefixes = new Set(all('SELECT bulletin_prefix FROM contracts').map(r => r.bulletin_prefix));
     const created = [], used = new Set();
-    let bms = 0, skippedMonths = 0;
+    let bms = 0, skippedMonths = 0, valueAdded = 0;
+    const track = (r, contractId, status, mid = null) => run(`INSERT INTO contract_import_rows (import_key, contract_id, kind, nature, amount, status, measurement_id) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(import_key) DO UPDATE SET status = excluded.status, measurement_id = excluded.measurement_id, updated_at = datetime('now')`, r.import_key, contractId, r.kind, natureLabel(r.nature), r.amount, status, mid);
     for (const g of p.groups) {
       const m = mapping[g.key] === undefined || mapping[g.key] === null || mapping[g.key] === '' ? (g.match ? g.match.id : 'new') : mapping[g.key];
-      if (m === 'skip') continue;
-      const months = g.months;
-      if (!months.length) continue;
+      if (m === 'skip' || !g.pending) continue;
       let contract;
       if (m === 'new') {
         const n = one(`SELECT MAX(CAST(SUBSTR(code, 4) AS INTEGER)) AS n FROM contracts WHERE code LIKE 'CT-%'`)?.n || 0;
@@ -186,33 +221,38 @@ export function applyImport(ctx, body, ip) {
         contract = { id: Number(r.lastInsertRowid), code, bulletin_prefix: prefix, fresh: true };
         created.push(code);
       } else {
-        const c = one('SELECT id, code, bulletin_prefix FROM contracts WHERE id = ?', Number(m));
+        const c = one('SELECT id, code, bulletin_prefix, source_import FROM (SELECT c.*, EXISTS(SELECT 1 FROM contract_import_rows i WHERE i.contract_id = c.id) AS source_import FROM contracts c) WHERE id = ?', Number(m));
         if (!c) throw badRequest(`Contrato escolhido para "${g.obra}" não existe.`);
-        contract = c;
+        contract = { ...c, fresh: false };
       }
       used.add(contract.id);
-      // Meses que já têm BM neste contrato ficam de fora (reenviar não duplica)
-      const taken = new Set(all(`SELECT ref_month FROM measurements WHERE contract_id = ? AND status <> 'rascunho'`, contract.id).map(r => r.ref_month));
-      const todo = months.filter(x => !taken.has(x.month));
-      skippedMonths += months.length - todo.length;
-      if (!todo.length) continue;
-      // Itens por natureza (R$ · preço 1,00 · quantidade = valor). Em contrato existente entram como aditivo.
-      const sums = new Map();
-      for (const x of todo) for (const l of x.lines) sums.set(l.nature, r2((sums.get(l.nature) || 0) + l.value));
-      const itemId = new Map();
+      const a = analyze(g.rows, contract.fresh ? null : contract.id);
+      skippedMonths += a.skipped_months;
+      // Valor do contrato: itens por natureza (R$ · preço 1,00). Em contrato lançado à mão entram como aditivo.
+      const itemFor = new Map();
       let seqItem = one('SELECT MAX(seq) AS n FROM contract_items WHERE contract_id = ?', contract.id)?.n || 0;
-      for (const [nature, total] of sums) {
-        const desc = contract.fresh ? nature : `${nature} (importado das planilhas)`;
-        const ex = one(`SELECT id, quantity FROM contract_items WHERE contract_id = ? AND description = ? AND unit = 'R$' AND unit_price = 1`, contract.id, desc);
-        if (ex) { run('UPDATE contract_items SET quantity = ? WHERE id = ?', r2(ex.quantity + total), ex.id); itemId.set(nature, ex.id); }
+      const natures = new Set([...a.natures.map(x => x.nature), ...a.months.flatMap(x => x.lines.map(l => l.nature))]);
+      for (const nature of natures) {
+        const add = a.natures.find(x => x.nature === nature)?.value || 0;
+        const ex = one(`SELECT id, quantity FROM contract_items WHERE contract_id = ? AND unit = 'R$' AND unit_price = 1 AND description IN (?, ?) ORDER BY seq LIMIT 1`, contract.id, nature, `${nature} (importado das planilhas)`);
+        if (ex) { if (add) run('UPDATE contract_items SET quantity = ? WHERE id = ?', r2(ex.quantity + add), ex.id); itemFor.set(nature, ex.id); }
         else {
-          const r = run('INSERT INTO contract_items (contract_id, seq, description, unit, unit_price, quantity, additive) VALUES (?,?,?,?,?,?,?)', contract.id, ++seqItem, desc, 'R$', 1, total, contract.fresh ? 0 : 1);
-          itemId.set(nature, Number(r.lastInsertRowid));
+          const manual = !contract.fresh && !contract.source_import;
+          const r = run('INSERT INTO contract_items (contract_id, seq, description, unit, unit_price, quantity, additive) VALUES (?,?,?,?,?,?,?)',
+            contract.id, ++seqItem, manual ? `${nature} (importado das planilhas)` : nature, 'R$', 1, add, manual ? 1 : 0);
+          itemFor.set(nature, Number(r.lastInsertRowid));
         }
+        valueAdded = r2(valueAdded + add);
       }
+      // Linhas em aberto e ignoradas: só registra
+      for (const x of a.acts) {
+        if (x.act === 'track') track(x.r, contract.id, 'aberto');
+        else if (x.act === 'skip') track(x.r, contract.id, 'ignorado');
+      }
+      // BMs (Recebida) do que foi recebido
       const items = all('SELECT id FROM contract_items WHERE contract_id = ?', contract.id);
       let seq = one('SELECT MAX(seq) AS n FROM measurements WHERE contract_id = ?', contract.id)?.n || 0;
-      for (const x of todo) {
+      for (const x of a.months) {
         seq++;
         const code = `${contract.bulletin_prefix}${String(seq).padStart(4, '0')}.${x.month.slice(2, 4)}`;
         const [y, mo] = x.month.split('-').map(Number);
@@ -221,14 +261,15 @@ export function applyImport(ctx, body, ip) {
           VALUES (?,?,?,?,?,?, 'recebida', ?,?,?,?,?,?,?,?)`, contract.id, seq, code, x.month, `${x.month}-01`, `${x.month}-${String(last).padStart(2, '0')}`,
           x.notes, x.docs, x.nf_date, x.paid_date, x.total, `${x.nf_date}T12:00:00.000Z`, ctx.user.id, ctx.user.id);
         const mid = Number(r.lastInsertRowid);
-        const qty = new Map(x.lines.map(l => [itemId.get(l.nature), l.value]));
+        const qty = new Map(x.lines.map(l => [itemFor.get(l.nature), l.value]));
         for (const it of items) run('INSERT INTO measurement_lines (measurement_id, item_id, quantity) VALUES (?,?,?)', mid, it.id, qty.get(it.id) || 0);
-        x.adjustments.forEach((a, k) => run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', mid, k + 1, a.description, 'vb', a.amount));
+        x.adjustments.forEach((adj, k) => run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', mid, k + 1, adj.description, 'vb', adj.amount));
+        for (const row of x.rows) track(row, contract.id, 'medido', mid);
         bms++;
       }
     }
-    const result = { files: p.files.map(f => f.name), bms, skipped_months: skippedMonths, contracts_created: created, contracts_used: used.size, open_ignored: p.skipped.open, others_ignored: p.skipped.others };
-    audit(ctx.user.id, 'contract', null, 'BMs importados das planilhas de recebimentos', { arquivos: result.files, bms, meses_ja_existentes: skippedMonths, contratos_criados: created }, ip);
+    const result = { files: p.files.map(f => f.name), bms, value_added: valueAdded, skipped_months: skippedMonths, contracts_created: created, contracts_used: used.size, others_ignored: p.skipped.others };
+    audit(ctx.user.id, 'contract', null, 'BMs importados das planilhas de recebimentos', { arquivos: result.files, bms, valor_somado: valueAdded, meses_com_bm_manual: skippedMonths, contratos_criados: created }, ip);
     return result;
   });
 }

@@ -1682,38 +1682,45 @@ async function main() {
   ok(mvPv.start_date > '2099-07-15' && mvSv.start_date === mvPv.start_date && mvSv.due_date === mvPv.due_date && mvSv.reschedule_count === 0, 'mãe empurrada por dependência leva as subtarefas junto (sem contar como reagendamento)');
 
   // ---------- Contratos: importar BMs das planilhas de recebimentos ----------
-  const biFiles = [{ name: 'recebimentos-exemplo.xlsx', data: fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'recebimentos-exemplo.xlsx')).toString('base64') }];
+  const biFile = n => ({ name: n, data: fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', n)).toString('base64') });
+  const biFiles = [biFile('recebimentos-exemplo.xlsx')];
   const biNo = await login('marcos@charao.eng.br');
   ok((await biNo('POST', '/contracts/import-bms/preview', { files: biFiles })).status === 403, 'sem liberação de Contratos não importa BMs');
   ok((await fo('POST', '/contracts/import-bms/preview', { files: [{ name: 'x.xlsx', data: Buffer.from('não é planilha').toString('base64') }] })).status === 400, 'arquivo que não é .xlsx é recusado');
   const biPv = (await fo('POST', '/contracts/import-bms/preview', { files: biFiles })).data;
   const biA1 = biPv.groups.find(g => g.obra === 'Reforma - Casa Exemplo A1'), biA2 = biPv.groups.find(g => g.obra === 'Projeto - Sala Exemplo A2'), biGer = biPv.groups.find(g => g.obra === 'Gerenciamento');
-  ok(biPv.total_rows === 12 && biPv.groups.length === 4 && biPv.skipped.others === 2 && biPv.skipped.open === 2, `prévia: 4 obras, 2 em aberto e 2 outras entradas fora (${biPv.groups.length}/${biPv.skipped.open}/${biPv.skipped.others})`);
-  ok(biA1.client === 'Cliente Exemplo Alfa' && biA1.bms === 3 && biA1.open_count === 1 && biA1.rt === 750.5, 'obra: um BM por mês recebido (jan, fev, mar), em aberto não entra');
+  ok(biPv.total_rows === 12 && biPv.groups.length === 4 && biPv.skipped.others === 2, `prévia: 4 obras e 2 outras entradas fora (${biPv.groups.length}/${biPv.skipped.others})`);
+  ok(biA1.client === 'Cliente Exemplo Alfa' && biA1.bms === 3 && biA1.value_add === 40000 && biA1.open_add === 10000 && biA1.rt === 750.5, 'obra: valor do contrato com todas as parcelas, BM só dos meses recebidos (jan, fev, mar)');
   const biMar = biA1.months.find(m => m.month === '2025-03'), biFev = biA1.months.find(m => m.month === '2025-02');
   ok(biMar.total === 10750.5 && biMar.adjustments.some(a => a.description === 'RT - Fornecedor Exemplo Móveis' && a.amount === 750.5), 'RT do fornecedor entra como acréscimo no BM do mês');
   ok(biFev.measured === 10000 && biFev.total === 9800 && biFev.adjustments.some(a => a.description === 'Descontos no recebimento' && a.amount === -200), 'desconto do recebimento entra como desconto (total = valor recebido)');
-  ok(biA2.months.length === 1 && biA2.months[0].measured === 5000 && biA2.months[0].count === 2, 'linhas do mesmo mês somam num único BM');
+  ok(biA2.months.length === 1 && biA2.months[0].measured === 5000 && biA2.months[0].count === 2 && biA2.value_add === 9000, 'linhas do mesmo mês somam num único BM');
   ok(biGer.match && biGer.match.code === 'CT-001', 'obra com o nome de um contrato existente já vem ligada a ele');
   const biCt1Before = (await fo('GET', `/contracts/${kCtId}`)).data;
   const biImp = (await fo('POST', '/contracts/import-bms', { files: biFiles, mapping: { [biA2.key]: 'skip' } })).data;
-  ok(biImp.bms === 5 && biImp.contracts_created.length === 2, `importação: 5 BMs (A1: 3, B1: 1, Gerenciamento: 1) e 2 contratos novos (${JSON.stringify(biImp)})`);
+  ok(biImp.bms === 5 && biImp.contracts_created.length === 2 && biImp.value_added === 40000 + 6000 + 9841.05, `importação: 5 BMs, 2 contratos novos e valor somado (${JSON.stringify(biImp)})`);
   const biCts = (await fo('GET', '/contracts')).data;
   ok(!biCts.some(c => c.title === 'Projeto - Sala Exemplo A2'), 'obra marcada "não importar" fica de fora');
   const biCtA1 = biCts.find(c => c.title === 'Reforma - Casa Exemplo A1');
-  const biA1v = (await fo('GET', `/contracts/${biCtA1.id}`)).data;
-  ok(biA1v.client === 'Cliente Exemplo Alfa' && biA1v.status === 'vigente' && biA1v.items.length === 1 && biA1v.items[0].unit === 'R$' && biA1v.items[0].description === 'Execução de Obras' && biA1v.items[0].quantity === 30000,
-    'contrato novo: item por natureza (R$ · quantidade = valor recebido) e vigente por ter parcela em aberto');
-  ok(biA1v.measurements.length === 3 && biA1v.measurements.every(m => m.status === 'recebida') && biA1v.summary.received === 30550.5 && biA1v.summary.balance === 0,
-    'BMs recebidos: total recebido confere e saldo a medir zerado');
+  let biA1v = (await fo('GET', `/contracts/${biCtA1.id}`)).data;
+  ok(biA1v.client === 'Cliente Exemplo Alfa' && biA1v.status === 'vigente' && biA1v.items.length === 1 && biA1v.items[0].unit === 'R$' && biA1v.items[0].description === 'Execução de Obras' && biA1v.items[0].quantity === 40000,
+    'contrato novo: item por natureza com o valor de todas as parcelas (recebidas + em aberto)');
+  ok(biA1v.measurements.length === 3 && biA1v.measurements.every(m => m.status === 'recebida') && biA1v.summary.received === 30550.5 && biA1v.summary.value === 40000 && biA1v.summary.balance === 10000,
+    'BMs só do recebido; parcela em aberto fica como saldo a medir');
   const biM = (await fo('GET', `/measurements/${biA1v.measurements.find(m => m.ref_month === '2025-03').id}`)).data;
-  ok(biM.code === `${biA1v.bulletin_prefix}0003.25` && biM.totals.to_bill === 10750.5 && biM.paid_amount === 10750.5 && biM.nf_date === '2025-03-10' && biM.rows[0].acc_value === 30000 && biM.rows[0].bal_value === 0, 'boletim completo: código, acumulado, saldo e valor recebido');
+  ok(biM.code === `${biA1v.bulletin_prefix}0003.25` && biM.totals.to_bill === 10750.5 && biM.paid_amount === 10750.5 && biM.nf_date === '2025-03-10' && biM.rows[0].acc_value === 30000 && biM.rows[0].bal_value === 10000, 'boletim completo: código, acumulado, saldo e valor recebido');
   ok(biCts.find(c => c.title === 'Orçamento - Estudo Exemplo B1').status === 'encerrado', 'contrato antigo, sem nada em aberto, nasce encerrado');
   const biCt1 = (await fo('GET', `/contracts/${kCtId}`)).data;
   ok(biCt1.measurements.length === biCt1Before.measurements.length + 1 && biCt1.items.some(i => i.additive && i.description.includes('importado')) && biCt1.summary.value === biCt1Before.summary.value + 9841.05,
-    'contrato existente: BM do mês acrescentado e item importado entra como aditivo');
+    'contrato lançado à mão: BM do mês acrescentado e item importado entra como aditivo');
   const biAgain = (await fo('POST', '/contracts/import-bms', { files: biFiles, mapping: { [biA2.key]: 'skip' } })).data;
-  ok(biAgain.bms === 0 && biAgain.skipped_months === 5 && biAgain.contracts_created.length === 0, 'reenviar não duplica (meses que já têm BM)');
+  ok(biAgain.bms === 0 && biAgain.value_added === 0 && biAgain.contracts_created.length === 0, 'reenviar não duplica (nem BM, nem valor do contrato)');
+  ok((await fo('POST', '/contracts/import-bms/preview', { files: biFiles })).data.groups.filter(g => g.key !== biA2.key).every(g => !g.pending), 'prévia de reenvio: obras já importadas aparecem como concluídas');
+  // Planilha mais nova: a parcela que estava em aberto foi recebida (com juros) → ganha o BM, sem somar de novo no contrato
+  const biBx = (await fo('POST', '/contracts/import-bms', { files: [biFile('recebimentos-exemplo-baixa.xlsx')] })).data;
+  biA1v = (await fo('GET', `/contracts/${biCtA1.id}`)).data;
+  const biAbr = biA1v.measurements.find(m => m.ref_month === '2025-04');
+  ok(biBx.bms === 1 && biBx.value_added === 0 && biAbr && biAbr.paid_amount === 10150 && biA1v.summary.value === 40000 && biA1v.summary.balance === 0, 'parcela recebida depois ganha o BM (com juros) e o saldo zera, sem mudar o valor do contrato');
   ok((await fo('GET', '/audit')).data.some(a => a.action === 'BMs importados das planilhas de recebimentos'), 'importação registrada na auditoria');
 
 }

@@ -236,7 +236,10 @@ function bindRanking(root, d) {
   if (!sec) return;
   const body = sec.querySelector('[data-rk-body]');
   const ref = `${d.year.year}-${d.year.through}`;
+  let expanded = false, cur = 'ano';
   const draw = k => {
+    if (k !== cur) expanded = false;
+    cur = k;
     const [a, b] = rkRange(k, ref);
     const by = new Map();
     for (const n of d.billing.filter(x => x.nf_date >= a && x.nf_date <= b)) {
@@ -247,22 +250,30 @@ function bindRanking(root, d) {
     const rows = [...by.values()].sort((x, y) => y.total - x.total);
     const total = rows.reduce((s, r) => s + r.total, 0);
     const max = Math.max(1, ...rows.map(r => r.total));
-    const top = rows.slice(0, 10);
-    const rest = rows.slice(10);
+    const top = expanded ? rows.slice() : rows.slice(0, 10);
+    const rest = expanded ? [] : rows.slice(10);
     if (rest.length) top.push({ client: `Outros (${rest.length})`, total: rest.reduce((s, r) => s + r.total, 0), received: rest.reduce((s, r) => s + r.received, 0), nfs: rest.reduce((s, r) => s + r.nfs, 0), contracts: new Set(), other: true });
     const label = k === 'tudo' ? 'todo o período' : `${a.split('-').reverse().join('/')} a ${b.split('-').reverse().join('/')}`;
     body.innerHTML = (rows.length ? html`
       <div class="ct-rk-head"><span>Faturado (pela data da NF) · ${label}</span><b>${money(total)}</b><small>${rows.length} cliente(s)</small></div>
-      <ol class="ct-rk-list">${top.map((r, i) => html`<li class="${r.other ? 'is-other' : ''}">
+      <ol class="ct-rk-list">${top.map((r, i) => html`<li class="${r.other ? 'is-other' : ''}">${r.other
+        ? html`<button type="button" class="ct-rk-a" data-rk-more title="Ver os outros ${rest.length} clientes">`
+        : html`<a class="ct-rk-a" href="#/contratos/cliente?nome=${encodeURIComponent(r.client)}" title="Abrir ${r.client}">`}
         <span class="ct-rk-pos">${r.other ? '' : `${i + 1}º`}</span>
         <div class="ct-rk-main">
           <div class="ct-rk-name"><b>${r.client}</b><span>${r.nfs} NF · recebido ${money(r.received)}</span></div>
           <div class="ct-rk-bar"><i style="width:calc((100% - 120px) * ${Math.max(0.015, r.total / max).toFixed(4)})"></i><em>${money(r.total)}</em></div>
         </div>
-        <span class="ct-rk-share">${String(total ? Math.round((r.total / total) * 1000) / 10 : 0).replace('.', ',')}%</span></li>`)}</ol>`
+        <span class="ct-rk-share">${String(total ? Math.round((r.total / total) * 1000) / 10 : 0).replace('.', ',')}%</span>${r.other ? html`</button>` : html`</a>`}</li>`)}</ol>
+      ${expanded && rows.length > 10 ? html`<button type="button" class="ct-rk-less" data-rk-less>Mostrar só os 10 maiores</button>` : ''}`
       : html`<p class="muted" style="margin:0">Nenhuma nota fiscal emitida neste período.</p>`).toString();
   };
   sec.querySelectorAll('[data-rk]').forEach(b => b.addEventListener('click', () => { sec.querySelectorAll('[data-rk]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(b.dataset.rk); }));
+  // "Outros (N)" abre a lista completa; cada cliente abre a tela do cliente
+  body.addEventListener('click', e => {
+    if (e.target.closest('[data-rk-more]')) { expanded = true; draw(cur); }
+    else if (e.target.closest('[data-rk-less]')) { expanded = false; draw(cur); }
+  });
   draw('ano');
 }
 

@@ -2657,3 +2657,12 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 
 .m-correct-note { margin: 0 0 14px; }
 .m-correct-note a { font-weight: 700; color: inherit; }
+
+/* Clientes que mais faturam: cada linha abre o cliente; "Outros" abre a lista completa */
+.ct-rk-list li > .ct-rk-a { display: contents; color: inherit; text-decoration: none; cursor: pointer; }
+.ct-rk-list li > button.ct-rk-a { font: inherit; }
+.ct-rk-list li { border-radius: 8px; }
+.ct-rk-list li:hover { background: var(--navy-50); }
+.ct-rk-list li:hover .ct-rk-name b { color: var(--navy); text-decoration: underline; }
+.ct-rk-list li.is-other:hover .ct-rk-name b::after { content: ' — ver todos'; font-weight: 400; color: var(--muted); }
+.ct-rk-less { margin-top: 8px; border: 0; background: none; padding: 6px 0; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--navy); cursor: pointer; }

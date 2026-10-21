@@ -38,7 +38,7 @@ function paysHtml(p) {
         <span class="fi-line">linha ${r.line}</span>
         <span class="fi-main"><b>${r.title || '(sem tarefa)'}</b>
           <small>${[r.category, r.year, r.target && !r.target.id ? 'tarefa nova (aba Tarefas)' : ''].filter(Boolean).join(' · ')}</small>
-          <span class="fp-months">${r.months.map(m => html`<span class="fp-m is-${m.status}" title="${m.error || (m.status === 'pago' ? 'já pago no sistema: ignorado' : '')}"><b>${m.month}</b>${m.amount != null ? money(m.amount) : '?'}</span>`)}</span>
+          <span class="fp-months">${r.months.map(m => html`<span class="fp-m is-${m.status === 'ok' && m.amount === 0 ? 'zero' : m.status}" title="${m.error || (m.status === 'pago' ? 'já pago no sistema: ignorado' : '')}"><b>${m.month}</b>${m.amount != null ? money(m.amount) : '?'}</span>`)}</span>
           ${r.errors.length ? html`<em class="fi-errs">${r.errors.join(' · ')}</em>` : ''}</span>
         <span class="fi-val"><b>${money(r.total)}</b><span class="m-badge ${PST[r.status][1]}">${PST[r.status][0]}</span></span>
       </label></li>`)}</ul>

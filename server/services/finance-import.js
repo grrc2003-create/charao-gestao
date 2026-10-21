@@ -75,7 +75,7 @@ export function templateXlsx(ctx) {
         ['Tarefa *', 'Nome da tarefa: as já cadastradas vêm listadas; para uma tarefa nova, cadastre-a também na aba "Tarefas" (mesmo nome).'],
         ['Tipo da despesa', 'Só é preciso quando há duas tarefas com o mesmo nome.'],
         ['Ano *', 'Ano dos pagamentos da linha (ex.: 2026). Para lançar outro ano, repita a tarefa em outra linha.'],
-        ['JAN … DEZ', 'Valor pago no mês (ex.: 1500 ou 1.500,00). Em branco = não pago. A data do pagamento fica a do vencimento (ou hoje, se o vencimento ainda não chegou). Meses futuros não são aceitos.'],
+        ['JAN … DEZ', 'Valor pago no mês (ex.: 1500 ou 1.500,00). 0 = a previsão não ocorreu no mês (não fica atrasada). Em branco = não pago. A data do pagamento fica a do vencimento (ou hoje, se o vencimento ainda não chegou). Meses futuros não são aceitos.'],
         ['Já pagos', 'Mês que já tem pagamento no sistema é ignorado (para corrigir, desfaça o pagamento na tela).'],
         ['Só pagamentos', 'Pode enviar só a aba "Pagamentos" preenchida (a aba "Tarefas" pode ficar vazia).'],
       ],
@@ -232,7 +232,7 @@ function parsePayments(ctx, { rows: grid, hi, col }, taskRows) {
       const ym = okYear ? `${year}-${String(m + 1).padStart(2, '0')}` : null;
       const amount = amountOf(raw);
       const r = { month: MES[m], ym, amount: typeof amount === 'number' ? amount : null, status: 'ok', error: null };
-      if (typeof amount !== 'number' || amount <= 0) { r.status = 'erro'; r.error = `${MES[m]}: valor inválido`; }
+      if (typeof amount !== 'number' || amount < 0) { r.status = 'erro'; r.error = `${MES[m]}: valor inválido`; }
       else if (ym && ym > cur) { r.status = 'erro'; r.error = `${MES[m]}: mês futuro`; }
       else if (ym && target && !monthsOf(target.o, ym).includes(ym)) { r.status = 'erro'; r.error = `${MES[m]}: a tarefa não vence neste mês`; }
       else if (ym && target?.id && paidSet.has(`${target.id}|${ym}`)) r.status = 'pago';

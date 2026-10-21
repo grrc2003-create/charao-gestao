@@ -80,7 +80,7 @@ function taskDescription(o, amount) {
 // Valor da parcela anterior da mesma obrigação (pago, se houver; senão o previsto)
 export function previousAmount(obligationId, ref) {
   const it = one('SELECT amount_expected, paid_amount, status FROM finance_items WHERE obligation_id = ? AND ref_month < ? ORDER BY ref_month DESC LIMIT 1', obligationId, ref);
-  return it ? r2(it.status === 'paga' && it.paid_amount != null ? it.paid_amount : it.amount_expected) : null;
+  return it ? r2(it.status === 'paga' && it.paid_amount ? it.paid_amount : it.amount_expected) : null; // real 0 (não ocorreu) não vira previsão
 }
 
 function createItem(o, ref, userId) {
@@ -151,7 +151,8 @@ export function financeYear(ctx, y) {
       if (it) {
         const paid = it.status === 'paga';
         return { ym: k, item_id: it.id, planned: r2(it.amount_expected), real: paid ? r2(it.paid_amount ?? it.amount_expected) : null, paid_date: it.paid_date, due_date: it.due_date,
-          status: paid ? 'pago' : it.due_date < ref ? 'atrasada' : 'pendente', estimated: !!it.estimated, files: it.files };
+          // Real = 0: a previsão não ocorreu no mês (resolvido, não é atraso)
+          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : it.due_date < ref ? 'atrasada' : 'pendente', estimated: !!it.estimated, files: it.files };
       }
       if (!due.has(k)) return null;
       const p = plans.get(`${o.id}|${k}`);
@@ -171,7 +172,7 @@ export function financeYear(ctx, y) {
   const monthTot = keys.map((k, i) => {
     const cs = rows.map(r => r.cells[i]).filter(Boolean);
     return { ym: k, planned: r2(cs.reduce((s, c) => s + c.planned, 0)), real: r2(cs.reduce((s, c) => s + (c.real || 0), 0)),
-      paid: cs.filter(c => c.status === 'pago').length, count: cs.length, late: cs.filter(c => c.status === 'atrasada').length };
+      paid: cs.filter(c => c.status === 'pago' || c.status === 'nao_ocorreu').length, count: cs.length, late: cs.filter(c => c.status === 'atrasada').length };
   });
   const late = rows.flatMap(r => r.cells.filter(c => c && c.status === 'atrasada'));
   return {
@@ -363,9 +364,9 @@ export function payItem(ctx, id, body, ip) {
       }
       run(`UPDATE tasks SET status = 'concluida', started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ?`,
         now, `${pd}T15:00:00.000Z`, now, ctx.user.id, now, now, it.task_id);
-      taskHistory(it.task_id, ctx.user.id, 'Pagamento registrado', `${brl(amount)} pago em ${pd.split('-').reverse().join('/')}${files.length ? ` · ${files.length} comprovante(s)` : ''} (Tarefas financeiras)`);
+      taskHistory(it.task_id, ctx.user.id, amount === 0 ? 'Não ocorreu no mês' : 'Pagamento registrado', amount === 0 ? 'Real lançado = R$ 0,00: a previsão não ocorreu neste mês (Tarefas financeiras)' : `${brl(amount)} pago em ${pd.split('-').reverse().join('/')}${files.length ? ` · ${files.length} comprovante(s)` : ''} (Tarefas financeiras)`);
     }
-    audit(ctx.user.id, 'finance', it.obligation_id, 'Parcela paga', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount, data: pd }, ip);
+    audit(ctx.user.id, 'finance', it.obligation_id, amount === 0 ? 'Parcela marcada como não ocorrida (real = 0)' : 'Parcela paga', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount, data: pd }, ip);
   });
   return getItem(ctx, id);
 }

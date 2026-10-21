@@ -1868,6 +1868,22 @@ async function main() {
     ok(undo.removed === 1 && undo.unpaid === (mi ? 2 : 1) && row2('Pagamento importado teste').cells[0].status !== 'pago' && !row2('Nova com pagamento teste'), 'desfazer: pagamentos voltam a pendente e a tarefa nova sai');
     await fo('PUT', `/finance/obligations/${base}`, { title: 'Pagamento importado teste', category: 'Impostos', amount: 300, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
   }
+  {
+    // Real = 0: a previsão não ocorreu no mês (resolvido, não conta como atrasada)
+    const y = new Date().toISOString().slice(0, 4);
+    const zid = (await fo('POST', '/finance/obligations', { title: 'Zero não ocorreu teste', category: 'Outros', amount: 150, frequency: 'mensal', due_day: 1, start_month: `${y}-01` })).data.id;
+    const before = (await fo('GET', `/finance/year?ano=${y}`)).data;
+    const zr = d => d.groups.flatMap(g => g.rows).find(r => r.title === 'Zero não ocorreu teste');
+    const jan = zr(before).cells[0];
+    const paid0 = await fo('POST', `/finance/items/${jan.item_id || (await fo('POST', `/finance/obligations/${zid}/months/${y}-01`)).data.id}/pay`, { paid_date: `${y}-01-01`, paid_amount: 0 });
+    const after = (await fo('GET', `/finance/year?ano=${y}`)).data;
+    ok(paid0.status === 200 && zr(after).cells[0].status === 'nao_ocorreu' && zr(after).cells[0].real === 0 && after.totals.late === before.totals.late - (jan.status === 'atrasada' ? 1 : 0),
+      'real 0 = não ocorreu no mês (não fica atrasada)');
+    const zfile = writeXlsx([{ name: 'Pagamentos', header: true, rows: [['Tarefa *', 'Tipo da despesa', 'Ano *', 'JAN', 'FEV'], ['Zero não ocorreu teste', null, Number(y), null, 0]] }]).toString('base64');
+    const zpv = (await fo('POST', '/finance/import/preview', { file: { name: 'z.xlsx', data: zfile } })).data;
+    ok(new Date().getMonth() === 0 || (zpv.pays[0].status === 'ok' && zpv.pays[0].months[0].amount === 0), 'importação: 0 é aceito (não ocorreu)');
+    await fo('PUT', `/finance/obligations/${zid}`, { title: 'Zero não ocorreu teste', category: 'Outros', amount: 150, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
+  }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------
   const pyRec = (await fo('POST', '/finance/obligations', { title: 'Planejamento recorrente teste', category: 'Impostos', amount: 1000, frequency: 'mensal', due_day: 10, start_month: '2099-01' })).data.id;

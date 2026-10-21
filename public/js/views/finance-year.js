@@ -15,14 +15,15 @@ const ymLabel = ym => `${MESES[Number(ym.slice(5, 7)) - 1]}/${ym.slice(0, 4)}`;
 const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return ''; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : NaN; };
 const numIn = v => (v === null || v === undefined || v === '' ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-const ST = { pago: 'Pago', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
+const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
+const done = c => c.status === 'pago' || c.status === 'nao_ocorreu';
 
 function cellHtml(row, c, i, cur) {
   if (!c) return html`<td class="fy-c is-none ${cur ? 'is-cur' : ''}"><span class="fy-dash">—</span></td>`;
   return html`<td class="fy-c is-${c.status} ${cur ? 'is-cur' : ''}"><button type="button" class="fy-btn" data-o="${row.id}" data-i="${i}"
       title="${row.title} · ${ymLabel(c.ym)} · ${ST[c.status]} · previsto ${money(c.planned)}${c.real != null ? ` · real ${money(c.real)}` : ''}">
     <span class="fy-p ${c.custom ? 'is-custom' : ''}">${short(c.planned)}</span>
-    <span class="fy-r">${c.status === 'pago' ? html`✓ ${short(c.real)}` : c.status === 'atrasada' ? 'atrasada' : ''}</span></button></td>`;
+    <span class="fy-r">${c.status === 'pago' ? html`✓ ${short(c.real)}` : c.status === 'nao_ocorreu' ? 'não ocorreu' : c.status === 'atrasada' ? 'atrasada' : ''}</span></button></td>`;
 }
 
 export async function view({ state, query, setQuery, render }) {
@@ -72,7 +73,7 @@ export async function view({ state, query, setQuery, render }) {
       ${d.groups.length ? html`
       <section class="card fy-card">
         <div class="card-head"><h2>${icon('calendar')}Planejamento anual ${d.year}</h2><span class="sub">previsto × real, mês a mês</span></div>
-        <div class="fy-legend"><span><i class="fy-k is-pago"></i>Pago (real)</span><span><i class="fy-k is-atrasada"></i>Atrasada</span><span><i class="fy-k is-pendente"></i>A pagar</span><span><i class="fy-k is-projetado"></i>Previsto (projetado)</span><span><i class="fy-k is-custom"></i>Previsto ajustado no mês</span></div>
+        <div class="fy-legend"><span><i class="fy-k is-pago"></i>Pago (real)</span><span><i class="fy-k is-atrasada"></i>Atrasada</span><span><i class="fy-k is-pendente"></i>A pagar</span><span><i class="fy-k is-nao_ocorreu"></i>Não ocorreu (real 0)</span><span><i class="fy-k is-projetado"></i>Previsto (projetado)</span><span><i class="fy-k is-custom"></i>Previsto ajustado no mês</span></div>
         <div class="fy-wrap"><table class="fy">
           <thead><tr><th class="fy-name">Tarefa</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
           ${d.groups.map(g => html`<tbody>
@@ -109,10 +110,10 @@ export async function view({ state, query, setQuery, render }) {
         const c = r?.cells[i];
         if (!c) return;
         const reload = () => { setQuery({ ano: d.year, m: mobMonth }); render(); };
-        if (c.status === 'pago') {
+        if (done(c)) {
           const ok = await sheet({
-            title: `${r.title} · ${ymLabel(c.ym)}`, submitLabel: 'Desfazer pagamento', danger: true,
-            body: html`<p style="margin:0 0 6px"><b class="ok">✓ Pago ${money(c.real)}</b> em ${fmtDate(c.paid_date)}</p>
+            title: `${r.title} · ${ymLabel(c.ym)}`, submitLabel: c.status === 'nao_ocorreu' ? 'Desfazer (voltar a pendente)' : 'Desfazer pagamento', danger: true,
+            body: html`${c.status === 'nao_ocorreu' ? html`<p style="margin:0 0 6px"><b>Não ocorreu neste mês</b> (real lançado R$ 0,00)</p>` : html`<p style="margin:0 0 6px"><b class="ok">✓ Pago ${money(c.real)}</b> em ${fmtDate(c.paid_date)}</p>`}
               <p class="muted" style="margin:0">Previsto ${money(c.planned)}${c.real !== c.planned ? ` · diferença ${money(c.real - c.planned)}` : ''}${c.files ? ` · ${c.files} comprovante(s) na tarefa` : ''}.</p>
               <p class="hint" style="margin:10px 0 0">Para corrigir o valor real, desfaça o pagamento e lance de novo.</p>`,
             onSubmit: () => api(`/finance/items/${c.item_id}/unpay`, { method: 'POST' }),
@@ -126,7 +127,7 @@ export async function view({ state, query, setQuery, render }) {
             <div class="form-row"><div class="field"><label for="fy-p">Previsto (R$)</label><input type="text" id="fy-p" name="planned" inputmode="decimal" value="${numIn(c.planned)}">
               <span class="hint">Só deste mês${c.custom ? ' (já ajustado)' : ''}. Valor da tarefa: ${money(r.amount)}.</span></div>
               <div class="field"><label for="fy-r">Valor real pago (R$)</label><input type="text" id="fy-r" name="real" inputmode="decimal" placeholder="em branco = ainda não pago">
-                <span class="hint">Preencha quando pagar.</span></div></div>
+                <span class="hint">Preencha quando pagar. <b>0</b> = não ocorreu neste mês (não fica atrasada).</span></div></div>
             <div class="form-row"><div class="field"><label for="fy-d">Data do pagamento</label><input type="date" id="fy-d" name="paid_date" max="${today()}" value="${today()}"></div>
               <div class="field"><label for="fy-f">Comprovante (opcional)</label><input type="file" id="fy-f" accept="image/*,application/pdf,.pdf" multiple class="fin-file"></div></div>`,
           onSubmit: async (f, form) => {
@@ -137,10 +138,10 @@ export async function view({ state, query, setQuery, render }) {
             const item = c.item_id || (await api(`/finance/obligations/${r.id}/months/${c.ym}`, { method: 'POST' })).id;
             const files = await readAttachments(form.querySelector('input[type=file]')?.files || []);
             await api(`/finance/items/${item}/pay`, { method: 'POST', body: { paid_date: f.paid_date, paid_amount: real, files: files.map(x => ({ data: x.data, name: x.name })) } });
-            return { saved: 'paid' };
+            return { saved: real === 0 ? 'none' : 'paid' };
           },
         });
-        if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : 'Previsto atualizado.'); reload(); }
+        if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
       });
     },
   };

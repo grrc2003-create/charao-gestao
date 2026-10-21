@@ -6,7 +6,7 @@
 // (quem importa precisa poder dar acesso); descrição em branco = título. Check-lists continuam sendo criados no sistema.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, intOrNull } from '../lib/http.js';
-import { readXlsx, serialToDate } from '../lib/xlsx.js';
+import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { writeXlsx } from '../lib/xlsx-write.js';
 import { canCreateTaskIn, userHasProjectAccess, isAdmin, isManagerRole, restrictedProjectIds } from '../lib/permissions.js';
 import { audit, taskHistory } from './audit.js';
@@ -106,10 +106,15 @@ function parse(ctx, project, file) {
   if (!file?.data) throw badRequest('Envie a planilha (.xlsx).');
   const name = str(file.name, { max: 200, label: 'Nome do arquivo' }) || 'planilha.xlsx';
   let grid;
-  try { grid = readXlsx(Buffer.from(String(file.data).replace(/^data:[^,]*,/, ''), 'base64')); }
+  let sheets;
+  try { sheets = readXlsxSheets(Buffer.from(String(file.data).replace(/^data:[^,]*,/, ''), 'base64')); }
   catch (e) { throw badRequest(`${name}: não foi possível ler a planilha (${e.message}).`); }
-  const hi = grid.findIndex(r => r.some(v => hkey(v).startsWith('titulo')) && r.some(v => hkey(v) === 'id'));
-  if (hi < 0) throw badRequest('Não encontrei o cabeçalho da planilha modelo (ID, Título…). Use "Baixar planilha modelo".');
+  const isHead = r => r.some(v => hkey(v).startsWith('titulo')) && r.some(v => hkey(v) === 'id');
+  let hi = -1;
+  for (const s of sheets) { hi = s.rows.findIndex(isHead); if (hi >= 0) { grid = s.rows; break; } }
+  const other = sheets.some(s => s.rows.some(r => r.some(v => hkey(v).startsWith('descricao')) && r.some(v => hkey(v).startsWith('periodicidade'))));
+  if (hi < 0 && other) throw badRequest('Esta é a planilha de tarefas financeiras (Descrição, Periodicidade…), que se importa em Tarefas financeiras. Para o planejamento do projeto, use "Baixar planilha modelo" nesta tela.');
+  if (hi < 0) throw badRequest(`Não encontrei o cabeçalho da planilha modelo (colunas "ID" e "Título") em nenhuma aba (${sheets.map(s => s.name).join(', ')}). Use a planilha baixada em "Baixar planilha modelo", sem apagar a linha 1, e salve como .xlsx.`);
   const col = {};
   grid[hi].forEach((v, i) => {
     const k = HEAD.findIndex(h => hkey(h) === hkey(v));

@@ -1,4 +1,4 @@
-// Leitura mínima de planilhas .xlsx (sem dependências): abre o zip, lê a primeira aba e devolve as linhas.
+// Leitura mínima de planilhas .xlsx (sem dependências): abre o zip, lê as abas e devolve as linhas.
 // Células de texto, número, booleano e datas (número serial do Excel nas colunas de data).
 import { inflateRawSync } from 'node:zlib';
 
@@ -25,34 +25,29 @@ function unzip(buf) {
 
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const decode = s => s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => (e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e] ?? m));
-const texts = xml => [...xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>|<t\s*\/>/g)].map(m => decode(m[1] || '')).join('');
 const colIndex = ref => { let n = 0; for (const ch of ref.replace(/\d+/g, '')) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
 
-// Linhas da primeira aba: matriz de valores (string | number | boolean | null)
-export function readXlsx(buf) {
-  const files = unzip(buf);
-  const get = n => files.get(n)?.();
-  const strings = [];
-  const ss = get('xl/sharedStrings.xml');
-  if (ss) for (const m of ss.matchAll(/<si>([\s\S]*?)<\/si>/g)) strings.push(texts(m[1]));
-  // Primeira aba pela ordem do workbook
-  let sheetPath = 'xl/worksheets/sheet1.xml';
-  const wb = get('xl/workbook.xml'), rels = get('xl/_rels/workbook.xml.rels');
-  const rid = wb && /<sheet\b[^>]*\br:id="([^"]+)"/.exec(wb)?.[1];
-  if (rid && rels) {
-    const t = new RegExp(`<Relationship\\b[^>]*Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels)?.[1] || new RegExp(`<Relationship\\b[^>]*Target="([^"]+)"[^>]*Id="${rid}"`).exec(rels)?.[1];
-    if (t) sheetPath = t.startsWith('/') ? t.slice(1) : `xl/${t.replace(/^\.\//, '')}`;
-  }
-  const sheet = get(sheetPath);
-  if (!sheet) throw new Error('planilha sem abas');
+// Aceita XML com prefixo de namespace (ex.: <x:row>, gerado por alguns programas além do Excel)
+const T = String.raw`(?:[\w-]+:)?`;
+const RE = {
+  si: new RegExp(String.raw`<${T}si>([\s\S]*?)<\/${T}si>`, 'g'),
+  t: new RegExp(String.raw`<${T}t(?:\s[^>]*)?>([\s\S]*?)<\/${T}t>`, 'g'),
+  row: new RegExp(String.raw`<${T}row\b[^>]*?(?:\/>|>([\s\S]*?)<\/${T}row>)`, 'g'),
+  c: new RegExp(String.raw`<${T}c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/${T}c>)`, 'g'),
+  v: new RegExp(String.raw`<${T}v>([\s\S]*?)<\/${T}v>`),
+  sheet: new RegExp(String.raw`<${T}sheet\b([^>]*?)\/?>`, 'g'),
+};
+const texts = xml => [...xml.matchAll(RE.t)].map(m => decode(m[1] || '')).join('');
+
+function sheetRows(sheet, strings) {
   const rows = [];
-  for (const rm of sheet.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+  for (const rm of sheet.matchAll(RE.row)) {
     const row = [];
-    for (const cm of (rm[1] || '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    for (const cm of (rm[1] || '').matchAll(RE.c)) {
       const attrs = cm[1], inner = cm[2] || '';
       const ref = /\br="([A-Z]+\d+)"/.exec(attrs)?.[1];
       const t = /\bt="(\w+)"/.exec(attrs)?.[1];
-      const v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
+      const v = RE.v.exec(inner)?.[1];
       let val = null;
       if (t === 's') val = v !== undefined ? strings[Number(v)] ?? null : null;
       else if (t === 'inlineStr') val = texts(inner);
@@ -64,6 +59,39 @@ export function readXlsx(buf) {
     rows.push(Array.from(row, x => (x === undefined ? null : x)));
   }
   return rows;
+}
+
+// Todas as abas, na ordem do workbook: [{ name, rows }]
+export function readXlsxSheets(buf) {
+  const files = unzip(buf);
+  const get = n => files.get(n)?.();
+  const strings = [];
+  const ss = get('xl/sharedStrings.xml');
+  if (ss) for (const m of ss.matchAll(RE.si)) strings.push(texts(m[1]));
+  const wb = get('xl/workbook.xml') || '', rels = get('xl/_rels/workbook.xml.rels') || '';
+  const target = rid => {
+    const t = new RegExp(String.raw`<${T}Relationship\b[^>]*Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels)?.[1]
+      || new RegExp(String.raw`<${T}Relationship\b[^>]*Target="([^"]+)"[^>]*Id="${rid}"`).exec(rels)?.[1];
+    return t ? (t.startsWith('/') ? t.slice(1) : `xl/${t.replace(/^\.\//, '')}`) : null;
+  };
+  const sheets = [];
+  for (const m of wb.matchAll(RE.sheet)) {
+    const name = decode(/\bname="([^"]*)"/.exec(m[1])?.[1] || '');
+    const rid = /\b[\w-]+:id="([^"]+)"/.exec(m[1])?.[1];
+    const xml = rid && get(target(rid));
+    if (xml) sheets.push({ name, rows: sheetRows(xml, strings) });
+  }
+  if (!sheets.length) {
+    const xml = get('xl/worksheets/sheet1.xml');
+    if (xml) sheets.push({ name: 'Planilha1', rows: sheetRows(xml, strings) });
+  }
+  if (!sheets.length) throw new Error('planilha sem abas');
+  return sheets;
+}
+
+// Linhas da primeira aba: matriz de valores (string | number | boolean | null)
+export function readXlsx(buf) {
+  return readXlsxSheets(buf)[0].rows;
 }
 
 // Número serial do Excel (sistema 1900) → AAAA-MM-DD

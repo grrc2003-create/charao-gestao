@@ -1816,6 +1816,13 @@ async function main() {
     && !fiObs.some(o => o.title === 'Linha desmarcada teste') && fiObs.filter(o => o.title === 'Aluguel teste importação').length === 1, 'importa só as prontas e marcadas; a que já existia não duplica');
   ok((await fo('POST', '/finance/import', { file: { name: 'teste.xlsx', data: fiFile } })).data.imported === 1, 'reenviar: só a que ficou de fora entra (as importadas viram "já existe")');
   ok((await fo('POST', '/finance/import/preview', { file: { name: 'x.xlsx', data: writeXlsx([{ name: 'A', rows: [['outra coisa']] }]).toString('base64') } })).status === 400, 'planilha fora do modelo é recusada');
+  {
+    const reord = writeXlsx([{ name: 'Listas', rows: [['x']] }, { name: 'Tarefas', header: true, rows: [fiHead, ['Reordenada teste', 'Impostos', 100, null, null, 'Mensal', 5, '02/2099', null, null, null]] }]).toString('base64');
+    const pv = await fo('POST', '/finance/import/preview', { file: { name: 'reord.xlsx', data: reord } });
+    ok(pv.status === 200 && pv.data.rows.length === 1 && pv.data.rows[0].status === 'ok', 'cabeçalho achado mesmo com a aba "Tarefas" fora da primeira posição');
+    const wrong = await fo('POST', '/finance/import/preview', { file: { name: 'p.xlsx', data: writeXlsx([{ name: 'Planejamento', rows: [['ID', 'Título *']] }]).toString('base64') } });
+    ok(wrong.status === 400 && /planejamento de projeto/.test(wrong.data.error), 'planilha de planejamento de projeto: aviso de modelo trocado');
+  }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------
   const pyRec = (await fo('POST', '/finance/obligations', { title: 'Planejamento recorrente teste', category: 'Impostos', amount: 1000, frequency: 'mensal', due_day: 10, start_month: '2099-01' })).data.id;

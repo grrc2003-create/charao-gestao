@@ -3,7 +3,7 @@
 // Tarefa que já existe (mesma descrição e tipo da despesa) é pulada e avisada; linhas com erro não entram.
 import { all, one, tx } from '../db.js';
 import { badRequest, str } from '../lib/http.js';
-import { readXlsx, serialToDate } from '../lib/xlsx.js';
+import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { writeXlsx } from '../lib/xlsx-write.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
@@ -97,10 +97,16 @@ function parse(ctx, file) {
   if (!file?.data) throw badRequest('Envie a planilha (.xlsx).');
   const name = str(file.name, { max: 200, label: 'Nome do arquivo' }) || 'planilha.xlsx';
   let grid;
-  try { grid = readXlsx(Buffer.from(String(file.data).replace(/^data:[^,]*,/, ''), 'base64')); }
+  let sheets;
+  try { sheets = readXlsxSheets(Buffer.from(String(file.data).replace(/^data:[^,]*,/, ''), 'base64')); }
   catch (e) { throw badRequest(`${name}: não foi possível ler a planilha (${e.message}).`); }
-  const hi = grid.findIndex(r => r.some(v => hkey(v).startsWith('descricao')) && r.some(v => hkey(v).startsWith('periodicidade')));
-  if (hi < 0) throw badRequest('Não encontrei o cabeçalho da planilha modelo (Descrição, Periodicidade…). Use "Baixar planilha modelo".');
+  // O cabeçalho pode estar em qualquer aba (ex.: abas reordenadas) e em qualquer linha
+  const isHead = r => r.some(v => hkey(v).startsWith('descricao')) && r.some(v => hkey(v).startsWith('periodicidade'));
+  let hi = -1;
+  for (const s of sheets) { hi = s.rows.findIndex(isHead); if (hi >= 0) { grid = s.rows; break; } }
+  const other = sheets.some(s => s.rows.some(r => r.some(v => hkey(v).startsWith('titulo')) && r.some(v => hkey(v) === 'id')));
+  if (hi < 0 && other) throw badRequest('Esta é a planilha de planejamento de projeto (ID, Título…), que se importa em Projetos. Para tarefas financeiras, use "Baixar planilha modelo" nesta tela.');
+  if (hi < 0) throw badRequest(`Não encontrei o cabeçalho da planilha modelo (colunas "Descrição *" e "Periodicidade *") em nenhuma aba (${sheets.map(s => s.name).join(', ')}). Use a planilha baixada em "Baixar planilha modelo", preencha a aba "Tarefas" sem apagar a linha 1 e salve como .xlsx.`);
   const col = {};
   const ALIASES = { categoria: 'category', favorecido: 'payee' };
   grid[hi].forEach((v, i) => {

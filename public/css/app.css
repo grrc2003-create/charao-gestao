@@ -2775,3 +2775,36 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .card-head .sec-pdf svg { width: 13px; height: 13px; }
 .card-head .sec-pdf:hover { border-color: var(--navy); color: var(--navy); }
 #print-one { display: none; }
+
+/* Tarefas financeiras › Planejamento anual: no PC a grade ocupa a largura da tela e se ajusta a ela (sem rolagem lateral
+   a partir de ~1180px); no celular, só a visão do mês, mais compacta */
+@media (min-width: 900px) {
+  #view:has(.fy-top) { max-width: none; }
+  .fy { table-layout: fixed; font-size: clamp(10.5px, .72vw, 13.5px); }
+  .fy thead .fy-name { width: 180px; }
+  .fy thead .fy-tot { width: 7.5%; }
+  .fy .fy-name { min-width: 0; max-width: none; padding: 6px 8px; }
+  .fy .fy-name a { white-space: nowrap; }
+  .fy .fy-name small { font-size: .88em; overflow: hidden; text-overflow: ellipsis; }
+  .fy-c { min-width: 0; }
+  .fy thead th { font-size: .9em; padding: 8px 4px; }
+  .fy-btn { padding: 5px 4px; }
+  .fy-r { font-size: .9em; }
+  .fy .fy-tot { padding: 6px 6px; }
+  .fy tfoot th, .fy tfoot td { padding: 8px 4px; }
+}
+@media (min-width: 1500px) { .fy thead .fy-name { width: 230px; } }
+@media (min-width: 1900px) { .fy thead .fy-name { width: 270px; } }
+@media (min-width: 900px) and (max-width: 1179px) {
+  .fy { min-width: 940px; }
+}
+@media (max-width: 899px) {
+  #view:has(.fy-top) .page-head p { display: none; }
+  #view:has(.fy-top) .page-actions { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
+  #view:has(.fy-top) .page-actions .btn { flex: none; }
+  .fy-top { gap: 10px; }
+  .fy-tiles .ct-tile { padding: 10px 12px; }
+  .fy-tiles .ct-tile small { display: none; }
+  .fy-mob { overflow: visible; }
+  .fy-mnav { position: sticky; top: var(--topbar-h); z-index: 5; background: var(--surface); border-radius: inherit; }
+}

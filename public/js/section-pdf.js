@@ -15,6 +15,22 @@ async function waitLoaded(card) {
   }
 }
 
+// O PDF tem largura menor que a tela e ativaria o layout de celular (ex.: semana empilhada). Para sair igual à tela,
+// copia o layout calculado de cada elemento (exibição, grade, flex, posição e largura) para o clone.
+const FREEZE = ['display', 'position', 'top', 'left', 'right', 'bottom', 'width', 'min-width', 'max-width', 'grid-template-columns', 'grid-template-rows',
+  'grid-column-start', 'grid-column-end', 'grid-row-start', 'grid-row-end', 'grid-auto-flow', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis',
+  'row-gap', 'column-gap', 'align-items', 'justify-content', 'order', 'font-size', 'white-space', 'overflow-x', 'overflow-y', 'padding-left', 'padding-right'];
+function freezeLayout(src, dst) {
+  const a = [src, ...src.querySelectorAll('*')], b = [dst, ...dst.querySelectorAll('*')];
+  if (a.length !== b.length) return;
+  a.forEach((el, i) => {
+    if (el instanceof SVGElement && el.tagName.toLowerCase() !== 'svg') return;
+    const cs = getComputedStyle(el), st = b[i].style;
+    FREEZE.forEach(k => st.setProperty(k, cs.getPropertyValue(k)));
+  });
+  dst.style.width = `${src.getBoundingClientRect().width}px`;
+}
+
 async function printCard(card, ctx) {
   if (card.tagName === 'DETAILS' && !card.open) { card.open = true; card.dispatchEvent(new Event('toggle')); await sleep(150); }
   await waitLoaded(card);
@@ -22,11 +38,12 @@ async function printCard(card, ctx) {
   await sleep(60);
   const head = card.querySelector('.card-head');
   const title = head?.querySelector('h2')?.textContent.trim() || 'Quadro';
-  const wide = card.matches('.gantt-sec') || card.scrollWidth > 1100 || [...card.querySelectorAll('.table-wrap, .gantt, .fy-wrap')].some(el => el.scrollWidth > 1000);
-  const width = Math.max(card.scrollWidth, ...[...card.querySelectorAll('.table-wrap, .gantt, .fy-wrap, table, svg')].map(el => el.scrollWidth || 0));
+  const width = Math.max(card.getBoundingClientRect().width, ...[...card.querySelectorAll('.table-wrap, .gantt, .fy-wrap, table, svg')].map(el => el.scrollWidth || 0));
+  const wide = card.matches('.gantt-sec') || width > 760;
   const pageW = wide ? 1040 : 700;
   const scale = width > pageW ? Math.max(0.45, pageW / width) : 1;
   const clone = card.cloneNode(true);
+  freezeLayout(card, clone);
   clone.querySelectorAll('.sec-pdf, .no-print').forEach(el => el.remove());
   if (clone.tagName === 'DETAILS') clone.open = true;
   clone.querySelectorAll('details').forEach(d => { d.open = true; });

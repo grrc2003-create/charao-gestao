@@ -15,7 +15,7 @@ const ymLabel = ym => `${MESES[Number(ym.slice(5, 7)) - 1]}/${ym.slice(0, 4)}`;
 const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return ''; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : NaN; };
 const numIn = v => (v === null || v === undefined || v === '' ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
+const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', sem_previsto: 'Sem previsão', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
 const done = c => c.status === 'pago' || c.status === 'nao_ocorreu';
 
 function cellHtml(row, c, i, cur) {

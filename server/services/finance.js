@@ -99,7 +99,62 @@ function createItem(o, ref, userId) {
     creatorId: userId || o.created_by,
   });
   run('UPDATE finance_items SET task_id = ? WHERE id = ?', taskId, itemId);
+  if (amount === 0) syncZeroTask(taskId, 0, userId || o.created_by);
   return itemId;
+}
+
+// Previsto 0 = nada esperado no mês: a tarefa do mês sai da lista (cancelada); voltando a ter previsto, ela reabre
+const ZERO_REASON = 'Sem previsão no mês (previsto R$ 0,00)';
+function syncZeroTask(taskId, amount, userId) {
+  if (!taskId) return;
+  const now = new Date().toISOString();
+  if (amount === 0) {
+    const r = run(`UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ? AND cancelled_at IS NULL AND status <> 'concluida'`, now, userId, ZERO_REASON, now, taskId);
+    if (r.changes) taskHistory(taskId, userId, 'Tarefa cancelada', ZERO_REASON);
+  } else {
+    const r = run('UPDATE tasks SET cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, updated_at = ? WHERE id = ? AND cancel_reason = ?', now, taskId, ZERO_REASON);
+    if (r.changes) taskHistory(taskId, userId, 'Tarefa reaberta', `Previsto do mês: ${brl(amount)}`);
+  }
+}
+
+// Previsto de um mês (importação da aba "Previsto"): parcela existente (pendente ou paga) ou planejamento do mês ainda não
+// gerado. Devolve o estado anterior para poder desfazer.
+export function setPlannedInternal(userId, o, ym, amount) {
+  const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', o.id, ym);
+  if (it) {
+    const before = { item_id: it.id, amount: it.amount_expected };
+    if (r2(it.amount_expected) === r2(amount)) return null;
+    run('UPDATE finance_items SET amount_expected = ?, estimated = 0 WHERE id = ?', r2(amount), it.id);
+    if (it.task_id && it.status !== 'paga') {
+      run('UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?', taskDescription(o, r2(amount)), new Date().toISOString(), it.task_id);
+      syncZeroTask(it.task_id, r2(amount), userId);
+    }
+    return before;
+  }
+  const p = one('SELECT amount FROM finance_plan WHERE obligation_id = ? AND ref_month = ?', o.id, ym);
+  if (p && r2(p.amount) === r2(amount)) return null;
+  run(`INSERT INTO finance_plan (obligation_id, ref_month, amount, updated_by) VALUES (?,?,?,?)
+    ON CONFLICT(obligation_id, ref_month) DO UPDATE SET amount = excluded.amount, updated_by = excluded.updated_by, updated_at = datetime('now')`, o.id, ym, r2(amount), userId);
+  return { plan: p ? p.amount : null };
+}
+export function restorePlannedInternal(userId, obligationId, ym, before) {
+  const o = one('SELECT * FROM finance_obligations WHERE id = ?', obligationId);
+  if (!o || !before) return;
+  if (before.item_id) {
+    const it = one('SELECT * FROM finance_items WHERE id = ?', before.item_id);
+    if (!it) return;
+    run('UPDATE finance_items SET amount_expected = ? WHERE id = ?', before.amount, it.id);
+    if (it.task_id && it.status !== 'paga') { run('UPDATE tasks SET description = ? WHERE id = ?', taskDescription(o, before.amount), it.task_id); syncZeroTask(it.task_id, r2(before.amount), userId); }
+    return;
+  }
+  const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', obligationId, ym);
+  if (it && it.status !== 'paga') {
+    const amount = before.plan ?? o.amount;
+    run('UPDATE finance_items SET amount_expected = ? WHERE id = ?', amount, it.id);
+    if (it.task_id) { run('UPDATE tasks SET description = ? WHERE id = ?', taskDescription(o, amount), it.task_id); syncZeroTask(it.task_id, r2(amount), userId); }
+  }
+  if (before.plan == null) run('DELETE FROM finance_plan WHERE obligation_id = ? AND ref_month = ?', obligationId, ym);
+  else run('UPDATE finance_plan SET amount = ? WHERE obligation_id = ? AND ref_month = ?', before.plan, obligationId, ym);
 }
 
 export function generateItems(userId = null) {
@@ -171,11 +226,11 @@ export function financeYear(ctx, y) {
         const paid = it.status === 'paga';
         return { ym: k, item_id: it.id, planned: r2(it.amount_expected), real: paid ? r2(it.paid_amount ?? it.amount_expected) : null, paid_date: it.paid_date, due_date: it.due_date,
           // Real = 0: a previsão não ocorreu no mês (resolvido, não é atraso)
-          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : it.due_date < ref ? 'atrasada' : 'pendente', estimated: !!it.estimated, files: it.files };
+          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : r2(it.amount_expected) === 0 ? 'sem_previsto' : it.due_date < ref ? 'atrasada' : 'pendente', estimated: !!it.estimated, files: it.files };
       }
       if (!due.has(k)) return null;
       const p = plans.get(`${o.id}|${k}`);
-      return { ym: k, item_id: null, planned: r2(p ?? o.amount), custom: p != null, real: null, due_date: dueOf(k, o.due_day), status: 'projetado' };
+      return { ym: k, item_id: null, planned: r2(p ?? o.amount), custom: p != null, real: null, due_date: dueOf(k, o.due_day), status: p === 0 ? 'sem_previsto' : 'projetado' };
     });
     if (!cells.some(Boolean)) continue;
     const sum = f => r2(cells.reduce((s, c) => s + (c ? f(c) : 0), 0));
@@ -404,6 +459,7 @@ export function payItem(ctx, id, body, ip) {
       }
       run(`UPDATE tasks SET status = 'concluida', started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ?`,
         now, `${pd}T15:00:00.000Z`, now, ctx.user.id, now, now, it.task_id);
+      run('UPDATE tasks SET cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL WHERE id = ? AND cancel_reason = ?', it.task_id, ZERO_REASON);
       taskHistory(it.task_id, ctx.user.id, amount === 0 ? 'Não ocorreu no mês' : 'Pagamento registrado', amount === 0 ? 'Real lançado = R$ 0,00: a previsão não ocorreu neste mês (Tarefas financeiras)' : `${brl(amount)} pago em ${pd.split('-').reverse().join('/')}${files.length ? ` · ${files.length} comprovante(s)` : ''} (Tarefas financeiras)`);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, amount === 0 ? 'Parcela marcada como não ocorrida (real = 0)' : 'Parcela paga', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount, data: pd }, ip);
@@ -438,6 +494,7 @@ export function setItemAmount(ctx, id, body, ip) {
       const o = one('SELECT * FROM finance_obligations WHERE id = ?', it.obligation_id);
       run('UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?', taskDescription(o, amount), new Date().toISOString(), it.task_id);
       taskHistory(it.task_id, ctx.user.id, 'Valor previsto ajustado', `${brl(it.amount_expected)} → ${brl(amount)}`);
+      syncZeroTask(it.task_id, amount, ctx.user.id);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Valor da parcela ajustado', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, de: it.amount_expected, para: amount }, ip);
   });
@@ -535,9 +592,9 @@ export function financeMonth(ctx, ym) {
       (SELECT pm.ref FROM payroll_months pm WHERE pm.finance_item_id = i.id) AS payroll_ref
     FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
     LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN users u ON u.id = t.assignee_id
-    WHERE i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ?) ORDER BY i.due_date, o.title`, month, ref);
+    WHERE (i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ?)) AND NOT (i.status = 'pendente' AND i.amount_expected = 0) ORDER BY i.due_date, o.title`, month, ref);
   const decorate = it => {
-    const late = it.status === 'pendente' && it.due_date < ref;
+    const late = it.status === 'pendente' && it.due_date < ref && r2(it.amount_expected) > 0;
     const days = Math.round((Date.parse(it.due_date) - Date.parse(ref)) / 86400e3);
     return { ...it, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : late ? 'atrasada' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
   };

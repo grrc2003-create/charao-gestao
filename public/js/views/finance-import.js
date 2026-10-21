@@ -45,9 +45,33 @@ function paysHtml(p) {
     </section>`;
 }
 
+function plansHtml(p) {
+  const t = p.totals;
+  if (!p.plans?.length) return '';
+  return html`<section class="card section">
+      <div class="card-head"><h2>${icon('calendar')}Previsto mês a mês</h2><span class="sub">aba "Previsto" · substitui o previsto de cada mês</span></div>
+      <div class="card-body">
+        <div class="ct-tiles fi-tiles">
+          <div class="ct-tile"><span>Meses com previsto</span><b>${t.plan_months}</b><small>${t.plan_zeros} com previsto 0 (nada esperado)</small></div>
+          <div class="ct-tile"><span>Linhas prontas</span><b>${t.plan_ok}</b><small>desmarque se não quiser alguma</small></div>
+          <div class="ct-tile"><span>Com erro</span><b class="${t.plan_erro ? 'is-neg' : ''}">${t.plan_erro}</b><small>corrija na planilha e envie de novo</small></div>
+        </div>
+      </div>
+      <ul class="fi-list">${p.plans.map(r => html`<li class="is-${r.status}"><label>
+        <input type="checkbox" data-fplok="${r.line}" ${r.status === 'ok' ? 'checked' : 'disabled'} aria-label="Importar previsto da linha ${r.line}">
+        <span class="fi-line">linha ${r.line}</span>
+        <span class="fi-main"><b>${r.title || '(sem tarefa)'}</b>
+          <small>${[r.category, r.year, r.target && !r.target.id ? 'tarefa nova (aba Tarefas)' : ''].filter(Boolean).join(' · ')}</small>
+          <span class="fp-months">${r.months.map(m => html`<span class="fp-m is-plan ${m.amount === 0 ? 'is-zero' : ''}"><b>${m.month}</b>${money(m.amount)}</span>`)}</span>
+          ${r.errors.length ? html`<em class="fi-errs">${r.errors.join(' · ')}</em>` : ''}</span>
+        <span class="fi-val"><b>${money(r.total)}</b><span class="m-badge ${r.status === 'ok' ? 'm-paid' : 'fi-err'}">${r.status === 'ok' ? 'Pronto' : 'Com erro'}</span></span>
+      </label></li>`)}</ul>
+    </section>`;
+}
+
 function previewHtml(p) {
   const t = p.totals;
-  const n = t.ok + t.pay_count;
+  const n = t.ok + t.pay_count + t.plan_months;
   const tasks = !t.rows ? '' : html`<section class="card section">
       <div class="card-head"><h2>${icon('file')}Prévia</h2><span class="sub">${p.file}</span></div>
       <div class="card-body">
@@ -68,11 +92,11 @@ function previewHtml(p) {
         <span class="fi-val"><b>${money(r.view.amount)}</b>${r.view.variable ? html`<small>variável${r.view.repeat_last ? ' · mês anterior' : ''}</small>` : ''}<span class="m-badge ${ST[r.status][1]}">${ST[r.status][0]}</span></span>
       </label></li>`)}</ul>
     </section>`;
-  return html`${tasks}${paysHtml(p)}
-    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-fi-apply ${n ? '' : 'disabled'}>${icon('check')}<span>${applyLabel(t.ok, t.pay_count)}</span></button></div>`;
+  return html`${tasks}${plansHtml(p)}${paysHtml(p)}
+    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-fi-apply ${n ? '' : 'disabled'}>${icon('check')}<span>${applyLabel(t.ok, t.pay_count, t.plan_months)}</span></button></div>`;
 }
-const applyLabel = (tasks, pays) => (!tasks && !pays ? 'Nada para importar'
-  : `Importar ${[tasks ? `${tasks} tarefa(s)` : '', pays ? `${pays} pagamento(s)` : ''].filter(Boolean).join(' e ')}`);
+const applyLabel = (tasks, pays, plans = 0) => (!tasks && !pays && !plans ? 'Nada para importar'
+  : `Importar ${[tasks ? `${tasks} tarefa(s)` : '', plans ? `${plans} previsto(s)` : '', pays ? `${pays} pagamento(s)` : ''].filter(Boolean).join(', ')}`);
 
 const when = s => new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(s));
 function lastHtml(l) {
@@ -81,7 +105,7 @@ function lastHtml(l) {
   return html`<section class="card section fi-last">
       <div class="card-head"><h2>${icon('history')}Última importação</h2><span class="sub">${l.file || 'planilha'} · ${when(l.at)}${l.actor_name ? ` · ${l.actor_name}` : ''}</span></div>
       <div class="card-body">
-        <p class="muted" style="margin:0 0 10px">Importou errado? Desfazer ${l.items.length ? `exclui as ${l.items.length} tarefa(s) abaixo, com as parcelas e as tarefas do mês geradas por elas` : ''}${l.items.length && l.payments.length ? ' e ' : ''}${l.payments.length ? `volta a pendente os ${l.payments.length} pagamento(s) lançados (${money(l.payments_total)})` : ''}.${paid ? html` <b>${paid} tarefa já tem outro pagamento lançado e será mantida</b> (inative pela edição, se quiser).` : ''}</p>
+        <p class="muted" style="margin:0 0 10px">Importou errado? Desfazer ${l.items.length ? `exclui as ${l.items.length} tarefa(s) abaixo, com as parcelas e as tarefas do mês geradas por elas` : ''}${l.items.length && l.payments.length ? ' e ' : ''}${l.payments.length ? `volta a pendente os ${l.payments.length} pagamento(s) lançados (${money(l.payments_total)})` : ''}${l.plan_months ? `${l.items.length || l.payments.length ? ' e ' : ''}volta o previsto anterior de ${l.plan_months} mês(es)` : ''}.${paid ? html` <b>${paid} tarefa já tem outro pagamento lançado e será mantida</b> (inative pela edição, se quiser).` : ''}</p>
         ${l.payments.length ? html`<p class="fi-last-pays"><b>Pagamentos:</b> ${l.payments.slice(0, 12).map(x => `${x.title} ${x.ref_month.slice(5)}/${x.ref_month.slice(0, 4)}`).join(' · ')}${l.payments.length > 12 ? ` · +${l.payments.length - 12}` : ''}</p>` : ''}
         <ul class="fi-list fi-list-sm">${l.items.map(o => html`<li class="${o.paid ? 'is-paid' : ''}"><span class="fi-main"><b>${o.title}</b><small>${o.category || 'Sem tipo'} · ${o.frequency_label}</small></span>
           <span class="fi-val"><b>${money(o.amount)}</b>${o.paid ? html`<span class="m-badge m-paid">Com pagamento · mantida</span>` : ''}</span></li>`)}</ul>
@@ -102,8 +126,8 @@ export async function importPage({ state, navigate, render }) {
           <div class="fi-steps">
             <div class="fi-step"><span class="fi-n">1</span><div><b>Baixe a planilha modelo</b><small>já vem com as listas de tipo da despesa, periodicidade e responsáveis, e uma aba de instruções</small>
               <button type="button" class="btn btn-ghost btn-sm" data-fi-template>${icon('file')}Baixar planilha modelo</button></div></div>
-            <div class="fi-step"><span class="fi-n">2</span><div><b>Preencha e envie</b><small>aba "Tarefas": uma linha por tarefa nova · aba "Pagamentos": valor pago por mês (grade do ano)</small>
-              <label class="bi-drop" for="fi-file">${icon('file')}<span><b>Escolher planilha preenchida</b><small>arquivo .xlsx · abas "Tarefas" e/ou "Pagamentos"</small></span></label>
+            <div class="fi-step"><span class="fi-n">2</span><div><b>Preencha e envie</b><small>aba "Tarefas": uma linha por tarefa nova · "Previsto": previsto de cada mês (0 = nada esperado) · "Pagamentos": valor pago por mês</small>
+              <label class="bi-drop" for="fi-file">${icon('file')}<span><b>Escolher planilha preenchida</b><small>arquivo .xlsx · abas "Tarefas", "Previsto" e/ou "Pagamentos"</small></span></label>
               <input type="file" id="fi-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
               <ul class="bi-files" data-fi-name></ul></div></div>
           </div>
@@ -116,9 +140,9 @@ export async function importPage({ state, navigate, render }) {
       const input = root.querySelector('#fi-file'), nameBox = root.querySelector('[data-fi-name]'), read = root.querySelector('[data-fi-read]'), out = root.querySelector('[data-fi-preview]');
       let file = null, payload = null;
       root.querySelector('[data-fi-undo]')?.addEventListener('click', async ev => {
-        const b = ev.currentTarget, n = last.items.filter(o => !o.paid).length, k = last.payments.length;
-        if (!n && !k) { toast('Todas as tarefas desta importação já têm pagamento lançado; nada a desfazer.', 'error'); return; }
-        const what = [n ? `excluir ${n} tarefa(s) financeira(s) (com as parcelas e as tarefas do mês)` : '', k ? `voltar ${k} pagamento(s) a pendente` : ''].filter(Boolean).join(' e ');
+        const b = ev.currentTarget, n = last.items.filter(o => !o.paid).length, k = last.payments.length, q = last.plan_months || 0;
+        if (!n && !k && !q) { toast('Todas as tarefas desta importação já têm pagamento lançado; nada a desfazer.', 'error'); return; }
+        const what = [n ? `excluir ${n} tarefa(s) financeira(s) (com as parcelas e as tarefas do mês)` : '', k ? `voltar ${k} pagamento(s) a pendente` : '', q ? `voltar o previsto anterior de ${q} mês(es)` : ''].filter(Boolean).join(', ');
         if (!(await confirmSheet('Desfazer importação', `Desfazer a importação de "${last.file || 'planilha'}": ${what}? Não dá para voltar atrás.`, 'Desfazer', true))) return;
         b.disabled = true;
         try {
@@ -149,16 +173,19 @@ export async function importPage({ state, navigate, render }) {
           // Pagamentos de uma tarefa nova só entram se a linha da tarefa também for importada
           const payCount = () => p.pays.filter(r => r.status === 'ok' && out.querySelector(`[data-fpok="${r.line}"]`)?.checked
             && (r.target.id || out.querySelector(`[data-fiok="${r.target.line}"]`)?.checked)).reduce((s, r) => s + r.months.filter(m => m.status === 'ok').length, 0);
-          const count = () => { const n = out.querySelectorAll('[data-fiok]:checked').length, k = payCount(); btn.disabled = !(n + k); btn.querySelector('span').textContent = applyLabel(n, k); };
-          out.querySelectorAll('[data-fiok], [data-fpok]').forEach(cb => cb.addEventListener('change', () => { cb.closest('li').classList.toggle('is-off', !cb.checked); count(); }));
+          const planCount = () => (p.plans || []).filter(r => r.status === 'ok' && out.querySelector(`[data-fplok="${r.line}"]`)?.checked
+            && (r.target.id || out.querySelector(`[data-fiok="${r.target.line}"]`)?.checked)).reduce((s, r) => s + r.months.length, 0);
+          const count = () => { const n = out.querySelectorAll('[data-fiok]:checked').length, k = payCount(), q = planCount(); btn.disabled = !(n + k + q); btn.querySelector('span').textContent = applyLabel(n, k, q); };
+          out.querySelectorAll('[data-fiok], [data-fpok], [data-fplok]').forEach(cb => cb.addEventListener('change', () => { cb.closest('li').classList.toggle('is-off', !cb.checked); count(); }));
           btn.addEventListener('click', async () => {
             const skip = [...out.querySelectorAll('[data-fiok]:not(:checked):not(:disabled)')].map(c => Number(c.dataset.fiok));
             const skipPay = [...out.querySelectorAll('[data-fpok]:not(:checked):not(:disabled)')].map(c => Number(c.dataset.fpok));
+            const skipPlan = [...out.querySelectorAll('[data-fplok]:not(:checked):not(:disabled)')].map(c => Number(c.dataset.fplok));
             btn.disabled = true; btn.querySelector('span').textContent = 'Importando…';
             try {
-              const r = await api('/finance/import', { method: 'POST', body: { file: payload, skip, skip_pay: skipPay } });
-              toast([r.imported ? `${r.imported} tarefa(s) importada(s)` : '', r.paid ? `${r.paid} pagamento(s) lançado(s) (${money(r.paid_total)})` : ''].filter(Boolean).join(' · ') || 'Nada importado.');
-              navigate(r.paid ? '/financeiro' : '/financeiro/obrigacoes');
+              const r = await api('/finance/import', { method: 'POST', body: { file: payload, skip, skip_pay: skipPay, skip_plan: skipPlan } });
+              toast([r.imported ? `${r.imported} tarefa(s) importada(s)` : '', r.planned ? `${r.planned} previsto(s) ajustado(s)` : '', r.paid ? `${r.paid} pagamento(s) lançado(s) (${money(r.paid_total)})` : ''].filter(Boolean).join(' · ') || 'Nada mudou (já estava igual).');
+              navigate(r.paid || r.planned ? '/financeiro' : '/financeiro/obrigacoes');
             } catch (ex) { toast(ex.message, 'error'); count(); }
           });
         } catch (ex) { toast(ex.message, 'error'); }

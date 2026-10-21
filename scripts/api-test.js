@@ -1840,7 +1840,7 @@ async function main() {
     // Pagamentos (aba "Pagamentos", grade do ano): tarefa cadastrada e tarefa nova do mesmo arquivo
     const cur = new Date().toISOString().slice(0, 7), y = Number(cur.slice(0, 4)), mi = Number(cur.slice(5, 7)) - 1;
     const tpl = readXlsxSheets(fiBuf);
-    ok(tpl.map(x => x.name).join(',') === 'Tarefas,Pagamentos,Instruções,Listas' && tpl[1].rows[0][0] === 'Tarefa *' && tpl[1].rows.length > 1, 'modelo: aba Pagamentos com as tarefas cadastradas');
+    ok(tpl.map(x => x.name).join(',') === 'Tarefas,Pagamentos,Previsto,Instruções,Listas' && tpl[1].rows[0][0] === 'Tarefa *' && tpl[1].rows.length > 1, 'modelo: aba Pagamentos com as tarefas cadastradas');
     const base = (await fo('POST', '/finance/obligations', { title: 'Pagamento importado teste', category: 'Impostos', amount: 300, frequency: 'mensal', due_day: 1, start_month: `${y}-01` })).data.id;
     const months = Array(12).fill(null); months[0] = 310; months[mi] = 320;
     const fut = Array(12).fill(null); if (mi < 11) fut[mi + 1] = 50; else fut[0] = 'abc';
@@ -1908,6 +1908,34 @@ async function main() {
     ok((await biNo('DELETE', `/finance/obligations/${del}`)).status === 403, 'sem liberação não exclui');
     ok((await fo('DELETE', `/finance/obligations/${del}`)).status === 200 && (await fo('GET', `/finance/obligations/${del}`)).status === 404, 'tarefa sem pagamento é excluída (com parcelas)');
     await fo('PUT', `/finance/obligations/${keep}`, { title: 'Nao excluir teste', category: 'Outros', amount: 10, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
+  }
+  {
+    // Aba "Previsto": previsto de cada mês; 0 = nada esperado (não atrasa, tarefa do mês cancelada); desfazer volta
+    const y = Number(new Date().toISOString().slice(0, 4)), mi = Number(new Date().toISOString().slice(5, 7)) - 1;
+    const body = { title: 'Previsto mensal teste', category: 'Impostos', amount: 100, variable: true, repeat_last: true, frequency: 'mensal', due_day: 1, start_month: `${y}-01` };
+    const oid = (await fo('POST', '/finance/obligations', body)).data.id;
+    const row = async () => (await fo('GET', `/finance/year?ano=${y}`)).data.groups.flatMap(g => g.rows).find(r => r.id === oid);
+    const before = await row();
+    const plan = Array(12).fill(0); plan[11] = 250; // tudo 0, só DEZ com 250
+    const file = writeXlsx([{ name: 'Previsto 2026', header: true, rows: [['Tarefa *', 'Tipo da despesa', 'Ano *', 'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'],
+      ['Previsto mensal teste', null, y, ...plan], ['TOTAL', null, null, ...plan]] }]).toString('base64');
+    const pv = (await fo('POST', '/finance/import/preview', { file: { name: 'prev.xlsx', data: file } })).data;
+    ok(pv.plans.length === 1 && pv.totals.plan_months === 12 && pv.totals.plan_zeros === 11 && !pv.pays.length, 'prévia do previsto: lê a aba "Previsto…" (ignora a linha TOTAL)');
+    const imp = (await fo('POST', '/finance/import', { file: { name: 'prev.xlsx', data: file } })).data;
+    const after = await row();
+    const lateBefore = before.cells.filter(c => c && c.status === 'atrasada').length;
+    ok(imp.planned === 12 && lateBefore > 0 && !after.cells.some(c => c && c.status === 'atrasada') && after.cells[11].planned === 250 && after.cells[0].status === 'sem_previsto',
+      'previsto 0: mês sem previsão (não fica atrasada); DEZ com o previsto da planilha');
+    const it0 = (await fo('GET', `/finance/obligations/${oid}`)).data.items.find(i => i.ref_month === `${y}-01`);
+    const t0 = (await fo('GET', `/tasks/${it0.task_id}`)).data;
+    ok(t0.cancelled_at && /Sem previsão/.test(t0.cancel_reason || ''), 'previsto 0: a tarefa do mês é cancelada');
+    const last = (await fo('GET', '/finance/import/last')).data.last;
+    ok(last.plan_months === 12, 'última importação lista o previsto ajustado');
+    await fo('POST', `/finance/import/${last.id}/undo`, {});
+    const back = await row();
+    const t1 = (await fo('GET', `/tasks/${it0.task_id}`)).data;
+    ok(back.cells[0].status === before.cells[0].status && back.cells[0].planned === before.cells[0].planned && !t1.cancelled_at, 'desfazer: previsto volta ao anterior e a tarefa reabre');
+    await fo('PUT', `/finance/obligations/${oid}`, { ...body, active: false });
   }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------

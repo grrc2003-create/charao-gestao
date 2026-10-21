@@ -7,7 +7,7 @@ import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { writeXlsx } from '../lib/xlsx-write.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
-import { requireFinance, CATEGORIES, FREQ_LABEL, readObligation, insertObligation, generateItems, removeObligationInternal, monthsOf, ensureItem, payItem, unpayItem } from './finance.js';
+import { requireFinance, CATEGORIES, FREQ_LABEL, readObligation, insertObligation, generateItems, removeObligationInternal, monthsOf, ensureItem, payItem, unpayItem, setPlannedInternal, restorePlannedInternal } from './finance.js';
 
 const HEAD = ['Descrição *', 'Tipo da despesa', 'Valor previsto (R$) *', 'Valor variável?', 'Usar valor do mês anterior?', 'Periodicidade *', 'Dia do vencimento *', 'Início (mês/ano) *', 'Término (mês/ano)', 'Responsável', 'Observações'];
 const KEYS = ['title', 'category', 'amount', 'variable', 'repeat_last', 'frequency', 'due_day', 'start_month', 'end_month', 'assignee', 'notes'];
@@ -50,6 +50,11 @@ export function templateXlsx(ctx) {
       validations: [{ col: 1, rows: [2, last], source: `Listas!$A$2:$A$${CATEGORIES.length + 1}` }],
     },
     {
+      name: 'Previsto', header: true, freeze: true, rows: [PAY_HEAD, ...payRows],
+      widths: [34, 24, 8, ...MES.map(() => 11)],
+      validations: [{ col: 1, rows: [2, last], source: `Listas!$A$2:$A$${CATEGORIES.length + 1}` }],
+    },
+    {
       name: 'Instruções', title: true, widths: [30, 90], styles: { 1: 2 },
       rows: [
         ['Como preencher a planilha de Tarefas financeiras'],
@@ -78,6 +83,10 @@ export function templateXlsx(ctx) {
         ['JAN … DEZ', 'Valor pago no mês (ex.: 1500 ou 1.500,00). 0 = a previsão não ocorreu no mês (não fica atrasada). Em branco = não pago. A data do pagamento fica a do vencimento (ou hoje, se o vencimento ainda não chegou). Meses futuros não são aceitos.'],
         ['Já pagos', 'Mês que já tem pagamento no sistema é ignorado (para corrigir, desfaça o pagamento na tela).'],
         ['Só pagamentos', 'Pode enviar só a aba "Pagamentos" preenchida (a aba "Tarefas" pode ficar vazia).'],
+        [],
+        ['Aba "Previsto"', 'Previsto de cada mês (mesmo formato da aba Pagamentos): substitui o "valor do mês anterior" daquele mês. Em branco = mantém o previsto atual.'],
+        ['Previsto 0', 'Nada esperado no mês: não fica atrasada, não soma no previsto e a tarefa do mês é cancelada (volta se o previsto mudar).'],
+        ['Meses sem vencimento', 'Previsto 0 em mês em que a tarefa não vence é ignorado; valor maior que 0 dá erro.'],
       ],
     },
     { name: 'Listas', header: true, widths: [30, 16, 10, 30], rows: listRows },
@@ -123,11 +132,12 @@ function parse(ctx, file) {
   let hi = -1;
   for (const s of sheets) { hi = s.rows.findIndex(isHead); if (hi >= 0) { grid = s.rows; break; } }
   const other = sheets.some(s => s.rows.some(r => r.some(v => hkey(v).startsWith('titulo')) && r.some(v => hkey(v) === 'id')));
-  const payHead = findPayHead(sheets);
-  if (hi < 0 && payHead) {
-    const pays = parsePayments(ctx, payHead, []);
-    if (!pays.length) throw badRequest('A planilha não tem linhas preenchidas nas abas "Tarefas" e "Pagamentos".');
-    return { name, rows: [], pays };
+  const payHead = findPayHead(sheets), planHead = findPayHead(sheets, true);
+  if (hi < 0 && (payHead || planHead)) {
+    const plans = planHead ? parsePlans(ctx, planHead, []) : [];
+    const pays = payHead ? parsePayments(ctx, payHead, []) : [];
+    if (!pays.length && !plans.length) throw badRequest('A planilha não tem linhas preenchidas nas abas "Tarefas", "Pagamentos" e "Previsto".');
+    return { name, rows: [], pays, plans };
   }
   if (hi < 0 && other) throw badRequest('Esta é a planilha de planejamento de projeto (ID, Título…), que se importa em Projetos. Para tarefas financeiras, use "Baixar planilha modelo" nesta tela.');
   if (hi < 0) throw badRequest(`Não encontrei o cabeçalho da planilha modelo (colunas "Descrição *" e "Periodicidade *") em nenhuma aba (${sheets.map(s => s.name).join(', ')}). Use a planilha baixada em "Baixar planilha modelo", preencha a aba "Tarefas" sem apagar a linha 1 e salve como .xlsx.`);
@@ -177,14 +187,59 @@ function parse(ctx, file) {
     });
   }
   const pays = payHead ? parsePayments(ctx, payHead, rows) : [];
-  if (!rows.length && !pays.length) throw badRequest('A planilha não tem linhas preenchidas nas abas "Tarefas" e "Pagamentos".');
-  return { name, rows, pays };
+  const plans = planHead ? parsePlans(ctx, planHead, rows) : [];
+  if (!rows.length && !pays.length && !plans.length) throw badRequest('A planilha não tem linhas preenchidas nas abas "Tarefas", "Pagamentos" e "Previsto".');
+  return { name, rows, pays, plans };
+}
+
+// Tarefa da linha (aba Pagamentos ou Previsto): cadastrada no sistema ou nova (aba "Tarefas" do mesmo arquivo)
+function targetOf(obs, fresh, title, category, errors) {
+  const same = obs.filter(o => hkey(o.title) === hkey(title) && (!category || hkey(o.category) === hkey(category)));
+  const neu = fresh.filter(r => hkey(r.body.title) === hkey(title) && (!category || hkey(r.body.category) === hkey(category)));
+  if (same.length + neu.length > 1) { errors.push(`Há mais de uma tarefa "${title}": informe o Tipo da despesa`); return null; }
+  if (same.length) return { id: same[0].id, o: same[0] };
+  if (neu.length) return { line: neu[0].line, o: neu[0].body };
+  errors.push(`Tarefa "${title}" não encontrada (cadastre-a na aba "Tarefas")`);
+  return null;
+}
+
+// ---------- Aba "Previsto" (grade do ano: previsto de cada mês; 0 = nada esperado) ----------
+function parsePlans(ctx, { rows: grid, hi, col }, taskRows) {
+  const obs = all('SELECT * FROM finance_obligations');
+  const fresh = taskRows.filter(r => r.status === 'ok');
+  const out = [];
+  for (let i = hi + 1; i < grid.length && out.length < MAX_ROWS; i++) {
+    const g = grid[i], at = c => (c === undefined ? null : g[c] ?? null);
+    const title = txt(at(col.title));
+    if (hkey(title) === 'total') continue; // linha de totais
+    const filled = Object.entries(col.months).map(([m, c]) => ({ m: Number(m), raw: at(c) })).filter(x => txt(x.raw) !== '');
+    if (!filled.length) continue;
+    const category = txt(at(col.category));
+    const yRaw = at(col.year), year = typeof yRaw === 'number' ? yRaw : Number(txt(yRaw));
+    const okYear = Number.isInteger(year) && year >= 2000 && year <= 2100;
+    const errors = [];
+    if (!title) errors.push('Tarefa em branco');
+    if (!okYear) errors.push('Ano inválido (ex.: 2026)');
+    const target = title ? targetOf(obs, fresh, title, category, errors) : null;
+    const months = [];
+    for (const { m, raw } of filled) {
+      const ym = okYear ? `${year}-${String(m + 1).padStart(2, '0')}` : null;
+      const amount = amountOf(raw);
+      if (typeof amount !== 'number' || amount < 0) { errors.push(`${MES[m]}: valor inválido`); continue; }
+      if (ym && target && !monthsOf(target.o, ym).includes(ym)) { if (amount > 0) errors.push(`${MES[m]}: a tarefa não vence neste mês`); continue; }
+      months.push({ month: MES[m], ym, amount });
+    }
+    out.push({ line: i + 1, status: errors.length ? 'erro' : months.length ? 'ok' : 'vazio', errors, title, category: category || target?.o.category || null, year: okYear ? year : null,
+      target: target ? { id: target.id || null, line: target.line || null } : null, months, zeros: months.filter(x => x.amount === 0).length, total: r2(months.reduce((s, x) => s + x.amount, 0)) });
+  }
+  return out.filter(r => r.status !== 'vazio');
 }
 
 // ---------- Aba "Pagamentos" (grade do ano: tarefa × meses, valor pago) ----------
 const MKEY = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
-function findPayHead(sheets) {
-  for (const s of sheets) {
+const isPlanSheet = s => hkey(s.name).startsWith('previsto');
+function findPayHead(sheets, plan = false) {
+  for (const s of sheets.filter(x => isPlanSheet(x) === plan)) {
     const hi = s.rows.findIndex(r => r.some(v => hkey(v).startsWith('tarefa')) && r.some(v => hkey(v) === 'jan' || hkey(v) === 'janeiro'));
     if (hi < 0) continue;
     const col = { months: {} };
@@ -218,15 +273,7 @@ function parsePayments(ctx, { rows: grid, hi, col }, taskRows) {
     if (!title) errors.push('Tarefa em branco');
     if (!Number.isInteger(year) || year < 2000 || year > 2100) errors.push('Ano inválido (ex.: 2026)');
     // Tarefa: cadastrada no sistema ou nova (aba "Tarefas" do mesmo arquivo)
-    let target = null;
-    if (title) {
-      const same = obs.filter(o => hkey(o.title) === hkey(title) && (!category || hkey(o.category) === hkey(category)));
-      const neu = fresh.filter(r => hkey(r.body.title) === hkey(title) && (!category || hkey(r.body.category) === hkey(category)));
-      if (same.length + neu.length > 1) errors.push(`Há mais de uma tarefa "${title}": informe o Tipo da despesa`);
-      else if (same.length) target = { id: same[0].id, o: same[0] };
-      else if (neu.length) target = { line: neu[0].line, o: neu[0].body };
-      else errors.push(`Tarefa "${title}" não encontrada (cadastre-a na aba "Tarefas")`);
-    }
+    const target = title ? targetOf(obs, fresh, title, category, errors) : null;
     const okYear = Number.isInteger(year) && year >= 2000 && year <= 2100;
     const months = filled.map(({ m, raw }) => {
       const ym = okYear ? `${year}-${String(m + 1).padStart(2, '0')}` : null;
@@ -249,12 +296,15 @@ function parsePayments(ctx, { rows: grid, hi, col }, taskRows) {
 
 export function previewImport(ctx, body) {
   requireFinance(ctx.user);
-  const { name, rows, pays } = parse(ctx, body.file);
+  const { name, rows, pays, plans } = parse(ctx, body.file);
   const count = s => rows.filter(r => r.status === s).length;
+  const okPlans = plans.filter(r => r.status === 'ok');
   const pc = s => pays.filter(r => r.status === s).length;
   const okPays = pays.filter(r => r.status === 'ok');
-  return { file: name, rows: rows.map(({ body: _b, ...r }) => r), pays,
-    totals: { rows: rows.length, ok: count('ok'), erro: count('erro'), existe: count('existe'), repetida: count('repetida'),
+  return { file: name, rows: rows.map(({ body: _b, ...r }) => r), pays, plans,
+    totals: {
+      plan_rows: plans.length, plan_ok: okPlans.length, plan_erro: plans.filter(r => r.status === 'erro').length,
+      plan_months: okPlans.reduce((s, r) => s + r.months.length, 0), plan_zeros: okPlans.reduce((s, r) => s + r.zeros, 0), rows: rows.length, ok: count('ok'), erro: count('erro'), existe: count('existe'), repetida: count('repetida'),
       pay_rows: pays.length, pay_ok: pc('ok'), pay_erro: pc('erro'), pay_pago: pc('pago'),
       pay_count: okPays.reduce((s, r) => s + r.months.filter(m => m.status === 'ok').length, 0),
       pay_total: r2(okPays.reduce((s, r) => s + r.total, 0)) } };
@@ -263,14 +313,25 @@ export function previewImport(ctx, body) {
 // Importa só as linhas válidas (status ok), menos as desmarcadas na prévia (skip: números de linha)
 export function applyImport(ctx, body, ip) {
   requireFinance(ctx.user);
-  const { name, rows, pays } = parse(ctx, body.file);
+  const { name, rows, pays, plans } = parse(ctx, body.file);
   const skip = new Set((Array.isArray(body.skip) ? body.skip : []).map(Number));
   const skipPay = new Set((Array.isArray(body.skip_pay) ? body.skip_pay : []).map(Number));
+  const skipPlan = new Set((Array.isArray(body.skip_plan) ? body.skip_plan : []).map(Number));
+  let planned = 0;
   const todo = rows.filter(r => r.status === 'ok' && !skip.has(r.line));
   let paid = 0, paidTotal = 0;
   const ids = tx(() => {
     const byLine = new Map();
     const out = todo.map(r => { const id = insertObligation(ctx, readObligation(r.body), ip, { imported: true }); byLine.set(r.line, id); return id; });
+    // Previsto mês a mês (antes dos pagamentos, para a parcela nascer com o previsto certo)
+    for (const pl of plans.filter(r => r.status === 'ok' && !skipPlan.has(r.line))) {
+      const oid = pl.target.id || byLine.get(pl.target.line);
+      const o = oid && one('SELECT * FROM finance_obligations WHERE id = ?', oid);
+      if (!o) continue;
+      const changes = [];
+      for (const m of pl.months) { const before = setPlannedInternal(ctx.user.id, o, m.ym, m.amount); if (before) changes.push({ ym: m.ym, to: m.amount, before }); }
+      if (changes.length) { audit(ctx.user.id, 'finance', o.id, PLAN, { tarefa: o.title, meses: changes }, ip); planned += changes.length; }
+    }
     // Pagamentos: tarefa cadastrada ou criada agora (se a linha dela foi importada)
     for (const p of pays.filter(r => r.status === 'ok' && !skipPay.has(r.line))) {
       const oid = p.target.id || byLine.get(p.target.line);
@@ -284,21 +345,23 @@ export function applyImport(ctx, body, ip) {
         paid++; paidTotal += m.amount;
       }
     }
-    audit(ctx.user.id, 'finance', null, BATCH, { arquivo: name, importadas: out.length, com_erro: rows.filter(r => r.status === 'erro').length, ja_existiam: rows.filter(r => r.status === 'existe').length, pagamentos: paid, valor_pago: r2(paidTotal) }, ip);
+    audit(ctx.user.id, 'finance', null, BATCH, { arquivo: name, importadas: out.length, com_erro: rows.filter(r => r.status === 'erro').length, ja_existiam: rows.filter(r => r.status === 'existe').length, pagamentos: paid, valor_pago: r2(paidTotal), previstos: planned }, ip);
     return out;
   });
   if (ids.length) generateItems(ctx.user.id);
-  return { imported: ids.length, skipped: rows.length - ids.length, ids, paid, paid_total: r2(paidTotal) };
+  return { imported: ids.length, skipped: rows.length - ids.length, ids, paid, paid_total: r2(paidTotal), planned };
 }
 
 // ---------- Desfazer importação ----------
 // Cada importação deixa na auditoria uma linha por tarefa ("…importada de planilha") e, ao final, a linha do lote
 // ("Tarefas financeiras importadas de planilha"). As tarefas do lote são as registradas entre o lote anterior e este.
-const BATCH = 'Tarefas financeiras importadas de planilha', ITEM = 'Obrigação financeira importada de planilha', UNDONE = 'Importação de planilha desfeita', PAY = 'Pagamento importado de planilha';
+const BATCH = 'Tarefas financeiras importadas de planilha', ITEM = 'Obrigação financeira importada de planilha', UNDONE = 'Importação de planilha desfeita', PAY = 'Pagamento importado de planilha', PLAN = 'Previsto mensal importado de planilha';
 function batchInfo(b) {
   const prev = one(`SELECT MAX(id) AS id FROM audit_log WHERE entity = 'finance' AND action = ? AND id < ?`, BATCH, b.id)?.id || 0;
   const inRange = action => all(`SELECT entity_id FROM audit_log WHERE entity = 'finance' AND action = ? AND id > ? AND id < ? AND actor_id IS ?`, action, prev, b.id, b.actor_id).map(r => r.entity_id);
   const ids = inRange(ITEM), payIds = inRange(PAY);
+  const planRows = all(`SELECT entity_id, details FROM audit_log WHERE entity = 'finance' AND action = ? AND id > ? AND id < ? AND actor_id IS ? ORDER BY id DESC`, PLAN, prev, b.id, b.actor_id)
+    .map(r => { try { return { obligation_id: r.entity_id, ...JSON.parse(r.details) }; } catch { return null; } }).filter(Boolean);
   const pays = payIds.length ? all(`SELECT i.id, i.obligation_id, i.ref_month, i.paid_amount, i.status, o.title FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
     WHERE i.id IN (${payIds.map(() => '?').join(',')}) AND i.status = 'paga' ORDER BY o.title, i.ref_month`, ...payIds) : [];
   const own = new Set(pays.map(x => x.id));
@@ -314,6 +377,8 @@ function batchInfo(b) {
       paid: String(o.paid_ids || '').split(',').filter(Boolean).some(x => !own.has(Number(x))) })),
     payments: pays.map(x => ({ id: x.id, title: x.title, ref_month: x.ref_month, amount: x.paid_amount })),
     payments_total: r2(pays.reduce((s, x) => s + (x.paid_amount || 0), 0)),
+    plans: planRows.map(x => ({ obligation_id: x.obligation_id, title: x.tarefa, months: x.meses || [] })),
+    plan_months: planRows.reduce((s, x) => s + (x.meses || []).length, 0),
   };
 }
 export function lastImport(ctx) {
@@ -323,7 +388,7 @@ export function lastImport(ctx) {
     WHERE a.entity = 'finance' AND a.action = ? ORDER BY a.id DESC LIMIT 20`, BATCH).find(x => !undone.has(x.id));
   if (!b) return null;
   const info = batchInfo(b);
-  return info.items.length || info.payments.length ? info : null;
+  return info.items.length || info.payments.length || info.plan_months ? info : null;
 }
 export function undoImport(ctx, batchId, ip) {
   requireFinance(ctx.user);
@@ -338,6 +403,11 @@ export function undoImport(ctx, batchId, ip) {
       const it = one('SELECT obligation_id, status FROM finance_items WHERE id = ?', x.id);
       if (!it || it.status !== 'paga' || dropIds.has(it.obligation_id)) continue;
       unpayItem(ctx, x.id, ip); unpaid++;
+    }
+    let restored = 0;
+    for (const pl of last.plans) {
+      if (dropIds.has(pl.obligation_id)) continue;
+      for (const m of [...pl.months].reverse()) { restorePlannedInternal(ctx.user.id, pl.obligation_id, m.ym, m.before); restored++; }
     }
     for (const o of drop) {
       run('DELETE FROM finance_plan WHERE obligation_id = ?', o.id);

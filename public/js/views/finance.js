@@ -247,10 +247,16 @@ export async function form({ params, state, navigate }) {
         ${editing ? html`<label class="switch"><input type="checkbox" name="active" ${v.active ? 'checked' : ''}>Obrigação ativa (desmarque para parar de gerar parcelas)</label>` : ''}
         <span class="hint">As parcelas são geradas até 2 meses à frente, cada uma com a sua tarefa (responsável e prazo) na área “Financeiro (restrito)”. Alterações valem para as parcelas pendentes do mês atual em diante.</span>
         <div class="form-error" hidden></div>
-        <div class="form-actions"><a class="btn btn-ghost" href="#/financeiro/obrigacoes">Cancelar</a><button class="btn btn-primary" type="submit">${icon('check')}${editing ? 'Salvar' : 'Cadastrar tarefa'}</button></div>
+        <div class="form-actions">${editing && o.deletable ? html`<button type="button" class="btn btn-danger-ghost" data-fo-del style="margin-right:auto">${icon('trash')}Excluir tarefa</button>` : ''}<a class="btn btn-ghost" href="#/financeiro/obrigacoes">Cancelar</a><button class="btn btn-primary" type="submit">${icon('check')}${editing ? 'Salvar' : 'Cadastrar tarefa'}</button></div>
+        ${editing && !o.deletable ? html`<span class="hint">Tarefa com pagamento registrado (ou gerada pela Folha) não pode ser excluída: desmarque “ativa” para parar de gerar parcelas.</span>` : ''}
       </form>`,
     mount(root) {
       const f = root.querySelector('#fo-form');
+      root.querySelector('[data-fo-del]')?.addEventListener('click', async () => {
+        if (!(await confirmSheet('Excluir tarefa financeira', `Excluir “${o.title}”? As parcelas pendentes e as tarefas do mês geradas por ela também saem. Não dá para voltar atrás.`, 'Excluir', true))) return;
+        try { await api(`/finance/obligations/${o.id}`, { method: 'DELETE' }); toast('Tarefa financeira excluída.'); navigate('/financeiro'); }
+        catch (ex) { toast(ex.message, 'error'); }
+      });
       f.variable.addEventListener('change', () => { f.querySelector('.fin-repeat').hidden = !f.variable.checked; });
       // Pontual = periodicidade "Única" (sem término); recorrente escolhe a periodicidade
       const kindSync = () => {

@@ -1896,6 +1896,19 @@ async function main() {
     ok(before > 1 && after.filter(Boolean).length === 1 && after[0] && cm >= `${y}-01`, 'término antecipado: parcelas pendentes depois do término saem (com "valor do mês anterior")');
     await fo('PUT', `/finance/obligations/${tid}`, { ...body, end_month: `${y}-01`, active: false });
   }
+  {
+    // Excluir tarefa financeira: só sem pagamento registrado
+    const y = new Date().toISOString().slice(0, 4);
+    const del = (await fo('POST', '/finance/obligations', { title: 'Excluir teste', category: 'Outros', amount: 10, frequency: 'mensal', due_day: 1, start_month: `${y}-01` })).data.id;
+    const keep = (await fo('POST', '/finance/obligations', { title: 'Nao excluir teste', category: 'Outros', amount: 10, frequency: 'mensal', due_day: 1, start_month: `${y}-01` })).data.id;
+    const kit = (await fo('POST', `/finance/obligations/${keep}/months/${y}-01`)).data.id;
+    await fo('POST', `/finance/items/${kit}/pay`, { paid_date: `${y}-01-01`, paid_amount: 10 });
+    ok((await fo('GET', `/finance/obligations/${del}`)).data.deletable === true && (await fo('GET', `/finance/obligations/${keep}`)).data.deletable === false, 'exclusão liberada só para tarefa sem pagamento');
+    ok((await fo('DELETE', `/finance/obligations/${keep}`)).status === 400, 'tarefa com pagamento não pode ser excluída');
+    ok((await biNo('DELETE', `/finance/obligations/${del}`)).status === 403, 'sem liberação não exclui');
+    ok((await fo('DELETE', `/finance/obligations/${del}`)).status === 200 && (await fo('GET', `/finance/obligations/${del}`)).status === 404, 'tarefa sem pagamento é excluída (com parcelas)');
+    await fo('PUT', `/finance/obligations/${keep}`, { title: 'Nao excluir teste', category: 'Outros', amount: 10, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
+  }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------
   const pyRec = (await fo('POST', '/finance/obligations', { title: 'Planejamento recorrente teste', category: 'Impostos', amount: 1000, frequency: 'mensal', due_day: 10, start_month: '2099-01' })).data.id;

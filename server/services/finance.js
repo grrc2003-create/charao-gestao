@@ -278,7 +278,27 @@ export function getObligation(ctx, id) {
   requireFinance(ctx.user);
   const o = one('SELECT o.*, u.name AS assignee_name FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id WHERE o.id = ?', id);
   if (!o) throw notFound('Obrigação não encontrada.');
-  return { ...o, frequency_label: FREQ_LABEL[o.frequency], items: all('SELECT * FROM finance_items WHERE obligation_id = ? ORDER BY ref_month DESC', id) };
+  return { ...o, frequency_label: FREQ_LABEL[o.frequency], items: all('SELECT * FROM finance_items WHERE obligation_id = ? ORDER BY ref_month DESC', id), deletable: deleteBlock(id) === null };
+}
+
+// Excluir só quando não há nenhum pagamento registrado (nem "não ocorreu") e não vem da Folha
+function deleteBlock(id) {
+  if (one(`SELECT 1 FROM finance_items WHERE obligation_id = ? AND status = 'paga' LIMIT 1`, id)) return 'Esta tarefa tem pagamento registrado: não pode ser excluída (inative pela edição para parar de gerar parcelas).';
+  if (one('SELECT 1 FROM payroll_entries WHERE obligation_id = ? LIMIT 1', id)) return 'Esta tarefa foi gerada pela Folha: é removida ao reabrir a folha.';
+  return null;
+}
+export function deleteObligation(ctx, id, ip) {
+  requireFinance(ctx.user);
+  const o = one('SELECT * FROM finance_obligations WHERE id = ?', id);
+  if (!o) throw notFound('Tarefa financeira não encontrada.');
+  const why = deleteBlock(id);
+  if (why) throw badRequest(why);
+  tx(() => {
+    run('DELETE FROM finance_plan WHERE obligation_id = ?', id);
+    removeObligationInternal(id, ctx.user.id, 'Tarefa financeira excluída');
+    audit(ctx.user.id, 'finance', id, 'Obrigação financeira excluída', { descricao: o.title, categoria: o.category }, ip);
+  });
+  return { ok: true };
 }
 
 // Grava a obrigação (sem gerar as parcelas — quem chama roda generateItems). Usado no cadastro e na importação.

@@ -322,6 +322,7 @@ api.post('/api/finance/obligations/:id/months/:ym', (req, res, { ctx, params }) 
 api.get('/api/finance/obligations', (req, res, { ctx }) => send(res, 200, Finance.listObligations(ctx)));
 api.post('/api/finance/obligations', (req, res, { ctx, body }) => send(res, 201, { id: Finance.createObligation(ctx, body, clientIp(req)) }));
 api.get('/api/finance/obligations/:id', (req, res, { ctx, params }) => send(res, 200, Finance.getObligation(ctx, intOrNull(params.id))));
+api.delete('/api/finance/obligations/:id', (req, res, { ctx, params }) => send(res, 200, Finance.deleteObligation(ctx, intOrNull(params.id), clientIp(req))));
 api.put('/api/finance/obligations/:id', (req, res, { ctx, params, body }) => { Finance.updateObligation(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, Finance.getObligation(ctx, intOrNull(params.id))); });
 api.get('/api/finance/items/:id', (req, res, { ctx, params }) => send(res, 200, Finance.getItem(ctx, intOrNull(params.id))));
 api.post('/api/finance/items/:id/pay', (req, res, { ctx, params, body }) => send(res, 200, Finance.payItem(ctx, intOrNull(params.id), body, clientIp(req))));

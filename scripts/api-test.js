@@ -7,7 +7,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { writeXlsx } from '../server/lib/xlsx-write.js';
-import { readXlsx } from '../server/lib/xlsx.js';
+import { readXlsx, readXlsxSheets } from '../server/lib/xlsx.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'charao-test-'));
@@ -1835,6 +1835,38 @@ async function main() {
     ok(undo.removed === 1 && (await fo('GET', `/finance/obligations/${imp.ids[0]}`)).status === 404, 'desfazer exclui as tarefas importadas no lote');
     const prev = (await fo('GET', '/finance/import/last')).data.last;
     ok(prev && prev.id !== last.id && prev.items.some(o => o.title === 'Linha desmarcada teste'), 'depois de desfazer, a "última" passa a ser a importação anterior');
+  }
+  {
+    // Pagamentos (aba "Pagamentos", grade do ano): tarefa cadastrada e tarefa nova do mesmo arquivo
+    const cur = new Date().toISOString().slice(0, 7), y = Number(cur.slice(0, 4)), mi = Number(cur.slice(5, 7)) - 1;
+    const tpl = readXlsxSheets(fiBuf);
+    ok(tpl.map(x => x.name).join(',') === 'Tarefas,Pagamentos,Instruções,Listas' && tpl[1].rows[0][0] === 'Tarefa *' && tpl[1].rows.length > 1, 'modelo: aba Pagamentos com as tarefas cadastradas');
+    const base = (await fo('POST', '/finance/obligations', { title: 'Pagamento importado teste', category: 'Impostos', amount: 300, frequency: 'mensal', due_day: 1, start_month: `${y}-01` })).data.id;
+    const months = Array(12).fill(null); months[0] = 310; months[mi] = 320;
+    const fut = Array(12).fill(null); if (mi < 11) fut[mi + 1] = 50; else fut[0] = 'abc';
+    const file = writeXlsx([
+      { name: 'Tarefas', header: true, rows: [fiHead, ['Nova com pagamento teste', 'Seguros', 80, null, null, 'Mensal', 1, `01/${y}`, null, null, null]] },
+      { name: 'Pagamentos', header: true, rows: [['Tarefa *', 'Tipo da despesa', 'Ano *', 'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'],
+        ['Pagamento importado teste', null, y, ...months], ['Nova com pagamento teste', null, y, 81, ...Array(11).fill(null)],
+        ['Pagamento importado teste', null, y, ...fut], ['Tarefa que não existe', null, y, 10, ...Array(11).fill(null)]] },
+    ]).toString('base64');
+    const pv = (await fo('POST', '/finance/import/preview', { file: { name: 'pag.xlsx', data: file } })).data;
+    const pr = l => pv.pays.find(r => r.line === l);
+    ok(pv.totals.pay_ok === 2 && pv.totals.pay_erro === 2 && pr(2).months.length === (mi ? 2 : 1) && pr(3).target.line === 2 && /não encontrada/.test(pr(5).errors[0]) && pr(4).status === 'erro',
+      'prévia dos pagamentos: tarefa cadastrada, tarefa nova, mês futuro/valor inválido e tarefa inexistente');
+    const imp = (await fo('POST', '/finance/import', { file: { name: 'pag.xlsx', data: file } })).data;
+    const yr = (await fo('GET', `/finance/year?ano=${y}`)).data;
+    const row = t => yr.groups.flatMap(g => g.rows).find(r => r.title === t);
+    ok(imp.imported === 1 && imp.paid === (mi ? 3 : 2) && row('Pagamento importado teste').cells[0].status === 'pago' && row('Pagamento importado teste').cells[0].real === 310
+      && row('Pagamento importado teste').cells[mi].real === 320 && row('Nova com pagamento teste').cells[0].real === 81, 'pagamentos lançados nas parcelas (real na grade)');
+    const again = (await fo('POST', '/finance/import/preview', { file: { name: 'pag.xlsx', data: file } })).data;
+    ok(again.pays.find(r => r.line === 2).status === 'pago', 'reenviar: meses já pagos são ignorados');
+    const last = (await fo('GET', '/finance/import/last')).data.last;
+    const undo = (await fo('POST', `/finance/import/${last.id}/undo`, {})).data;
+    const yr2 = (await fo('GET', `/finance/year?ano=${y}`)).data;
+    const row2 = t => yr2.groups.flatMap(g => g.rows).find(r => r.title === t);
+    ok(undo.removed === 1 && undo.unpaid === (mi ? 2 : 1) && row2('Pagamento importado teste').cells[0].status !== 'pago' && !row2('Nova com pagamento teste'), 'desfazer: pagamentos voltam a pendente e a tarefa nova sai');
+    await fo('PUT', `/finance/obligations/${base}`, { title: 'Pagamento importado teste', category: 'Impostos', amount: 300, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
   }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------

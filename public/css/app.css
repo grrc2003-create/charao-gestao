@@ -2815,3 +2815,11 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fi-list-sm .fi-main small { display: block; font-size: 12px; color: var(--muted); }
 .fi-list-sm .fi-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; }
 .fi-list-sm li.is-paid { background: #F2FAF5; }
+
+/* Importar: pagamentos (grade do ano) na prévia */
+.fp-months { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.fp-m { display: inline-flex; gap: 4px; align-items: baseline; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; background: #F2FAF5; color: #1F7A4A; border: 1px solid #CFE8DA; }
+.fp-m b { font-size: 10.5px; letter-spacing: .03em; }
+.fp-m.is-erro { background: #FDF1EF; color: #B03A2E; border-color: #F0C6BF; }
+.fp-m.is-pago { background: var(--surface); color: var(--muted); border-color: var(--line); text-decoration: line-through; }
+.fi-last-pays { margin: 0 0 10px; font-size: 12.5px; color: var(--ink-2); }

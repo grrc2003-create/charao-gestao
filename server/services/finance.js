@@ -63,7 +63,7 @@ function stageFor(areaId, category) {
 
 // ---------- Geração das parcelas (e das tarefas) ----------
 const HORIZON = 2; // gera até 2 meses à frente do mês atual
-function monthsOf(o, until) {
+export function monthsOf(o, until) {
   const step = FREQUENCIES[o.frequency];
   const last = o.end_month && o.end_month < until ? o.end_month : until;
   const out = [];

@@ -1884,6 +1884,18 @@ async function main() {
     ok(new Date().getMonth() === 0 || (zpv.pays[0].status === 'ok' && zpv.pays[0].months[0].amount === 0), 'importação: 0 é aceito (não ocorreu)');
     await fo('PUT', `/finance/obligations/${zid}`, { title: 'Zero não ocorreu teste', category: 'Outros', amount: 150, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
   }
+  {
+    // Término antecipado depois de geradas as parcelas: as pendentes depois do término somem (mesmo meses passados)
+    const y = new Date().toISOString().slice(0, 4), cm = new Date().toISOString().slice(0, 7);
+    const body = { title: 'Termino antecipado teste', category: 'Outros', amount: 90, variable: true, repeat_last: true, frequency: 'mensal', due_day: 1, start_month: `${y}-01` };
+    const tid = (await fo('POST', '/finance/obligations', body)).data.id;
+    const cells = d => d.groups.flatMap(g => g.rows).find(r => r.title === body.title)?.cells || [];
+    const before = cells((await fo('GET', `/finance/year?ano=${y}`)).data).filter(c => c && c.item_id).length;
+    await fo('PUT', `/finance/obligations/${tid}`, { ...body, end_month: `${y}-01` });
+    const after = cells((await fo('GET', `/finance/year?ano=${y}`)).data);
+    ok(before > 1 && after.filter(Boolean).length === 1 && after[0] && cm >= `${y}-01`, 'término antecipado: parcelas pendentes depois do término saem (com "valor do mês anterior")');
+    await fo('PUT', `/finance/obligations/${tid}`, { ...body, end_month: `${y}-01`, active: false });
+  }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------
   const pyRec = (await fo('POST', '/finance/obligations', { title: 'Planejamento recorrente teste', category: 'Impostos', amount: 1000, frequency: 'mensal', due_day: 10, start_month: '2099-01' })).data.id;

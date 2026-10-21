@@ -104,6 +104,7 @@ function createItem(o, ref, userId) {
 
 export function generateItems(userId = null) {
   if (!financeAreaId()) ensureFinanceArea();
+  pruneOutOfRange(userId);
   const until = addMonths(today().slice(0, 7), HORIZON);
   let n = 0;
   for (const o of all('SELECT * FROM finance_obligations WHERE active = 1')) {
@@ -111,6 +112,23 @@ export function generateItems(userId = null) {
     for (const ref of monthsOf(o, until)) if (!have.has(ref)) { tx(() => createItem(o, ref, userId)); n++; }
   }
   return n;
+}
+
+// Parcela pendente fora do período da tarefa (depois do Término ou antes do Início, ex.: término antecipado depois de as
+// parcelas terem sido geradas) não vale, em qualquer mês — passado ou futuro. Parcelas pagas ficam.
+function dropItem(it, userId, reason) {
+  if (it.task_id) {
+    run(`UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ? AND cancelled_at IS NULL`,
+      new Date().toISOString(), userId, reason, new Date().toISOString(), it.task_id);
+    taskHistory(it.task_id, userId, 'Tarefa cancelada', reason);
+  }
+  run('DELETE FROM finance_items WHERE id = ?', it.id);
+}
+export function pruneOutOfRange(userId = null) {
+  const stale = all(`SELECT i.* FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
+    WHERE i.status = 'pendente' AND ((o.end_month IS NOT NULL AND i.ref_month > o.end_month) OR i.ref_month < o.start_month)`);
+  if (stale.length) tx(() => stale.forEach(it => dropItem(it, userId, 'Parcela financeira removida (fora do período da tarefa: início/término)')));
+  return stale.length;
 }
 
 // Remove parcelas pendentes futuras que não valem mais (obrigação inativada, término antecipado) e cancela as tarefas
@@ -133,6 +151,7 @@ function pruneFuture(o, userId) {
 // (previsto = ajuste do mês no planejamento, ou o valor da tarefa).
 export function financeYear(ctx, y) {
   requireFinance(ctx.user);
+  pruneOutOfRange(ctx.user.id);
   const year = /^\d{4}$/.test(String(y || '')) ? String(y) : today().slice(0, 4);
   const keys = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   const ref = today();
@@ -301,6 +320,7 @@ export function updateObligation(ctx, id, body, ip) {
         taskTitle(no, it.ref_month), taskDescription(no, amount), due, due, no.assignee_id, stageFor(area, no.category), new Date().toISOString(), it.task_id);
     }
     pruneFuture(no, ctx.user.id);
+    pruneOutOfRange(ctx.user.id);
     audit(ctx.user.id, 'finance', id, d.active ? 'Obrigação financeira atualizada' : 'Obrigação financeira inativada', { descricao: d.title, campos: Object.keys(d).filter(k => (d[k] ?? null) !== (o[k] ?? null)) }, ip);
   });
   generateItems(ctx.user.id);

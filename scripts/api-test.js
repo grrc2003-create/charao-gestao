@@ -1823,6 +1823,19 @@ async function main() {
     const wrong = await fo('POST', '/finance/import/preview', { file: { name: 'p.xlsx', data: writeXlsx([{ name: 'Planejamento', rows: [['ID', 'Título *']] }]).toString('base64') } });
     ok(wrong.status === 400 && /planejamento de projeto/.test(wrong.data.error), 'planilha de planejamento de projeto: aviso de modelo trocado');
   }
+  {
+    // Desfazer a última importação
+    const reord = writeXlsx([{ name: 'Tarefas', header: true, rows: [fiHead, ['Desfazer teste importação', 'Impostos', 100, null, null, 'Mensal', 5, '02/2099', null, null, null]] }]).toString('base64');
+    const imp = (await fo('POST', '/finance/import', { file: { name: 'desfazer.xlsx', data: reord } })).data;
+    const last = (await fo('GET', '/finance/import/last')).data.last;
+    ok(imp.imported === 1 && last.file === 'desfazer.xlsx' && last.items.length === 1 && last.items[0].title === 'Desfazer teste importação', 'última importação: arquivo e tarefas do lote');
+    ok((await biNo('GET', '/finance/import/last')).status === 403, 'sem liberação não vê a última importação');
+    ok((await fo('POST', `/finance/import/${last.id - 1}/undo`, {})).status === 404, 'só a última importação pode ser desfeita');
+    const undo = (await fo('POST', `/finance/import/${last.id}/undo`, {})).data;
+    ok(undo.removed === 1 && (await fo('GET', `/finance/obligations/${imp.ids[0]}`)).status === 404, 'desfazer exclui as tarefas importadas no lote');
+    const prev = (await fo('GET', '/finance/import/last')).data.last;
+    ok(prev && prev.id !== last.id && prev.items.some(o => o.title === 'Linha desmarcada teste'), 'depois de desfazer, a "última" passa a ser a importação anterior');
+  }
 
   // ---------- Tarefas financeiras › Planejamento anual ----------
   const pyRec = (await fo('POST', '/finance/obligations', { title: 'Planejamento recorrente teste', category: 'Impostos', amount: 1000, frequency: 'mensal', due_day: 10, start_month: '2099-01' })).data.id;

@@ -1,13 +1,13 @@
 // Tarefas financeiras: planilha modelo (.xlsx) para preencher e importação com prévia.
 // Cada linha vira uma tarefa financeira (mesmas regras de "Nova tarefa"); as parcelas mês a mês são geradas como hoje.
 // Tarefa que já existe (mesma descrição e tipo da despesa) é pulada e avisada; linhas com erro não entram.
-import { all, one, tx } from '../db.js';
-import { badRequest, str } from '../lib/http.js';
+import { all, one, run, tx } from '../db.js';
+import { badRequest, notFound, str, intOrNull } from '../lib/http.js';
 import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { writeXlsx } from '../lib/xlsx-write.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
-import { requireFinance, CATEGORIES, FREQ_LABEL, readObligation, insertObligation, generateItems } from './finance.js';
+import { requireFinance, CATEGORIES, FREQ_LABEL, readObligation, insertObligation, generateItems, removeObligationInternal } from './finance.js';
 
 const HEAD = ['Descrição *', 'Tipo da despesa', 'Valor previsto (R$) *', 'Valor variável?', 'Usar valor do mês anterior?', 'Periodicidade *', 'Dia do vencimento *', 'Início (mês/ano) *', 'Término (mês/ano)', 'Responsável', 'Observações'];
 const KEYS = ['title', 'category', 'amount', 'variable', 'repeat_last', 'frequency', 'due_day', 'start_month', 'end_month', 'assignee', 'notes'];
@@ -176,4 +176,43 @@ export function applyImport(ctx, body, ip) {
   });
   if (ids.length) generateItems(ctx.user.id);
   return { imported: ids.length, skipped: rows.length - ids.length, ids };
+}
+
+// ---------- Desfazer importação ----------
+// Cada importação deixa na auditoria uma linha por tarefa ("…importada de planilha") e, ao final, a linha do lote
+// ("Tarefas financeiras importadas de planilha"). As tarefas do lote são as registradas entre o lote anterior e este.
+const BATCH = 'Tarefas financeiras importadas de planilha', ITEM = 'Obrigação financeira importada de planilha', UNDONE = 'Importação de planilha desfeita';
+function batchInfo(b) {
+  const prev = one(`SELECT MAX(id) AS id FROM audit_log WHERE entity = 'finance' AND action = ? AND id < ?`, BATCH, b.id)?.id || 0;
+  const ids = all(`SELECT entity_id FROM audit_log WHERE entity = 'finance' AND action = ? AND id > ? AND id < ? AND actor_id IS ?`, ITEM, prev, b.id, b.actor_id).map(r => r.entity_id);
+  const items = ids.length ? all(`SELECT o.id, o.title, o.category, o.amount, o.frequency,
+      EXISTS(SELECT 1 FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'paga') AS paid
+    FROM finance_obligations o WHERE o.id IN (${ids.map(() => '?').join(',')}) ORDER BY o.title`, ...ids) : [];
+  const d = (() => { try { return JSON.parse(b.details || '{}'); } catch { return {}; } })();
+  return { id: b.id, file: d.arquivo || null, at: b.created_at, actor_name: b.actor_name, imported: ids.length,
+    items: items.map(o => ({ ...o, paid: !!o.paid, frequency_label: FREQ_LABEL[o.frequency] })), removed: ids.length - items.length };
+}
+export function lastImport(ctx) {
+  requireFinance(ctx.user);
+  const undone = new Set(all(`SELECT details FROM audit_log WHERE entity = 'finance' AND action = ?`, UNDONE).map(r => { try { return JSON.parse(r.details).lote; } catch { return null; } }));
+  const b = all(`SELECT a.*, u.name AS actor_name FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
+    WHERE a.entity = 'finance' AND a.action = ? ORDER BY a.id DESC LIMIT 20`, BATCH).find(x => !undone.has(x.id));
+  if (!b) return null;
+  const info = batchInfo(b);
+  return info.items.length ? info : null;
+}
+export function undoImport(ctx, batchId, ip) {
+  requireFinance(ctx.user);
+  const last = lastImport(ctx);
+  if (!last || last.id !== intOrNull(batchId)) throw notFound('Importação não encontrada (só a última importação pode ser desfeita).');
+  const keep = last.items.filter(o => o.paid), drop = last.items.filter(o => !o.paid);
+  tx(() => {
+    for (const o of drop) {
+      run('DELETE FROM finance_plan WHERE obligation_id = ?', o.id);
+      removeObligationInternal(o.id, ctx.user.id, 'Importação de planilha desfeita');
+      audit(ctx.user.id, 'finance', o.id, 'Obrigação financeira excluída (importação desfeita)', { descricao: o.title, categoria: o.category }, ip);
+    }
+    audit(ctx.user.id, 'finance', null, UNDONE, { lote: last.id, arquivo: last.file, excluidas: drop.length, mantidas_com_pagamento: keep.map(o => o.title) }, ip);
+  });
+  return { removed: drop.length, kept: keep.map(o => o.title) };
 }

@@ -1,7 +1,7 @@
 // Tarefas financeiras › Importar planilha: baixar a planilha modelo, enviar preenchida, conferir a prévia
 // (erros por linha, tarefas que já existem) e confirmar. Cada linha vira uma obrigação, com as parcelas geradas como hoje.
 import { html, api, icon } from '../core.js';
-import { toast } from '../ui.js';
+import { toast, confirmSheet } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -44,8 +44,24 @@ function previewHtml(p) {
     <div class="bi-confirm"><button type="button" class="btn btn-accent" data-fi-apply ${t.ok ? '' : 'disabled'}>${icon('check')}${t.ok ? `Importar ${t.ok} tarefa(s)` : 'Nada para importar'}</button></div>`;
 }
 
-export async function importPage({ state, navigate }) {
+const when = s => new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(s));
+function lastHtml(l) {
+  if (!l) return '';
+  const paid = l.items.filter(o => o.paid).length;
+  return html`<section class="card section fi-last">
+      <div class="card-head"><h2>${icon('history')}Última importação</h2><span class="sub">${l.file || 'planilha'} · ${when(l.at)}${l.actor_name ? ` · ${l.actor_name}` : ''}</span></div>
+      <div class="card-body">
+        <p class="muted" style="margin:0 0 10px">Importou errado? Desfazer exclui as ${l.items.length} tarefa(s) abaixo, com as parcelas e as tarefas do mês geradas por elas.${paid ? html` <b>${paid} já tem pagamento lançado e será mantida</b> (inative pela edição, se quiser).` : ''}</p>
+        <ul class="fi-list fi-list-sm">${l.items.map(o => html`<li class="${o.paid ? 'is-paid' : ''}"><span class="fi-main"><b>${o.title}</b><small>${o.category || 'Sem tipo'} · ${o.frequency_label}</small></span>
+          <span class="fi-val"><b>${money(o.amount)}</b>${o.paid ? html`<span class="m-badge m-paid">Com pagamento · mantida</span>` : ''}</span></li>`)}</ul>
+        <button type="button" class="btn btn-danger" data-fi-undo="${l.id}">${icon('trash')}Desfazer esta importação</button>
+      </div>
+    </section>`;
+}
+
+export async function importPage({ state, navigate, render }) {
   if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação das Tarefas financeiras.');
+  const { last } = await api('/finance/import/last');
   return {
     title: 'Importar tarefas financeiras',
     html: html`${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: 'Importar planilha',
@@ -63,10 +79,22 @@ export async function importPage({ state, navigate }) {
           <button type="button" class="btn btn-primary" data-fi-read disabled>Ler e mostrar prévia</button>
         </div>
       </section>
-      <div data-fi-preview></div>`,
+      <div data-fi-preview></div>
+      ${lastHtml(last)}`,
     mount(root) {
       const input = root.querySelector('#fi-file'), nameBox = root.querySelector('[data-fi-name]'), read = root.querySelector('[data-fi-read]'), out = root.querySelector('[data-fi-preview]');
       let file = null, payload = null;
+      root.querySelector('[data-fi-undo]')?.addEventListener('click', async ev => {
+        const b = ev.currentTarget, n = last.items.filter(o => !o.paid).length;
+        if (!n) { toast('Todas as tarefas desta importação já têm pagamento lançado; nada a desfazer.', 'error'); return; }
+        if (!(await confirmSheet('Desfazer importação', `Excluir ${n} tarefa(s) financeira(s) importadas de "${last.file || 'planilha'}", com as parcelas e as tarefas do mês geradas? Não dá para voltar atrás.`, 'Excluir', true))) return;
+        b.disabled = true;
+        try {
+          const r = await api(`/finance/import/${b.dataset.fiUndo}/undo`, { method: 'POST', body: {} });
+          toast(`Importação desfeita: ${r.removed} tarefa(s) excluída(s)${r.kept.length ? `, ${r.kept.length} mantida(s) por ter pagamento` : ''}.`);
+          render();
+        } catch (ex) { toast(ex.message, 'error'); b.disabled = false; }
+      });
       root.querySelector('[data-fi-template]').addEventListener('click', async ev => {
         const b = ev.currentTarget; b.disabled = true;
         try { await downloadTemplate(); toast('Planilha modelo baixada.'); } catch (ex) { toast(ex.message, 'error'); }

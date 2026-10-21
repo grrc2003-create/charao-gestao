@@ -101,8 +101,10 @@ export async function view({ state, query, setQuery, render }) {
         mob.innerHTML = mobileMonth(mobMonth).toString();
         setQuery({ ano: d.year, m: mobMonth });
       });
-      // Célula (grade ou lista do celular): previsto do mês e lançamento do real
-      root.addEventListener('click', async e => {
+      // Célula (grade ou lista do celular): previsto do mês e lançamento do real.
+      // Liga nos quadros desta renderização (o #view é reaproveitado: ligar nele acumulava um clique por recarga
+      // e abria várias janelas empilhadas)
+      const onCell = async e => {
         const b = e.target.closest('[data-o][data-i]');
         if (!b) return;
         const r = rowsById.get(Number(b.dataset.o));
@@ -142,7 +144,8 @@ export async function view({ state, query, setQuery, render }) {
           },
         });
         if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
-      });
+      };
+      root.querySelectorAll('.fy-card, [data-fy-mob]').forEach(el => el.addEventListener('click', onCell));
     },
   };
 }

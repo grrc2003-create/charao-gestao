@@ -1,5 +1,6 @@
--- Mais Controle: custos que não devem entrar (um pagamento, um fornecedor ou uma categoria inteira) e tarefa com
--- previsto sempre zero (despesa sem previsão). Migração apenas aditiva.
+-- Mais Controle: custos que não devem entrar (um pagamento, um fornecedor ou uma categoria inteira) e regra do previsto
+-- da tarefa (plan_zero: 0 = realizado do ano anterior; 2 = zero no primeiro ano da categoria, depois a regra; 1 = sempre
+-- zero). Migração apenas aditiva.
 CREATE TABLE ext_exclusions (
   source     TEXT NOT NULL DEFAULT 'maiscontrole',
   kind       TEXT NOT NULL,                        -- pagamento | fornecedor | categoria

@@ -89,7 +89,7 @@ function createItem(o, ref, userId, { noTask = false } = {}) {
   const due = dueOf(ref, o.due_day);
   // Previsto do mês ajustado no Planejamento anual tem prioridade
   const plan = one('SELECT amount FROM finance_plan WHERE obligation_id = ? AND ref_month = ?', o.id, ref);
-  const amount = o.plan_zero ? 0 : plan ? plan.amount : o.variable && o.repeat_last ? previousAmount(o.id, ref) ?? o.amount : o.amount;
+  const amount = o.plan_zero === 1 ? 0 : plan ? plan.amount : o.variable && o.repeat_last ? previousAmount(o.id, ref) ?? o.amount : o.amount;
   const r = run('INSERT INTO finance_items (obligation_id, ref_month, due_date, amount_expected, estimated) VALUES (?,?,?,?,?)', o.id, ref, due, amount, o.variable ? 1 : 0);
   const itemId = Number(r.lastInsertRowid);
   if (noTask) return itemId;
@@ -321,7 +321,8 @@ export function readObligation(body) {
     assignee_id: intOrNull(body.assignee_id),
     notes: str(body.notes, { max: 2000, label: 'Observações' }),
     active: body.active === false || body.active === 0 || body.active === '0' ? 0 : 1,
-    plan_zero: body.plan_zero === true || body.plan_zero === 1 || body.plan_zero === '1' || body.plan_zero === 'on' ? 1 : 0,
+    // Previsto: 0 = regra (realizado do ano anterior), 2 = zero no primeiro ano da categoria, 1 = sempre zero
+    plan_zero: [0, 1, 2].includes(Number(body.plan_zero)) ? Number(body.plan_zero) : body.plan_zero === true || body.plan_zero === 'on' ? 1 : 0,
   };
   if (d.due_day < 1 || d.due_day > 31) throw badRequest('Dia de vencimento: informe de 1 a 31.');
   if (d.end_month && d.end_month < d.start_month) throw badRequest('O término deve ser depois do início.');
@@ -372,7 +373,7 @@ export function insertObligation(ctx, d, ip, { imported = false } = {}) {
   if (!d.assignee_id) d.assignee_id = ctx.user.id; // sem responsável: quem cadastrou
   return tx(() => {
     const r = run(`INSERT INTO finance_obligations (title, category, payee, amount, variable, repeat_last, frequency, due_day, start_month, end_month, assignee_id, notes, active, created_by, plan_zero)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.title, d.category, d.payee, d.plan_zero ? 0 : d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, ctx.user.id, d.plan_zero);
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.title, d.category, d.payee, d.plan_zero === 1 ? 0 : d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, ctx.user.id, d.plan_zero);
     const nid = Number(r.lastInsertRowid);
     audit(ctx.user.id, 'finance', nid, imported ? 'Obrigação financeira importada de planilha' : 'Obrigação financeira cadastrada', { descricao: d.title, categoria: d.category, valor: d.amount, periodicidade: FREQ_LABEL[d.frequency], vencimento: `dia ${d.due_day}` }, ip);
     return nid;
@@ -394,9 +395,9 @@ export function updateObligation(ctx, id, body, ip) {
   const cur = today().slice(0, 7);
   tx(() => {
     run(`UPDATE finance_obligations SET title=?, category=?, payee=?, amount=?, variable=?, repeat_last=?, frequency=?, due_day=?, start_month=?, end_month=?, assignee_id=?, notes=?, active=?, plan_zero=?, updated_at=datetime('now') WHERE id=?`,
-      d.title, d.category, d.payee, d.plan_zero ? 0 : d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, d.plan_zero, id);
+      d.title, d.category, d.payee, d.plan_zero === 1 ? 0 : d.amount, d.variable, d.variable ? d.repeat_last : 0, d.frequency, d.due_day, d.start_month, d.end_month, d.assignee_id, d.notes, d.active, d.plan_zero, id);
     // Previsto sempre zero: parcelas pendentes e meses projetados passam a 0 (nada esperado, sem alerta)
-    if (d.plan_zero) {
+    if (d.plan_zero === 1) {
       for (const it of all(`SELECT * FROM finance_items WHERE obligation_id = ? AND status = 'pendente' AND amount_expected <> 0`, id)) {
         run('UPDATE finance_items SET amount_expected = 0 WHERE id = ?', it.id);
         if (it.task_id) syncZeroTask(it.task_id, 0, ctx.user.id);

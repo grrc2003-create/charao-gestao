@@ -2006,8 +2006,12 @@ async function main() {
     ok(row(await grid(yp), cont).cells[0].status !== 'pago' && pv.exclusions.some(e => e.kind === 'categoria') && pv.totals.excluded >= 2, 'ignorar categoria: sai do realizado e dos alertas');
     await fo('POST', '/finance/maiscontrole/exclusions/remove', { kind: 'categoria', key: pv.exclusions.find(e => e.kind === 'categoria').ext_key });
     ok(row(await grid(yp), cont).cells[0].real === 280, 'categoria volta a entrar');
+    // Zero no primeiro ano da categoria, depois realizado do ano anterior
+    await fo('PUT', `/finance/obligations/${cont}`, { title: 'Contabilidade MC teste', category: 'Serviços e assinaturas', amount: 0, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, plan_zero: 2 });
+    await fo('POST', '/finance/maiscontrole/sync', {});
+    ok(row(await grid(yp), cont).cells[0].planned === 0 && row(await grid(y), cont).cells[0].planned === 280, 'zero no primeiro ano da categoria; no ano seguinte, o realizado do ano anterior');
     // Previsto sempre zero
-    await fo('PUT', `/finance/obligations/${outra}`, { title: 'Outra categoria MC teste', category: 'Outros', amount: 0, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, plan_zero: true });
+    await fo('PUT', `/finance/obligations/${outra}`, { title: 'Outra categoria MC teste', category: 'Outros', amount: 0, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, plan_zero: 1 });
     await fo('POST', '/finance/maiscontrole/sync', {});
     const oz = row(await grid(y), outra);
     ok(oz.cells.filter(Boolean).every(c => c.planned === 0) && oz.cells[0].real === 300, 'previsto sempre zero: nenhum mês com previsto (o realizado continua)');

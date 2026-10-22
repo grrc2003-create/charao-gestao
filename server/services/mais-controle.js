@@ -477,7 +477,10 @@ export function sync(ctx, ip, { resetManualPlans = false } = {}) {
         const manual = new Set(all('SELECT ref_month FROM finance_plan WHERE obligation_id = ? AND auto = 0', oid).map(r => r.ref_month));
         for (const ym of monthsOf(o, lastYm)) {
           if (ym < `${al.firstYear}-01` || manual.has(ym)) continue;
-          const planned = o.plan_zero ? 0 : Number(ym.slice(0, 4)) === al.firstYear ? realOf(oid, ym) : realOf(oid, prevYm(ym));
+          // Regra da tarefa: sempre zero; zero no primeiro ano em que a categoria aparece; ou realizado do ano anterior
+          // (no primeiro ano do histórico, o próprio realizado)
+          const yr = Number(ym.slice(0, 4)), catFirst = Number((o.mc_start || ym).slice(0, 4));
+          const planned = o.plan_zero === 1 || (o.plan_zero === 2 && yr === catFirst) ? 0 : yr === al.firstYear ? realOf(oid, ym) : realOf(oid, prevYm(ym));
           const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', oid, ym);
           if (it) {
             if (r2(it.amount_expected) === r2(planned)) continue;

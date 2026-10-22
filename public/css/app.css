@@ -2892,3 +2892,6 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .mc-changes { max-height: 420px; overflow-y: auto; }
 .fy-c.is-sem_pagamento .fy-p { color: var(--muted); }
 .fy-c.is-sem_pagamento .fy-r { color: var(--muted); }
+
+.fo-mc { display: flex; gap: 6px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #EEF4FB; color: #2A4F7A; margin: 0 0 6px; }
+.fo-mc svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }

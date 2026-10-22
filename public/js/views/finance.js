@@ -216,7 +216,9 @@ export async function form({ params, state, navigate, query }) {
     api('/finance/assignees'),
     api('/finance/month'),
   ]);
-  const v = o || { title: query?.get('titulo') || '', frequency: 'mensal', due_day: 10, start_month: new Date().toISOString().slice(0, 7), active: 1, assignee_id: state.user.id };
+  // Tarefa do Mais Controle (categoria): previsto e realizado vêm da regra (realizado do ano anterior), sem valor fixo
+  const fromMc = editing ? !!o.mc_start : query?.get('mc') === '1';
+  const v = o || { title: query?.get('titulo') || '', frequency: 'mensal', due_day: 10, start_month: new Date().toISOString().slice(0, 7), active: 1, assignee_id: state.user.id, amount: fromMc ? 0 : undefined };
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
   return {
     title: editing ? `Editar ${o.title}` : 'Nova obrigação',
@@ -231,12 +233,13 @@ export async function form({ params, state, navigate, query }) {
         <div class="field" style="max-width:420px"><label for="category">Tipo da despesa</label><input type="text" id="category" name="category" list="fo-cats" maxlength="60" value="${v.category || ''}" placeholder="Escolha ou digite (ex.: Impostos, Aluguel e condomínio)">
           <datalist id="fo-cats">${meta.category_options.map(c => html`<option value="${c}"></option>`)}</datalist></div>
         <div class="form-row form-row-3">
-          <div class="field"><label class="req" for="amount">Valor previsto (R$)</label><input type="text" id="amount" name="amount" required inputmode="decimal" value="${v.amount !== undefined ? String(v.amount).replace('.', ',') : ''}" placeholder="0,00"></div>
+          ${fromMc ? html`<input type="hidden" name="amount" value="${String(v.amount ?? 0).replace('.', ',')}">` : html`<div class="field"><label class="req" for="amount">Valor previsto (R$)</label><input type="text" id="amount" name="amount" required inputmode="decimal" value="${v.amount !== undefined ? String(v.amount).replace('.', ',') : ''}" placeholder="0,00"></div>`}
           <div class="field fo-rec"><label for="frequency">Periodicidade</label><select id="frequency" name="frequency">${Object.entries(FREQ).filter(([k]) => k !== 'unica' || v.frequency === 'unica').map(([k, l]) => opt(k, l, v.frequency))}</select></div>
           <div class="field"><label class="req" for="due_day">Dia do vencimento</label><input id="due_day" name="due_day" type="number" min="1" max="31" required value="${v.due_day}"></div>
         </div>
-        <label class="switch"><input type="checkbox" name="variable" ${v.variable ? 'checked' : ''}>Valor variável (ajusto o valor de cada parcela)</label>
-        <label class="switch fin-repeat" ${v.variable ? '' : 'hidden'}><input type="checkbox" name="repeat_last" ${v.repeat_last ? 'checked' : ''}>Estimar cada parcela com o valor do mês anterior (ex.: folha de pagamento, corrigida no fechamento da Folha)</label>
+        ${fromMc ? html`<p class="hint fo-mc">${icon('info')} Categoria do Mais Controle: não precisa de valor. O realizado vem dos pagamentos do Mais Controle e o previsto de cada mês é o realizado do mesmo mês no ano anterior (no primeiro ano, o próprio realizado). O nome precisa ser igual ao da categoria.</p>` : ''}
+        <label class="switch" ${fromMc ? 'hidden' : ''}><input type="checkbox" name="variable" ${v.variable ? 'checked' : ''}>Valor variável (ajusto o valor de cada parcela)</label>
+        <label class="switch fin-repeat" ${v.variable && !fromMc ? '' : 'hidden'}><input type="checkbox" name="repeat_last" ${v.repeat_last ? 'checked' : ''}>Estimar cada parcela com o valor do mês anterior (ex.: folha de pagamento, corrigida no fechamento da Folha)</label>
         <div class="form-row form-row-3">
           <div class="field"><label class="req" for="start_month" id="fo-start-l">${v.frequency === 'unica' ? 'Mês' : 'Início'}</label><input id="start_month" name="start_month" type="month" required value="${v.start_month}"></div>
           <div class="field fo-rec"><label for="end_month">Término (opcional)</label><input id="end_month" name="end_month" type="month" value="${v.end_month || ''}"></div>
@@ -278,13 +281,14 @@ export async function form({ params, state, navigate, query }) {
         data.repeat_last = f.variable.checked && f.repeat_last.checked;
         if (editing) data.active = f.active.checked;
         data.amount = parseNum(data.amount);
+        if (fromMc) { data.variable = false; data.repeat_last = false; if (data.amount === '' || Number.isNaN(data.amount)) data.amount = 0; }
         const err = f.querySelector('.form-error');
         err.hidden = true;
         try {
           if (editing) await api(`/finance/obligations/${o.id}`, { method: 'PUT', body: data });
           else await api('/finance/obligations', { method: 'POST', body: data });
-          toast(editing ? 'Obrigação atualizada.' : 'Obrigação cadastrada. Parcelas e tarefas geradas.');
-          navigate('/financeiro');
+          toast(editing ? 'Obrigação atualizada.' : fromMc ? 'Tarefa cadastrada. Sincronize para trazer o histórico do Mais Controle.' : 'Obrigação cadastrada. Parcelas e tarefas geradas.');
+          navigate(fromMc && !editing ? '/financeiro/mais-controle' : '/financeiro');
         } catch (ex) { err.textContent = ex.message; err.hidden = false; }
       });
     },

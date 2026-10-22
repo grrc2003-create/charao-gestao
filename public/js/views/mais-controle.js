@@ -51,7 +51,7 @@ export async function view({ state, render }) {
         <div class="card-body"><p class="muted" style="margin:0">A tarefa financeira é a categoria do Mais Controle (mesmo nome). Cadastre a tarefa com o nome da categoria e, na próxima sincronização, o histórico entra sozinho.</p></div>
         <ul class="mc-cats">${pv.categories.map(c => html`<li class="is-pending">
           <span class="mc-cat"><b>${c.label}</b><small>${c.count} pagamento(s) · ${money(c.total)}${c.last ? ` · último em ${ymLabel(c.last)}` : ''}</small></span>
-          <a class="btn btn-ghost btn-sm" href="#/financeiro/obrigacoes/nova?titulo=${encodeURIComponent(c.label)}">${icon('plus')}Cadastrar tarefa</a></li>`)}</ul>
+          <a class="btn btn-ghost btn-sm" href="#/financeiro/obrigacoes/nova?mc=1&titulo=${encodeURIComponent(c.label)}">${icon('plus')}Cadastrar tarefa</a></li>`)}</ul>
       </section>` : ''}
       ${pv.reviews.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('alert')}Conferência de alocação</h2><span class="sub">despesas do mês numa categoria diferente da habitual do fornecedor</span></div>

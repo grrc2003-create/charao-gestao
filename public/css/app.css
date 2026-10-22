@@ -2838,3 +2838,47 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fy-mrow.is-sem_previsto { opacity: .6; }
 .fp-m.is-plan { background: #EEF4FB; color: #2F6FB3; border-color: #CADCF0; }
 .fp-m.is-plan.is-zero { background: #F4F5F7; color: var(--muted); border-color: var(--line); }
+
+/* Tarefas financeiras › Mais Controle */
+.mc-fetch { display: grid; gap: 12px; }
+.mc-fetch .hint { display: block; margin-top: 6px; }
+.mc-cfg { padding: 10px 12px; border-radius: 10px; background: #FFF8E6; border: 1px solid #EBCF8E; font-size: 13px; line-height: 1.5; }
+.mc-cfg code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.mc-or { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--muted); }
+.mc-last { margin: 0; font-size: 12.5px; }
+.mc-cats { list-style: none; margin: 0; padding: 0; }
+.mc-cats li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 320px); gap: 10px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--line); }
+.mc-cats li.is-pending { background: #FFFBF0; }
+.mc-cats li.is-ignored { opacity: .6; }
+.mc-cat small { display: block; font-size: 12px; color: var(--muted); }
+.mc-cats select { width: 100%; min-height: 36px; }
+@media (max-width: 640px) { .mc-cats li { grid-template-columns: 1fr; } }
+
+.mc-acc { font-size: 12.5px; white-space: nowrap; }
+.mc-sub { font-size: 13px; color: var(--ink-2); }
+
+/* Tarefas financeiras › Contas da semana (lembretes, "Paguei", justificativa) */
+.fw-alert { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 16px; background: #FDF1EF; border-bottom: 1px solid #F0C6BF; color: #8A2D23; font-size: 12.5px; text-decoration: none; }
+.fw-alert svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.fw-alert:hover span { text-decoration: underline; }
+.fw-list { list-style: none; margin: 0; padding: 0; }
+.fw-list li { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 16px; border-top: 1px solid var(--line); }
+.fw-when { font-size: 12.5px; font-weight: 700; color: var(--ink-2); text-transform: capitalize; }
+.fw-main small { display: block; font-size: 12px; color: var(--muted); }
+.fw-main em { font-style: normal; font-weight: 600; }
+.fw-list li.is-today .fw-when { color: #A06A00; }
+.fw-list li.is-late { background: #FDF6F5; }
+.fw-list li.is-late .fw-when, .fw-list li.is-late em { color: #B03A2E; }
+.fw-list li.is-wait em { color: #2F6FB3; }
+.fw-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.fy-k.is-aguardando { background: #EEF4FB; border-color: #9DBDE3; }
+.fy-c.is-aguardando { background: #F3F7FC; }
+.fy-c.is-aguardando .fy-r { color: #2F6FB3; }
+.fy-c.is-nao_encontrado { background: #FDF1EF; }
+.fy-c.is-nao_encontrado .fy-r { color: #B03A2E; }
+.fy-projt td { padding: 0 6px; }
+@media (max-width: 899px) {
+  .fw-list li { grid-template-columns: 1fr; gap: 4px; }
+  .fw-acts { justify-content: flex-start; }
+  .fy-proj { display: none; }
+}

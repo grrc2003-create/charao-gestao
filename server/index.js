@@ -20,6 +20,7 @@ import * as Contracts from './services/contracts.js';
 import * as BmImport from './services/bm-import.js';
 import * as Finance from './services/finance.js';
 import * as FinanceImport from './services/finance-import.js';
+import * as MaisControle from './services/mais-controle.js';
 import * as TaskImport from './services/task-import.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
@@ -314,6 +315,17 @@ api.get('/api/finance/import/template', (req, res, { ctx }) => send(res, 200, Fi
   'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="tarefas-financeiras-modelo.xlsx"' }));
 api.post('/api/finance/import/preview', (req, res, { ctx, body }) => send(res, 200, FinanceImport.previewImport(ctx, body)));
 api.post('/api/finance/import', (req, res, { ctx, body }) => send(res, 200, FinanceImport.applyImport(ctx, body, clientIp(req))));
+api.get('/api/finance/maiscontrole', (req, res, { ctx }) => send(res, 200, MaisControle.status(ctx)));
+api.post('/api/finance/maiscontrole/fetch', async (req, res, { ctx }) => send(res, 200, await MaisControle.fetchFromApi(ctx)));
+api.post('/api/finance/maiscontrole/upload', (req, res, { ctx, body }) => send(res, 200, MaisControle.uploadFile(ctx, body)));
+api.get('/api/finance/maiscontrole/preview', (req, res, { ctx }) => { const { _groups, _projects, ...pv } = MaisControle.preview(ctx); send(res, 200, pv); });
+api.put('/api/finance/maiscontrole/account', (req, res, { ctx, body }) => send(res, 200, MaisControle.setAccount(ctx, body)));
+api.get('/api/finance/week', (req, res, { ctx }) => send(res, 200, MaisControle.financeWeek(ctx)));
+api.post('/api/finance/items/:id/mark', (req, res, { ctx, params, body }) => send(res, 200, Finance.markPaid(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/finance/items/:id/unmark', (req, res, { ctx, params }) => send(res, 200, Finance.unmarkPaid(ctx, intOrNull(params.id), clientIp(req))));
+api.post('/api/finance/items/:id/justify', (req, res, { ctx, params, body }) => send(res, 200, Finance.justifyItem(ctx, intOrNull(params.id), body, clientIp(req))));
+api.put('/api/finance/maiscontrole/map', (req, res, { ctx, body }) => send(res, 200, MaisControle.setMapping(ctx, body)));
+api.post('/api/finance/maiscontrole/apply', (req, res, { ctx }) => send(res, 200, MaisControle.apply(ctx, clientIp(req))));
 api.get('/api/finance/import/last', (req, res, { ctx }) => send(res, 200, { last: FinanceImport.lastImport(ctx) }));
 api.post('/api/finance/import/:id/undo', (req, res, { ctx, params }) => send(res, 200, FinanceImport.undoImport(ctx, params.id, clientIp(req))));
 api.get('/api/finance/year', (req, res, { ctx, query }) => send(res, 200, Finance.financeYear(ctx, query.get('ano'))));
@@ -617,3 +629,6 @@ runRecurrences();
 setInterval(runRecurrences, 60 * 60 * 1000).unref();
 
 server.listen(PORT, () => console.log(`Charão Gestão rodando em http://localhost:${PORT}${DEMO ? ' (modo demonstração)' : ''}`));
+// Mais Controle: sincronização semanal automática (segunda a partir das 8h; confere a cada 30 min se já é hora)
+setTimeout(() => MaisControle.autoSync().catch(() => {}), 60e3);
+setInterval(() => MaisControle.autoSync().catch(() => {}), 30 * 60e3).unref();

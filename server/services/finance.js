@@ -216,6 +216,7 @@ export function financeYear(ctx, y) {
     items.get(it.obligation_id).set(it.ref_month, it);
   }
   const plans = new Map(all('SELECT * FROM finance_plan WHERE ref_month BETWEEN ? AND ?', keys[0], keys[11]).map(p => [`${p.obligation_id}|${p.ref_month}`, p.amount]));
+  const cov = coverage();
   const rows = [];
   for (const o of all(`SELECT o.*, u.name AS assignee_name FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.category, o.title`)) {
     const due = new Set(o.active ? monthsOf(o, keys[11]).filter(k => k >= keys[0]) : []);
@@ -226,7 +227,8 @@ export function financeYear(ctx, y) {
         const paid = it.status === 'paga';
         return { ym: k, item_id: it.id, planned: r2(it.amount_expected), real: paid ? r2(it.paid_amount ?? it.amount_expected) : null, paid_date: it.paid_date, due_date: it.due_date,
           // Real = 0: a previsão não ocorreu no mês (resolvido, não é atraso)
-          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : r2(it.amount_expected) === 0 ? 'sem_previsto' : it.due_date < ref ? 'atrasada' : 'pendente', estimated: !!it.estimated, files: it.files };
+          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : r2(it.amount_expected) === 0 ? 'sem_previsto' : it.marked_paid_at ? markState(it, cov) : it.due_date < ref ? 'atrasada' : 'pendente',
+          estimated: !!it.estimated, files: it.files, marked_amount: it.marked_amount, marked_paid_at: it.marked_paid_at, justify_kind: it.justify_kind, justify_reason: it.justify_reason };
       }
       if (!due.has(k)) return null;
       const p = plans.get(`${o.id}|${k}`);
@@ -258,6 +260,7 @@ export function financeYear(ctx, y) {
       late: late.length, late_amount: r2(late.reduce((s, c) => s + c.planned, 0)) },
     month_totals: monthTot,
     categories: CATEGORIES,
+    projects: projectCosts(keys),
   };
 }
 
@@ -624,4 +627,83 @@ export function financeMonth(ctx, ym) {
     area_id: financeAreaId(),
     category_options: CATEGORIES,
   };
+}
+
+// ---------- Mais Controle: cobertura dos dados, "Paguei" e justificativa ----------
+// Até que dia a última busca do Mais Controle cobre (para conferir o "Paguei" e pedir justificativa)
+export function coverage() {
+  try { return one(`SELECT data_until, fetched_at FROM ext_fetches WHERE source = 'maiscontrole' ORDER BY id DESC LIMIT 1`) || null; } catch { return null; }
+}
+const tsOf = s => Date.parse(/Z$|T/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
+// "Paguei" sem confirmação: aguardando a próxima busca; se a busca já cobre o vencimento e não achou → não encontrado
+export function markState(it, cov) {
+  if (cov && cov.data_until >= it.due_date && tsOf(cov.fetched_at) > tsOf(it.marked_paid_at)) return 'nao_encontrado';
+  return 'aguardando';
+}
+// Custos destinados a Projetos (centros de custo diferentes de Empresa), uma linha por centro de custo
+function projectCosts(keys) {
+  let rows = [];
+  try { rows = all(`SELECT cost_center, ref_month, SUM(amount) AS total, COUNT(*) AS n FROM ext_payments WHERE kind = 'projeto' AND ref_month BETWEEN ? AND ? GROUP BY cost_center, ref_month`, keys[0], keys[11]); } catch { return []; }
+  const by = new Map();
+  for (const r of rows) {
+    if (!by.has(r.cost_center)) by.set(r.cost_center, { cost_center: r.cost_center, months: keys.map(() => 0), count: 0 });
+    const g = by.get(r.cost_center); g.months[keys.indexOf(r.ref_month)] = r2(r.total); g.count += r.n;
+  }
+  return [...by.values()].map(g => ({ ...g, total: r2(g.months.reduce((s, v) => s + v, 0)) })).sort((a, b) => a.cost_center.localeCompare(b.cost_center, 'pt-BR'));
+}
+export function markPaid(ctx, id, body, ip) {
+  const it = loadItem(ctx, id);
+  if (it.status === 'paga') throw badRequest('Esta parcela já está paga.');
+  const amount = body.amount === '' || body.amount === undefined || body.amount === null ? null : r2(num(body.amount, 'Valor pago'));
+  const now = new Date().toISOString();
+  tx(() => {
+    run('UPDATE finance_items SET marked_paid_at = ?, marked_paid_by = ?, marked_amount = ? WHERE id = ?', now, ctx.user.id, amount, id);
+    if (it.task_id) {
+      run(`UPDATE tasks SET status = 'concluida', started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ?`,
+        now, now, now, ctx.user.id, now, now, it.task_id);
+      taskHistory(it.task_id, ctx.user.id, 'Marcado como pago', `${amount != null ? brl(amount) : 'valor a confirmar'} · aguardando confirmação do Mais Controle`);
+    }
+    audit(ctx.user.id, 'finance', it.obligation_id, 'Parcela marcada como paga (aguardando Mais Controle)', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount }, ip);
+  });
+  return getItem(ctx, id);
+}
+export function unmarkPaid(ctx, id, ip) {
+  const it = loadItem(ctx, id);
+  if (it.status === 'paga' || !it.marked_paid_at) throw badRequest('Esta parcela não está marcada como paga.');
+  tx(() => {
+    run('UPDATE finance_items SET marked_paid_at = NULL, marked_paid_by = NULL, marked_amount = NULL WHERE id = ?', id);
+    if (it.task_id) {
+      run(`UPDATE tasks SET status = 'aberta', delivered_at = NULL, completed_at = NULL, review_status = NULL, reviewed_by = NULL, reviewed_at = NULL, progress_pct = NULL, updated_at = ? WHERE id = ?`, new Date().toISOString(), it.task_id);
+      taskHistory(it.task_id, ctx.user.id, 'Marcação de pago desfeita', '');
+    }
+    audit(ctx.user.id, 'finance', it.obligation_id, 'Marcação de pago desfeita', { parcela: `${it.title} ${monthLabel(it.ref_month)}` }, ip);
+  });
+  return getItem(ctx, id);
+}
+// Despesa prevista sem pagamento: "vai ocorrer" (nova data) ou "não vai ocorrer" (real 0), sempre com motivo
+export function justifyItem(ctx, id, body, ip) {
+  const it = loadItem(ctx, id);
+  if (it.status === 'paga') throw badRequest('Esta parcela já está paga.');
+  const kind = oneOf(body.kind, ['vai_ocorrer', 'nao_ocorre'], 'Justificativa');
+  const reason = str(body.reason, { max: 500, required: true, label: 'Motivo' });
+  const now = new Date().toISOString();
+  if (kind === 'nao_ocorre') {
+    tx(() => {
+      run('UPDATE finance_items SET justify_kind = ?, justify_reason = ?, justified_at = ?, justified_by = ?, marked_paid_at = NULL, marked_amount = NULL WHERE id = ?', kind, reason, now, ctx.user.id, id);
+      payItem(ctx, id, { paid_date: today(), paid_amount: 0, notes: `Não vai ocorrer: ${reason}` }, ip);
+    });
+    return getItem(ctx, id);
+  }
+  const nd = date(body.new_date, 'Nova data prevista');
+  if (!nd) throw badRequest('Informe a nova data prevista.');
+  if (nd < today()) throw badRequest('A nova data prevista não pode ser no passado.');
+  tx(() => {
+    run('UPDATE finance_items SET due_date = ?, justify_kind = ?, justify_reason = ?, justified_at = ?, justified_by = ?, marked_paid_at = NULL, marked_amount = NULL WHERE id = ?', nd, kind, reason, now, ctx.user.id, id);
+    if (it.task_id) {
+      run(`UPDATE tasks SET due_date = ?, status = CASE WHEN status = 'concluida' THEN 'aberta' ELSE status END, updated_at = ? WHERE id = ?`, nd, now, it.task_id);
+      taskHistory(it.task_id, ctx.user.id, 'Pagamento reprogramado', `Vai ocorrer em ${nd.split('-').reverse().join('/')} · ${reason}`);
+    }
+    audit(ctx.user.id, 'finance', it.obligation_id, 'Despesa sem pagamento justificada', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, vai_ocorrer: nd, motivo: reason }, ip);
+  });
+  return getItem(ctx, id);
 }

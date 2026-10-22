@@ -5,6 +5,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, notFound, str, intOrNull } from '../lib/http.js';
 import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { writeXlsx } from '../lib/xlsx-write.js';
+import { undoBatch, somaItems, batchExtCount } from './mais-controle.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { requireFinance, CATEGORIES, FREQ_LABEL, readObligation, insertObligation, generateItems, removeObligationInternal, monthsOf, ensureItem, payItem, unpayItem, setPlannedInternal, restorePlannedInternal } from './finance.js';
@@ -378,6 +379,7 @@ function batchInfo(b) {
     payments: pays.map(x => ({ id: x.id, title: x.title, ref_month: x.ref_month, amount: x.paid_amount })),
     payments_total: r2(pays.reduce((s, x) => s + (x.paid_amount || 0), 0)),
     plans: planRows.map(x => ({ obligation_id: x.obligation_id, title: x.tarefa, months: x.meses || [] })),
+    somas: somaItems(prev, b.id).length,
     plan_months: planRows.reduce((s, x) => s + (x.meses || []).length, 0),
   };
 }
@@ -388,7 +390,7 @@ export function lastImport(ctx) {
     WHERE a.entity = 'finance' AND a.action = ? ORDER BY a.id DESC LIMIT 20`, BATCH).find(x => !undone.has(x.id));
   if (!b) return null;
   const info = batchInfo(b);
-  return info.items.length || info.payments.length || info.plan_months ? info : null;
+  return info.items.length || info.payments.length || info.plan_months || info.somas || batchExtCount(b.id) ? info : null;
 }
 export function undoImport(ctx, batchId, ip) {
   requireFinance(ctx.user);
@@ -404,6 +406,8 @@ export function undoImport(ctx, batchId, ip) {
       if (!it || it.status !== 'paga' || dropIds.has(it.obligation_id)) continue;
       unpayItem(ctx, x.id, ip); unpaid++;
     }
+    // Mais Controle: desfaz as somas em parcelas já pagas e libera os pagamentos para nova sincronização
+    undoBatch(ctx, last.id, ip, { unpaidIds: new Set(last.payments.map(x => x.id)) });
     let restored = 0;
     for (const pl of last.plans) {
       if (dropIds.has(pl.obligation_id)) continue;

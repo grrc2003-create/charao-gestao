@@ -15,7 +15,10 @@ const ymLabel = ym => `${MESES[Number(ym.slice(5, 7)) - 1]}/${ym.slice(0, 4)}`;
 const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return ''; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : NaN; };
 const numIn = v => (v === null || v === undefined || v === '' ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', sem_previsto: 'Sem previsão', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
+const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', sem_previsto: 'Sem previsão', aguardando: 'Paguei · aguardando Mais Controle', nao_encontrado: 'Não encontrado no Mais Controle', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
+const WST = { hoje: ['pagar hoje', 'is-today'], a_pagar: ['', ''], atrasada: ['atrasada', 'is-late'], aguardando: ['paguei · aguardando confirmação', 'is-wait'], nao_encontrado: ['não encontrado no Mais Controle: pagamento não realizado ou não lançado', 'is-late'], justificar: ['sem pagamento no Mais Controle: justifique', 'is-late'] };
+const DOW = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+const dueLabel = i => (i.days < 0 ? `venceu ${fmtDate(i.due_date)}` : i.days === 0 ? 'hoje' : i.days === 1 ? 'amanhã' : `${DOW[new Date(`${i.due_date}T12:00:00`).getDay()]} ${i.due_date.slice(8, 10)}/${i.due_date.slice(5, 7)}`);
 const done = c => c.status === 'pago' || c.status === 'nao_ocorreu';
 
 function cellHtml(row, c, i, cur) {
@@ -23,12 +26,27 @@ function cellHtml(row, c, i, cur) {
   return html`<td class="fy-c is-${c.status} ${cur ? 'is-cur' : ''}"><button type="button" class="fy-btn" data-o="${row.id}" data-i="${i}"
       title="${row.title} · ${ymLabel(c.ym)} · ${ST[c.status]} · previsto ${money(c.planned)}${c.real != null ? ` · real ${money(c.real)}` : ''}">
     <span class="fy-p ${c.custom ? 'is-custom' : ''}">${short(c.planned)}</span>
-    <span class="fy-r">${c.status === 'pago' ? html`✓ ${short(c.real)}` : c.status === 'nao_ocorreu' ? 'não ocorreu' : c.status === 'atrasada' ? 'atrasada' : ''}</span></button></td>`;
+    <span class="fy-r">${c.status === 'pago' ? html`✓ ${short(c.real)}` : c.status === 'nao_ocorreu' ? 'não ocorreu' : c.status === 'atrasada' ? 'atrasada' : c.status === 'aguardando' ? html`paguei${c.marked_amount != null ? ` ${short(c.marked_amount)}` : ''}?` : c.status === 'nao_encontrado' ? 'não achado' : ''}</span></button></td>`;
 }
 
 export async function view({ state, query, setQuery, render }) {
   if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação de Tarefas financeiras (Usuários → Editar).');
-  const d = await api('/finance/year', { query: { ano: query.get('ano') || '' } });
+  const [d, wk] = await Promise.all([api('/finance/year', { query: { ano: query.get('ano') || '' } }), api('/finance/week').catch(() => null)]);
+  const wItems = wk?.items || [];
+  const al = wk?.alerts || { accounts: [], categories: [] };
+  const weekCard = !wk ? '' : html`<section class="card section fw-card">
+      <div class="card-head"><h2>${icon('alert')}Contas da semana</h2><span class="sub">até ${fmtDate(wk.week_end)}${wk.data_until ? ` · Mais Controle até ${fmtDate(wk.data_until)}` : ''}</span></div>
+      ${al.accounts.length || al.categories.length ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
+        ${al.accounts.map(a => `custo de ${money(a.total)} na conta ${a.label} (não cadastrada: ${a.categories.map(c => c.label).join(', ')})`).join(' · ')}${al.accounts.length && al.categories.length ? ' · ' : ''}${al.categories.length ? `${al.categories.length} categoria(s) sem tarefa (${money(al.categories.reduce((s, c) => s + c.total, 0))})` : ''} — cadastre para trazer</span></a>` : ''}
+      ${wItems.length ? html`<ul class="fw-list">${wItems.map(i => html`<li class="${WST[i.state][1]}">
+        <span class="fw-when">${dueLabel(i)}</span>
+        <span class="fw-main"><b>${i.title}</b><small>${i.category} · ${money(i.amount_expected)}${WST[i.state][0] ? html` · <em>${WST[i.state][0]}</em>` : ''}${i.justify_reason && i.justify_kind === 'vai_ocorrer' ? ` · reprogramado: ${i.justify_reason}` : ''}</small></span>
+        <span class="fw-acts">
+          ${i.state === 'aguardando' || i.state === 'nao_encontrado' ? html`<button type="button" class="btn btn-ghost btn-sm" data-w-unmark="${i.id}">Desfazer “Paguei”</button>`
+            : html`<button type="button" class="btn btn-primary btn-sm" data-w-mark="${i.id}">${icon('check')}Paguei</button>`}
+          ${['justificar', 'nao_encontrado', 'atrasada'].includes(i.state) ? html`<button type="button" class="btn btn-ghost btn-sm" data-w-just="${i.id}">Justificar</button>` : ''}
+        </span></li>`)}</ul>` : html`<div class="card-body muted">Nenhuma conta a pagar nesta semana. 👍</div>`}
+    </section>`;
   const T = d.totals;
   const curIdx = d.months.indexOf(d.current);
   const qm = query.get('m');
@@ -60,6 +78,7 @@ export async function view({ state, query, setQuery, render }) {
           <a class="btn btn-ghost" href="#/financeiro/analise">${icon('reports')}Análise</a>
           <a class="btn btn-ghost" href="#/financeiro/obrigacoes">${icon('settings')}Tarefas cadastradas</a>
           <a class="btn btn-ghost" href="#/financeiro/importar">${icon('file')}Importar planilha</a>
+          <a class="btn btn-ghost" href="#/financeiro/mais-controle">${icon('reschedule')}Mais Controle</a>
           <a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova tarefa financeira</a>` })}
       <div class="fy-top">
         <div class="fy-year"><button type="button" class="icon-btn" data-y="${Number(d.year) - 1}" aria-label="Ano anterior">‹</button><b>${d.year}</b><button type="button" class="icon-btn" data-y="${Number(d.year) + 1}" aria-label="Próximo ano">›</button></div>
@@ -71,9 +90,10 @@ export async function view({ state, query, setQuery, render }) {
         </div>
       </div>
       ${d.groups.length ? html`
+      ${weekCard}
       <section class="card fy-card">
         <div class="card-head"><h2>${icon('calendar')}Planejamento anual ${d.year}</h2><span class="sub">previsto × real, mês a mês</span></div>
-        <div class="fy-legend"><span><i class="fy-k is-pago"></i>Pago (real)</span><span><i class="fy-k is-atrasada"></i>Atrasada</span><span><i class="fy-k is-pendente"></i>A pagar</span><span><i class="fy-k is-nao_ocorreu"></i>Não ocorreu (real 0)</span><span><i class="fy-k is-projetado"></i>Previsto (projetado)</span><span><i class="fy-k is-custom"></i>Previsto ajustado no mês</span></div>
+        <div class="fy-legend"><span><i class="fy-k is-pago"></i>Pago (real)</span><span><i class="fy-k is-atrasada"></i>Atrasada</span><span><i class="fy-k is-pendente"></i>A pagar</span><span><i class="fy-k is-aguardando"></i>Paguei (aguardando Mais Controle)</span><span><i class="fy-k is-nao_ocorreu"></i>Não ocorreu (real 0)</span><span><i class="fy-k is-projetado"></i>Previsto (projetado)</span><span><i class="fy-k is-custom"></i>Previsto ajustado no mês</span></div>
         <div class="fy-wrap"><table class="fy">
           <thead><tr><th class="fy-name">Tarefa</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
           ${d.groups.map(g => html`<tbody>
@@ -89,7 +109,12 @@ export async function view({ state, query, setQuery, render }) {
           </tfoot>
         </table></div>
       </section>
-      <section class="card fy-mob" data-fy-mob>${mobileMonth(mobMonth)}</section>`
+      <section class="card fy-mob" data-fy-mob>${mobileMonth(mobMonth)}</section>
+      ${d.projects?.length ? html`<section class="card section fy-proj">
+        <div class="card-head"><h2>${icon('projects')}Custos destinados a Projetos</h2><span class="sub">Mais Controle · centros de custo diferentes de Empresa · ${money(d.projects.reduce((s, p) => s + p.total, 0))}</span></div>
+        <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Centro de custo</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
+          <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody></table></div>
+      </section>` : ''}`
       : html`<section class="card"><div class="card-body muted">Nenhuma tarefa financeira em ${d.year}. Comece em “Nova tarefa financeira” ou “Importar planilha”.</div></section>`}`,
     mount(root) {
       root.querySelectorAll('[data-y]').forEach(b => b.addEventListener('click', () => { setQuery({ ano: b.dataset.y }); render(); }));
@@ -146,6 +171,32 @@ export async function view({ state, query, setQuery, render }) {
         if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
       };
       root.querySelectorAll('.fy-card, [data-fy-mob]').forEach(el => el.addEventListener('click', onCell));
+      const wReload = () => { setQuery({ ano: d.year, m: mobMonth }); render(); };
+      const wItem = id => wItems.find(i => i.id === Number(id));
+      root.querySelectorAll('[data-w-mark]').forEach(b => b.addEventListener('click', async () => {
+        const i = wItem(b.dataset.wMark);
+        const res = await sheet({ title: `Paguei · ${i.title}`, submitLabel: 'Marcar como pago',
+          body: html`<p class="muted" style="margin:0 0 10px">Vence ${fmtDate(i.due_date)} · previsto ${money(i.amount_expected)}. Na próxima atualização o sistema confere no Mais Controle; se não achar o pagamento, avisa.</p>
+            <div class="field"><label for="w-v">Valor pago (opcional)</label><input type="text" id="w-v" name="amount" inputmode="decimal" placeholder="em branco = o Mais Controle informa"></div>`,
+          onSubmit: f => { const v = parseNum(f.amount); if (Number.isNaN(v)) throw new Error('Valor inválido.'); return api(`/finance/items/${i.id}/mark`, { method: 'POST', body: { amount: v === '' ? null : v } }); } });
+        if (res) { toast('Marcado como pago: aguardando a confirmação do Mais Controle.'); wReload(); }
+      }));
+      root.querySelectorAll('[data-w-unmark]').forEach(b => b.addEventListener('click', async () => {
+        try { await api(`/finance/items/${b.dataset.wUnmark}/unmark`, { method: 'POST' }); toast('Marcação desfeita.'); wReload(); } catch (ex) { toast(ex.message, 'error'); }
+      }));
+      root.querySelectorAll('[data-w-just]').forEach(b => b.addEventListener('click', async () => {
+        const i = wItem(b.dataset.wJust);
+        const res = await sheet({ title: `Justificar · ${i.title}`, submitLabel: 'Salvar justificativa',
+          body: html`<p class="muted" style="margin:0 0 10px">Previsto ${money(i.amount_expected)} para ${fmtDate(i.due_date)}${i.state === 'nao_encontrado' ? ', marcado como pago, mas o pagamento não apareceu no Mais Controle' : ', sem pagamento'}. A despesa ainda vai ocorrer?</p>
+            <div class="segmented fo-kind" role="radiogroup" aria-label="A despesa vai ocorrer?">
+              <label><input type="radio" name="kind" value="vai_ocorrer" checked>Vai ocorrer<small>informe a nova data</small></label>
+              <label><input type="radio" name="kind" value="nao_ocorre">Não vai ocorrer<small>fica “não ocorreu” (real 0)</small></label></div>
+            <div class="field" data-w-nd><label for="w-d">Nova data prevista</label><input type="date" id="w-d" name="new_date" min="${today()}" value="${today()}"></div>
+            <div class="field"><label class="req" for="w-r">Motivo</label><textarea id="w-r" name="reason" rows="2" maxlength="500" required></textarea></div>`,
+          onSubmit: f => { if (!String(f.reason || '').trim()) throw new Error('Informe o motivo.'); return api(`/finance/items/${i.id}/justify`, { method: 'POST', body: f }); } });
+        if (res) { toast(res.status === 'paga' ? 'Registrado: não vai ocorrer.' : 'Justificado: nova data prevista.'); wReload(); }
+      }));
+
     },
   };
 }

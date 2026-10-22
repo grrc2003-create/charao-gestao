@@ -33,6 +33,7 @@ import * as BmImport from './views/bm-import.js';
 import * as Finance from './views/finance.js';
 import * as FinanceYear from './views/finance-year.js';
 import * as FinanceImport from './views/finance-import.js';
+import * as MaisControle from './views/mais-controle.js';
 import * as ReportMeasurement from './views/report-measurement.js';
 import * as Processes from './views/processes.js';
 import * as ProcessesPrint from './views/processes-print.js';
@@ -121,6 +122,7 @@ const routes = [
   ['/financeiro/obrigacoes', Finance.obligations],
   ['/financeiro/obrigacoes/nova', Finance.form],
   ['/financeiro/importar', FinanceImport.importPage],
+  ['/financeiro/mais-controle', MaisControle.view],
   ['/financeiro/obrigacoes/:id/editar', Finance.form],
   ['/conta', Account.view],
   ['/auditoria', Audit.view],

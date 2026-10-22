@@ -36,10 +36,11 @@ export async function view({ state, query, setQuery, render }) {
   const al = wk?.alerts || { accounts: [], categories: [] };
   const weekCard = !wk ? '' : html`<section class="card section fw-card">
       <div class="card-head"><h2>${icon('alert')}Contas da semana</h2><span class="sub">até ${fmtDate(wk.week_end)}${wk.data_until ? ` · Mais Controle até ${fmtDate(wk.data_until)}` : ''}</span></div>
-      ${al.accounts.length || al.categories.length || al.reviews ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
+      ${al.accounts.length || al.categories.length || al.reviews || al.issues ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
         ${[...al.accounts.map(a => `custo de ${money(a.total)} na conta ${a.label} (não cadastrada: ${a.categories.map(c => c.label).join(', ')})`),
           al.categories.length ? `${al.categories.length} categoria(s) sem tarefa (${money(al.categories.reduce((s, c) => s + c.total, 0))}): cadastre para trazer` : '',
-          al.reviews ? `${al.reviews} despesa(s) em categoria diferente da habitual: confira a alocação` : ''].filter(Boolean).join(' · ')}</span></a>` : ''}
+          al.reviews ? `${al.reviews} despesa(s) para conferir a categoria` : '',
+          al.issues ? `${al.issues} lançamento(s) para ajustar no Mais Controle (cliente ou conta fora do centro de custo Empresa)` : ''].filter(Boolean).join(' · ')}</span></a>` : ''}
       ${wItems.length ? html`<ul class="fw-list">${wItems.map(i => html`<li class="${WST[i.state][1]}">
         <span class="fw-when">${dueLabel(i)}</span>
         <span class="fw-main"><b>${i.title}</b><small>${i.category} · ${money(i.amount_expected)}${WST[i.state][0] ? html` · <em>${WST[i.state][0]}</em>` : ''}${i.justify_reason && i.justify_kind === 'vai_ocorrer' ? ` · reprogramado: ${i.justify_reason}` : ''}</small></span>

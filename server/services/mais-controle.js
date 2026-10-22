@@ -66,7 +66,7 @@ function numOf(v) {
 const COLS = {
   due: ['datadevencimento', 'datavencimento'], paid: ['datadepagamento', 'datapagamento'],
   total: ['valortotalpago'], paidPart: ['valorpagodaparcela', 'valorpago'], fees: ['jurosmultas', 'valorjurosemulta'], discount: ['descontos', 'valordesconto'],
-  category: ['categoria'], supplier: ['fornecedor'], desc: ['descricao'], costCenter: ['centrodecusto'], account: ['contabancaria'],
+  category: ['categoria'], supplier: ['fornecedor'], desc: ['descricao'], costCenter: ['centrodecusto'], account: ['contabancaria'], payer: ['quempaga'],
   id: ['idlancamento'], installment: ['numeroparcela'],
 };
 function toPayments(grid) {
@@ -93,7 +93,7 @@ function toPayments(grid) {
       due, paid, amount: amount === null ? null : r2(amount),
       category: String(at(r, COLS.category) ?? '').trim(), supplier: String(at(r, COLS.supplier) ?? '').trim(),
       desc: String(at(r, COLS.desc) ?? '').trim().slice(0, 200),
-      cost_center: String(at(r, COLS.costCenter) ?? '').trim(), account: String(at(r, COLS.account) ?? '').trim(),
+      cost_center: String(at(r, COLS.costCenter) ?? '').trim(), account: String(at(r, COLS.account) ?? '').trim(), payer: String(at(r, COLS.payer) ?? '').trim(),
     });
   }
   return out;
@@ -124,8 +124,8 @@ function saveFetch(ctx, origin, fileName, pays, raw = null) {
       if (ms.length) run('DELETE FROM ext_payments WHERE source = ? AND ref_month BETWEEN ? AND ?', SOURCE, ms[0], ms.at(-1));
     } else run('DELETE FROM ext_payments WHERE source = ?', SOURCE);
     for (const p of rows) {
-      run(`INSERT OR REPLACE INTO ext_payments (source, ext_key, due_date, paid_date, ref_month, amount, category, supplier, supplier_key, description, account, account_key, cost_center, fetch_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, SOURCE, p.key, p.due, p.paid, p.ym, p.amount ?? 0, p.category, p.supplier, hkey(p.supplier), p.desc, p.account, hkey(p.account), p.cost_center || 'Empresa', id);
+      run(`INSERT OR REPLACE INTO ext_payments (source, ext_key, due_date, paid_date, ref_month, amount, category, supplier, supplier_key, description, account, account_key, cost_center, fetch_id, payer)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, SOURCE, p.key, p.due, p.paid, p.ym, p.amount ?? 0, p.category, p.supplier, hkey(p.supplier), p.desc, p.account, hkey(p.account), p.cost_center || 'Empresa', id, p.payer || null);
     }
     audit(actorId(ctx), 'finance', null, origin === 'arquivo' ? 'Pagamentos do Mais Controle enviados por arquivo' : 'Pagamentos buscados no Mais Controle (API)', { arquivo: fileName, pagamentos: pays.length }, null);
     return id;
@@ -293,6 +293,24 @@ export function monthPayments(ctx, obligationId, ym) {
       excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category) }; });
 }
 
+// ---------- Ajustar no Mais Controle: lançamentos no centro de custo Empresa que não são custo da empresa ----------
+//  - pago pelo cliente (Quem Paga = Cliente) no centro de custo Empresa;
+//  - conta bancária não cadastrada como da empresa no centro de custo Empresa.
+// Ficam fora do realizado; saem da lista quando forem ajustados lá (ou quando a conta for cadastrada).
+export function issues() {
+  const ex = exclusions();
+  const rows = all(`SELECT p.*, a.active AS acc_active FROM ext_payments p LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key
+    WHERE p.source = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa') ORDER BY p.paid_date DESC`, SOURCE);
+  const out = [];
+  for (const p of rows) {
+    if (excluded(ex, p)) continue;
+    const kind = hkey(p.payer) === 'cliente' ? 'cliente' : !p.acc_active ? 'conta' : null;
+    if (!kind) continue;
+    out.push({ key: p.ext_key, kind, supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, due_date: p.due_date, category: p.category, account: p.account || '(sem conta)', payer: p.payer });
+  }
+  return out;
+}
+
 // ---------- Alocação: a partir da foto atual ----------
 // Empresa + conta cadastrada → tarefa de mesmo nome da categoria (realizado por tarefa e mês do vencimento)
 function allocation() {
@@ -308,6 +326,7 @@ function allocation() {
   for (const p of rows) {
     if (!p.paid_date || !(p.amount > 0)) { unpaid++; continue; }
     if (excluded(ex, p)) { excludedN++; excludedTotal = r2(excludedTotal + p.amount); continue; }
+    if (hkey(p.payer) === 'cliente' && isEmpresa(p.cost_center)) continue; // ajustar no Mais Controle (lista de ajustes)
     const ak = p.account_key || '';
     if (!accounts.has(ak)) accounts.set(ak, { key: ak, label: p.account || '(sem conta)', active: !!p.acc_active, count: 0, total: 0, categories: new Map() });
     const acc = accounts.get(ak); acc.count++; acc.total = r2(acc.total + p.amount);
@@ -446,6 +465,7 @@ export function preview(ctx) {
   return {
     fetch: f ? { id: f.id, origin: f.origin, file_name: f.file_name, fetched_at: f.fetched_at, rows: f.row_count, data_until: f.data_until } : null,
     first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(), exclusions: listExclusions(ctx),
+    issues: issues(),
     tasks: al.obs.filter(o => o.active).map(o => ({ id: o.id, title: o.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR')),
     totals: {
       novo: cnt('novo'), alterado: cnt('alterado'), removido: cnt('removido'), manual: cnt('manual'),
@@ -568,6 +588,7 @@ export function financeWeek(ctx) {
       accounts: pv.accounts.filter(a => !a.active && a.count).map(a => ({ label: a.label, count: a.count, total: a.total, categories: a.categories.slice(0, 4) })),
       categories: pv.categories.map(c => ({ label: c.label, count: c.count, total: c.total })),
       reviews: pv.reviews.length,
+      issues: pv.issues.length,
     };
   } catch { /* sem dados ainda */ }
   return { today: ref, week_end: end, data_until: cov?.data_until || null, items, alerts };

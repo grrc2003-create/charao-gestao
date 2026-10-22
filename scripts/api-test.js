@@ -20,7 +20,7 @@ const MC_PORT = 3998, MC_AUTH = `Basic ${Buffer.from('mc-teste:mc-senha-teste').
 const mcY = new Date().toISOString().slice(0, 4), mcM = new Date().toISOString().slice(5, 7);
 const mcP = String(Number(mcY) - 1), mcD = new Date().toISOString().slice(8, 10);
 const MC_HEAD = 'id_lancamento;data_competencia;data_vencimento;data_pagamento;numero_parcela;valor_parcela;valor_pago;valor_desconto;valor_juros_e_multa;fornecedor;descricao;numero_documento;categoria;grupo;plano_de_conta;condicao_pagamento;forma_pagamento;quem_paga;conta_bancaria;id_obra;centro_de_custo';
-const mcRow = (id, due, paid, val, fees, sup, desc, cat, acc, cc) => [id, due, due, paid, 1, val, paid ? val : '', '0.00', fees, sup, desc, '', cat, 'Outros', 'Gerais', 'À Vista', 'Boleto', 'Empresa', acc, '', cc].join(';');
+const mcRow = (id, due, paid, val, fees, sup, desc, cat, acc, cc, payer = 'Empresa') => [id, due, due, paid, 1, val, paid ? val : '', '0.00', fees, sup, desc, '', cat, 'Outros', 'Gerais', 'À Vista', 'Boleto', payer, acc, '', cc].join(';');
 const MC_CSV = [MC_HEAD,
   mcRow(101, `${mcP}-01-10`, `${mcP}-01-10`, '280.00', '0.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(102, `${mcP}-02-10`, `${mcP}-02-10`, '285.00', '5.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
@@ -31,7 +31,8 @@ const MC_CSV = [MC_HEAD,
   mcRow(115, `${mcY}-01-19`, `${mcY}-01-19`, '70.00', '0.00', 'Loja Teste', 'Compra cartão teste', 'Materiais de Copa', 'Cartão Teste', 'Empresa'),
   mcRow(116, `${mcY}-${mcM}-01`, `${mcY}-${mcM}-01`, '120.00', '0.00', 'Fornecedor Teste A', 'Serviço avulso teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(117, `${mcY}-01-12`, `${mcY}-01-12`, '100.00', '0.00', 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa'),
-  mcRow(118, `${mcY}-${mcM}-02`, `${mcY}-${mcM}-02`, '40.00', '0.00', 'Fornecedor Novo Teste', 'Primeira compra teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa')].join('\r\n');
+  mcRow(118, `${mcY}-${mcM}-02`, `${mcY}-${mcM}-02`, '40.00', '0.00', 'Fornecedor Novo Teste', 'Primeira compra teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(119, `${mcY}-01-22`, `${mcY}-01-22`, '555.00', '0.00', 'Fornecedor Cliente', 'Pago pelo cliente teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa', 'Cliente')].join('\r\n');
 let mcHits = 0;
 const mcServer = http.createServer((req, res) => {
   mcHits++;
@@ -1943,17 +1944,18 @@ async function main() {
     ok(st.configured === true && st.plan === 'semanal' && !st.next_allowed, 'Mais Controle: configurado pelas variáveis do servidor');
     ok((await biNo('GET', '/finance/maiscontrole')).status === 403, 'Mais Controle: sem liberação não acessa');
     const f1 = await fo('POST', '/finance/maiscontrole/fetch', {});
-    ok(f1.status === 200 && f1.data.rows === 10 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
+    ok(f1.status === 200 && f1.data.rows === 11 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
     ok((await fo('POST', '/finance/maiscontrole/reprocess', {})).status === 404 && !(await fo('GET', '/finance/maiscontrole')).data.pending, 'resposta da API lida: nada pendente para reprocessar');
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.totals.other_account === 9 && pv.totals.novo === 0 && pv.accounts.length === 2, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
+    ok(pv.totals.other_account === 9 && pv.totals.novo === 0 && pv.accounts.length === 2 && pv.issues.length === 9, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
     await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Teste PJ', label: 'Conta Teste PJ', active: true });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     const cartao = pv.accounts.find(a => a.label === 'Cartão Teste');
     ok(pv.totals.other_account === 1 && cartao && !cartao.active && cartao.total === 70 && cartao.categories[0].label === 'Materiais de Copa', 'conta não cadastrada: alerta com o custo e a categoria');
     ok(pv.totals.projects === 1 && pv.projects[0].cost_center === 'Obra Teste 1', 'outro centro de custo: vai para Custos destinados a Projetos');
+    ok(pv.issues.length === 2 && pv.issues.some(i => i.kind === 'cliente' && i.amount === 555) && pv.issues.some(i => i.kind === 'conta' && i.account === 'Cartão Teste'), 'ajustar no Mais Controle: pago pelo cliente e conta não cadastrada no centro de custo Empresa');
     ok(pv.categories.length === 1 && pv.categories[0].label === 'Tarifa MC teste' && pv.totals.unpaid === 1, 'a tarefa é a categoria (mesmo nome); categoria sem tarefa vira alerta; linha sem pagamento fora');
     ok(pv.first_year === Number(yp) && pv.changes.filter(c => c.kind === 'novo' && c.title === 'Contabilidade MC teste').length === 3 && pv.changes.some(c => c.kind === 'novo' && c.title === 'Manual MC teste'), 'prévia: meses novos do histórico (ano anterior e atual)');
     const rv = pv.reviews.find(r => r.category === 'Outra categoria MC teste');

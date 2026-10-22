@@ -2914,3 +2914,8 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .mc-fix select { min-height: 32px; max-width: 200px; font-size: 12.5px; }
 .mc-note { color: #2F6FB3 !important; font-weight: 600; }
 .mc-pays .mc-pacts { max-width: 420px; }
+
+.mc-iss summary { cursor: pointer; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 13px; background: #FDF6F5; }
+.mc-iss[open] summary { border-bottom: 1px solid var(--line); }
+.mc-iss .mc-cats { max-height: 320px; overflow-y: auto; }
+.mc-iss .mc-cats li { grid-template-columns: 1fr; }

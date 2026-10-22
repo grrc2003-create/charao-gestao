@@ -77,6 +77,17 @@ export async function view({ state, render }) {
           <span class="mc-cat"><b>${a.label}</b><small>${a.count ? `${a.count} pagamento(s) · ${money(a.total)}` : 'sem pagamentos'}${!a.active && a.categories?.length ? ` · ${a.categories.slice(0, 5).map(c => `${c.label} ${money(c.total)}`).join(' · ')}` : ''}</small></span>
           <label class="switch mc-acc"><input type="checkbox" data-mc-acc="${a.label}" data-mc-acc-key="${a.key}" ${a.active ? 'checked' : ''}>${a.active ? 'Cadastrada: traz os custos' : 'Não cadastrada'}</label></li>`)}</ul>
       </section>` : ''}
+      ${pv.issues?.length ? (() => {
+        const cli = pv.issues.filter(i => i.kind === 'cliente'), acc = pv.issues.filter(i => i.kind === 'conta');
+        const byAcc = [...new Set(acc.map(i => i.account))].map(a => ({ account: a, items: acc.filter(i => i.account === a) }));
+        const item = i => html`<li><span class="mc-cat"><b>${i.supplier || '(sem fornecedor)'} · ${money(i.amount)}</b><small>${dmy(i.paid_date)} · ${i.category || '(sem categoria)'}${i.description ? ` · ${i.description}` : ''}${i.kind === 'cliente' ? ` · conta ${i.account}` : ''}</small></span></li>`;
+        return html`<section class="card section mc-issues">
+          <div class="card-head"><h2>${icon('alert')}Ajustar no Mais Controle</h2><span class="sub">centro de custo Empresa · ${pv.issues.length} lançamento(s) fora do realizado · ${money(pv.issues.reduce((s, i) => s + i.amount, 0))}</span></div>
+          <div class="card-body"><p class="muted" style="margin:0">Só entra o que é custo da empresa (centro de custo Empresa, pago pela empresa, em conta bancária cadastrada). Estes lançamentos estão no centro de custo Empresa mas não seguem a regra: ajuste no Mais Controle (ou cadastre a conta, se ela for da empresa). Ao ajustar, saem desta lista na próxima atualização.</p></div>
+          ${cli.length ? html`<details open class="mc-iss"><summary><b>Pago pelo cliente no centro de custo Empresa</b> · ${cli.length} · ${money(cli.reduce((s, i) => s + i.amount, 0))}</summary><ul class="mc-cats">${cli.map(item)}</ul></details>` : ''}
+          ${byAcc.map(g => html`<details class="mc-iss"><summary><b>Conta não cadastrada: ${g.account}</b> · ${g.items.length} · ${money(g.items.reduce((s, i) => s + i.amount, 0))}</summary><ul class="mc-cats">${g.items.map(item)}</ul></details>`)}
+        </section>`;
+      })() : ''}
       ${pv.categories.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('alert')}Categorias sem tarefa financeira</h2><span class="sub">${pv.categories.length} · ${money(t.unmapped_total)} fora do realizado</span></div>
         <div class="card-body"><p class="muted" style="margin:0">A tarefa financeira é a categoria do Mais Controle (mesmo nome). Cadastre a tarefa com o nome da categoria e, na próxima sincronização, o histórico entra sozinho.</p></div>

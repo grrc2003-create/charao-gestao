@@ -25,7 +25,7 @@ export function reviewActs(r, tasks = TASKS) {
       : r.state === 'corrigido' ? html`<button type="button" class="btn btn-ghost btn-sm" data-rv="reabrir" data-key="${r.key}">Desfazer correção</button>`
       : html`<button type="button" class="btn btn-ghost btn-sm" data-rv="ok" data-key="${r.key}" data-usual="${r.usual || ''}">${icon('check')}Está OK</button>
         <button type="button" class="btn btn-ghost btn-sm mc-wrong" data-rv="standby" data-key="${r.key}" data-usual="${r.usual || ''}">Stand by</button>`}
-    <span class="mc-fix"><select data-fix-sel="${r.key}" aria-label="Tarefa correta">${others.map(x => html`<option value="${x.id}" ${x.id === def ? 'selected' : ''}>${x.title}</option>`)}</select>
+    <span class="mc-fix"><select data-fix-sel="${r.key}" aria-label="Tarefa correta"><option value="" ${def ? '' : 'selected'}>— escolher tarefa —</option>${others.map(x => html`<option value="${x.id}" ${x.id === def ? 'selected' : ''}>${x.title}</option>`)}</select>
       <button type="button" class="btn btn-ghost btn-sm" data-rv="corrigido" data-key="${r.key}" data-usual="${r.usual || ''}">Corrigir</button></span>
   </span>`;
 }
@@ -34,7 +34,10 @@ export function bindReviewActs(scope, after) {
   scope.querySelectorAll('[data-rv]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
     const body = { key: b.dataset.key, decision: b.dataset.rv, usual: b.dataset.usual };
-    if (b.dataset.rv === 'corrigido') body.obligation_id = Number(scope.querySelector(`[data-fix-sel="${b.dataset.key}"]`)?.value);
+    if (b.dataset.rv === 'corrigido') {
+      body.obligation_id = Number(scope.querySelector(`[data-fix-sel="${b.dataset.key}"]`)?.value);
+      if (!body.obligation_id) { toast('Escolha a tarefa (categoria) correta.', 'error'); b.disabled = false; return; }
+    }
     try {
       await api('/finance/maiscontrole/review', { method: 'POST', body });
       toast({ ok: 'OK: o fornecedor passa a valer nesta categoria.', corrigido: 'Corrigido: a despesa foi para a tarefa escolhida.', standby: 'Em stand by: fora do realizado até vir corrigido do Mais Controle.', reabrir: 'Decisão desfeita.' }[b.dataset.rv]);
@@ -83,12 +86,13 @@ export async function view({ state, render }) {
             <button type="button" class="btn btn-ghost btn-sm" data-ign="${c.label}">Ignorar categoria</button></span></li>`)}</ul>
       </section>` : ''}
       ${pv.reviews.length ? html`<section class="card section">
-        <div class="card-head"><h2>${icon('alert')}Conferência de alocação</h2><span class="sub">despesas numa categoria diferente da habitual do fornecedor${t.standby ? ` · ${t.standby} em stand by (${money(t.standby_total)} fora do realizado)` : ''}</span></div>
-        <div class="card-body"><p class="muted" style="margin:0"><b>Está OK</b>: o fornecedor passa a valer nesta categoria. <b>Corrigir</b>: a despesa vai para a tarefa escolhida já no sistema. <b>Stand by</b>: fica fora do realizado até ser corrigida no Mais Controle; quando vier correta, entra sozinha.</p></div>
+        <div class="card-head"><h2>${icon('alert')}Conferir categorias</h2><span class="sub">mês atual e anterior · despesas novas e categorias diferentes da habitual${t.standby ? ` · ${t.standby} em stand by (${money(t.standby_total)} fora do realizado)` : ''}</span></div>
+        <div class="card-body"><p class="muted" style="margin:0"><b>Está OK</b>: a categoria do Mais Controle está certa (o fornecedor passa a valer nela). <b>Corrigir</b>: a despesa vai para a tarefa escolhida já no sistema. <b>Stand by</b>: erro de cadastro no Mais Controle; fica fora do realizado até vir corrigida e, quando vier, entra sozinha.</p></div>
         <ul class="mc-cats mc-rev">${pv.reviews.map(r => html`<li class="${r.state === 'standby' ? 'is-late' : 'is-pending'}">
           <span class="mc-cat"><b>${r.supplier || '(sem fornecedor)'} · ${money(r.amount)}</b>
             <small>${dmy(r.due_date)}${r.description ? ` · ${r.description}` : ''}</small>
-            <small>No Mais Controle: <b>${r.category}</b>${r.usual ? html` · costuma ser <b>${r.usual}</b>` : ''}${r.state === 'standby' ? ` · em stand by desde ${when(r.marked_at)}: aguardando ajuste no Mais Controle` : ''}</small></span>
+            <small><span class="m-badge ${r.state === 'nova' ? 'm-draft' : r.state === 'standby' ? 'fi-err' : 'm-paid'}">${{ nova: 'Despesa nova', conferir: 'Categoria diferente da habitual', standby: 'Stand by' }[r.state]}</span>
+              No Mais Controle: <b>${r.category}</b>${r.usual ? html` · costuma ser <b>${r.usual}</b>` : ''}${r.state === 'standby' ? ` · desde ${when(r.marked_at)}: aguardando ajuste no Mais Controle` : ''}</small></span>
           ${reviewActs(r)}</li>`)}</ul>
       </section>` : ''}
       ${pv.exclusions?.length ? html`<section class="card section">

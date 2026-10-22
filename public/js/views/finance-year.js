@@ -4,7 +4,6 @@
 import { html, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
-import * as MC from './mais-controle.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = v => BRL.format(Number(v) || 0);
@@ -141,21 +140,17 @@ export async function view({ state, query, setQuery, render }) {
         if (!c) return;
         const reload = () => { setQuery({ ano: d.year, m: mobMonth }); render(); };
         if (done(c) && c.source === 'maiscontrole') {
-          const [pays, obs] = await Promise.all([api('/finance/maiscontrole/payments', { query: { tarefa: r.id, mes: c.ym } }).catch(() => []), api('/finance/obligations').catch(() => [])]);
-          const tasks = obs.filter(x => x.active).map(x => ({ id: x.id, title: x.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
+          const pays = await api('/finance/maiscontrole/payments', { query: { tarefa: r.id, mes: c.ym } }).catch(() => []);
           const p = sheet({
             title: `${r.title} · ${ymLabel(c.ym)}`, submitLabel: 'Fechar',
             body: html`<p style="margin:0 0 6px"><b class="ok">✓ Pago ${money(c.real)}</b> · Mais Controle · previsto ${money(c.planned)}</p>
               <p class="muted" style="margin:0 0 8px">Pagamentos do Mais Controle que formam o realizado do mês. Se algum não deve entrar, use “Não trazer”: o realizado é recalculado na hora.</p>
               <ul class="mc-pays">${pays.map(x => html`<li class="${x.excluded || x.standby ? 'is-off' : ''}"><span><b>${x.supplier || '(sem fornecedor)'}</b><small>${fmtDate(x.paid_date)}${x.description ? ` · ${x.description}` : ''}</small>
-                  ${x.fixed_from ? html`<small class="mc-note">corrigida no sistema (no Mais Controle: ${x.fixed_from})</small>` : ''}${x.standby ? html`<small class="mc-note">em stand by: fora do realizado até ser corrigida no Mais Controle</small>` : ''}</span>
+                  ${x.fixed_from ? html`<small class="mc-note">corrigida no sistema (no Mais Controle: ${x.fixed_from})</small>` : ''}${x.standby ? html`<small class="mc-note">em stand by: fora do realizado até ser corrigida no Mais Controle (veja em Mais Controle › Conferir categorias)</small>` : ''}</span>
                 <span class="mc-pv"><b>${money(x.amount)}</b>${x.excluded ? html`<small>não entra</small>` : html`<span class="mc-pacts">
-                  ${MC.reviewActs({ key: x.key, category: x.fixed_from || x.category, usual: null, state: x.standby ? 'standby' : (x.fixed_from ? 'corrigido' : '') }, tasks)}
                   <button type="button" class="btn btn-ghost btn-sm" data-ex="pagamento" data-key="${x.key}">Não trazer</button>
                   ${x.supplier ? html`<button type="button" class="btn btn-ghost btn-sm" data-ex="fornecedor" data-label="${x.supplier}">Não trazer o fornecedor</button>` : ''}</span>`}</span></li>`)}</ul>`,
           });
-          const sheetEl = [...document.querySelectorAll('.sheet')].at(-1);
-          MC.bindReviewActs(sheetEl, () => { sheetEl.querySelector('[data-close]')?.click(); reload(); });
           document.querySelectorAll('.sheet [data-ex]').forEach(b => b.addEventListener('click', async () => {
             const forn = b.dataset.ex === 'fornecedor';
             if (!(await confirmSheet(forn ? 'Não trazer o fornecedor' : 'Não trazer este pagamento', forn ? `Nenhum pagamento de “${b.dataset.label}” vai entrar nas tarefas financeiras. Dá para voltar em Mais Controle › Custos que não entram.` : 'Este pagamento deixa de entrar no realizado. Dá para voltar em Mais Controle › Custos que não entram.', 'Não trazer', true))) return;

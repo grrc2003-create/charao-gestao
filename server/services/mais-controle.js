@@ -376,7 +376,12 @@ export function reviews() {
   const accepted = new Map();
   for (const r of [...decided.values()].filter(x => x.decision === 'ok').sort((a, b) => String(a.decided_at).localeCompare(String(b.decided_at)))) accepted.set(r.supplier_key, r.category);
   const hist = new Map();
-  for (const p of rows) if (p.ref_month < cur) {
+  // Período conferido a cada atualização: mês atual e o anterior
+  const [cy, cm] = cur.split('-').map(Number);
+  const prevM = cm === 1 ? `${cy - 1}-12` : `${cy}-${String(cm - 1).padStart(2, '0')}`;
+  const firstOf = new Map();
+  for (const p of rows) if (!firstOf.has(p.supplier_key) || p.ref_month < firstOf.get(p.supplier_key)) firstOf.set(p.supplier_key, p.ref_month);
+  for (const p of rows) if (p.ref_month < prevM) {
     const d = decided.get(p.ext_key);
     const cat = d?.decision === 'corrigido' && hkey(p.category) === hkey(d.category) ? d.fix_category : p.category;
     const m = hist.get(p.supplier_key) || new Map();
@@ -390,12 +395,15 @@ export function reviews() {
     // Stand by: aparece até o Mais Controle mandar a categoria corrigida (qualquer mês)
     if (d?.decision === 'standby') { if (hkey(p.category) === hkey(d.category)) out.push({ ...base, usual: d.usual, state: 'standby', marked_at: d.decided_at }); continue; }
     if (d && hkey(p.category) === hkey(d.category)) continue; // ok ou corrigido (enquanto a categoria não mudar lá)
-    if (p.ref_month !== cur) continue;
+    if (p.ref_month < prevM) continue;
+    // Despesa nova: o fornecedor não tem pagamento em meses anteriores
+    if (firstOf.get(p.supplier_key) >= p.ref_month && !hist.has(p.supplier_key)) { out.push({ ...base, usual: null, state: 'nova' }); continue; }
     const usual = usualOf(p.supplier_key);
     if (!usual || hkey(usual) === hkey(p.category)) continue;
     out.push({ ...base, usual, state: 'conferir' });
   }
-  return out.sort((a, b) => (a.state === 'standby' ? -1 : 1) - (b.state === 'standby' ? -1 : 1) || String(a.supplier).localeCompare(String(b.supplier), 'pt-BR'));
+  const ord = { standby: 0, conferir: 1, nova: 2 };
+  return out.sort((a, b) => ord[a.state] - ord[b.state] || String(a.supplier).localeCompare(String(b.supplier), 'pt-BR'));
 }
 export function decideReview(ctx, body, ip) {
   requireFinance(ctx.user);

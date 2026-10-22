@@ -30,7 +30,8 @@ const MC_CSV = [MC_HEAD,
   mcRow(114, `${mcY}-01-18`, `${mcY}-01-18`, '900.00', '0.00', 'Fornecedor Obra', 'Material obra teste', 'Materiais', 'Conta Teste PJ', 'Obra Teste 1'),
   mcRow(115, `${mcY}-01-19`, `${mcY}-01-19`, '70.00', '0.00', 'Loja Teste', 'Compra cartão teste', 'Materiais de Copa', 'Cartão Teste', 'Empresa'),
   mcRow(116, `${mcY}-${mcM}-01`, `${mcY}-${mcM}-01`, '120.00', '0.00', 'Fornecedor Teste A', 'Serviço avulso teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
-  mcRow(117, `${mcY}-01-12`, `${mcY}-01-12`, '100.00', '0.00', 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa')].join('\r\n');
+  mcRow(117, `${mcY}-01-12`, `${mcY}-01-12`, '100.00', '0.00', 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(118, `${mcY}-${mcM}-02`, `${mcY}-${mcM}-02`, '40.00', '0.00', 'Fornecedor Novo Teste', 'Primeira compra teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa')].join('\r\n');
 let mcHits = 0;
 const mcServer = http.createServer((req, res) => {
   mcHits++;
@@ -1942,12 +1943,12 @@ async function main() {
     ok(st.configured === true && st.plan === 'semanal' && !st.next_allowed, 'Mais Controle: configurado pelas variáveis do servidor');
     ok((await biNo('GET', '/finance/maiscontrole')).status === 403, 'Mais Controle: sem liberação não acessa');
     const f1 = await fo('POST', '/finance/maiscontrole/fetch', {});
-    ok(f1.status === 200 && f1.data.rows === 9 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
+    ok(f1.status === 200 && f1.data.rows === 10 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
     ok((await fo('POST', '/finance/maiscontrole/reprocess', {})).status === 404 && !(await fo('GET', '/finance/maiscontrole')).data.pending, 'resposta da API lida: nada pendente para reprocessar');
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.totals.other_account === 8 && pv.totals.novo === 0 && pv.accounts.length === 2, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
+    ok(pv.totals.other_account === 9 && pv.totals.novo === 0 && pv.accounts.length === 2, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
     await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Teste PJ', label: 'Conta Teste PJ', active: true });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     const cartao = pv.accounts.find(a => a.label === 'Cartão Teste');
@@ -1957,6 +1958,7 @@ async function main() {
     ok(pv.first_year === Number(yp) && pv.changes.filter(c => c.kind === 'novo' && c.title === 'Contabilidade MC teste').length === 3 && pv.changes.some(c => c.kind === 'novo' && c.title === 'Manual MC teste'), 'prévia: meses novos do histórico (ano anterior e atual)');
     const rv = pv.reviews.find(r => r.category === 'Outra categoria MC teste');
     ok(rv && rv.usual === 'Contabilidade MC teste' && rv.state === 'conferir', 'conferência: despesa do mês em categoria diferente da habitual do fornecedor');
+    ok(pv.reviews.some(r => r.supplier === 'Fornecedor Novo Teste' && r.state === 'nova') && (mcM <= '02' || !pv.reviews.some(r => r.supplier === 'Fornecedor Manual')), 'conferência: despesa nova (primeira vez do fornecedor) no período da atualização');
     // Pagamento lançado à mão (diferente do Mais Controle) não é mexido
     const mi = (await fo('POST', `/finance/obligations/${man}/months/${y}-01`)).data.id;
     await fo('POST', `/finance/items/${mi}/pay`, { paid_date: `${y}-01-12`, paid_amount: 999 });
@@ -1969,7 +1971,7 @@ async function main() {
     ok(['sem_previsto', 'nao_ocorreu'].includes(row(gy, cont).cells[2]?.status) || mcM <= '03', 'mês sem realizado no ano anterior: previsto 0 (nada esperado)');
     // Categoria que só aparece no ano atual: previsto = o próprio realizado; meses futuros = média do que já foi pago no ano
     const outraRow = row(gy, outra), mIdx = Number(mcM) - 1;
-    ok(outraRow.cells[mIdx]?.planned === 120 && (mIdx === 11 || outraRow.cells[11]?.planned === 120), 'primeiro ano da categoria: previsto = o próprio realizado; meses futuros = média do ano');
+    ok(outraRow.cells[mIdx]?.planned === 160 && (mIdx === 11 || outraRow.cells[11]?.planned === 160), 'primeiro ano da categoria: previsto = o próprio realizado; meses futuros = média do ano');
     ok(row(gy, man).cells[0].real === 999, 'pago à mão diferente do Mais Controle: mantido');
     const hist = (await fo('GET', `/finance/obligations/${cont}`)).data.items.find(i => i.ref_month === `${yp}-01`);
     ok(hist && !hist.task_id, 'meses do histórico não geram tarefas "a fazer"');

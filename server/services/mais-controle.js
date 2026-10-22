@@ -285,12 +285,53 @@ export function monthPayments(ctx, obligationId, ym) {
   const o = one('SELECT * FROM finance_obligations WHERE id = ?', obligationId);
   if (!o || !/^\d{4}-\d{2}$/.test(String(ym || ''))) throw notFound('Tarefa ou mês não encontrado.');
   const ex = exclusions(), dec = decisions();
-  const catOf = p => { const d = dec.get(p.ext_key); return d?.decision === 'corrigido' && hkey(p.category) === hkey(d.category) ? d.fix_category : p.category; };
+  const rules = categoryRules();
+  const catOf = p => effectiveCategory(p, dec, rules);
   return all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
     WHERE p.source = ? AND p.ref_month = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa')`, SOURCE, ym)
     .filter(p => hkey(catOf(p)) === hkey(o.title) || (hkey(p.category) === hkey(o.title) && dec.get(p.ext_key)?.decision === 'standby'))
     .map(p => { const d = dec.get(p.ext_key); return { key: p.ext_key, supplier: p.supplier, supplier_key: p.supplier_key, description: p.description, amount: p.amount, due_date: p.due_date, paid_date: p.paid_date, category: p.category,
       excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category) }; });
+}
+
+// ---------- Regras por categoria: enviar para outra tarefa ou ajustar no Mais Controle ----------
+function categoryRules() {
+  const m = new Map();
+  try {
+    for (const r of all(`SELECT r.*, o.title AS target FROM ext_category_rules r LEFT JOIN finance_obligations o ON o.id = r.obligation_id WHERE r.source = ?`, SOURCE)) m.set(r.cat_key, r);
+  } catch { /* antes da migração */ }
+  return m;
+}
+// Categoria efetiva de um pagamento: correção da despesa (conferência) > regra da categoria > categoria do Mais Controle
+function effectiveCategory(p, dec, rules) {
+  const d = dec.get(p.ext_key);
+  if (d?.decision === 'corrigido' && d.fix_category && hkey(p.category) === hkey(d.category)) return d.fix_category;
+  const r = rules.get(hkey(p.category));
+  if (r?.action === 'mapear' && r.target) return r.target;
+  return p.category;
+}
+export function setCategoryRule(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const label = str(body.label, { max: 160, required: true, label: 'Categoria' });
+  const key = hkey(label);
+  if (body.action === 'remover') {
+    run('DELETE FROM ext_category_rules WHERE source = ? AND cat_key = ?', SOURCE, key);
+    audit(ctx.user.id, 'finance', null, 'Mais Controle: regra da categoria desfeita', { categoria: label }, ip);
+    return sync(ctx, ip);
+  }
+  const action = body.action === 'mapear' ? 'mapear' : body.action === 'ajustar' ? 'ajustar' : null;
+  if (!action) throw badRequest('Escolha: enviar para outra tarefa ou ajustar no Mais Controle.');
+  let oid = null;
+  if (action === 'mapear') {
+    const o = one('SELECT * FROM finance_obligations WHERE id = ?', intOrNull(body.obligation_id));
+    if (!o) throw badRequest('Escolha a tarefa para onde a categoria vai.');
+    oid = o.id;
+  }
+  run(`INSERT INTO ext_category_rules (source, cat_key, label, action, obligation_id, created_by) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(source, cat_key) DO UPDATE SET label = excluded.label, action = excluded.action, obligation_id = excluded.obligation_id, created_by = excluded.created_by, created_at = datetime('now')`,
+    SOURCE, key, label, action, oid, ctx.user.id);
+  audit(ctx.user.id, 'finance', null, action === 'mapear' ? 'Mais Controle: categoria enviada para outra tarefa' : 'Mais Controle: categoria para ajustar no Mais Controle', { categoria: label, tarefa: oid }, ip);
+  return sync(ctx, ip);
 }
 
 // ---------- Ajustar no Mais Controle: lançamentos no centro de custo Empresa que não são custo da empresa ----------
@@ -322,6 +363,8 @@ function allocation() {
   const real = new Map(), noTask = new Map(), otherAcc = new Map(), projects = new Map(), accounts = new Map();
   const ex = exclusions();
   const fixes = decisions();
+  const rules = categoryRules();
+  const adjust = new Map();
   let firstYear = null, unpaid = 0, excludedN = 0, excludedTotal = 0, standbyN = 0, standbyTotal = 0;
   for (const p of rows) {
     if (!p.paid_date || !(p.amount > 0)) { unpaid++; continue; }
@@ -343,7 +386,14 @@ function allocation() {
     // Stand by: fora do realizado enquanto o Mais Controle mandar a mesma categoria (corrigida lá → entra sozinha)
     if (d?.decision === 'standby' && hkey(p.category) === hkey(d.category)) { standbyN++; standbyTotal = r2(standbyTotal + p.amount); continue; }
     // Corrigida no sistema: vai para a tarefa escolhida (se o Mais Controle não mudou a categoria desde então)
-    if (d?.decision === 'corrigido' && d.fix_category && hkey(p.category) === hkey(d.category)) p.category = d.fix_category;
+    const rule = rules.get(hkey(p.category));
+    if (rule?.action === 'ajustar' && !(d?.decision === 'corrigido' && hkey(p.category) === hkey(d.category))) {
+      const a = adjust.get(rule.cat_key) || { label: rule.label, count: 0, total: 0, last: null, since: rule.created_at };
+      a.count++; a.total = r2(a.total + p.amount); if (!a.last || p.ref_month > a.last) a.last = p.ref_month;
+      adjust.set(rule.cat_key, a);
+      continue;
+    }
+    p.category = effectiveCategory(p, fixes, rules);
     const o = byName.get(hkey(p.category));
     if (!o) {
       const c = noTask.get(hkey(p.category)) || { label: p.category || '(sem categoria)', count: 0, total: 0, last: null };
@@ -358,7 +408,7 @@ function allocation() {
   }
   for (const a of accounts.values()) a.categories = [...a.categories].map(([label, total]) => ({ label, total })).sort((x, y) => y.total - x.total);
   for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, count: 0, total: 0, categories: [] });
-  return { real, noTask, projects, accounts, firstYear, unpaid, obs, excludedN, excludedTotal, standbyN, standbyTotal };
+  return { real, noTask, projects, accounts, firstYear, unpaid, obs, excludedN, excludedTotal, standbyN, standbyTotal, adjust, rules };
 }
 
 // O que a sincronização muda nas parcelas (novo / alterado / removido / pago à mão)
@@ -391,6 +441,7 @@ export function reviews() {
   const ex = exclusions();
   for (let i = rows.length - 1; i >= 0; i--) if (excluded(ex, rows[i])) rows.splice(i, 1);
   const decided = decisions();
+  const rulesR = categoryRules();
   // Categoria habitual: a última aceita ("Está OK") para o fornecedor, senão a mais frequente nos meses anteriores
   const accepted = new Map();
   for (const r of [...decided.values()].filter(x => x.decision === 'ok').sort((a, b) => String(a.decided_at).localeCompare(String(b.decided_at)))) accepted.set(r.supplier_key, r.category);
@@ -402,7 +453,7 @@ export function reviews() {
   for (const p of rows) if (!firstOf.has(p.supplier_key) || p.ref_month < firstOf.get(p.supplier_key)) firstOf.set(p.supplier_key, p.ref_month);
   for (const p of rows) if (p.ref_month < prevM) {
     const d = decided.get(p.ext_key);
-    const cat = d?.decision === 'corrigido' && hkey(p.category) === hkey(d.category) ? d.fix_category : p.category;
+    const cat = effectiveCategory(p, decided, rulesR);
     const m = hist.get(p.supplier_key) || new Map();
     m.set(cat, (m.get(cat) || 0) + 1); hist.set(p.supplier_key, m);
   }
@@ -466,6 +517,8 @@ export function preview(ctx) {
     fetch: f ? { id: f.id, origin: f.origin, file_name: f.file_name, fetched_at: f.fetched_at, rows: f.row_count, data_until: f.data_until } : null,
     first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(), exclusions: listExclusions(ctx),
     issues: issues(),
+    category_rules: [...al.rules.values()].map(r => ({ label: r.label, action: r.action, target: r.target || null, created_at: r.created_at, pending: al.adjust.get(r.cat_key) || null }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
     tasks: al.obs.filter(o => o.active).map(o => ({ id: o.id, title: o.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR')),
     totals: {
       novo: cnt('novo'), alterado: cnt('alterado'), removido: cnt('removido'), manual: cnt('manual'),
@@ -474,6 +527,7 @@ export function preview(ctx) {
       other_account: otherAcc.reduce((s, a) => s + a.count, 0), other_account_total: r2(otherAcc.reduce((s, a) => s + a.total, 0)),
       projects: projList.reduce((s, g) => s + g.count, 0), projects_total: r2(projList.reduce((s, g) => s + g.amount, 0)), unpaid: al.unpaid,
       excluded: al.excludedN, excluded_total: al.excludedTotal, standby: al.standbyN, standby_total: al.standbyTotal,
+      adjust: [...al.adjust.values()].reduce((s, a) => s + a.count, 0), adjust_total: r2([...al.adjust.values()].reduce((s, a) => s + a.total, 0)),
     },
   };
 }

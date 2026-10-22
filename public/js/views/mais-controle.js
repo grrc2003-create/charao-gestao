@@ -94,7 +94,10 @@ export async function view({ state, render }) {
         <ul class="mc-cats">${pv.categories.map(c => html`<li class="is-pending">
           <span class="mc-cat"><b>${c.label}</b><small>${c.count} pagamento(s) · ${money(c.total)}${c.last ? ` · último em ${ymLabel(c.last)}` : ''}</small></span>
           <span class="mc-rev-acts"><a class="btn btn-ghost btn-sm" href="#/financeiro/obrigacoes/nova?mc=1&titulo=${encodeURIComponent(c.label)}">${icon('plus')}Cadastrar tarefa</a>
-            <button type="button" class="btn btn-ghost btn-sm" data-ign="${c.label}">Ignorar categoria</button></span></li>`)}</ul>
+            <span class="mc-fix"><select data-map-sel="${c.label}" aria-label="Enviar para a tarefa"><option value="">— enviar para a tarefa… —</option>${(pv.tasks || []).map(x => html`<option value="${x.id}">${x.title}</option>`)}</select>
+              <button type="button" class="btn btn-ghost btn-sm" data-cr="mapear" data-label="${c.label}">Enviar</button></span>
+            <button type="button" class="btn btn-ghost btn-sm mc-wrong" data-cr="ajustar" data-label="${c.label}">Ajustar no Mais Controle</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-ign="${c.label}">Ignorar</button></span></li>`)}</ul>
       </section>` : ''}
       ${pv.reviews.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('alert')}Conferir categorias</h2><span class="sub">mês atual e anterior · despesas novas e categorias diferentes da habitual${t.standby ? ` · ${t.standby} em stand by (${money(t.standby_total)} fora do realizado)` : ''}</span></div>
@@ -105,6 +108,12 @@ export async function view({ state, render }) {
             <small><span class="m-badge ${r.state === 'nova' ? 'm-draft' : r.state === 'standby' ? 'fi-err' : 'm-paid'}">${{ nova: 'Despesa nova', conferir: 'Categoria diferente da habitual', standby: 'Stand by' }[r.state]}</span>
               No Mais Controle: <b>${r.category}</b>${r.usual ? html` · costuma ser <b>${r.usual}</b>` : ''}${r.state === 'standby' ? ` · desde ${when(r.marked_at)}: aguardando ajuste no Mais Controle` : ''}</small></span>
           ${reviewActs(r)}</li>`)}</ul>
+      </section>` : ''}
+      ${pv.category_rules?.length ? html`<section class="card section">
+        <div class="card-head"><h2>${icon('settings')}Regras por categoria</h2><span class="sub">${pv.category_rules.length}${t.adjust ? ` · ${t.adjust} pagamento(s) aguardando ajuste no Mais Controle (${money(t.adjust_total)} fora do realizado)` : ''}</span></div>
+        <ul class="mc-cats">${pv.category_rules.map(r => html`<li class="${r.action === 'ajustar' && r.pending ? 'is-late' : ''}">
+          <span class="mc-cat"><b>${r.label}</b><small>${r.action === 'mapear' ? `todos os pagamentos vão para a tarefa “${r.target || '(tarefa excluída)'}”` : r.pending ? `ajustar no Mais Controle: ${r.pending.count} pagamento(s) ainda nesta categoria · ${money(r.pending.total)} · último em ${ymLabel(r.pending.last)}` : 'ajustada no Mais Controle: não há mais pagamentos nesta categoria'}</small></span>
+          <button type="button" class="btn btn-ghost btn-sm" data-cr="remover" data-label="${r.label}">Desfazer regra</button></li>`)}</ul>
       </section>` : ''}
       ${pv.exclusions?.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('x')}Custos que não entram</h2><span class="sub">${pv.exclusions.length} · ${t.excluded} pagamento(s) · ${money(t.excluded_total)} fora</span></div>
@@ -153,6 +162,17 @@ export async function view({ state, render }) {
         if (!(await confirmSheet('Ignorar categoria', `Os pagamentos da categoria “${b.dataset.ign}” não vão entrar nas tarefas financeiras nem aparecer como alerta. Dá para voltar em “Custos que não entram”.`, 'Ignorar'))) { b.disabled = false; return; }
         await api('/finance/maiscontrole/exclusions', { method: 'POST', body: { kind: 'categoria', label: b.dataset.ign } });
         toast('Categoria ignorada.'); render();
+      })));
+      root.querySelectorAll('[data-cr]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        const action = b.dataset.cr, label = b.dataset.label;
+        const body = { label, action };
+        if (action === 'mapear') {
+          body.obligation_id = Number(root.querySelector(`[data-map-sel="${CSS.escape(label)}"]`)?.value);
+          if (!body.obligation_id) { toast('Escolha a tarefa para onde a categoria vai.', 'error'); b.disabled = false; return; }
+        }
+        if (action === 'ajustar' && !(await confirmSheet('Ajustar no Mais Controle', `Os pagamentos de “${label}” ficam fora do realizado e em alerta até serem recategorizados no Mais Controle. Quando não houver mais pagamentos nesta categoria, a regra se resolve sozinha.`, 'Confirmar'))) { b.disabled = false; return; }
+        await api('/finance/maiscontrole/category-rule', { method: 'POST', body });
+        toast({ mapear: 'Categoria enviada para a tarefa: o realizado foi recalculado.', ajustar: 'Categoria em ajuste no Mais Controle.', remover: 'Regra desfeita.' }[action]); render();
       })));
       root.querySelectorAll('[data-unex]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
         await api('/finance/maiscontrole/exclusions/remove', { method: 'POST', body: { kind: b.dataset.unex, key: b.dataset.key } });

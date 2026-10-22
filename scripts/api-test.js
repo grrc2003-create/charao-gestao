@@ -1981,6 +1981,19 @@ async function main() {
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');
     // Conferência: stand by (fora do realizado até vir corrigido), corrigir a categoria no sistema, reabrir e "Está OK"
+    // Regra por categoria: enviar todos os pagamentos para outra tarefa / ajustar no Mais Controle
+    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    const tar0 = pv.categories.find(c => c.label === 'Tarifa MC teste');
+    if (tar0) {
+      await fo('POST', '/finance/maiscontrole/category-rule', { label: 'Tarifa MC teste', action: 'mapear', obligation_id: man });
+      pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+      ok(!pv.categories.some(c => c.label === 'Tarifa MC teste') && pv.category_rules.some(r => r.action === 'mapear' && r.target === 'Manual MC teste'), 'enviar categoria para outra tarefa: sai dos alertas e soma na tarefa escolhida');
+      await fo('POST', '/finance/maiscontrole/category-rule', { label: 'Tarifa MC teste', action: 'ajustar' });
+      pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+      ok(pv.category_rules.find(r => r.label === 'Tarifa MC teste')?.pending?.count === 1 && pv.totals.adjust === 1, 'ajustar no Mais Controle: categoria fora do realizado e em alerta');
+      await fo('POST', '/finance/maiscontrole/category-rule', { label: 'Tarifa MC teste', action: 'remover' });
+      ok((await fo('GET', '/finance/maiscontrole/preview')).data.categories.some(c => c.label === 'Tarifa MC teste'), 'desfazer regra: volta a ser categoria sem tarefa');
+    } else ok(false, 'regra por categoria: categoria de teste não encontrada');
     const mi2 = Number(mcM) - 1, realAt = async id => row(await grid(y), id)?.cells[mi2]?.real ?? null;
     const contBefore = await realAt(cont), outraBefore = await realAt(outra);
     await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'standby', usual: rv.usual });

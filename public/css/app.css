@@ -2919,3 +2919,6 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .mc-iss[open] summary { border-bottom: 1px solid var(--line); }
 .mc-iss .mc-cats { max-height: 320px; overflow-y: auto; }
 .mc-iss .mc-cats li { grid-template-columns: 1fr; }
+
+.mc-cats .mc-rev-acts .mc-fix select { max-width: 220px; }
+.mc-cats li > .btn { justify-self: end; }

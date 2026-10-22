@@ -329,6 +329,7 @@ api.post('/api/finance/maiscontrole/sync', (req, res, { ctx, body }) => send(res
 api.get('/api/finance/maiscontrole/payments', (req, res, { ctx, query }) => send(res, 200, MaisControle.monthPayments(ctx, intOrNull(query.get('tarefa')), query.get('mes'))));
 api.post('/api/finance/maiscontrole/exclusions', (req, res, { ctx, body }) => send(res, 200, MaisControle.addExclusion(ctx, body, clientIp(req))));
 api.post('/api/finance/maiscontrole/exclusions/remove', (req, res, { ctx, body }) => send(res, 200, MaisControle.removeExclusion(ctx, body, clientIp(req))));
+api.post('/api/finance/maiscontrole/category-rule', (req, res, { ctx, body }) => send(res, 200, MaisControle.setCategoryRule(ctx, body, clientIp(req))));
 api.post('/api/finance/maiscontrole/review', (req, res, { ctx, body }) => send(res, 200, MaisControle.decideReview(ctx, body, clientIp(req))));
 api.get('/api/finance/import/last', (req, res, { ctx }) => send(res, 200, { last: FinanceImport.lastImport(ctx) }));
 api.post('/api/finance/import/:id/undo', (req, res, { ctx, params }) => send(res, 200, FinanceImport.undoImport(ctx, params.id, clientIp(req))));

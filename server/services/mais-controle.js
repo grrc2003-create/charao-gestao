@@ -61,22 +61,39 @@ function numOf(v) {
   return Number.isFinite(n) ? n : null;
 }
 // Linhas → pagamentos normalizados (só o necessário; sem dados bancários do fornecedor)
+// Dois formatos: a API ("data_vencimento", "valor_pago", "id_lancamento"…) e o arquivo exportado da tela
+// ("Data de Vencimento", "Valor Total Pago"…). Os nomes são comparados sem acento, espaço ou "_".
+const COLS = {
+  due: ['datadevencimento', 'datavencimento'], paid: ['datadepagamento', 'datapagamento'],
+  total: ['valortotalpago'], paidPart: ['valorpagodaparcela', 'valorpago'], fees: ['jurosmultas', 'valorjurosemulta'], discount: ['descontos', 'valordesconto'],
+  category: ['categoria'], supplier: ['fornecedor'], desc: ['descricao'], costCenter: ['centrodecusto'], account: ['contabancaria'],
+  id: ['idlancamento'], installment: ['numeroparcela'],
+};
 function toPayments(grid) {
-  const hi = grid.findIndex(r => r.some(v => hkey(v) === 'datadevencimento') && r.some(v => hkey(v) === 'categoria'));
-  if (hi < 0) throw badRequest('Não reconheci o formato de Pagamentos do Mais Controle (faltam as colunas "Data de Vencimento" e "Categoria").');
+  const hi = grid.findIndex(r => r.some(v => COLS.due.includes(hkey(v))) && r.some(v => hkey(v) === 'categoria'));
+  if (hi < 0) {
+    const first = (grid.find(r => r.some(v => String(v ?? '').trim())) || []).filter(v => String(v ?? '').trim()).slice(0, 12).join(', ');
+    throw badRequest(`Não reconheci o formato de Pagamentos do Mais Controle (faltam as colunas de vencimento e categoria).${first ? ` Colunas recebidas: ${first}.` : ''}`);
+  }
   const H = grid[hi].map(hkey);
-  const at = (r, ...ks) => { for (const k of ks) { const i = H.indexOf(k); if (i >= 0 && r[i] !== null && r[i] !== undefined && String(r[i]).trim() !== '') return r[i]; } return null; };
+  const at = (r, ks) => { for (const k of ks) { const i = H.indexOf(k); if (i >= 0 && r[i] !== null && r[i] !== undefined && String(r[i]).trim() !== '') return r[i]; } return null; };
   const out = [];
   for (const r of grid.slice(hi + 1)) {
-    const due = dateOf(at(r, 'datadevencimento')), paid = dateOf(at(r, 'datadepagamento'));
+    const due = dateOf(at(r, COLS.due)), paid = dateOf(at(r, COLS.paid));
     if (!due && !paid) continue;
-    const amount = numOf(at(r, 'valortotalpago', 'valorpagodaparcela'));
+    // Valor pago: o total pago (com juros/multa e descontos); na API vem separado (valor pago + juros − desconto)
+    let amount = numOf(at(r, COLS.total));
+    if (amount === null) {
+      const part = numOf(at(r, COLS.paidPart));
+      amount = part === null ? null : part + (numOf(at(r, COLS.fees)) || 0) - (numOf(at(r, COLS.discount)) || 0);
+    }
+    const id = String(at(r, COLS.id) ?? '').trim();
     out.push({
+      id: id ? `${id}:${String(at(r, COLS.installment) ?? '1').trim()}` : null,
       due, paid, amount: amount === null ? null : r2(amount),
-      category: String(at(r, 'categoria') ?? '').trim(), supplier: String(at(r, 'fornecedor') ?? '').trim(),
-      desc: String(at(r, 'descricao') ?? '').trim().slice(0, 200),
-      cost_center: String(at(r, 'centrodecusto') ?? '').trim(), account: String(at(r, 'contabancaria') ?? '').trim(),
-      obra: String(at(r, 'obra') ?? '').trim().replace(/^-$/, ''),
+      category: String(at(r, COLS.category) ?? '').trim(), supplier: String(at(r, COLS.supplier) ?? '').trim(),
+      desc: String(at(r, COLS.desc) ?? '').trim().slice(0, 200),
+      cost_center: String(at(r, COLS.costCenter) ?? '').trim(), account: String(at(r, COLS.account) ?? '').trim(),
     });
   }
   return out;
@@ -86,6 +103,7 @@ function toPayments(grid) {
 function withKeys(pays) {
   const seen = new Map();
   return pays.map(p => {
+    if (p.id) return { ...p, key: `id:${p.id}` }; // API: identificador do lançamento + parcela (fixo)
     const base = crypto.createHash('sha1').update([p.due, p.paid, p.amount, hkey(p.supplier), hkey(p.desc)].join('|')).digest('hex').slice(0, 24);
     const n = (seen.get(base) || 0) + 1; seen.set(base, n);
     return { ...p, key: `${base}#${n}` };
@@ -95,11 +113,11 @@ const actorId = ctx => ctx.user?.id || null;
 
 // Busca guardada + foto atual dos pagamentos. API (completa): substitui a foto inteira. Arquivo exportado: substitui só
 // os meses que o arquivo cobre (o resto do histórico fica).
-function saveFetch(ctx, origin, fileName, pays) {
+function saveFetch(ctx, origin, fileName, pays, raw = null) {
   const until = origin === 'arquivo' ? today() : new Date(Date.parse(today()) - 86400e3).toISOString().slice(0, 10);
   return tx(() => {
-    const id = Number(run('INSERT INTO ext_fetches (source, origin, file_name, rows_json, row_count, data_until, fetched_by) VALUES (?,?,?,?,?,?,?)',
-      SOURCE, origin, fileName, JSON.stringify(pays), pays.length, until, actorId(ctx)).lastInsertRowid);
+    const id = Number(run('INSERT INTO ext_fetches (source, origin, file_name, rows_json, row_count, data_until, fetched_by, raw) VALUES (?,?,?,?,?,?,?,?)',
+      SOURCE, origin, fileName, JSON.stringify(pays), pays.length, until, actorId(ctx), raw).lastInsertRowid);
     const rows = withKeys(pays).map(p => ({ ...p, ym: (p.due || p.paid).slice(0, 7) }));
     if (origin === 'arquivo') {
       const ms = rows.map(r => r.ym).sort();
@@ -125,9 +143,10 @@ function nextAllowed() {
 }
 export function status(ctx) {
   requireFinance(ctx.user);
-  const f = one('SELECT id, origin, file_name, row_count, data_until, fetched_at FROM ext_fetches WHERE source = ? ORDER BY id DESC LIMIT 1', SOURCE);
+  const f = one('SELECT id, origin, file_name, row_count, data_until, fetched_at FROM ext_fetches WHERE source = ? AND row_count > 0 ORDER BY id DESC LIMIT 1', SOURCE);
   const span = one(`SELECT COUNT(*) AS n, MIN(ref_month) AS desde, MAX(ref_month) AS ate FROM ext_payments WHERE source = ?`, SOURCE);
-  return { configured: configured(), plan: plan(), next_allowed: nextAllowed(), last_fetch: f || null, auto: process.env.MAISCONTROLE_AUTO !== '0', snapshot: span };
+  const pending = one(`SELECT id, fetched_at, error FROM ext_fetches WHERE source = ? AND origin IN ('api', 'auto') AND row_count = 0 AND raw IS NOT NULL ORDER BY id DESC LIMIT 1`, SOURCE);
+  return { configured: configured(), plan: plan(), next_allowed: nextAllowed(), last_fetch: f || null, auto: process.env.MAISCONTROLE_AUTO !== '0', snapshot: span, pending: pending || null };
 }
 
 // ---------- Buscar ----------
@@ -142,15 +161,41 @@ async function callApi() {
   if (res.status === 401) throw badRequest('O Mais Controle recusou o acesso (401): confira o usuário e a senha da API nas variáveis de ambiente.');
   if (res.status === 429) throw badRequest('O Mais Controle informou que a cota de consultas do plano já foi usada (429): tente depois da renovação ou envie o arquivo exportado.');
   if (!res.ok) throw badRequest(`O Mais Controle respondeu com erro ${res.status}.`);
-  return toPayments(parseCsv(await res.text()));
+  return res.text();
+}
+// Resposta da API guardada antes de ler: se a leitura falhar, fica registrada (conta na cota) e pode ser reprocessada
+function storeRaw(ctx, origin, raw) {
+  return Number(run(`INSERT INTO ext_fetches (source, origin, file_name, rows_json, row_count, raw, fetched_by) VALUES (?,?,?,'[]',0,?,?)`,
+    SOURCE, origin, origin === 'auto' ? 'API · pagamentos (automático)' : 'API · pagamentos', raw, actorId(ctx)).lastInsertRowid);
+}
+function parseRaw(ctx, fetchId) {
+  const f = one('SELECT * FROM ext_fetches WHERE id = ?', fetchId);
+  let pays;
+  try { pays = toPayments(parseCsv(f.raw || '')); }
+  catch (e) {
+    run('UPDATE ext_fetches SET error = ? WHERE id = ?', e.message, fetchId);
+    const head = String(f.raw || '').replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0].slice(0, 400);
+    console.warn(`[mais-controle] formato não reconhecido; cabeçalho recebido: ${head}`);
+    throw e;
+  }
+  run('DELETE FROM ext_fetches WHERE id = ?', fetchId); // vira a busca definitiva (com a foto) logo abaixo
+  return saveFetch(ctx, f.origin, f.file_name, pays, f.raw);
+}
+// Última resposta da API que não foi lida (ex.: formato mudou) — reprocessa sem nova consulta
+export function reprocess(ctx) {
+  requireFinance(ctx.user);
+  const f = one(`SELECT * FROM ext_fetches WHERE source = ? AND origin IN ('api', 'auto') AND row_count = 0 AND raw IS NOT NULL ORDER BY id DESC LIMIT 1`, SOURCE);
+  if (!f) throw notFound('Não há resposta da API pendente de leitura.');
+  const id = parseRaw(ctx, f.id);
+  return { fetch_id: id, rows: one('SELECT row_count FROM ext_fetches WHERE id = ?', id).row_count };
 }
 export async function fetchFromApi(ctx) {
   requireFinance(ctx.user);
   if (!configured()) throw badRequest('Integração não configurada: cadastre MAISCONTROLE_USUARIO e MAISCONTROLE_SENHA nas variáveis de ambiente do servidor.');
   const na = nextAllowed();
   if (na) throw badRequest(`Pelo plano ${plan()} da API, a próxima busca fica liberada em ${new Date(na).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}. Use a última busca ou envie o arquivo exportado.`);
-  const pays = await callApi();
-  return { fetch_id: saveFetch(ctx, 'api', 'API · pagamentos', pays), rows: pays.length };
+  const id = parseRaw(ctx, storeRaw(ctx, 'api', await callApi()));
+  return { fetch_id: id, rows: one('SELECT row_count FROM ext_fetches WHERE id = ?', id).row_count };
 }
 export function uploadFile(ctx, body) {
   requireFinance(ctx.user);
@@ -179,8 +224,7 @@ export async function autoSync() {
   autoRunning = true;
   const ctx = { user: { id: null, can_finance: 1, role: 'admin', name: 'Sincronização automática' } };
   try {
-    const pays = await callApi();
-    saveFetch(ctx, 'auto', 'API · pagamentos (automático)', pays);
+    parseRaw(ctx, storeRaw(ctx, 'auto', await callApi()));
     return sync(ctx, null);
   } catch (e) {
     audit(null, 'finance', null, 'Falha na sincronização automática com o Mais Controle', { erro: e.message }, null);
@@ -304,7 +348,7 @@ export function decideReview(ctx, body) {
 // ---------- Prévia ----------
 export function preview(ctx) {
   requireFinance(ctx.user);
-  const f = one('SELECT * FROM ext_fetches WHERE source = ? ORDER BY id DESC LIMIT 1', SOURCE);
+  const f = one('SELECT * FROM ext_fetches WHERE source = ? AND row_count > 0 ORDER BY id DESC LIMIT 1', SOURCE);
   const al = allocation();
   const ch = changes(al);
   const projList = [...al.projects.values()].sort((a, b) => a.cost_center.localeCompare(b.cost_center, 'pt-BR') || a.ym.localeCompare(b.ym));

@@ -32,6 +32,7 @@ export async function view({ state, render }) {
               <button type="button" class="btn btn-primary" data-mc-fetch ${st.next_allowed ? 'disabled' : ''}>${icon('reschedule')}Buscar no Mais Controle</button>
               <small class="hint">${st.next_allowed ? `Pelo plano ${PLAN[st.plan] || st.plan}, a próxima busca fica liberada em ${when(st.next_allowed)}.` : 'Traz todo o histórico (2024 em diante) e usa 1 consulta da cota do plano.'}${st.auto ? ' Automático: toda segunda-feira a partir das 8h o sistema busca e sincroniza sozinho.' : ''}</small></div>`
             : html`<div class="mc-cfg"><b>Integração ainda não configurada.</b> No painel do servidor (Render › Environment), cadastre <code>MAISCONTROLE_USUARIO</code> e <code>MAISCONTROLE_SENHA</code> com a credencial da API para Relatórios (Mais Controle › Configurações › Integração). Opcional: <code>MAISCONTROLE_PLANO</code> = semanal, diario ou horario. A senha fica só no servidor.</div>`}
+          ${st.pending ? html`<div class="mc-cfg">A última resposta da API (${when(st.pending.fetched_at)}) não foi lida${st.pending.error ? `: ${st.pending.error}` : ''}. <button type="button" class="btn btn-ghost btn-sm" data-mc-reprocess>${icon('reschedule')}Ler de novo a resposta guardada</button> <small>(não gasta outra consulta)</small></div>` : ''}
           <div class="mc-or">ou envie o arquivo de Pagamentos exportado do Mais Controle (substitui só os meses do arquivo)
             <label class="btn btn-ghost btn-sm" for="mc-file">${icon('file')}Escolher arquivo (.xlsx ou .csv)</label>
             <input type="file" id="mc-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
@@ -84,6 +85,10 @@ export async function view({ state, render }) {
       root.querySelector('[data-mc-fetch]')?.addEventListener('click', e => busy(e.currentTarget, async () => {
         const r = await api('/finance/maiscontrole/fetch', { method: 'POST', body: {} });
         toast(`${r.rows} pagamento(s) recebido(s) do Mais Controle. Confira e sincronize.`); render();
+      }));
+      root.querySelector('[data-mc-reprocess]')?.addEventListener('click', e => busy(e.currentTarget, async () => {
+        const r = await api('/finance/maiscontrole/reprocess', { method: 'POST', body: {} });
+        toast(`${r.rows} pagamento(s) lido(s) da resposta guardada. Confira e sincronize.`); render();
       }));
       root.querySelector('#mc-file')?.addEventListener('change', async e => {
         const f = e.currentTarget.files[0];

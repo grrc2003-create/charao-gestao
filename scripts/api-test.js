@@ -19,17 +19,18 @@ const PW = 'charao2026'; // senha das contas de demonstração (server/seed.js)
 const MC_PORT = 3998, MC_AUTH = `Basic ${Buffer.from('mc-teste:mc-senha-teste').toString('base64')}`;
 const mcY = new Date().toISOString().slice(0, 4), mcM = new Date().toISOString().slice(5, 7);
 const mcP = String(Number(mcY) - 1), mcD = new Date().toISOString().slice(8, 10);
-const MC_HEAD = 'Índice;Data de Competência;Data de Vencimento;Data de Pagamento;Valor da Parcela;Valor em Aberto;Valor Pago da Parcela;Juros / Multas;Descontos;Valor Total Pago;Fornecedor;CNPJ / CPF do Fornecedor;Dados Bancários do Fornecedor;Descrição;Número do Documento;Categoria;Plano de Contas;Conta Bancária;Centro de Custo';
+const MC_HEAD = 'id_lancamento;data_competencia;data_vencimento;data_pagamento;numero_parcela;valor_parcela;valor_pago;valor_desconto;valor_juros_e_multa;fornecedor;descricao;numero_documento;categoria;grupo;plano_de_conta;condicao_pagamento;forma_pagamento;quem_paga;conta_bancaria;id_obra;centro_de_custo';
+const mcRow = (id, due, paid, val, fees, sup, desc, cat, acc, cc) => [id, due, due, paid, 1, val, paid ? val : '', '0.00', fees, sup, desc, '', cat, 'Outros', 'Gerais', 'À Vista', 'Boleto', 'Empresa', acc, '', cc].join(';');
 const MC_CSV = [MC_HEAD,
-  `1;05/01/${mcP};10/01/${mcP};10/01/${mcP};280.00;0.00;280.00;0.00;0.00;280.00;Fornecedor Teste A;;;Honorários teste;101;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `2;05/02/${mcP};10/02/${mcP};10/02/${mcP};290.00;0.00;290.00;0.00;0.00;290.00;Fornecedor Teste A;;;Honorários teste;102;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `3;05/01/${mcY};10/01/${mcY};10/01/${mcY};300.00;0.00;300.00;0.00;0.00;300.00;Fornecedor Teste A;;;Honorários teste;111;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `4;01/01/${mcY};15/01/${mcY};15/01/${mcY};50.00;0.00;50.00;0.00;0.00;50.00;Banco Teste;;;"Tarifa; teste";;Tarifa MC teste;Despesas;Conta Teste PJ;Empresa`,
-  `5;01/01/${mcY};20/01/${mcY};;80.00;80.00;0.00;0.00;0.00;0.00;Fornecedor Teste B;;;Sem pagamento;;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `6;01/01/${mcY};18/01/${mcY};18/01/${mcY};900.00;0.00;900.00;0.00;0.00;900.00;Fornecedor Obra;;;Material obra teste;;Materiais;Obras;Conta Teste PJ;Obra Teste 1`,
-  `7;01/01/${mcY};19/01/${mcY};19/01/${mcY};70.00;0.00;70.00;0.00;0.00;70.00;Loja Teste;;;Compra cartão teste;;Materiais de Copa;Gerais;Cartão Teste;Empresa`,
-  `8;01/${mcM}/${mcY};01/${mcM}/${mcY};01/${mcM}/${mcY};120.00;0.00;120.00;0.00;0.00;120.00;Fornecedor Teste A;;;Serviço avulso teste;;Outra categoria MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `9;05/01/${mcY};12/01/${mcY};12/01/${mcY};100.00;0.00;100.00;0.00;0.00;100.00;Fornecedor Manual;;;Manual teste;;Manual MC teste;Gerais;Conta Teste PJ;Empresa`].join('\r\n');
+  mcRow(101, `${mcP}-01-10`, `${mcP}-01-10`, '280.00', '0.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(102, `${mcP}-02-10`, `${mcP}-02-10`, '285.00', '5.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(111, `${mcY}-01-10`, `${mcY}-01-10`, '300.00', '0.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(112, `${mcY}-01-15`, `${mcY}-01-15`, '50.00', '0.00', 'Banco Teste', '"Tarifa; teste"', 'Tarifa MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(113, `${mcY}-01-20`, '', '80.00', '0.00', 'Fornecedor Teste B', 'Sem pagamento', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(114, `${mcY}-01-18`, `${mcY}-01-18`, '900.00', '0.00', 'Fornecedor Obra', 'Material obra teste', 'Materiais', 'Conta Teste PJ', 'Obra Teste 1'),
+  mcRow(115, `${mcY}-01-19`, `${mcY}-01-19`, '70.00', '0.00', 'Loja Teste', 'Compra cartão teste', 'Materiais de Copa', 'Cartão Teste', 'Empresa'),
+  mcRow(116, `${mcY}-${mcM}-01`, `${mcY}-${mcM}-01`, '120.00', '0.00', 'Fornecedor Teste A', 'Serviço avulso teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(117, `${mcY}-01-12`, `${mcY}-01-12`, '100.00', '0.00', 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa')].join('\r\n');
 let mcHits = 0;
 const mcServer = http.createServer((req, res) => {
   mcHits++;
@@ -1941,7 +1942,8 @@ async function main() {
     ok(st.configured === true && st.plan === 'semanal' && !st.next_allowed, 'Mais Controle: configurado pelas variáveis do servidor');
     ok((await biNo('GET', '/finance/maiscontrole')).status === 403, 'Mais Controle: sem liberação não acessa');
     const f1 = await fo('POST', '/finance/maiscontrole/fetch', {});
-    ok(f1.status === 200 && f1.data.rows === 9 && mcHits === 1, 'busca na API: lê o CSV (BOM, ; e aspas) com a credencial do servidor, com o histórico');
+    ok(f1.status === 200 && f1.data.rows === 9 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
+    ok((await fo('POST', '/finance/maiscontrole/reprocess', {})).status === 404 && !(await fo('GET', '/finance/maiscontrole')).data.pending, 'resposta da API lida: nada pendente para reprocessar');
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
@@ -1962,7 +1964,7 @@ async function main() {
     const grid = async yr => (await fo('GET', `/finance/year?ano=${yr}`)).data;
     const row = (d, id) => d.groups.flatMap(g => g.rows).find(r => r.id === id);
     const gp = await grid(yp), gy = await grid(y);
-    ok(sy.pagos >= 4 && sy.manual === 1 && row(gp, cont)?.cells[0].status === 'pago' && row(gp, cont).cells[0].real === 280 && row(gp, cont).cells[1].real === 290, 'sincronizar: histórico do ano anterior entra na tarefa (desde o primeiro pagamento)');
+    ok(sy.pagos >= 4 && sy.manual === 1 && row(gp, cont)?.cells[0].status === 'pago' && row(gp, cont).cells[0].real === 280 && row(gp, cont).cells[1].real === 290 /* 285 + 5 de juros */, 'sincronizar: histórico do ano anterior entra na tarefa (desde o primeiro pagamento)');
     ok(row(gp, cont).cells[0].planned === 280 && row(gy, cont).cells[0].planned === 280 && row(gy, cont).cells[1].planned === 290 && row(gy, cont).cells[0].real === 300, 'previsto: 1º ano = o próprio realizado; ano seguinte = realizado do ano anterior');
     ok(['sem_previsto', 'nao_ocorreu'].includes(row(gy, cont).cells[2]?.status) || mcM <= '03', 'mês sem realizado no ano anterior: previsto 0 (nada esperado)');
     ok(row(gy, man).cells[0].real === 999, 'pago à mão diferente do Mais Controle: mantido');

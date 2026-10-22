@@ -317,6 +317,7 @@ api.post('/api/finance/import/preview', (req, res, { ctx, body }) => send(res, 2
 api.post('/api/finance/import', (req, res, { ctx, body }) => send(res, 200, FinanceImport.applyImport(ctx, body, clientIp(req))));
 api.get('/api/finance/maiscontrole', (req, res, { ctx }) => send(res, 200, MaisControle.status(ctx)));
 api.post('/api/finance/maiscontrole/fetch', async (req, res, { ctx }) => send(res, 200, await MaisControle.fetchFromApi(ctx)));
+api.post('/api/finance/maiscontrole/reprocess', (req, res, { ctx }) => send(res, 200, MaisControle.reprocess(ctx)));
 api.post('/api/finance/maiscontrole/upload', (req, res, { ctx, body }) => send(res, 200, MaisControle.uploadFile(ctx, body)));
 api.get('/api/finance/maiscontrole/preview', (req, res, { ctx }) => send(res, 200, MaisControle.preview(ctx)));
 api.put('/api/finance/maiscontrole/account', (req, res, { ctx, body }) => send(res, 200, MaisControle.setAccount(ctx, body)));

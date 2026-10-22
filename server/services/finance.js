@@ -640,7 +640,7 @@ export function financeMonth(ctx, ym) {
 // ---------- Mais Controle: cobertura dos dados, "Paguei" e justificativa ----------
 // Até que dia a última busca do Mais Controle cobre (para conferir o "Paguei" e pedir justificativa)
 export function coverage() {
-  try { return one(`SELECT data_until, fetched_at FROM ext_fetches WHERE source = 'maiscontrole' ORDER BY id DESC LIMIT 1`) || null; } catch { return null; }
+  try { return one(`SELECT data_until, fetched_at FROM ext_fetches WHERE source = 'maiscontrole' AND row_count > 0 ORDER BY id DESC LIMIT 1`) || null; } catch { return null; }
 }
 const tsOf = s => Date.parse(/Z$|T/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
 // "Paguei" sem confirmação: aguardando a próxima busca; se a busca já cobre o vencimento e não achou → não encontrado

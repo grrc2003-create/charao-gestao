@@ -116,7 +116,8 @@ export async function view({ state, query, setQuery, render }) {
       ${d.projects?.length ? html`<section class="card section fy-proj">
         <div class="card-head"><h2>${icon('projects')}Custos destinados a Projetos</h2><span class="sub">Mais Controle · centros de custo diferentes de Empresa · ${money(d.projects.reduce((s, p) => s + p.total, 0))}</span></div>
         <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Centro de custo</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
-          <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody></table></div>
+          <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody>
+          <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.projects.reduce((s, p) => s + (p.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.projects.reduce((s, p) => s + p.total, 0))}</td></tr></tfoot></table></div>
       </section>` : ''}`
       : html`<section class="card"><div class="card-body muted">Nenhuma tarefa financeira em ${d.year}. Comece em “Nova tarefa financeira” ou “Importar planilha”.</div></section>`}`,
     mount(root) {

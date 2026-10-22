@@ -2922,3 +2922,10 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 
 .mc-cats .mc-rev-acts .mc-fix select { max-width: 220px; }
 .mc-cats li > .btn { justify-self: end; }
+
+/* Grade anual: nome da tarefa / centro de custo não passa do limite da coluna (quebra em até 2 linhas) */
+.fy .fy-name { white-space: normal; overflow: hidden; overflow-wrap: anywhere; }
+.fy .fy-name a, .fy .fy-projt .fy-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
+.fy .fy-name small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy .fy-projt .fy-name { display: table-cell; }
+.fy .fy-projt .fy-name small { display: block; }

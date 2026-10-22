@@ -15,7 +15,7 @@ const ymLabel = ym => `${MESES[Number(ym.slice(5, 7)) - 1]}/${ym.slice(0, 4)}`;
 const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return ''; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : NaN; };
 const numIn = v => (v === null || v === undefined || v === '' ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', sem_previsto: 'Sem previsão', aguardando: 'Paguei · aguardando Mais Controle', nao_encontrado: 'Não encontrado no Mais Controle', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
+const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', sem_previsto: 'Sem previsão', aguardando: 'Paguei · aguardando Mais Controle', sem_pagamento: 'Sem pagamento no mês', nao_encontrado: 'Não encontrado no Mais Controle', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
 const WST = { hoje: ['pagar hoje', 'is-today'], a_pagar: ['', ''], atrasada: ['atrasada', 'is-late'], aguardando: ['paguei · aguardando confirmação', 'is-wait'], nao_encontrado: ['não encontrado no Mais Controle: pagamento não realizado ou não lançado', 'is-late'], justificar: ['sem pagamento no Mais Controle: justifique', 'is-late'] };
 const DOW = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 const dueLabel = i => (i.days < 0 ? `venceu ${fmtDate(i.due_date)}` : i.days === 0 ? 'hoje' : i.days === 1 ? 'amanhã' : `${DOW[new Date(`${i.due_date}T12:00:00`).getDay()]} ${i.due_date.slice(8, 10)}/${i.due_date.slice(5, 7)}`);
@@ -36,8 +36,10 @@ export async function view({ state, query, setQuery, render }) {
   const al = wk?.alerts || { accounts: [], categories: [] };
   const weekCard = !wk ? '' : html`<section class="card section fw-card">
       <div class="card-head"><h2>${icon('alert')}Contas da semana</h2><span class="sub">até ${fmtDate(wk.week_end)}${wk.data_until ? ` · Mais Controle até ${fmtDate(wk.data_until)}` : ''}</span></div>
-      ${al.accounts.length || al.categories.length ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
-        ${al.accounts.map(a => `custo de ${money(a.total)} na conta ${a.label} (não cadastrada: ${a.categories.map(c => c.label).join(', ')})`).join(' · ')}${al.accounts.length && al.categories.length ? ' · ' : ''}${al.categories.length ? `${al.categories.length} categoria(s) sem tarefa (${money(al.categories.reduce((s, c) => s + c.total, 0))})` : ''} — cadastre para trazer</span></a>` : ''}
+      ${al.accounts.length || al.categories.length || al.reviews ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
+        ${[...al.accounts.map(a => `custo de ${money(a.total)} na conta ${a.label} (não cadastrada: ${a.categories.map(c => c.label).join(', ')})`),
+          al.categories.length ? `${al.categories.length} categoria(s) sem tarefa (${money(al.categories.reduce((s, c) => s + c.total, 0))}): cadastre para trazer` : '',
+          al.reviews ? `${al.reviews} despesa(s) em categoria diferente da habitual: confira a alocação` : ''].filter(Boolean).join(' · ')}</span></a>` : ''}
       ${wItems.length ? html`<ul class="fw-list">${wItems.map(i => html`<li class="${WST[i.state][1]}">
         <span class="fw-when">${dueLabel(i)}</span>
         <span class="fw-main"><b>${i.title}</b><small>${i.category} · ${money(i.amount_expected)}${WST[i.state][0] ? html` · <em>${WST[i.state][0]}</em>` : ''}${i.justify_reason && i.justify_kind === 'vai_ocorrer' ? ` · reprogramado: ${i.justify_reason}` : ''}</small></span>

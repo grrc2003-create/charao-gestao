@@ -2882,3 +2882,13 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
   .fw-acts { justify-content: flex-start; }
   .fy-proj { display: none; }
 }
+
+/* Mais Controle: conferência de alocação e sincronização */
+.mc-cats li.is-late { background: #FDF1EF; }
+.mc-rev .mc-cat small b { color: var(--ink-2); }
+.mc-rev-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.mc-wrong { color: #B03A2E; }
+.mc-sync { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.mc-changes { max-height: 420px; overflow-y: auto; }
+.fy-c.is-sem_pagamento .fy-p { color: var(--muted); }
+.fy-c.is-sem_pagamento .fy-r { color: var(--muted); }

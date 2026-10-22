@@ -18,13 +18,18 @@ const PW = 'charao2026'; // senha das contas de demonstração (server/seed.js)
 // API do Mais Controle simulada (dados fictícios; credencial de teste)
 const MC_PORT = 3998, MC_AUTH = `Basic ${Buffer.from('mc-teste:mc-senha-teste').toString('base64')}`;
 const mcY = new Date().toISOString().slice(0, 4), mcM = new Date().toISOString().slice(5, 7);
-const MC_CSV = ['Índice;Data de Competência;Data de Vencimento;Data de Pagamento;Valor da Parcela;Valor em Aberto;Valor Pago da Parcela;Juros / Multas;Descontos;Valor Total Pago;Fornecedor;CNPJ / CPF do Fornecedor;Dados Bancários do Fornecedor;Descrição;Número do Documento;Categoria;Plano de Contas;Conta Bancária;Centro de Custo',
-  `1;05/01/${mcY};10/01/${mcY};10/01/${mcY};300.00;0.00;300.00;0.00;0.00;300.00;Fornecedor Teste A;00.000.000/0001-00;;Honorários teste;111;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `2;05/02/${mcY};10/02/${mcY};11/02/${mcY};300.00;0.00;300.00;5.00;0.00;305.00;Fornecedor Teste A;00.000.000/0001-00;;Honorários teste;112;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `3;01/01/${mcY};15/01/${mcY};15/01/${mcY};50.00;0.00;50.00;0.00;0.00;50.00;Banco Teste;;;"Tarifa; teste";;Tarifa MC teste;Despesas;Conta Teste PJ;Empresa`,
-  `4;01/01/${mcY};20/01/${mcY};;80.00;80.00;0.00;0.00;0.00;0.00;Fornecedor Teste B;;;Sem pagamento;;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
-  `5;01/01/${mcY};18/01/${mcY};18/01/${mcY};900.00;0.00;900.00;0.00;0.00;900.00;Fornecedor Obra;;;Material obra teste;;Materiais;Obras;Conta Teste PJ;Obra Teste 1`,
-  `6;01/01/${mcY};19/01/${mcY};19/01/${mcY};70.00;0.00;70.00;0.00;0.00;70.00;Loja Teste;;;Compra cartão teste;;Materiais de Copa;Gerais;Cartão Teste;Empresa`].join('\r\n');
+const mcP = String(Number(mcY) - 1), mcD = new Date().toISOString().slice(8, 10);
+const MC_HEAD = 'Índice;Data de Competência;Data de Vencimento;Data de Pagamento;Valor da Parcela;Valor em Aberto;Valor Pago da Parcela;Juros / Multas;Descontos;Valor Total Pago;Fornecedor;CNPJ / CPF do Fornecedor;Dados Bancários do Fornecedor;Descrição;Número do Documento;Categoria;Plano de Contas;Conta Bancária;Centro de Custo';
+const MC_CSV = [MC_HEAD,
+  `1;05/01/${mcP};10/01/${mcP};10/01/${mcP};280.00;0.00;280.00;0.00;0.00;280.00;Fornecedor Teste A;;;Honorários teste;101;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
+  `2;05/02/${mcP};10/02/${mcP};10/02/${mcP};290.00;0.00;290.00;0.00;0.00;290.00;Fornecedor Teste A;;;Honorários teste;102;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
+  `3;05/01/${mcY};10/01/${mcY};10/01/${mcY};300.00;0.00;300.00;0.00;0.00;300.00;Fornecedor Teste A;;;Honorários teste;111;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
+  `4;01/01/${mcY};15/01/${mcY};15/01/${mcY};50.00;0.00;50.00;0.00;0.00;50.00;Banco Teste;;;"Tarifa; teste";;Tarifa MC teste;Despesas;Conta Teste PJ;Empresa`,
+  `5;01/01/${mcY};20/01/${mcY};;80.00;80.00;0.00;0.00;0.00;0.00;Fornecedor Teste B;;;Sem pagamento;;Contabilidade MC teste;Gerais;Conta Teste PJ;Empresa`,
+  `6;01/01/${mcY};18/01/${mcY};18/01/${mcY};900.00;0.00;900.00;0.00;0.00;900.00;Fornecedor Obra;;;Material obra teste;;Materiais;Obras;Conta Teste PJ;Obra Teste 1`,
+  `7;01/01/${mcY};19/01/${mcY};19/01/${mcY};70.00;0.00;70.00;0.00;0.00;70.00;Loja Teste;;;Compra cartão teste;;Materiais de Copa;Gerais;Cartão Teste;Empresa`,
+  `8;01/${mcM}/${mcY};01/${mcM}/${mcY};01/${mcM}/${mcY};120.00;0.00;120.00;0.00;0.00;120.00;Fornecedor Teste A;;;Serviço avulso teste;;Outra categoria MC teste;Gerais;Conta Teste PJ;Empresa`,
+  `9;05/01/${mcY};12/01/${mcY};12/01/${mcY};100.00;0.00;100.00;0.00;0.00;100.00;Fornecedor Manual;;;Manual teste;;Manual MC teste;Gerais;Conta Teste PJ;Empresa`].join('\r\n');
 let mcHits = 0;
 const mcServer = http.createServer((req, res) => {
   mcHits++;
@@ -1928,49 +1933,62 @@ async function main() {
     await fo('PUT', `/finance/obligations/${keep}`, { title: 'Nao excluir teste', category: 'Outros', amount: 10, frequency: 'mensal', due_day: 1, start_month: `${y}-01`, active: false });
   }
   {
-    // Mais Controle: contas bancárias cadastradas, centro de custo (Empresa → tarefas; demais → projetos), vínculo, lançar, soma e desfazer
-    const y = mcY;
-    const cont = (await fo('POST', '/finance/obligations', { title: 'Contabilidade MC teste', category: 'Serviços e assinaturas', amount: 300, frequency: 'mensal', due_day: 10, start_month: `${y}-01` })).data.id;
+    // Mais Controle como fonte do realizado: histórico, contas, centro de custo, previsto pelo ano anterior, correção e alocação
+    const y = mcY, yp = mcP;
+    const mk = (title, cat) => fo('POST', '/finance/obligations', { title, category: cat, amount: 1, frequency: 'mensal', due_day: 10, start_month: `${y}-01` }).then(r => r.data.id);
+    const cont = await mk('Contabilidade MC teste', 'Serviços e assinaturas'), outra = await mk('Outra categoria MC teste', 'Outros'), man = await mk('Manual MC teste', 'Outros');
     const st = (await fo('GET', '/finance/maiscontrole')).data;
     ok(st.configured === true && st.plan === 'semanal' && !st.next_allowed, 'Mais Controle: configurado pelas variáveis do servidor');
     ok((await biNo('GET', '/finance/maiscontrole')).status === 403, 'Mais Controle: sem liberação não acessa');
     const f1 = await fo('POST', '/finance/maiscontrole/fetch', {});
-    ok(f1.status === 200 && f1.data.rows === 6 && mcHits === 1, 'busca na API: lê o CSV (BOM, ; e aspas) com a credencial do servidor');
+    ok(f1.status === 200 && f1.data.rows === 9 && mcHits === 1, 'busca na API: lê o CSV (BOM, ; e aspas) com a credencial do servidor, com o histórico');
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.totals.other_account === 5 && pv.totals.ready_months === 0 && pv.accounts.length === 2 && !pv._groups, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
+    ok(pv.totals.other_account === 8 && pv.totals.novo === 0 && pv.accounts.length === 2, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
     await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Teste PJ', label: 'Conta Teste PJ', active: true });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     const cartao = pv.accounts.find(a => a.label === 'Cartão Teste');
     ok(pv.totals.other_account === 1 && cartao && !cartao.active && cartao.total === 70 && cartao.categories[0].label === 'Materiais de Copa', 'conta não cadastrada: alerta com o custo e a categoria');
-    ok(pv.totals.projects === 1 && pv.projects[0].cost_center === 'Obra Teste 1' && pv.projects[0].amount === 900, 'outro centro de custo: vai para Custos destinados a Projetos');
-    const cat = pv.categories.find(c => c.label === 'Contabilidade MC teste');
-    ok(cat && cat.obligation_id === cont && pv.totals.unpaid === 1 && pv.totals.unmapped === 1 && pv.categories.find(c => c.label === 'Tarifa MC teste' && !c.obligation_id),
-      'a tarefa é a categoria (mesmo nome); categoria sem tarefa vira alerta; linha sem pagamento fora');
-    const jan = pv.groups.find(g => g.ym === `${y}-01`), fev = pv.groups.find(g => g.ym === `${y}-02`);
-    ok(jan?.amount === 300 && jan.status === 'ok' && (mcM === '01' ? true : fev?.amount === 305), 'prévia: soma do mês por tarefa (valor total pago, com juros)');
-    const ap = (await fo('POST', '/finance/maiscontrole/apply', {})).data;
-    const yd = (await fo('GET', `/finance/year?ano=${y}`)).data;
-    const yr = yd.groups.flatMap(g => g.rows).find(r => r.id === cont);
-    ok(ap.payments >= 1 && yr.cells[0].status === 'pago' && yr.cells[0].real === 300, 'lançar: o real da tarefa vem do Mais Controle');
-    ok(yd.projects.some(p => p.cost_center === 'Obra Teste 1' && p.months[0] === 900), 'grade: Custos destinados a Projetos por centro de custo');
+    ok(pv.totals.projects === 1 && pv.projects[0].cost_center === 'Obra Teste 1', 'outro centro de custo: vai para Custos destinados a Projetos');
+    ok(pv.categories.length === 1 && pv.categories[0].label === 'Tarifa MC teste' && pv.totals.unpaid === 1, 'a tarefa é a categoria (mesmo nome); categoria sem tarefa vira alerta; linha sem pagamento fora');
+    ok(pv.first_year === Number(yp) && pv.changes.filter(c => c.kind === 'novo' && c.title === 'Contabilidade MC teste').length === 3 && pv.changes.some(c => c.kind === 'novo' && c.title === 'Manual MC teste'), 'prévia: meses novos do histórico (ano anterior e atual)');
+    const rv = pv.reviews.find(r => r.category === 'Outra categoria MC teste');
+    ok(rv && rv.usual === 'Contabilidade MC teste' && rv.state === 'conferir', 'conferência: despesa do mês em categoria diferente da habitual do fornecedor');
+    // Pagamento lançado à mão (diferente do Mais Controle) não é mexido
+    const mi = (await fo('POST', `/finance/obligations/${man}/months/${y}-01`)).data.id;
+    await fo('POST', `/finance/items/${mi}/pay`, { paid_date: `${y}-01-12`, paid_amount: 999 });
+    const sy = (await fo('POST', '/finance/maiscontrole/sync', {})).data;
+    const grid = async yr => (await fo('GET', `/finance/year?ano=${yr}`)).data;
+    const row = (d, id) => d.groups.flatMap(g => g.rows).find(r => r.id === id);
+    const gp = await grid(yp), gy = await grid(y);
+    ok(sy.pagos >= 4 && sy.manual === 1 && row(gp, cont)?.cells[0].status === 'pago' && row(gp, cont).cells[0].real === 280 && row(gp, cont).cells[1].real === 290, 'sincronizar: histórico do ano anterior entra na tarefa (desde o primeiro pagamento)');
+    ok(row(gp, cont).cells[0].planned === 280 && row(gy, cont).cells[0].planned === 280 && row(gy, cont).cells[1].planned === 290 && row(gy, cont).cells[0].real === 300, 'previsto: 1º ano = o próprio realizado; ano seguinte = realizado do ano anterior');
+    ok(['sem_previsto', 'nao_ocorreu'].includes(row(gy, cont).cells[2]?.status) || mcM <= '03', 'mês sem realizado no ano anterior: previsto 0 (nada esperado)');
+    ok(row(gy, man).cells[0].real === 999, 'pago à mão diferente do Mais Controle: mantido');
+    const hist = (await fo('GET', `/finance/obligations/${cont}`)).data.items.find(i => i.ref_month === `${yp}-01`);
+    ok(hist && !hist.task_id, 'meses do histórico não geram tarefas "a fazer"');
+    ok(gy.projects.some(p => p.cost_center === 'Obra Teste 1' && p.months[0] === 900), 'grade: Custos destinados a Projetos por centro de custo');
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.totals.ready_months === 0 && pv.totals.projects === 0 && pv.totals.already === ap.payments + 1, 'sincronizar de novo não duplica (pagamentos já lançados)');
-    const extra = writeXlsx([{ name: 'Pagamentos', header: true, rows: [['Índice', 'Data de Vencimento', 'Data de Pagamento', 'Valor Total Pago', 'Fornecedor', 'Descrição', 'Categoria', 'Conta Bancária', 'Centro de Custo'],
-      ['1', `10/01/${y}`, `10/01/${y}`, 300, 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'],
-      ['2', `12/01/${y}`, `12/01/${y}`, 40, 'Fornecedor Teste C', 'Taxa extra teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa']] }]).toString('base64');
-    const up = await fo('POST', '/finance/maiscontrole/upload', { file: { name: 'pagamentos.xlsx', data: extra } });
+    ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');
+    // Conferência: "Está errado" volta a avisar enquanto não for ajustado; "Está OK" aceita
+    await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'errado', usual: rv.usual });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(up.status === 200 && pv.groups.length === 1 && pv.groups[0].status === 'soma' && pv.groups[0].amount === 40, 'arquivo exportado: pagamento novo no mês já lançado entra como soma');
-    await fo('POST', '/finance/maiscontrole/apply', {});
-    const real = async () => (await fo('GET', `/finance/year?ano=${y}`)).data.groups.flatMap(g => g.rows).find(r => r.id === cont).cells[0].real;
-    ok(await real() === 340, 'soma: real do mês atualizado (300 + 40)');
-    const last = (await fo('GET', '/finance/import/last')).data.last;
-    await fo('POST', `/finance/import/${last.id}/undo`, {});
+    ok(pv.reviews.find(r => r.key === rv.key)?.state === 'nao_ajustado', '"Está errado": continua no alerta até ser ajustado no Mais Controle');
+    await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'ok', usual: rv.usual });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(await real() === 300 && pv.groups[0]?.status === 'soma' && pv.groups[0]?.amount === 40, 'desfazer: tira a soma e o pagamento volta a poder ser lançado');
-    await fo('PUT', `/finance/obligations/${cont}`, { title: 'Contabilidade MC teste', category: 'Serviços e assinaturas', amount: 300, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, active: false });
+    ok(!pv.reviews.some(r => r.key === rv.key), '"Está OK": sai da conferência (fornecedor passa a valer nesta categoria)');
+    // Categoria corrigida no Mais Controle (arquivo do mês): o valor sai de uma tarefa e vai para a outra
+    const fix = writeXlsx([{ name: 'Pagamentos', header: true, rows: [['Data de Vencimento', 'Data de Pagamento', 'Valor Total Pago', 'Fornecedor', 'Descrição', 'Categoria', 'Conta Bancária', 'Centro de Custo'],
+      [`10/01/${y}`, `10/01/${y}`, 300, 'Fornecedor Teste A', 'Honorários teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'],
+      [`12/01/${y}`, `12/01/${y}`, 100, 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa']] }]).toString('base64');
+    await fo('POST', '/finance/maiscontrole/upload', { file: { name: 'jan.xlsx', data: fix } });
+    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(pv.changes.some(c => c.kind === 'removido' && c.title === 'Contabilidade MC teste') && pv.changes.some(c => c.kind === 'novo' && c.title === 'Outra categoria MC teste'), 'prévia: correção de categoria no Mais Controle (retira de uma tarefa e põe na outra)');
+    await fo('POST', '/finance/maiscontrole/sync', {});
+    const gy2 = await grid(y);
+    ok(row(gy2, cont).cells[0].status !== 'pago' && row(gy2, outra).cells[0].real === 300 && row((await grid(yp)), cont).cells[0].real === 280, 'sincronizar: realocação feita sozinha; o histórico dos outros meses fica');
+    for (const id of [cont, outra, man]) await fo('PUT', `/finance/obligations/${id}`, { title: 'MC teste inativa ' + id, category: 'Outros', amount: 1, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, active: false });
   }
   {
     // Lembretes da semana: "Paguei" (aguardando → não encontrado após a busca) e justificativa (vai ocorrer / não vai ocorrer)

@@ -318,13 +318,14 @@ api.post('/api/finance/import', (req, res, { ctx, body }) => send(res, 200, Fina
 api.get('/api/finance/maiscontrole', (req, res, { ctx }) => send(res, 200, MaisControle.status(ctx)));
 api.post('/api/finance/maiscontrole/fetch', async (req, res, { ctx }) => send(res, 200, await MaisControle.fetchFromApi(ctx)));
 api.post('/api/finance/maiscontrole/upload', (req, res, { ctx, body }) => send(res, 200, MaisControle.uploadFile(ctx, body)));
-api.get('/api/finance/maiscontrole/preview', (req, res, { ctx }) => { const { _groups, _projects, ...pv } = MaisControle.preview(ctx); send(res, 200, pv); });
+api.get('/api/finance/maiscontrole/preview', (req, res, { ctx }) => send(res, 200, MaisControle.preview(ctx)));
 api.put('/api/finance/maiscontrole/account', (req, res, { ctx, body }) => send(res, 200, MaisControle.setAccount(ctx, body)));
 api.get('/api/finance/week', (req, res, { ctx }) => send(res, 200, MaisControle.financeWeek(ctx)));
 api.post('/api/finance/items/:id/mark', (req, res, { ctx, params, body }) => send(res, 200, Finance.markPaid(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/finance/items/:id/unmark', (req, res, { ctx, params }) => send(res, 200, Finance.unmarkPaid(ctx, intOrNull(params.id), clientIp(req))));
 api.post('/api/finance/items/:id/justify', (req, res, { ctx, params, body }) => send(res, 200, Finance.justifyItem(ctx, intOrNull(params.id), body, clientIp(req))));
-api.post('/api/finance/maiscontrole/apply', (req, res, { ctx }) => send(res, 200, MaisControle.apply(ctx, clientIp(req))));
+api.post('/api/finance/maiscontrole/sync', (req, res, { ctx, body }) => send(res, 200, MaisControle.sync(ctx, clientIp(req), { resetManualPlans: !!body?.reset_plans })));
+api.post('/api/finance/maiscontrole/review', (req, res, { ctx, body }) => send(res, 200, MaisControle.decideReview(ctx, body)));
 api.get('/api/finance/import/last', (req, res, { ctx }) => send(res, 200, { last: FinanceImport.lastImport(ctx) }));
 api.post('/api/finance/import/:id/undo', (req, res, { ctx, params }) => send(res, 200, FinanceImport.undoImport(ctx, params.id, clientIp(req))));
 api.get('/api/finance/year', (req, res, { ctx, query }) => send(res, 200, Finance.financeYear(ctx, query.get('ano'))));

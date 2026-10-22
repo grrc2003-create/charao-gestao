@@ -26,26 +26,47 @@ CREATE TABLE ext_accounts (
   PRIMARY KEY (source, ext_key)
 );
 
--- Pagamentos já lançados (não duplica ao sincronizar de novo). kind: empresa (tarefa) | projeto (centro de custo)
+-- Foto atual dos pagamentos do Mais Controle (a cada busca completa é substituída): o realizado de cada tarefa/mês é
+-- recalculado a partir daqui, então correções feitas no Mais Controle se refletem sozinhas
 CREATE TABLE ext_payments (
-  source        TEXT NOT NULL DEFAULT 'maiscontrole',
-  ext_key       TEXT NOT NULL,
-  kind          TEXT NOT NULL DEFAULT 'empresa',
-  obligation_id INTEGER,
-  item_id       INTEGER,
-  cost_center   TEXT,
-  account       TEXT,
-  ref_month     TEXT NOT NULL,
-  paid_date     TEXT,
-  amount        REAL NOT NULL,
-  category      TEXT,
-  fetch_id      INTEGER REFERENCES ext_fetches(id),
-  batch_id      INTEGER,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  source       TEXT NOT NULL DEFAULT 'maiscontrole',
+  ext_key      TEXT NOT NULL,                      -- vencimento, pagamento, valor, fornecedor, descrição (sem a categoria)
+  due_date     TEXT,
+  paid_date    TEXT,
+  ref_month    TEXT NOT NULL,                      -- mês do vencimento
+  amount       REAL NOT NULL,
+  category     TEXT,
+  supplier     TEXT,
+  supplier_key TEXT,
+  description  TEXT,
+  account      TEXT,
+  account_key  TEXT,
+  cost_center  TEXT,
+  fetch_id     INTEGER REFERENCES ext_fetches(id),
   PRIMARY KEY (source, ext_key)
 );
-CREATE INDEX ext_payments_item ON ext_payments(item_id);
-CREATE INDEX ext_payments_cc ON ext_payments(kind, ref_month);
+CREATE INDEX ext_payments_month ON ext_payments(ref_month);
+CREATE INDEX ext_payments_supplier ON ext_payments(supplier_key);
+
+-- Conferência de alocação: pagamento numa categoria diferente da habitual do fornecedor
+CREATE TABLE ext_reviews (
+  source       TEXT NOT NULL DEFAULT 'maiscontrole',
+  ext_key      TEXT NOT NULL,
+  supplier_key TEXT,
+  decision     TEXT NOT NULL,                      -- ok | errado
+  category     TEXT,                               -- categoria do pagamento quando foi decidido
+  usual        TEXT,                               -- categoria habitual do fornecedor
+  decided_by   INTEGER REFERENCES users(id),
+  decided_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (source, ext_key)
+);
+
+-- Tarefa: mês mais antigo com pagamento no Mais Controle (o histórico aparece na grade sem gerar tarefas antigas)
+ALTER TABLE finance_obligations ADD COLUMN mc_start TEXT;
+-- Parcela paga pela sincronização (o Mais Controle pode atualizar ou desfazer; pagamento lançado à mão não é mexido)
+ALTER TABLE finance_items ADD COLUMN source TEXT;
+-- Previsto calculado (realizado do ano anterior): auto = 1 é refeito a cada sincronização; ajuste manual (auto = 0) vale por cima
+ALTER TABLE finance_plan ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;
 
 -- Parcela: "Paguei" (aguardando confirmação do Mais Controle) e justificativa de despesa prevista sem pagamento
 ALTER TABLE finance_items ADD COLUMN marked_paid_at TEXT;

@@ -1967,6 +1967,9 @@ async function main() {
     ok(sy.pagos >= 4 && sy.manual === 1 && row(gp, cont)?.cells[0].status === 'pago' && row(gp, cont).cells[0].real === 280 && row(gp, cont).cells[1].real === 290 /* 285 + 5 de juros */, 'sincronizar: histórico do ano anterior entra na tarefa (desde o primeiro pagamento)');
     ok(row(gp, cont).cells[0].planned === 280 && row(gy, cont).cells[0].planned === 280 && row(gy, cont).cells[1].planned === 290 && row(gy, cont).cells[0].real === 300, 'previsto: 1º ano = o próprio realizado; ano seguinte = realizado do ano anterior');
     ok(['sem_previsto', 'nao_ocorreu'].includes(row(gy, cont).cells[2]?.status) || mcM <= '03', 'mês sem realizado no ano anterior: previsto 0 (nada esperado)');
+    // Categoria que só aparece no ano atual: previsto = o próprio realizado; meses futuros = média do que já foi pago no ano
+    const outraRow = row(gy, outra), mIdx = Number(mcM) - 1;
+    ok(outraRow.cells[mIdx]?.planned === 120 && (mIdx === 11 || outraRow.cells[11]?.planned === 120), 'primeiro ano da categoria: previsto = o próprio realizado; meses futuros = média do ano');
     ok(row(gy, man).cells[0].real === 999, 'pago à mão diferente do Mais Controle: mantido');
     const hist = (await fo('GET', `/finance/obligations/${cont}`)).data.items.find(i => i.ref_month === `${yp}-01`);
     ok(hist && !hist.task_id, 'meses do histórico não geram tarefas "a fazer"');

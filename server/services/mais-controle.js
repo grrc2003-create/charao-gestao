@@ -475,12 +475,20 @@ export function sync(ctx, ip, { resetManualPlans = false } = {}) {
         const o = fresh(oid);
         if (resetManualPlans) run('DELETE FROM finance_plan WHERE obligation_id = ? AND auto = 0', oid);
         const manual = new Set(all('SELECT ref_month FROM finance_plan WHERE obligation_id = ? AND auto = 0', oid).map(r => r.ref_month));
+        // Primeiro ano da categoria (mês do primeiro pagamento no Mais Controle): previsto = o próprio realizado; os meses
+        // desse ano que ainda não aconteceram usam a média mensal do que já foi pago nele (do 1º pagamento até o último)
+        const startYm = o.mc_start || [...al.real.values()].filter(g => g.o.id === oid).map(g => g.ym).sort()[0];
+        const catFirst = Number(startYm.slice(0, 4));
+        const lastPaid = [...al.real.values()].filter(g => g.o.id === oid && g.ym.startsWith(`${catFirst}-`)).map(g => g.ym).sort().at(-1) || startYm;
+        const firstMonths = monthsOf(o, lastPaid).filter(m => m >= startYm && m.startsWith(`${catFirst}-`));
+        const firstAvg = firstMonths.length ? r2(firstMonths.reduce((s, m) => s + realOf(oid, m), 0) / firstMonths.length) : 0;
         for (const ym of monthsOf(o, lastYm)) {
-          if (ym < `${al.firstYear}-01` || manual.has(ym)) continue;
-          // Regra da tarefa: sempre zero; zero no primeiro ano em que a categoria aparece; ou realizado do ano anterior
-          // (no primeiro ano do histórico, o próprio realizado)
-          const yr = Number(ym.slice(0, 4)), catFirst = Number((o.mc_start || ym).slice(0, 4));
-          const planned = o.plan_zero === 1 || (o.plan_zero === 2 && yr === catFirst) ? 0 : yr === al.firstYear ? realOf(oid, ym) : realOf(oid, prevYm(ym));
+          if (ym < startYm || manual.has(ym)) continue;
+          // Regra da tarefa: sempre zero; zero no primeiro ano da categoria; senão realizado do ano anterior
+          const yr = Number(ym.slice(0, 4));
+          const planned = o.plan_zero === 1 || (o.plan_zero === 2 && yr === catFirst) ? 0
+            : yr === catFirst ? (ym >= cur && !realOf(oid, ym) ? firstAvg : realOf(oid, ym))
+            : realOf(oid, prevYm(ym));
           const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', oid, ym);
           if (it) {
             if (r2(it.amount_expected) === r2(planned)) continue;

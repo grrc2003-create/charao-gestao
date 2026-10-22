@@ -1976,10 +1976,19 @@ async function main() {
     ok(gy.projects.some(p => p.cost_center === 'Obra Teste 1' && p.months[0] === 900), 'grade: Custos destinados a Projetos por centro de custo');
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');
-    // Conferência: "Está errado" volta a avisar enquanto não for ajustado; "Está OK" aceita
-    await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'errado', usual: rv.usual });
+    // Conferência: stand by (fora do realizado até vir corrigido), corrigir a categoria no sistema, reabrir e "Está OK"
+    const mi2 = Number(mcM) - 1, realAt = async id => row(await grid(y), id)?.cells[mi2]?.real ?? null;
+    const contBefore = await realAt(cont), outraBefore = await realAt(outra);
+    await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'standby', usual: rv.usual });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.reviews.find(r => r.key === rv.key)?.state === 'nao_ajustado', '"Está errado": continua no alerta até ser ajustado no Mais Controle');
+    ok(pv.reviews.find(r => r.key === rv.key)?.state === 'standby' && pv.totals.standby === 1 && (await realAt(outra) || 0) === r2t(outraBefore - 120), 'stand by: sai do realizado e fica no alerta até vir corrigido do Mais Controle');
+    await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'corrigido', obligation_id: cont, usual: rv.usual });
+    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(!pv.reviews.some(r => r.key === rv.key) && await realAt(cont) === r2t((contBefore || 0) + 120), 'corrigir a categoria no sistema: a despesa vai para a tarefa escolhida');
+    const pc = (await fo('GET', `/finance/maiscontrole/payments?tarefa=${cont}&mes=${y}-${mcM}`)).data.find(x => x.key === rv.key);
+    ok(pc && pc.fixed_from === 'Outra categoria MC teste', 'lista do mês mostra a despesa corrigida (categoria original)');
+    await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'reabrir' });
+    ok(await realAt(outra) === outraBefore, 'desfazer a decisão: volta para a categoria do Mais Controle');
     await fo('POST', '/finance/maiscontrole/review', { key: rv.key, decision: 'ok', usual: rv.usual });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(!pv.reviews.some(r => r.key === rv.key), '"Está OK": sai da conferência (fornecedor passa a valer nesta categoria)');

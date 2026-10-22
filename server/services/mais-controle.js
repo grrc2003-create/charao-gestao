@@ -284,11 +284,13 @@ export function monthPayments(ctx, obligationId, ym) {
   requireFinance(ctx.user);
   const o = one('SELECT * FROM finance_obligations WHERE id = ?', obligationId);
   if (!o || !/^\d{4}-\d{2}$/.test(String(ym || ''))) throw notFound('Tarefa ou mês não encontrado.');
-  const ex = exclusions();
+  const ex = exclusions(), dec = decisions();
+  const catOf = p => { const d = dec.get(p.ext_key); return d?.decision === 'corrigido' && hkey(p.category) === hkey(d.category) ? d.fix_category : p.category; };
   return all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
     WHERE p.source = ? AND p.ref_month = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa')`, SOURCE, ym)
-    .filter(p => hkey(p.category) === hkey(o.title))
-    .map(p => ({ key: p.ext_key, supplier: p.supplier, supplier_key: p.supplier_key, description: p.description, amount: p.amount, due_date: p.due_date, paid_date: p.paid_date, category: p.category, excluded: excluded(ex, p) }));
+    .filter(p => hkey(catOf(p)) === hkey(o.title) || (hkey(p.category) === hkey(o.title) && dec.get(p.ext_key)?.decision === 'standby'))
+    .map(p => { const d = dec.get(p.ext_key); return { key: p.ext_key, supplier: p.supplier, supplier_key: p.supplier_key, description: p.description, amount: p.amount, due_date: p.due_date, paid_date: p.paid_date, category: p.category,
+      excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category) }; });
 }
 
 // ---------- Alocação: a partir da foto atual ----------
@@ -301,7 +303,8 @@ function allocation() {
   for (const o of obs) if (!byName.has(hkey(o.title))) byName.set(hkey(o.title), o);
   const real = new Map(), noTask = new Map(), otherAcc = new Map(), projects = new Map(), accounts = new Map();
   const ex = exclusions();
-  let firstYear = null, unpaid = 0, excludedN = 0, excludedTotal = 0;
+  const fixes = decisions();
+  let firstYear = null, unpaid = 0, excludedN = 0, excludedTotal = 0, standbyN = 0, standbyTotal = 0;
   for (const p of rows) {
     if (!p.paid_date || !(p.amount > 0)) { unpaid++; continue; }
     if (excluded(ex, p)) { excludedN++; excludedTotal = r2(excludedTotal + p.amount); continue; }
@@ -317,6 +320,11 @@ function allocation() {
     }
     const y = Number(p.ref_month.slice(0, 4));
     if (!firstYear || y < firstYear) firstYear = y;
+    const d = fixes.get(p.ext_key);
+    // Stand by: fora do realizado enquanto o Mais Controle mandar a mesma categoria (corrigida lá → entra sozinha)
+    if (d?.decision === 'standby' && hkey(p.category) === hkey(d.category)) { standbyN++; standbyTotal = r2(standbyTotal + p.amount); continue; }
+    // Corrigida no sistema: vai para a tarefa escolhida (se o Mais Controle não mudou a categoria desde então)
+    if (d?.decision === 'corrigido' && d.fix_category && hkey(p.category) === hkey(d.category)) p.category = d.fix_category;
     const o = byName.get(hkey(p.category));
     if (!o) {
       const c = noTask.get(hkey(p.category)) || { label: p.category || '(sem categoria)', count: 0, total: 0, last: null };
@@ -331,7 +339,7 @@ function allocation() {
   }
   for (const a of accounts.values()) a.categories = [...a.categories].map(([label, total]) => ({ label, total })).sort((x, y) => y.total - x.total);
   for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, count: 0, total: 0, categories: [] });
-  return { real, noTask, projects, accounts, firstYear, unpaid, obs, excludedN, excludedTotal };
+  return { real, noTask, projects, accounts, firstYear, unpaid, obs, excludedN, excludedTotal, standbyN, standbyTotal };
 }
 
 // O que a sincronização muda nas parcelas (novo / alterado / removido / pago à mão)
@@ -349,52 +357,71 @@ function changes(al) {
   return out.sort((a, b) => a.title.localeCompare(b.title, 'pt-BR') || a.ym.localeCompare(b.ym));
 }
 
-// ---------- Conferência de alocação: despesa do mês atual numa categoria diferente da habitual do fornecedor ----------
+// ---------- Conferência de alocação: despesa numa categoria diferente da habitual do fornecedor ----------
+// Decisões por pagamento: ok (fornecedor passa a valer nesta categoria), corrigido (vai para outra tarefa no sistema)
+// ou standby (fora do realizado até vir corrigido do Mais Controle).
+function decisions() {
+  const m = new Map();
+  try { for (const r of all('SELECT * FROM ext_reviews WHERE source = ?', SOURCE)) m.set(r.ext_key, { ...r, decision: r.decision === 'errado' ? 'standby' : r.decision }); } catch { /* antes da migração */ }
+  return m;
+}
 export function reviews() {
   const cur = today().slice(0, 7);
   const rows = all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
     WHERE p.source = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa') AND p.supplier_key <> ''`, SOURCE);
   const ex = exclusions();
   for (let i = rows.length - 1; i >= 0; i--) if (excluded(ex, rows[i])) rows.splice(i, 1);
-  const decided = new Map(all('SELECT * FROM ext_reviews WHERE source = ?', SOURCE).map(r => [r.ext_key, r]));
+  const decided = decisions();
   // Categoria habitual: a última aceita ("Está OK") para o fornecedor, senão a mais frequente nos meses anteriores
   const accepted = new Map();
-  for (const r of all(`SELECT supplier_key, category FROM ext_reviews WHERE source = ? AND decision = 'ok' ORDER BY decided_at`, SOURCE)) accepted.set(r.supplier_key, r.category);
+  for (const r of [...decided.values()].filter(x => x.decision === 'ok').sort((a, b) => String(a.decided_at).localeCompare(String(b.decided_at)))) accepted.set(r.supplier_key, r.category);
   const hist = new Map();
   for (const p of rows) if (p.ref_month < cur) {
+    const d = decided.get(p.ext_key);
+    const cat = d?.decision === 'corrigido' && hkey(p.category) === hkey(d.category) ? d.fix_category : p.category;
     const m = hist.get(p.supplier_key) || new Map();
-    m.set(p.category, (m.get(p.category) || 0) + 1); hist.set(p.supplier_key, m);
+    m.set(cat, (m.get(cat) || 0) + 1); hist.set(p.supplier_key, m);
   }
   const usualOf = sk => accepted.get(sk) ?? (hist.get(sk) ? [...hist.get(sk)].sort((a, b) => b[1] - a[1])[0][0] : null);
   const out = [];
-  for (const p of rows.filter(x => x.ref_month === cur)) {
-    const usual = usualOf(p.supplier_key);
+  for (const p of rows) {
     const d = decided.get(p.ext_key);
-    if (d?.decision === 'ok') continue;
-    if (d?.decision === 'errado') {
-      // Marcado como errado: conferido de novo a cada atualização; corrigido no Mais Controle → sai da lista
-      if (hkey(p.category) !== hkey(d.category)) continue;
-      out.push({ key: p.ext_key, supplier: p.supplier, description: p.description, amount: p.amount, due_date: p.due_date, category: p.category, usual: d.usual || usual, state: 'nao_ajustado', marked_at: d.decided_at });
-      continue;
-    }
+    const base = { key: p.ext_key, supplier: p.supplier, description: p.description, amount: p.amount, due_date: p.due_date, category: p.category };
+    // Stand by: aparece até o Mais Controle mandar a categoria corrigida (qualquer mês)
+    if (d?.decision === 'standby') { if (hkey(p.category) === hkey(d.category)) out.push({ ...base, usual: d.usual, state: 'standby', marked_at: d.decided_at }); continue; }
+    if (d && hkey(p.category) === hkey(d.category)) continue; // ok ou corrigido (enquanto a categoria não mudar lá)
+    if (p.ref_month !== cur) continue;
+    const usual = usualOf(p.supplier_key);
     if (!usual || hkey(usual) === hkey(p.category)) continue;
-    out.push({ key: p.ext_key, supplier: p.supplier, description: p.description, amount: p.amount, due_date: p.due_date, category: p.category, usual, state: 'conferir' });
+    out.push({ ...base, usual, state: 'conferir' });
   }
-  return out.sort((a, b) => (a.state === 'nao_ajustado' ? -1 : 1) - (b.state === 'nao_ajustado' ? -1 : 1) || String(a.supplier).localeCompare(String(b.supplier), 'pt-BR'));
+  return out.sort((a, b) => (a.state === 'standby' ? -1 : 1) - (b.state === 'standby' ? -1 : 1) || String(a.supplier).localeCompare(String(b.supplier), 'pt-BR'));
 }
-export function decideReview(ctx, body) {
+export function decideReview(ctx, body, ip) {
   requireFinance(ctx.user);
-  const decision = body.decision === 'ok' ? 'ok' : body.decision === 'errado' ? 'errado' : null;
-  if (!decision) throw badRequest('Informe se está OK ou errado.');
+  const decision = { ok: 'ok', corrigido: 'corrigido', standby: 'standby', errado: 'standby', reabrir: 'reabrir' }[body.decision];
+  if (!decision) throw badRequest('Informe a decisão: está OK, corrigir a categoria ou stand by.');
   const p = one('SELECT * FROM ext_payments WHERE source = ? AND ext_key = ?', SOURCE, String(body.key || ''));
   if (!p) throw notFound('Pagamento não encontrado na última atualização do Mais Controle.');
-  const usual = str(body.usual, { max: 160, label: 'Categoria habitual' });
-  run(`INSERT INTO ext_reviews (source, ext_key, supplier_key, decision, category, usual, decided_by) VALUES (?,?,?,?,?,?,?)
-    ON CONFLICT(source, ext_key) DO UPDATE SET decision = excluded.decision, category = excluded.category, usual = excluded.usual, decided_by = excluded.decided_by, decided_at = datetime('now')`,
-    SOURCE, p.ext_key, p.supplier_key, decision, p.category, usual, ctx.user.id);
-  audit(ctx.user.id, 'finance', null, decision === 'ok' ? 'Alocação conferida: OK (fornecedor passa a valer nesta categoria)' : 'Alocação conferida: errada (ajustar no Mais Controle)',
-    { fornecedor: p.supplier, categoria: p.category, habitual: usual, valor: p.amount }, null);
-  return { ok: true };
+  if (decision === 'reabrir') {
+    run('DELETE FROM ext_reviews WHERE source = ? AND ext_key = ?', SOURCE, p.ext_key);
+    audit(ctx.user.id, 'finance', null, 'Alocação: decisão desfeita', { fornecedor: p.supplier, categoria: p.category, valor: p.amount }, ip);
+    return sync(ctx, ip);
+  }
+  let fix = null;
+  if (decision === 'corrigido') {
+    const o = one('SELECT * FROM finance_obligations WHERE id = ?', intOrNull(body.obligation_id));
+    if (!o) throw badRequest('Escolha a tarefa (categoria) correta.');
+    if (hkey(o.title) === hkey(p.category)) throw badRequest('A despesa já está nesta categoria.');
+    fix = o.title;
+  }
+  const usual = str(body.usual, { max: 160, label: 'Categoria habitual' }) || null;
+  run(`INSERT INTO ext_reviews (source, ext_key, supplier_key, decision, category, usual, fix_category, decided_by) VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(source, ext_key) DO UPDATE SET decision = excluded.decision, category = excluded.category, usual = excluded.usual, fix_category = excluded.fix_category, decided_by = excluded.decided_by, decided_at = datetime('now')`,
+    SOURCE, p.ext_key, p.supplier_key, decision, p.category, usual, fix, ctx.user.id);
+  audit(ctx.user.id, 'finance', null, { ok: 'Alocação conferida: OK (fornecedor passa a valer nesta categoria)', corrigido: 'Alocação corrigida no sistema', standby: 'Alocação em stand by (ajustar no Mais Controle)' }[decision],
+    { fornecedor: p.supplier, categoria: p.category, para: fix, valor: p.amount }, ip);
+  return sync(ctx, ip);
 }
 
 // ---------- Prévia ----------
@@ -411,13 +438,14 @@ export function preview(ctx) {
   return {
     fetch: f ? { id: f.id, origin: f.origin, file_name: f.file_name, fetched_at: f.fetched_at, rows: f.row_count, data_until: f.data_until } : null,
     first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(), exclusions: listExclusions(ctx),
+    tasks: al.obs.filter(o => o.active).map(o => ({ id: o.id, title: o.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR')),
     totals: {
       novo: cnt('novo'), alterado: cnt('alterado'), removido: cnt('removido'), manual: cnt('manual'),
       novo_total: r2(ch.filter(c => c.kind === 'novo').reduce((s, c) => s + c.amount, 0)),
       unmapped: noTask.reduce((s, c) => s + c.count, 0), unmapped_total: r2(noTask.reduce((s, c) => s + c.total, 0)),
       other_account: otherAcc.reduce((s, a) => s + a.count, 0), other_account_total: r2(otherAcc.reduce((s, a) => s + a.total, 0)),
       projects: projList.reduce((s, g) => s + g.count, 0), projects_total: r2(projList.reduce((s, g) => s + g.amount, 0)), unpaid: al.unpaid,
-      excluded: al.excludedN, excluded_total: al.excludedTotal,
+      excluded: al.excludedN, excluded_total: al.excludedTotal, standby: al.standbyN, standby_total: al.standbyTotal,
     },
   };
 }

@@ -2909,3 +2909,8 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fo-plan .radio { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; font-size: 13.5px; }
 .fo-plan .radio input { margin-top: 3px; }
 .fo-plan .radio small { display: block; font-size: 12px; color: var(--muted); }
+
+.mc-fix { display: inline-flex; gap: 4px; align-items: center; }
+.mc-fix select { min-height: 32px; max-width: 200px; font-size: 12.5px; }
+.mc-note { color: #2F6FB3 !important; font-weight: 600; }
+.mc-pays .mc-pacts { max-width: 420px; }

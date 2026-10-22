@@ -16,10 +16,38 @@ const readB64 = f => new Promise((res, rej) => { const fr = new FileReader(); fr
 const PLAN = { semanal: 'semanal (gratuito)', diario: 'diário', horario: 'de hora em hora' };
 const CH = { novo: ['Novo', 'm-paid'], alterado: ['Alterado', 'm-paid'], removido: ['Retirado', 'fi-err'], manual: ['Pago à mão: não muda', 'm-draft'] };
 
+// Ações de uma despesa: OK, corrigir para outra tarefa (no sistema), stand by (aguardar o Mais Controle) ou desfazer
+export function reviewActs(r, tasks = TASKS) {
+  const others = tasks.filter(x => x.title.toLowerCase() !== String(r.category).toLowerCase());
+  const def = others.find(x => r.usual && x.title.toLowerCase() === r.usual.toLowerCase())?.id;
+  return html`<span class="mc-rev-acts">
+    ${r.state === 'standby' ? html`<button type="button" class="btn btn-ghost btn-sm" data-rv="reabrir" data-key="${r.key}">Desfazer stand by</button>`
+      : r.state === 'corrigido' ? html`<button type="button" class="btn btn-ghost btn-sm" data-rv="reabrir" data-key="${r.key}">Desfazer correção</button>`
+      : html`<button type="button" class="btn btn-ghost btn-sm" data-rv="ok" data-key="${r.key}" data-usual="${r.usual || ''}">${icon('check')}Está OK</button>
+        <button type="button" class="btn btn-ghost btn-sm mc-wrong" data-rv="standby" data-key="${r.key}" data-usual="${r.usual || ''}">Stand by</button>`}
+    <span class="mc-fix"><select data-fix-sel="${r.key}" aria-label="Tarefa correta">${others.map(x => html`<option value="${x.id}" ${x.id === def ? 'selected' : ''}>${x.title}</option>`)}</select>
+      <button type="button" class="btn btn-ghost btn-sm" data-rv="corrigido" data-key="${r.key}" data-usual="${r.usual || ''}">Corrigir</button></span>
+  </span>`;
+}
+let TASKS = [];
+export function bindReviewActs(scope, after) {
+  scope.querySelectorAll('[data-rv]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const body = { key: b.dataset.key, decision: b.dataset.rv, usual: b.dataset.usual };
+    if (b.dataset.rv === 'corrigido') body.obligation_id = Number(scope.querySelector(`[data-fix-sel="${b.dataset.key}"]`)?.value);
+    try {
+      await api('/finance/maiscontrole/review', { method: 'POST', body });
+      toast({ ok: 'OK: o fornecedor passa a valer nesta categoria.', corrigido: 'Corrigido: a despesa foi para a tarefa escolhida.', standby: 'Em stand by: fora do realizado até vir corrigido do Mais Controle.', reabrir: 'Decisão desfeita.' }[b.dataset.rv]);
+      after();
+    } catch (ex) { toast(ex.message, 'error'); b.disabled = false; }
+  }));
+}
+
 export async function view({ state, render }) {
   if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação das Tarefas financeiras.');
   const [st, pv] = await Promise.all([api('/finance/maiscontrole'), api('/finance/maiscontrole/preview')]);
   const t = pv.totals;
+  TASKS = pv.tasks || [];
   const nChanges = t.novo + t.alterado + t.removido;
   return {
     title: 'Mais Controle',
@@ -55,14 +83,13 @@ export async function view({ state, render }) {
             <button type="button" class="btn btn-ghost btn-sm" data-ign="${c.label}">Ignorar categoria</button></span></li>`)}</ul>
       </section>` : ''}
       ${pv.reviews.length ? html`<section class="card section">
-        <div class="card-head"><h2>${icon('alert')}Conferência de alocação</h2><span class="sub">despesas do mês numa categoria diferente da habitual do fornecedor</span></div>
-        <div class="card-body"><p class="muted" style="margin:0"><b>Está OK</b>: o fornecedor passa a valer nesta categoria. <b>Está errado</b>: ajuste no Mais Controle; na próxima atualização o sistema confere e, se não tiver sido ajustado, avisa de novo.</p></div>
-        <ul class="mc-cats mc-rev">${pv.reviews.map(r => html`<li class="${r.state === 'nao_ajustado' ? 'is-late' : 'is-pending'}">
+        <div class="card-head"><h2>${icon('alert')}Conferência de alocação</h2><span class="sub">despesas numa categoria diferente da habitual do fornecedor${t.standby ? ` · ${t.standby} em stand by (${money(t.standby_total)} fora do realizado)` : ''}</span></div>
+        <div class="card-body"><p class="muted" style="margin:0"><b>Está OK</b>: o fornecedor passa a valer nesta categoria. <b>Corrigir</b>: a despesa vai para a tarefa escolhida já no sistema. <b>Stand by</b>: fica fora do realizado até ser corrigida no Mais Controle; quando vier correta, entra sozinha.</p></div>
+        <ul class="mc-cats mc-rev">${pv.reviews.map(r => html`<li class="${r.state === 'standby' ? 'is-late' : 'is-pending'}">
           <span class="mc-cat"><b>${r.supplier || '(sem fornecedor)'} · ${money(r.amount)}</b>
             <small>${dmy(r.due_date)}${r.description ? ` · ${r.description}` : ''}</small>
-            <small>Agora em <b>${r.category}</b> · costuma ser <b>${r.usual}</b>${r.state === 'nao_ajustado' ? ` · marcado como errado em ${when(r.marked_at)}: ainda não ajustado no Mais Controle` : ''}</small></span>
-          <span class="mc-rev-acts"><button type="button" class="btn btn-ghost btn-sm" data-rv="ok" data-key="${r.key}" data-usual="${r.usual}">${icon('check')}Está OK</button>
-            ${r.state === 'nao_ajustado' ? '' : html`<button type="button" class="btn btn-ghost btn-sm mc-wrong" data-rv="errado" data-key="${r.key}" data-usual="${r.usual}">${icon('x')}Está errado</button>`}</span></li>`)}</ul>
+            <small>No Mais Controle: <b>${r.category}</b>${r.usual ? html` · costuma ser <b>${r.usual}</b>` : ''}${r.state === 'standby' ? ` · em stand by desde ${when(r.marked_at)}: aguardando ajuste no Mais Controle` : ''}</small></span>
+          ${reviewActs(r)}</li>`)}</ul>
       </section>` : ''}
       ${pv.exclusions?.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('x')}Custos que não entram</h2><span class="sub">${pv.exclusions.length} · ${t.excluded} pagamento(s) · ${money(t.excluded_total)} fora</span></div>
@@ -116,10 +143,7 @@ export async function view({ state, render }) {
         await api('/finance/maiscontrole/exclusions/remove', { method: 'POST', body: { kind: b.dataset.unex, key: b.dataset.key } });
         toast('Volta a entrar: o realizado foi recalculado.'); render();
       })));
-      root.querySelectorAll('[data-rv]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
-        await api('/finance/maiscontrole/review', { method: 'POST', body: { key: b.dataset.key, decision: b.dataset.rv, usual: b.dataset.usual } });
-        toast(b.dataset.rv === 'ok' ? 'OK: o fornecedor passa a valer nesta categoria.' : 'Marcado como errado: ajuste no Mais Controle; o sistema confere na próxima atualização.'); render();
-      })));
+      bindReviewActs(root, render);
       const doSync = async (b, reset) => busy(b, async () => {
         if (reset && !(await confirmSheet('Refazer todo o previsto', 'O previsto de todos os meses das tarefas do Mais Controle volta a ser o realizado do ano anterior (no primeiro ano, o próprio realizado). Ajustes manuais do previsto dessas tarefas são descartados.', 'Refazer', true))) { b.disabled = false; return; }
         const r = await api('/finance/maiscontrole/sync', { method: 'POST', body: { reset_plans: reset } });

@@ -1,5 +1,5 @@
 // Tarefas financeiras › Mais Controle: busca os pagamentos do ERP (API para Relatórios) ou recebe o arquivo exportado,
-// vincula cada categoria do Mais Controle a uma tarefa financeira e lança o real do mês (prévia antes; não duplica).
+// a categoria do Mais Controle é a tarefa financeira (mesmo nome) e o real do mês é lançado (prévia antes; não duplica).
 import { html, api, icon } from '../core.js';
 import { toast, confirmSheet } from '../ui.js';
 import { pageHead } from './shared.js';
@@ -18,10 +18,7 @@ export async function view({ state, render }) {
   if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação das Tarefas financeiras.');
   const [st, pv] = await Promise.all([api('/finance/maiscontrole'), api('/finance/maiscontrole/preview')]);
   const t = pv.totals;
-  const opts = sel => html`<option value="">— escolher tarefa —</option><option value="ignorar" ${sel === 'ignorar' ? 'selected' : ''}>Ignorar esta categoria</option>
-    ${pv.obligations.filter(o => o.active || o.id === sel).map(o => html`<option value="${o.id}" ${o.id === sel ? 'selected' : ''}>${o.title}${o.active ? '' : ' (inativa)'}</option>`)}`;
-  const pending = pv.categories.filter(c => !c.obligation_id && !c.ignored);
-  const sugg = pending.filter(c => c.suggestion);
+  const pending = pv.categories.filter(c => !c.obligation_id);
   return {
     title: 'Mais Controle',
     html: html`${pageHead({ back: { href: '#/financeiro', label: 'Planejamento anual' }, eyebrow: 'Tarefas financeiras', title: 'Mais Controle · pagamentos',
@@ -48,30 +45,27 @@ export async function view({ state, render }) {
           <label class="switch mc-acc"><input type="checkbox" data-mc-acc="${a.label}" data-mc-acc-key="${a.key}" ${a.active ? 'checked' : ''}>${a.active ? 'Cadastrada: traz os custos' : 'Não cadastrada'}</label></li>`)}</ul>
       </section>` : ''}
       ${pv.fetch ? html`
-      <section class="card section">
-        <div class="card-head"><h2>${icon('settings')}Categorias do Mais Controle → tarefas</h2><span class="sub">${pending.length ? `${pending.length} sem vínculo` : 'todas vinculadas'}</span></div>
-        <div class="card-body">
-          <p class="muted" style="margin:0 0 10px">Centro de custo Empresa: cada categoria soma no real de uma tarefa financeira (várias categorias podem ir para a mesma tarefa). Categoria sem tarefa fica de fora e aparece aqui como alerta: cadastre a tarefa e vincule. O vínculo fica salvo para as próximas buscas.</p>
-          ${sugg.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-mc-sugg>${icon('check')}Usar as ${sugg.length} sugestão(ões) pelo nome</button>` : ''}
-        </div>
-        <ul class="mc-cats">${pv.categories.map(c => html`<li class="${!c.obligation_id && !c.ignored ? 'is-pending' : c.ignored ? 'is-ignored' : ''}">
-          <span class="mc-cat"><b>${c.label}</b><small>${c.count} pagamento(s) novo(s) · ${money(c.total)}${c.suggestion && !c.obligation_id && !c.ignored ? ` · sugestão: ${c.suggestion.title}` : ''}</small></span>
-          <select data-mc-map="${c.label}" data-mc-key="${c.key}" aria-label="Tarefa da categoria ${c.label}">${opts(c.ignored ? 'ignorar' : c.obligation_id)}</select></li>`)}</ul>
-      </section>
+      ${pending.length ? html`<section class="card section">
+        <div class="card-head"><h2>${icon('alert')}Categorias sem tarefa financeira</h2><span class="sub">${pending.length} · ${money(t.unmapped_total)} fora do lançamento</span></div>
+        <div class="card-body"><p class="muted" style="margin:0">A tarefa financeira é a categoria do Mais Controle (mesmo nome). Para trazer estes custos, cadastre a tarefa com o nome da categoria.</p></div>
+        <ul class="mc-cats">${pending.map(c => html`<li class="is-pending">
+          <span class="mc-cat"><b>${c.label}</b><small>${c.count} pagamento(s) · ${money(c.total)}</small></span>
+          <a class="btn btn-ghost btn-sm" href="#/financeiro/obrigacoes/nova?titulo=${encodeURIComponent(c.label)}">${icon('plus')}Cadastrar tarefa “${c.label}”</a></li>`)}</ul>
+      </section>` : ''}
       <section class="card section">
         <div class="card-head"><h2>${icon('wallet')}Prévia do lançamento</h2><span class="sub">real por tarefa e mês (mês do vencimento)</span></div>
         <div class="card-body">
           <div class="ct-tiles fi-tiles">
             <div class="ct-tile"><span>A lançar</span><b>${t.ready_payments}</b><small>${money(t.ready_total)} em ${t.ready_months} mês(es)</small></div>
-            <div class="ct-tile"><span>Sem vínculo</span><b class="${t.unmapped ? 'is-neg' : ''}">${t.unmapped}</b><small>vincule a categoria acima</small></div>
+            <div class="ct-tile"><span>Sem tarefa</span><b class="${t.unmapped ? 'is-neg' : ''}">${t.unmapped}</b><small>${money(t.unmapped_total)} · cadastre a tarefa</small></div>
             <div class="ct-tile"><span>Projetos</span><b>${t.projects}</b><small>${money(t.projects_total)} em outros centros de custo</small></div>
-            <div class="ct-tile"><span>Já lançados</span><b>${t.already}</b><small>${t.ignored} ignorado(s) · ${t.unpaid} sem pagamento · ${t.other_account} em conta não cadastrada</small></div>
+            <div class="ct-tile"><span>Já lançados</span><b>${t.already}</b><small>${t.unpaid} sem pagamento · ${t.other_account} em conta não cadastrada</small></div>
             <div class="ct-tile"><span>Atenção</span><b class="${t.conflicts + t.errors ? 'is-neg' : ''}">${t.conflicts + t.errors}</b><small>${t.conflicts} já pago(s) à mão · ${t.errors} com erro</small></div>
           </div>
         </div>
         ${pv.groups.length ? html`<ul class="fi-list fi-list-sm">${pv.groups.map(g => html`<li class="${g.status === 'erro' ? 'is-erro' : g.status === 'conflito' ? 'is-existe' : ''}">
           <span class="fi-main"><b>${g.title} · ${ymLabel(g.ym)}</b><small>${g.count} pagamento(s) · ${g.categories.join(', ')}${g.note ? ` · ${g.note}` : ''}</small></span>
-          <span class="fi-val"><b>${money(g.amount)}</b><span class="m-badge ${GST[g.status][1]}">${GST[g.status][0]}</span></span></li>`)}</ul>` : html`<div class="card-body muted">Nada novo para lançar nas tarefas${t.unmapped ? ': vincule as categorias acima' : ''}.</div>`}
+          <span class="fi-val"><b>${money(g.amount)}</b><span class="m-badge ${GST[g.status][1]}">${GST[g.status][0]}</span></span></li>`)}</ul>` : html`<div class="card-body muted">Nada novo para lançar nas tarefas${t.unmapped ? ': cadastre as tarefas das categorias acima' : ''}.</div>`}
         ${pv.projects.length ? html`<div class="card-body"><b class="mc-sub">Custos destinados a Projetos</b></div><ul class="fi-list fi-list-sm">${pv.projects.map(g => html`<li>
           <span class="fi-main"><b>${g.cost_center} · ${ymLabel(g.ym)}</b><small>${g.count} pagamento(s)</small></span><span class="fi-val"><b>${money(g.amount)}</b></span></li>`)}</ul>` : ''}
       </section>
@@ -91,15 +85,6 @@ export async function view({ state, render }) {
       root.querySelectorAll('[data-mc-acc]').forEach(c => c.addEventListener('change', async () => {
         try { await api('/finance/maiscontrole/account', { method: 'PUT', body: { key: c.dataset.mcAccKey, label: c.dataset.mcAcc, active: c.checked } }); render(); }
         catch (ex) { toast(ex.message, 'error'); c.checked = !c.checked; }
-      }));
-      root.querySelectorAll('[data-mc-map]').forEach(s => s.addEventListener('change', async () => {
-        const v = s.value;
-        try { await api('/finance/maiscontrole/map', { method: 'PUT', body: { key: s.dataset.mcKey, label: s.dataset.mcMap, obligation_id: v && v !== 'ignorar' ? Number(v) : null, ignored: v === 'ignorar' } }); render(); }
-        catch (ex) { toast(ex.message, 'error'); }
-      }));
-      root.querySelector('[data-mc-sugg]')?.addEventListener('click', e => busy(e.currentTarget, async () => {
-        for (const c of sugg) await api('/finance/maiscontrole/map', { method: 'PUT', body: { key: c.key, label: c.label, obligation_id: c.suggestion.id } });
-        toast(`${sugg.length} categoria(s) vinculada(s).`); render();
       }));
       root.querySelector('[data-mc-apply]')?.addEventListener('click', e => busy(e.currentTarget, async () => {
         if (!(await confirmSheet('Lançar pagamentos', `Lançar ${t.ready_payments} pagamento(s) nas tarefas financeiras (${money(t.ready_total)})${t.projects ? ` e ${t.projects} custo(s) de projetos (${money(t.projects_total)})` : ''}? Dá para desfazer em Importar planilha › Última importação.`, 'Lançar'))) { e.currentTarget.disabled = false; return; }

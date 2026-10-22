@@ -1,7 +1,7 @@
 // Tarefas financeiras › Mais Controle (API para Relatórios, rotina "pagamentos", CSV com login e senha da API).
 // Toda semana os pagamentos são buscados e lançados:
 //  - só de contas bancárias cadastradas (custo em outra conta vira alerta: cadastre a conta para trazer);
-//  - centro de custo Empresa → real da tarefa financeira vinculada à categoria (categoria sem tarefa vira alerta);
+//  - centro de custo Empresa → real da tarefa financeira de mesmo nome da categoria (a tarefa É a categoria; sem tarefa vira alerta);
 //  - demais centros de custo → "Custos destinados a Projetos" (uma linha por centro de custo, total do mês).
 // Depois de cada busca o sistema confere o "Paguei" (não achou → alerta) e pede justificativa da despesa prevista que
 // venceu sem pagamento. Credenciais só nas variáveis de ambiente do servidor (MAISCONTROLE_USUARIO / MAISCONTROLE_SENHA).
@@ -176,7 +176,7 @@ export async function autoSync() {
   } finally { autoRunning = false; }
 }
 
-// ---------- Cadastros: contas bancárias e vínculo categoria → tarefa ----------
+// ---------- Cadastro: contas bancárias ----------
 export function setAccount(ctx, body) {
   requireFinance(ctx.user);
   const key = hkey(body.key ?? body.label), label = str(body.label, { max: 160, label: 'Conta' }) || '(sem conta)';
@@ -186,23 +186,6 @@ export function setAccount(ctx, body) {
   audit(ctx.user.id, 'finance', null, body.active ? 'Conta bancária do Mais Controle cadastrada' : 'Conta bancária do Mais Controle desativada', { conta: label }, null);
   return { ok: true };
 }
-export function setMapping(ctx, body) {
-  requireFinance(ctx.user);
-  const key = body.key !== undefined ? hkey(body.key) : hkey(body.category), label = str(body.label || body.category, { max: 160, label: 'Categoria' }) || '(sem categoria)';
-  const oid = intOrNull(body.obligation_id), ignored = body.ignored ? 1 : 0;
-  if (oid && !one('SELECT id FROM finance_obligations WHERE id = ?', oid)) throw notFound('Tarefa financeira não encontrada.');
-  if (!oid && !ignored) { run('DELETE FROM ext_category_map WHERE source = ? AND ext_category = ?', SOURCE, key); return { ok: true }; }
-  run(`INSERT INTO ext_category_map (source, ext_category, label, obligation_id, ignored, updated_by) VALUES (?,?,?,?,?,?)
-    ON CONFLICT(source, ext_category) DO UPDATE SET label = excluded.label, obligation_id = excluded.obligation_id, ignored = excluded.ignored, updated_by = excluded.updated_by, updated_at = datetime('now')`,
-    SOURCE, key, label, ignored ? null : oid, ignored, ctx.user.id);
-  return { ok: true };
-}
-function suggest(label, obs) {
-  const k = hkey(label);
-  if (!k) return null;
-  return obs.find(o => hkey(o.title) === k) || obs.find(o => k.length >= 4 && (hkey(o.title).startsWith(k) || k.startsWith(hkey(o.title)))) || null;
-}
-
 // ---------- Prévia ----------
 export function preview(ctx) {
   requireFinance(ctx.user);
@@ -213,12 +196,14 @@ export function preview(ctx) {
   const done = new Set(all('SELECT ext_key FROM ext_payments WHERE source = ?', SOURCE).map(r => r.ext_key));
   const obs = all('SELECT * FROM finance_obligations ORDER BY active DESC, title');
   const byId = new Map(obs.map(o => [o.id, o]));
-  const maps = new Map(all('SELECT * FROM ext_category_map WHERE source = ?', SOURCE).map(m => [m.ext_category, m]));
+  // A tarefa financeira é a categoria do Mais Controle: mesmo nome (sem diferença de acento/maiúscula); ativa tem prioridade
+  const byName = new Map();
+  for (const o of obs) if (!byName.has(hkey(o.title))) byName.set(hkey(o.title), o);
   const accs = new Map(accRows.map(a => [a.ext_key, a]));
   const syncedItems = new Set(all('SELECT DISTINCT item_id FROM ext_payments WHERE source = ? AND item_id IS NOT NULL', SOURCE).map(r => r.item_id));
   const cur = today();
   const accounts = new Map(), cats = new Map(), groups = new Map(), projects = new Map();
-  let already = 0, unpaid = 0, ignoredN = 0, otherAccount = 0, otherAccountTotal = 0;
+  let already = 0, unpaid = 0, otherAccount = 0, otherAccountTotal = 0;
   for (const p of pays) {
     if (!p.paid || !p.amount || p.amount <= 0) { unpaid++; continue; }
     const ak = hkey(p.account);
@@ -243,10 +228,8 @@ export function preview(ctx) {
     const ck = hkey(p.category);
     if (!cats.has(ck)) cats.set(ck, { key: ck, label: p.category || '(sem categoria)', count: 0, total: 0 });
     const c = cats.get(ck); c.count++; c.total = r2(c.total + p.amount);
-    const m = maps.get(ck);
-    if (m?.ignored) { ignoredN++; continue; }
-    const o = m?.obligation_id && byId.get(m.obligation_id);
-    if (!o) continue;
+    const o = byName.get(ck);
+    if (!o) continue; // categoria sem tarefa: alerta
     const gk = `${o.id}|${ym}`;
     if (!groups.has(gk)) groups.set(gk, { obligation_id: o.id, title: o.title, ym, amount: 0, count: 0, paid_date: null, keys: [], categories: new Set(), rows: [] });
     const g = groups.get(gk);
@@ -257,17 +240,15 @@ export function preview(ctx) {
     const o = byId.get(g.obligation_id);
     const it = one('SELECT id, status, paid_amount, marked_paid_at FROM finance_items WHERE obligation_id = ? AND ref_month = ?', o.id, g.ym);
     let st = 'ok', note = it?.marked_paid_at && it.status !== 'paga' ? 'confirma o "Paguei"' : null;
-    if (!monthsOf(o, g.ym).includes(g.ym)) { st = 'erro'; note = 'a tarefa não vence neste mês (ajuste o início/término ou o vínculo)'; }
+    if (!monthsOf(o, g.ym).includes(g.ym)) { st = 'erro'; note = 'a tarefa não vence neste mês (ajuste o início/término da tarefa)'; }
     else if (it?.status === 'paga' && syncedItems.has(it.id)) { st = 'soma'; note = `soma ao já lançado pelo Mais Controle (${brl(it.paid_amount)})`; }
     else if (it?.status === 'paga') { st = 'conflito'; note = `já tem pagamento lançado à mão (${brl(it.paid_amount)}): não muda`; }
     return { ...g, categories: [...g.categories], paid_date: g.paid_date > cur ? cur : g.paid_date, status: st, note };
   }).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR') || a.ym.localeCompare(b.ym));
   const categories = [...cats.values()].map(c => {
-    const m = maps.get(c.key);
-    const o = m?.obligation_id && byId.get(m.obligation_id);
-    const s = !m ? suggest(c.label, obs.filter(x => x.active)) : null;
-    return { ...c, obligation_id: o ? o.id : null, obligation_title: o ? o.title : null, ignored: !!m?.ignored, suggestion: s ? { id: s.id, title: s.title } : null };
-  }).sort((a, b) => (a.obligation_id || a.ignored ? 1 : 0) - (b.obligation_id || b.ignored ? 1 : 0) || b.total - a.total);
+    const o = byName.get(c.key);
+    return { ...c, obligation_id: o ? o.id : null, obligation_title: o ? o.title : null, active: o ? !!o.active : null };
+  }).sort((a, b) => (a.obligation_id ? 1 : 0) - (b.obligation_id ? 1 : 0) || b.total - a.total);
   const accountList = [...new Map([...accRows.map(a => [a.ext_key, { key: a.ext_key, label: a.label, count: 0, total: 0, categories: [] }]), ...[...accounts.values()].map(a => [a.key, { ...a, categories: [...a.categories].map(([label, total]) => ({ label, total })).sort((x, y) => y.total - x.total) }])]).values()]
     .map(a => ({ ...a, active: !!accs.get(a.key)?.active })).sort((a, b) => Number(b.active) - Number(a.active) || b.total - a.total);
   const ready = outGroups.filter(g => g.status === 'ok' || g.status === 'soma');
@@ -277,8 +258,9 @@ export function preview(ctx) {
     accounts: accountList, categories, groups: outGroups.map(({ rows, ...g }) => g), projects: projList.map(({ rows, ...g }) => g),
     obligations: obs.map(o => ({ id: o.id, title: o.title, category: o.category, active: !!o.active })),
     totals: {
-      payments: pays.length, already, unpaid, ignored: ignoredN, other_account: otherAccount, other_account_total: otherAccountTotal,
-      unmapped: categories.filter(c => !c.obligation_id && !c.ignored).reduce((s, c) => s + c.count, 0),
+      payments: pays.length, already, unpaid, other_account: otherAccount, other_account_total: otherAccountTotal,
+      unmapped: categories.filter(c => !c.obligation_id).reduce((s, c) => s + c.count, 0),
+      unmapped_total: r2(categories.filter(c => !c.obligation_id).reduce((s, c) => s + c.total, 0)),
       ready_months: ready.length, ready_payments: ready.reduce((s, g) => s + g.count, 0), ready_total: r2(ready.reduce((s, g) => s + g.amount, 0)),
       projects: projList.reduce((s, g) => s + g.count, 0), projects_total: r2(projList.reduce((s, g) => s + g.amount, 0)),
       conflicts: outGroups.filter(g => g.status === 'conflito').length, errors: outGroups.filter(g => g.status === 'erro').length,
@@ -292,7 +274,7 @@ export function apply(ctx, ip) {
   const pv = preview(ctx);
   if (!pv.fetch) throw badRequest('Busque os pagamentos primeiro.');
   const todo = pv._groups.filter(g => g.status === 'ok' || g.status === 'soma');
-  if (!todo.length && !pv._projects.length) throw badRequest('Nada para lançar: cadastre as contas bancárias e vincule as categorias às tarefas financeiras.');
+  if (!todo.length && !pv._projects.length) throw badRequest('Nada para lançar: cadastre as contas bancárias e as tarefas financeiras com o nome das categorias.');
   let paid = 0, total = 0;
   const uid = actorId(ctx);
   tx(() => {
@@ -357,7 +339,7 @@ export function financeWeek(ctx) {
     const pv = preview(ctx);
     alerts = {
       accounts: pv.accounts.filter(a => !a.active && a.count).map(a => ({ label: a.label, count: a.count, total: a.total, categories: a.categories.slice(0, 4) })),
-      categories: pv.categories.filter(c => !c.obligation_id && !c.ignored).map(c => ({ label: c.label, count: c.count, total: c.total })),
+      categories: pv.categories.filter(c => !c.obligation_id).map(c => ({ label: c.label, count: c.count, total: c.total })),
     };
   } catch { /* sem busca ainda */ }
   return { today: ref, week_end: end, data_until: cov?.data_until || null, items, alerts };

@@ -1,5 +1,5 @@
 -- Tarefas financeiras › Mais Controle (API para Relatórios, rotina "pagamentos"): toda semana os pagamentos do ERP
--- viram o real das tarefas financeiras (centro de custo Empresa) e os custos dos demais centros de custo ficam em
+-- viram o real das tarefas financeiras (centro de custo Empresa; a tarefa é a categoria, pelo nome) e os custos dos demais centros de custo ficam em
 -- "Custos destinados a Projetos". Só entram pagamentos de contas bancárias cadastradas. Migração apenas aditiva.
 
 -- Cada busca (pela API ou por arquivo exportado): linhas guardadas para a prévia, sem nova consulta à API
@@ -24,18 +24,6 @@ CREATE TABLE ext_accounts (
   updated_by INTEGER REFERENCES users(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (source, ext_key)
-);
-
--- Categoria do Mais Controle → tarefa financeira (ou ignorada)
-CREATE TABLE ext_category_map (
-  source        TEXT NOT NULL DEFAULT 'maiscontrole',
-  ext_category  TEXT NOT NULL,
-  label         TEXT NOT NULL,
-  obligation_id INTEGER REFERENCES finance_obligations(id) ON DELETE SET NULL,
-  ignored       INTEGER NOT NULL DEFAULT 0,
-  updated_by    INTEGER REFERENCES users(id),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (source, ext_category)
 );
 
 -- Pagamentos já lançados (não duplica ao sincronizar de novo). kind: empresa (tarefa) | projeto (centro de custo)

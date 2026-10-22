@@ -208,7 +208,7 @@ export async function obligations({ state }) {
   };
 }
 
-export async function form({ params, state, navigate }) {
+export async function form({ params, state, navigate, query }) {
   denied(state);
   const editing = !!params.id;
   const [o, people, meta] = await Promise.all([
@@ -216,7 +216,7 @@ export async function form({ params, state, navigate }) {
     api('/finance/assignees'),
     api('/finance/month'),
   ]);
-  const v = o || { frequency: 'mensal', due_day: 10, start_month: new Date().toISOString().slice(0, 7), active: 1, assignee_id: state.user.id };
+  const v = o || { title: query?.get('titulo') || '', frequency: 'mensal', due_day: 10, start_month: new Date().toISOString().slice(0, 7), active: 1, assignee_id: state.user.id };
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
   return {
     title: editing ? `Editar ${o.title}` : 'Nova obrigação',

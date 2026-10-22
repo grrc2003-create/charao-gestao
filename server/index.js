@@ -324,7 +324,6 @@ api.get('/api/finance/week', (req, res, { ctx }) => send(res, 200, MaisControle.
 api.post('/api/finance/items/:id/mark', (req, res, { ctx, params, body }) => send(res, 200, Finance.markPaid(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/finance/items/:id/unmark', (req, res, { ctx, params }) => send(res, 200, Finance.unmarkPaid(ctx, intOrNull(params.id), clientIp(req))));
 api.post('/api/finance/items/:id/justify', (req, res, { ctx, params, body }) => send(res, 200, Finance.justifyItem(ctx, intOrNull(params.id), body, clientIp(req))));
-api.put('/api/finance/maiscontrole/map', (req, res, { ctx, body }) => send(res, 200, MaisControle.setMapping(ctx, body)));
 api.post('/api/finance/maiscontrole/apply', (req, res, { ctx }) => send(res, 200, MaisControle.apply(ctx, clientIp(req))));
 api.get('/api/finance/import/last', (req, res, { ctx }) => send(res, 200, { last: FinanceImport.lastImport(ctx) }));
 api.post('/api/finance/import/:id/undo', (req, res, { ctx, params }) => send(res, 200, FinanceImport.undoImport(ctx, params.id, clientIp(req))));

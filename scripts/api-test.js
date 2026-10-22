@@ -1946,13 +1946,10 @@ async function main() {
     ok(pv.totals.other_account === 1 && cartao && !cartao.active && cartao.total === 70 && cartao.categories[0].label === 'Materiais de Copa', 'conta não cadastrada: alerta com o custo e a categoria');
     ok(pv.totals.projects === 1 && pv.projects[0].cost_center === 'Obra Teste 1' && pv.projects[0].amount === 900, 'outro centro de custo: vai para Custos destinados a Projetos');
     const cat = pv.categories.find(c => c.label === 'Contabilidade MC teste');
-    ok(cat && cat.suggestion?.id === cont && pv.totals.unpaid === 1 && pv.totals.unmapped === 3, 'prévia: categorias sem tarefa (alerta), sugestão pelo nome e linha sem pagamento fora');
-    await fo('PUT', '/finance/maiscontrole/map', { key: cat.key, label: cat.label, obligation_id: cont });
-    const tar = pv.categories.find(c => c.label === 'Tarifa MC teste');
-    await fo('PUT', '/finance/maiscontrole/map', { key: tar.key, label: tar.label, ignored: true });
-    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(cat && cat.obligation_id === cont && pv.totals.unpaid === 1 && pv.totals.unmapped === 1 && pv.categories.find(c => c.label === 'Tarifa MC teste' && !c.obligation_id),
+      'a tarefa é a categoria (mesmo nome); categoria sem tarefa vira alerta; linha sem pagamento fora');
     const jan = pv.groups.find(g => g.ym === `${y}-01`), fev = pv.groups.find(g => g.ym === `${y}-02`);
-    ok(jan?.amount === 300 && jan.status === 'ok' && pv.totals.ignored === 1 && (mcM === '01' ? true : fev?.amount === 305), 'prévia: soma do mês por tarefa (valor total pago, com juros) e categoria ignorada fora');
+    ok(jan?.amount === 300 && jan.status === 'ok' && (mcM === '01' ? true : fev?.amount === 305), 'prévia: soma do mês por tarefa (valor total pago, com juros)');
     const ap = (await fo('POST', '/finance/maiscontrole/apply', {})).data;
     const yd = (await fo('GET', `/finance/year?ano=${y}`)).data;
     const yr = yd.groups.flatMap(g => g.rows).find(r => r.id === cont);

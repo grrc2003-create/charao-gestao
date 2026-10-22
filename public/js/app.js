@@ -304,6 +304,7 @@ function markNav(path) {
 }
 
 let renderToken = 0;
+let lastPath = null;
 export async function render() {
   if (await ensureLatestVersion()) return;
   const token = ++renderToken;
@@ -342,17 +343,28 @@ export async function render() {
   markNav(path);
   const root = document.getElementById('view');
   if (!root.dataset.pdf) { root.dataset.pdf = '1'; autoPdfButtons(root); }
-  root.innerHTML = '<div class="loading" aria-busy="true"><span></span>Carregando…</div>';
+  // Mesma tela atualizada (salvou algo, mudou filtro/ano): mantém a posição da página e o conteúdo até o novo chegar.
+  // Tela nova: mostra "Carregando…" e começa do topo.
+  const same = !printMode && path === lastPath;
+  const keepY = window.scrollY;
+  lastPath = path;
+  if (same) root.style.minHeight = `${root.offsetHeight}px`;
+  else root.innerHTML = '<div class="loading" aria-busy="true"><span></span>Carregando…</div>';
   const ctx = { params, query, state, navigate, render, setQuery, reloadMeta, path };
   try {
     const v = await route.view(ctx);
     if (token !== renderToken) return;
     root.innerHTML = v.html.toString();
     if (v.title) { document.title = `${v.title} · Charão`; setCurrentTitle(v.title); }
-    if (!printMode) window.scrollTo(0, 0);
+    if (!printMode) window.scrollTo(0, same ? keepY : 0);
     v.mount?.(root, ctx);
+    if (same) {
+      root.style.minHeight = '';
+      requestAnimationFrame(() => { if (token === renderToken && Math.abs(window.scrollY - keepY) > 2) window.scrollTo(0, keepY); });
+    }
   } catch (e) {
     if (token !== renderToken) return;
+    root.style.minHeight = '';
     root.innerHTML = html`<div class="empty-state"><h2>Não foi possível abrir</h2><p>${e.message}</p><a class="btn btn-ghost" href="#/">Voltar ao início</a></div>`.toString();
   }
 }

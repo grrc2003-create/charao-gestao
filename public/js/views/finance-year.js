@@ -139,6 +139,29 @@ export async function view({ state, query, setQuery, render }) {
         const c = r?.cells[i];
         if (!c) return;
         const reload = () => { setQuery({ ano: d.year, m: mobMonth }); render(); };
+        if (done(c) && c.source === 'maiscontrole') {
+          const pays = await api('/finance/maiscontrole/payments', { query: { tarefa: r.id, mes: c.ym } }).catch(() => []);
+          const p = sheet({
+            title: `${r.title} · ${ymLabel(c.ym)}`, submitLabel: 'Fechar',
+            body: html`<p style="margin:0 0 6px"><b class="ok">✓ Pago ${money(c.real)}</b> · Mais Controle · previsto ${money(c.planned)}</p>
+              <p class="muted" style="margin:0 0 8px">Pagamentos do Mais Controle que formam o realizado do mês. Se algum não deve entrar, use “Não trazer”: o realizado é recalculado na hora.</p>
+              <ul class="mc-pays">${pays.map(x => html`<li class="${x.excluded ? 'is-off' : ''}"><span><b>${x.supplier || '(sem fornecedor)'}</b><small>${fmtDate(x.paid_date)}${x.description ? ` · ${x.description}` : ''}</small></span>
+                <span class="mc-pv"><b>${money(x.amount)}</b>${x.excluded ? html`<small>não entra</small>` : html`<span class="mc-pacts">
+                  <button type="button" class="btn btn-ghost btn-sm" data-ex="pagamento" data-key="${x.key}">Não trazer</button>
+                  ${x.supplier ? html`<button type="button" class="btn btn-ghost btn-sm" data-ex="fornecedor" data-label="${x.supplier}">Não trazer o fornecedor</button>` : ''}</span>`}</span></li>`)}</ul>`,
+          });
+          document.querySelectorAll('.sheet [data-ex]').forEach(b => b.addEventListener('click', async () => {
+            const forn = b.dataset.ex === 'fornecedor';
+            if (!(await confirmSheet(forn ? 'Não trazer o fornecedor' : 'Não trazer este pagamento', forn ? `Nenhum pagamento de “${b.dataset.label}” vai entrar nas tarefas financeiras. Dá para voltar em Mais Controle › Custos que não entram.` : 'Este pagamento deixa de entrar no realizado. Dá para voltar em Mais Controle › Custos que não entram.', 'Não trazer', true))) return;
+            try {
+              await api('/finance/maiscontrole/exclusions', { method: 'POST', body: forn ? { kind: 'fornecedor', label: b.dataset.label } : { kind: 'pagamento', key: b.dataset.key } });
+              document.querySelector('.sheet [data-close]')?.click();
+              toast('Feito: o realizado foi recalculado.'); reload();
+            } catch (ex) { toast(ex.message, 'error'); }
+          }));
+          await p;
+          return;
+        }
         if (done(c)) {
           const ok = await sheet({
             title: `${r.title} · ${ymLabel(c.ym)}`, submitLabel: c.status === 'nao_ocorreu' ? 'Desfazer (voltar a pendente)' : 'Desfazer pagamento', danger: true,

@@ -243,6 +243,54 @@ export function setAccount(ctx, body) {
   return { ok: true };
 }
 
+// ---------- Custos que não entram (pagamento, fornecedor ou categoria) ----------
+function exclusions() {
+  const ex = { pagamento: new Set(), fornecedor: new Set(), categoria: new Set() };
+  try { for (const e of all('SELECT kind, ext_key FROM ext_exclusions WHERE source = ?', SOURCE)) ex[e.kind]?.add(e.ext_key); } catch { /* antes da migração */ }
+  return ex;
+}
+const excluded = (ex, p) => ex.pagamento.has(p.ext_key) || (p.supplier_key && ex.fornecedor.has(p.supplier_key)) || ex.categoria.has(hkey(p.category));
+export function listExclusions(ctx) {
+  requireFinance(ctx.user);
+  return all('SELECT e.*, u.name AS by_name FROM ext_exclusions e LEFT JOIN users u ON u.id = e.created_by WHERE e.source = ? ORDER BY e.created_at DESC', SOURCE);
+}
+export function addExclusion(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const kind = ['pagamento', 'fornecedor', 'categoria'].includes(body.kind) ? body.kind : null;
+  if (!kind) throw badRequest('Informe o que não deve entrar (pagamento, fornecedor ou categoria).');
+  let key, label, detail = null;
+  if (kind === 'pagamento') {
+    const p = one('SELECT * FROM ext_payments WHERE source = ? AND ext_key = ?', SOURCE, String(body.key || ''));
+    if (!p) throw notFound('Pagamento não encontrado na última atualização do Mais Controle.');
+    key = p.ext_key; label = `${p.supplier || '(sem fornecedor)'} · ${brl(p.amount)} · ${String(p.due_date || '').split('-').reverse().join('/')}`; detail = [p.category, p.description].filter(Boolean).join(' · ');
+  } else {
+    label = str(body.label, { max: 160, required: true, label: kind === 'fornecedor' ? 'Fornecedor' : 'Categoria' });
+    key = hkey(label);
+  }
+  run(`INSERT OR REPLACE INTO ext_exclusions (source, kind, ext_key, label, detail, created_by) VALUES (?,?,?,?,?,?)`, SOURCE, kind, key, label, detail, ctx.user.id);
+  audit(ctx.user.id, 'finance', null, `Mais Controle: ${kind} não entra mais`, { [kind]: label, detalhe: detail }, ip);
+  return sync(ctx, ip);
+}
+export function removeExclusion(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const e = one('SELECT * FROM ext_exclusions WHERE source = ? AND kind = ? AND ext_key = ?', SOURCE, String(body.kind || ''), String(body.key || ''));
+  if (!e) throw notFound('Exclusão não encontrada.');
+  run('DELETE FROM ext_exclusions WHERE source = ? AND kind = ? AND ext_key = ?', SOURCE, e.kind, e.ext_key);
+  audit(ctx.user.id, 'finance', null, `Mais Controle: ${e.kind} volta a entrar`, { [e.kind]: e.label }, ip);
+  return sync(ctx, ip);
+}
+// Pagamentos que formam o realizado de uma tarefa no mês (para conferir e, se for o caso, não trazer)
+export function monthPayments(ctx, obligationId, ym) {
+  requireFinance(ctx.user);
+  const o = one('SELECT * FROM finance_obligations WHERE id = ?', obligationId);
+  if (!o || !/^\d{4}-\d{2}$/.test(String(ym || ''))) throw notFound('Tarefa ou mês não encontrado.');
+  const ex = exclusions();
+  return all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
+    WHERE p.source = ? AND p.ref_month = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa')`, SOURCE, ym)
+    .filter(p => hkey(p.category) === hkey(o.title))
+    .map(p => ({ key: p.ext_key, supplier: p.supplier, supplier_key: p.supplier_key, description: p.description, amount: p.amount, due_date: p.due_date, paid_date: p.paid_date, category: p.category, excluded: excluded(ex, p) }));
+}
+
 // ---------- Alocação: a partir da foto atual ----------
 // Empresa + conta cadastrada → tarefa de mesmo nome da categoria (realizado por tarefa e mês do vencimento)
 function allocation() {
@@ -252,9 +300,11 @@ function allocation() {
   const byName = new Map();
   for (const o of obs) if (!byName.has(hkey(o.title))) byName.set(hkey(o.title), o);
   const real = new Map(), noTask = new Map(), otherAcc = new Map(), projects = new Map(), accounts = new Map();
-  let firstYear = null, unpaid = 0;
+  const ex = exclusions();
+  let firstYear = null, unpaid = 0, excludedN = 0, excludedTotal = 0;
   for (const p of rows) {
     if (!p.paid_date || !(p.amount > 0)) { unpaid++; continue; }
+    if (excluded(ex, p)) { excludedN++; excludedTotal = r2(excludedTotal + p.amount); continue; }
     const ak = p.account_key || '';
     if (!accounts.has(ak)) accounts.set(ak, { key: ak, label: p.account || '(sem conta)', active: !!p.acc_active, count: 0, total: 0, categories: new Map() });
     const acc = accounts.get(ak); acc.count++; acc.total = r2(acc.total + p.amount);
@@ -281,7 +331,7 @@ function allocation() {
   }
   for (const a of accounts.values()) a.categories = [...a.categories].map(([label, total]) => ({ label, total })).sort((x, y) => y.total - x.total);
   for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, count: 0, total: 0, categories: [] });
-  return { real, noTask, projects, accounts, firstYear, unpaid, obs };
+  return { real, noTask, projects, accounts, firstYear, unpaid, obs, excludedN, excludedTotal };
 }
 
 // O que a sincronização muda nas parcelas (novo / alterado / removido / pago à mão)
@@ -304,6 +354,8 @@ export function reviews() {
   const cur = today().slice(0, 7);
   const rows = all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
     WHERE p.source = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa') AND p.supplier_key <> ''`, SOURCE);
+  const ex = exclusions();
+  for (let i = rows.length - 1; i >= 0; i--) if (excluded(ex, rows[i])) rows.splice(i, 1);
   const decided = new Map(all('SELECT * FROM ext_reviews WHERE source = ?', SOURCE).map(r => [r.ext_key, r]));
   // Categoria habitual: a última aceita ("Está OK") para o fornecedor, senão a mais frequente nos meses anteriores
   const accepted = new Map();
@@ -358,13 +410,14 @@ export function preview(ctx) {
   const cnt = k => ch.filter(c => c.kind === k).length;
   return {
     fetch: f ? { id: f.id, origin: f.origin, file_name: f.file_name, fetched_at: f.fetched_at, rows: f.row_count, data_until: f.data_until } : null,
-    first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(),
+    first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(), exclusions: listExclusions(ctx),
     totals: {
       novo: cnt('novo'), alterado: cnt('alterado'), removido: cnt('removido'), manual: cnt('manual'),
       novo_total: r2(ch.filter(c => c.kind === 'novo').reduce((s, c) => s + c.amount, 0)),
       unmapped: noTask.reduce((s, c) => s + c.count, 0), unmapped_total: r2(noTask.reduce((s, c) => s + c.total, 0)),
       other_account: otherAcc.reduce((s, a) => s + a.count, 0), other_account_total: r2(otherAcc.reduce((s, a) => s + a.total, 0)),
       projects: projList.reduce((s, g) => s + g.count, 0), projects_total: r2(projList.reduce((s, g) => s + g.amount, 0)), unpaid: al.unpaid,
+      excluded: al.excludedN, excluded_total: al.excludedTotal,
     },
   };
 }
@@ -424,7 +477,7 @@ export function sync(ctx, ip, { resetManualPlans = false } = {}) {
         const manual = new Set(all('SELECT ref_month FROM finance_plan WHERE obligation_id = ? AND auto = 0', oid).map(r => r.ref_month));
         for (const ym of monthsOf(o, lastYm)) {
           if (ym < `${al.firstYear}-01` || manual.has(ym)) continue;
-          const planned = Number(ym.slice(0, 4)) === al.firstYear ? realOf(oid, ym) : realOf(oid, prevYm(ym));
+          const planned = o.plan_zero ? 0 : Number(ym.slice(0, 4)) === al.firstYear ? realOf(oid, ym) : realOf(oid, prevYm(ym));
           const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', oid, ym);
           if (it) {
             if (r2(it.amount_expected) === r2(planned)) continue;

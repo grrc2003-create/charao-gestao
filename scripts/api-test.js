@@ -1990,6 +1990,27 @@ async function main() {
     await fo('POST', '/finance/maiscontrole/sync', {});
     const gy2 = await grid(y);
     ok(row(gy2, cont).cells[0].status !== 'pago' && row(gy2, outra).cells[0].real === 300 && row((await grid(yp)), cont).cells[0].real === 280, 'sincronizar: realocação feita sozinha; o histórico dos outros meses fica');
+    // Não trazer: um pagamento, um fornecedor ou uma categoria inteira (e voltar a trazer)
+    const pays = (await fo('GET', `/finance/maiscontrole/payments?tarefa=${outra}&mes=${y}-01`)).data;
+    ok(pays.length === 1 && pays[0].amount === 300 && !pays[0].excluded, 'pagamentos que formam o realizado do mês');
+    await fo('POST', '/finance/maiscontrole/exclusions', { kind: 'pagamento', key: pays[0].key });
+    ok(row(await grid(y), outra).cells[0].status !== 'pago', 'não trazer um pagamento: sai do realizado na hora');
+    await fo('POST', '/finance/maiscontrole/exclusions/remove', { kind: 'pagamento', key: pays[0].key });
+    ok(row(await grid(y), outra).cells[0].real === 300, 'voltar a trazer: o pagamento entra de novo');
+    await fo('POST', '/finance/maiscontrole/exclusions', { kind: 'fornecedor', label: 'Fornecedor Teste A' });
+    ok(row(await grid(yp), cont).cells[0].status !== 'pago' && row(await grid(y), outra).cells[0].status !== 'pago', 'não trazer um fornecedor: todos os pagamentos dele saem');
+    let ex = (await fo('GET', '/finance/maiscontrole/preview')).data.exclusions;
+    await fo('POST', '/finance/maiscontrole/exclusions/remove', { kind: 'fornecedor', key: ex.find(e => e.kind === 'fornecedor').ext_key });
+    await fo('POST', '/finance/maiscontrole/exclusions', { kind: 'categoria', label: 'Contabilidade MC teste' });
+    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(row(await grid(yp), cont).cells[0].status !== 'pago' && pv.exclusions.some(e => e.kind === 'categoria') && pv.totals.excluded >= 2, 'ignorar categoria: sai do realizado e dos alertas');
+    await fo('POST', '/finance/maiscontrole/exclusions/remove', { kind: 'categoria', key: pv.exclusions.find(e => e.kind === 'categoria').ext_key });
+    ok(row(await grid(yp), cont).cells[0].real === 280, 'categoria volta a entrar');
+    // Previsto sempre zero
+    await fo('PUT', `/finance/obligations/${outra}`, { title: 'Outra categoria MC teste', category: 'Outros', amount: 0, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, plan_zero: true });
+    await fo('POST', '/finance/maiscontrole/sync', {});
+    const oz = row(await grid(y), outra);
+    ok(oz.cells.filter(Boolean).every(c => c.planned === 0) && oz.cells[0].real === 300, 'previsto sempre zero: nenhum mês com previsto (o realizado continua)');
     for (const id of [cont, outra, man]) await fo('PUT', `/finance/obligations/${id}`, { title: 'MC teste inativa ' + id, category: 'Outros', amount: 1, frequency: 'mensal', due_day: 10, start_month: `${y}-01`, active: false });
   }
   {

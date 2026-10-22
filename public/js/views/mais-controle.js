@@ -51,7 +51,8 @@ export async function view({ state, render }) {
         <div class="card-body"><p class="muted" style="margin:0">A tarefa financeira é a categoria do Mais Controle (mesmo nome). Cadastre a tarefa com o nome da categoria e, na próxima sincronização, o histórico entra sozinho.</p></div>
         <ul class="mc-cats">${pv.categories.map(c => html`<li class="is-pending">
           <span class="mc-cat"><b>${c.label}</b><small>${c.count} pagamento(s) · ${money(c.total)}${c.last ? ` · último em ${ymLabel(c.last)}` : ''}</small></span>
-          <a class="btn btn-ghost btn-sm" href="#/financeiro/obrigacoes/nova?mc=1&titulo=${encodeURIComponent(c.label)}">${icon('plus')}Cadastrar tarefa</a></li>`)}</ul>
+          <span class="mc-rev-acts"><a class="btn btn-ghost btn-sm" href="#/financeiro/obrigacoes/nova?mc=1&titulo=${encodeURIComponent(c.label)}">${icon('plus')}Cadastrar tarefa</a>
+            <button type="button" class="btn btn-ghost btn-sm" data-ign="${c.label}">Ignorar categoria</button></span></li>`)}</ul>
       </section>` : ''}
       ${pv.reviews.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('alert')}Conferência de alocação</h2><span class="sub">despesas do mês numa categoria diferente da habitual do fornecedor</span></div>
@@ -62,6 +63,12 @@ export async function view({ state, render }) {
             <small>Agora em <b>${r.category}</b> · costuma ser <b>${r.usual}</b>${r.state === 'nao_ajustado' ? ` · marcado como errado em ${when(r.marked_at)}: ainda não ajustado no Mais Controle` : ''}</small></span>
           <span class="mc-rev-acts"><button type="button" class="btn btn-ghost btn-sm" data-rv="ok" data-key="${r.key}" data-usual="${r.usual}">${icon('check')}Está OK</button>
             ${r.state === 'nao_ajustado' ? '' : html`<button type="button" class="btn btn-ghost btn-sm mc-wrong" data-rv="errado" data-key="${r.key}" data-usual="${r.usual}">${icon('x')}Está errado</button>`}</span></li>`)}</ul>
+      </section>` : ''}
+      ${pv.exclusions?.length ? html`<section class="card section">
+        <div class="card-head"><h2>${icon('x')}Custos que não entram</h2><span class="sub">${pv.exclusions.length} · ${t.excluded} pagamento(s) · ${money(t.excluded_total)} fora</span></div>
+        <ul class="mc-cats">${pv.exclusions.map(e => html`<li class="is-ignored">
+          <span class="mc-cat"><b>${{ pagamento: 'Pagamento', fornecedor: 'Fornecedor', categoria: 'Categoria' }[e.kind]}: ${e.label}</b><small>${e.detail ? `${e.detail} · ` : ''}desde ${when(e.created_at)}${e.by_name ? ` · ${e.by_name}` : ''}</small></span>
+          <button type="button" class="btn btn-ghost btn-sm" data-unex="${e.kind}" data-key="${e.ext_key}">Voltar a trazer</button></li>`)}</ul>
       </section>` : ''}
       ${pv.fetch ? html`<section class="card section">
         <div class="card-head"><h2>${icon('wallet')}O que a sincronização muda</h2><span class="sub">realizado por tarefa e mês (mês do vencimento) · previsto pelo ano anterior${pv.first_year ? ` (desde ${pv.first_year})` : ''}</span></div>
@@ -100,6 +107,15 @@ export async function view({ state, render }) {
         try { await api('/finance/maiscontrole/account', { method: 'PUT', body: { key: c.dataset.mcAccKey, label: c.dataset.mcAcc, active: c.checked } }); render(); }
         catch (ex) { toast(ex.message, 'error'); c.checked = !c.checked; }
       }));
+      root.querySelectorAll('[data-ign]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        if (!(await confirmSheet('Ignorar categoria', `Os pagamentos da categoria “${b.dataset.ign}” não vão entrar nas tarefas financeiras nem aparecer como alerta. Dá para voltar em “Custos que não entram”.`, 'Ignorar'))) { b.disabled = false; return; }
+        await api('/finance/maiscontrole/exclusions', { method: 'POST', body: { kind: 'categoria', label: b.dataset.ign } });
+        toast('Categoria ignorada.'); render();
+      })));
+      root.querySelectorAll('[data-unex]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        await api('/finance/maiscontrole/exclusions/remove', { method: 'POST', body: { kind: b.dataset.unex, key: b.dataset.key } });
+        toast('Volta a entrar: o realizado foi recalculado.'); render();
+      })));
       root.querySelectorAll('[data-rv]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
         await api('/finance/maiscontrole/review', { method: 'POST', body: { key: b.dataset.key, decision: b.dataset.rv, usual: b.dataset.usual } });
         toast(b.dataset.rv === 'ok' ? 'OK: o fornecedor passa a valer nesta categoria.' : 'Marcado como errado: ajuste no Mais Controle; o sistema confere na próxima atualização.'); render();

@@ -238,6 +238,7 @@ export async function form({ params, state, navigate, query }) {
           <div class="field"><label class="req" for="due_day">Dia do vencimento</label><input id="due_day" name="due_day" type="number" min="1" max="31" required value="${v.due_day}"></div>
         </div>
         ${fromMc ? html`<p class="hint fo-mc">${icon('info')} Categoria do Mais Controle: não precisa de valor. O realizado vem dos pagamentos do Mais Controle e o previsto de cada mês é o realizado do mesmo mês no ano anterior (no primeiro ano, o próprio realizado). O nome precisa ser igual ao da categoria.</p>` : ''}
+        <label class="switch"><input type="checkbox" name="plan_zero" ${v.plan_zero ? 'checked' : ''}>Sem previsto: deixar o previsto sempre em zero (despesa eventual; não gera alerta)</label>
         <label class="switch" ${fromMc ? 'hidden' : ''}><input type="checkbox" name="variable" ${v.variable ? 'checked' : ''}>Valor variável (ajusto o valor de cada parcela)</label>
         <label class="switch fin-repeat" ${v.variable && !fromMc ? '' : 'hidden'}><input type="checkbox" name="repeat_last" ${v.repeat_last ? 'checked' : ''}>Estimar cada parcela com o valor do mês anterior (ex.: folha de pagamento, corrigida no fechamento da Folha)</label>
         <div class="form-row form-row-3">
@@ -261,6 +262,9 @@ export async function form({ params, state, navigate, query }) {
         catch (ex) { toast(ex.message, 'error'); }
       });
       f.variable.addEventListener('change', () => { f.querySelector('.fin-repeat').hidden = !f.variable.checked; });
+      // Sem previsto: o valor deixa de ser pedido
+      const zeroSync = () => { const a = f.querySelector('#amount'); if (a) { a.closest('.field').hidden = f.plan_zero.checked; a.required = !f.plan_zero.checked; } };
+      f.plan_zero.addEventListener('change', zeroSync); zeroSync();
       // Pontual = periodicidade "Única" (sem término); recorrente escolhe a periodicidade
       const kindSync = () => {
         const pontual = f.querySelector('[name=fo_kind]:checked')?.value === 'pontual';
@@ -278,6 +282,8 @@ export async function form({ params, state, navigate, query }) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
         data.variable = f.variable.checked;
+        data.plan_zero = f.plan_zero.checked;
+        if (data.plan_zero && (data.amount === '' || data.amount === undefined)) data.amount = '0';
         data.repeat_last = f.variable.checked && f.repeat_last.checked;
         if (editing) data.active = f.active.checked;
         data.amount = parseNum(data.amount);

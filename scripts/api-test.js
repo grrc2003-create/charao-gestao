@@ -20,15 +20,15 @@ const MC_PORT = 3998, MC_AUTH = `Basic ${Buffer.from('mc-teste:mc-senha-teste').
 const mcY = new Date().toISOString().slice(0, 4), mcM = new Date().toISOString().slice(5, 7);
 const mcP = String(Number(mcY) - 1), mcD = new Date().toISOString().slice(8, 10);
 const MC_HEAD = 'id_lancamento;data_competencia;data_vencimento;data_pagamento;numero_parcela;valor_parcela;valor_pago;valor_desconto;valor_juros_e_multa;fornecedor;descricao;numero_documento;categoria;grupo;plano_de_conta;condicao_pagamento;forma_pagamento;quem_paga;conta_bancaria;id_obra;centro_de_custo';
-const mcRow = (id, due, paid, val, fees, sup, desc, cat, acc, cc, payer = 'Empresa') => [id, due, due, paid, 1, val, paid ? val : '', '0.00', fees, sup, desc, '', cat, 'Outros', 'Gerais', 'À Vista', 'Boleto', payer, acc, '', cc].join(';');
+const mcRow = (id, due, paid, val, fees, sup, desc, cat, acc, cc, payer = 'Empresa', plano = 'Gerais e Administrativas') => [id, due, due, paid, 1, val, paid ? val : '', '0.00', fees, sup, desc, '', cat, 'Outros', plano, 'À Vista', 'Boleto', payer, acc, '', cc].join(';');
 const MC_CSV = [MC_HEAD,
-  mcRow(101, `${mcP}-01-10`, `${mcP}-01-10`, '280.00', '0.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
+  mcRow(101, `${mcP}-01-10`, `${mcP}-01-10`, '280.00', '0.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa', 'Empresa', 'Serviços Contábeis'),
   mcRow(102, `${mcP}-02-10`, `${mcP}-02-10`, '285.00', '5.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(111, `${mcY}-01-10`, `${mcY}-01-10`, '300.00', '0.00', 'Fornecedor Teste A', 'Honorários teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(112, `${mcY}-01-15`, `${mcY}-01-15`, '50.00', '0.00', 'Banco Teste', '"Tarifa; teste"', 'Tarifa MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(113, `${mcY}-01-20`, '', '80.00', '0.00', 'Fornecedor Teste B', 'Sem pagamento', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(114, `${mcY}-01-18`, `${mcY}-01-18`, '900.00', '0.00', 'Fornecedor Obra', 'Material obra teste', 'Materiais', 'Conta Teste PJ', 'Obra Teste 1'),
-  mcRow(115, `${mcY}-01-19`, `${mcY}-01-19`, '70.00', '0.00', 'Loja Teste', 'Compra cartão teste', 'Materiais de Copa', 'Cartão Teste', 'Empresa'),
+  mcRow(115, `${mcY}-01-19`, `${mcY}-01-19`, '70.00', '0.00', 'Loja Teste', 'Compra cartão teste', 'Materiais de Copa', 'Cartão Teste', 'Empresa', ''),
   mcRow(116, `${mcY}-${mcM}-01`, `${mcY}-${mcM}-01`, '120.00', '0.00', 'Fornecedor Teste A', 'Serviço avulso teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(117, `${mcY}-01-12`, `${mcY}-01-12`, '100.00', '0.00', 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(118, `${mcY}-${mcM}-02`, `${mcY}-${mcM}-02`, '40.00', '0.00', 'Fornecedor Novo Teste', 'Primeira compra teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
@@ -1951,9 +1951,14 @@ async function main() {
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.totals.other_account === 10 && pv.totals.novo === 0 && pv.accounts.length === 3 && pv.issues.length === 10, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
+    const acc0 = l => pv.accounts.find(a => a.label === l);
+    ok(pv.accounts.length === 3 && acc0('Conta Teste PJ')?.kind === 'empresa' && !acc0('Conta Teste PJ').manual_kind && acc0('Conta Cliente Teste')?.kind === 'cliente' && !acc0('Cartão Teste')?.kind && pv.totals.other_account === 1,
+      'contas bancárias: tipo vem do Quem Paga do Mais Controle; conta sem Quem Paga fica não classificada');
     await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Teste PJ', label: 'Conta Teste PJ', active: true });
-    await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Cliente Teste', label: 'Conta Cliente Teste', kind: 'cliente' });
+    await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Cliente Teste', label: 'Conta Cliente Teste', kind: 'empresa' });
+    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(acc0('Conta Cliente Teste')?.kind === 'empresa' && acc0('Conta Cliente Teste').manual_kind === 'empresa' && acc0('Conta Cliente Teste').auto_kind === 'cliente', 'tipo manual vale sobre o do Mais Controle');
+    await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Cliente Teste', label: 'Conta Cliente Teste', kind: '' });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.accounts.find(a => a.label === 'Conta Teste PJ')?.kind === 'empresa' && pv.accounts.find(a => a.label === 'Conta Cliente Teste')?.kind === 'cliente', 'contas bancárias: todas do Mais Controle, tipo Empresa ou Cliente');
     ok(pv.clients.length === 1 && pv.clients[0].client === 'Conta Cliente Teste' && pv.clients[0].cost_center === 'Obra Teste 1' && pv.clients[0].amount === 1000, 'conta de cliente: gasto do cliente por obra (fora dos Projetos e do realizado)');
@@ -1990,6 +1995,7 @@ async function main() {
     const hist = (await fo('GET', `/finance/obligations/${cont}`)).data.items.find(i => i.ref_month === `${yp}-01`);
     ok(hist && !hist.task_id, 'meses do histórico não geram tarefas "a fazer"');
     ok(gy.projects.some(p => p.cost_center === 'Obra Teste 1' && p.months[0] === 900), 'grade: Custos destinados a Projetos por centro de custo');
+    ok(gy.groups.some(g => g.category === 'Gerais e Administrativas' && g.rows.some(r => r.title === 'Contabilidade MC teste')), 'grade: agrupada pelo Plano de Contas do Mais Controle (o mais frequente da categoria)');
     ok(gy.clients?.length === 1 && gy.clients[0].client === 'Conta Cliente Teste' && gy.clients[0].obras[0].cost_center === 'Obra Teste 1' && gy.clients[0].months[0] === 1000 && gy.clients[0].total === 1000, 'grade: gastos dos clientes por obra e mês');
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');

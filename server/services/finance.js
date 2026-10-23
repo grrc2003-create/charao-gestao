@@ -203,6 +203,19 @@ function pruneFuture(o, userId) {
   }
 }
 
+// Plano de Contas do Mais Controle de cada tarefa (a tarefa é a categoria): o mais frequente nos lançamentos da categoria
+const catKey = s => String(s ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function planAccounts() {
+  const m = new Map();
+  try {
+    for (const r of all(`SELECT category, plan_account, COUNT(*) AS n FROM ext_payments WHERE source = 'maiscontrole' AND COALESCE(plan_account, '') <> '' GROUP BY category, plan_account`)) {
+      const k = catKey(r.category), cur = m.get(k);
+      if (!cur || r.n > cur.n) m.set(k, { plan: r.plan_account, n: r.n });
+    }
+  } catch { /* antes da migração */ }
+  return m;
+}
+
 // ---------- Planejamento anual: tarefas x 12 meses (previsto e real) ----------
 // Cada célula: parcela existente (pendente / atrasada / paga, com o valor real) ou mês projetado pela recorrência
 // (previsto = ajuste do mês no planejamento, ou o valor da tarefa).
@@ -247,12 +260,18 @@ export function financeYear(ctx, y) {
     rows.push({ id: o.id, title: o.title, category: o.category, frequency: o.frequency, frequency_label: FREQ_LABEL[o.frequency], due_day: o.due_day, amount: o.amount,
       variable: !!o.variable, active: !!o.active, assignee_name: o.assignee_name, cells, planned: sum(c => c.planned), real: sum(c => c.real || 0) });
   }
+  // Agrupamento: Plano de Contas do Mais Controle; tarefa sem lançamentos lá fica na sua categoria
+  const plansMc = planAccounts();
   const cats = [];
   for (const r of rows) {
-    let g = cats.find(c => c.category === r.category);
-    if (!g) { g = { category: r.category, rows: [] }; cats.push(g); }
+    const gname = plansMc.get(catKey(r.title))?.plan || r.category;
+    r.plan_account = plansMc.get(catKey(r.title))?.plan || null;
+    let g = cats.find(c => c.category === gname);
+    if (!g) { g = { category: gname, plan: !!r.plan_account, rows: [] }; cats.push(g); }
     g.rows.push(r);
   }
+  cats.sort((a, b) => a.category.localeCompare(b.category, 'pt-BR'));
+  for (const g of cats) g.rows.sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
   const monthTot = keys.map((k, i) => {
     const cs = rows.map(r => r.cells[i]).filter(Boolean);
     return { ym: k, planned: r2(cs.reduce((s, c) => s + c.planned, 0)), real: r2(cs.reduce((s, c) => s + (c.real || 0), 0)),
@@ -680,7 +699,7 @@ function clientCosts(keys) {
   let rows = [];
   try {
     rows = all(`SELECT a.ext_key AS acc, a.label AS client, p.cost_center, p.ref_month, SUM(p.amount) AS total FROM ext_payments p
-      JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.kind = 'cliente'
+      JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND COALESCE(a.kind, a.auto_kind) = 'cliente'
       WHERE p.paid_date IS NOT NULL AND p.amount > 0 AND COALESCE(p.cost_center, '') <> '' AND lower(p.cost_center) <> 'empresa' AND p.ref_month BETWEEN ? AND ?
       GROUP BY a.ext_key, p.cost_center, p.ref_month`, keys[0], keys[11]);
   } catch { return []; }

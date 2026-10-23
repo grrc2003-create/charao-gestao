@@ -72,13 +72,14 @@ export async function view({ state, render }) {
       </section>
       ${pv.accounts.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('wallet')}Contas bancárias</h2><span class="sub">${pv.accounts.length} no Mais Controle · ${pv.accounts.filter(a => a.kind === 'empresa').length} da empresa · ${pv.accounts.filter(a => a.kind === 'cliente').length} de cliente${t.other_account ? ` · ${t.other_account} custo(s) em conta não classificada (${money(t.other_account_total)})` : ''}</span></div>
-        <div class="card-body"><p class="muted" style="margin:0"><b>Empresa</b>: conta controlada, os custos do centro de custo Empresa entram nas tarefas financeiras. <b>Cliente</b>: o que o cliente gastou em cada obra por mês (quadro “Gastos dos clientes por obra” no planejamento anual); conta de cliente pagando despesa do centro de custo Empresa vai para o verificador. Conta não classificada fica de fora e aparece como alerta.</p></div>
+        <div class="card-body"><p class="muted" style="margin:0">O tipo vem do Mais Controle (“Quem Paga” dos lançamentos da conta); mude só se precisar. <b>Empresa</b>: conta controlada, os custos do centro de custo Empresa entram nas tarefas financeiras. <b>Cliente</b>: o que o cliente gastou em cada obra por mês (quadro “Gastos dos clientes por obra” no planejamento anual); conta de cliente pagando despesa do centro de custo Empresa vai para o verificador. Conta não classificada fica de fora e aparece como alerta.</p></div>
         <ul class="mc-cats">${pv.accounts.map(a => html`<li class="${!a.kind && a.count ? 'is-pending' : ''}">
           <span class="mc-cat"><b>${a.label}</b><small>${a.count ? `${a.count} pagamento(s) · ${money(a.total)}` : 'sem pagamentos no realizado'}${!a.kind && a.categories?.length ? ` · ${a.categories.slice(0, 5).map(c => `${c.label} ${money(c.total)}`).join(' · ')}` : ''}</small></span>
+          <span class="mc-acc-k">${a.manual_kind ? html`<small class="mc-note">manual · no Mais Controle: ${{ empresa: 'Empresa', cliente: 'Cliente' }[a.auto_kind] || 'sem Quem Paga'}</small>` : ''}
           <select class="mc-acc-kind" data-mc-kind="${a.label}" data-mc-acc-key="${a.key}" aria-label="Tipo da conta ${a.label}">
-            <option value="" ${!a.kind ? 'selected' : ''}>Não classificada</option>
-            <option value="empresa" ${a.kind === 'empresa' ? 'selected' : ''}>Empresa (controlada)</option>
-            <option value="cliente" ${a.kind === 'cliente' ? 'selected' : ''}>Cliente</option></select></li>`)}</ul>
+            <option value="" ${!a.manual_kind ? 'selected' : ''}>${a.auto_kind ? `${{ empresa: 'Empresa', cliente: 'Cliente' }[a.auto_kind]} (Mais Controle)` : 'Não classificada'}</option>
+            ${a.auto_kind !== 'empresa' || a.manual_kind ? html`<option value="empresa" ${a.manual_kind === 'empresa' ? 'selected' : ''}>Empresa (manual)</option>` : ''}
+            ${a.auto_kind !== 'cliente' || a.manual_kind ? html`<option value="cliente" ${a.manual_kind === 'cliente' ? 'selected' : ''}>Cliente (manual)</option>` : ''}</select></span></li>`)}</ul>
       </section>` : ''}
       ${pv.issues?.some(i => i.kind === 'conta_cliente') ? (() => {
         const ver = pv.issues.filter(i => i.kind === 'conta_cliente').sort((a, b) => Number(!!a.marked_at) - Number(!!b.marked_at));
@@ -174,7 +175,7 @@ export async function view({ state, render }) {
       });
       root.querySelectorAll('[data-mc-kind]').forEach(c => c.addEventListener('change', async () => {
         c.disabled = true;
-        try { await api('/finance/maiscontrole/account', { method: 'PUT', body: { key: c.dataset.mcAccKey, label: c.dataset.mcKind, kind: c.value } }); toast(`Conta ${c.dataset.mcKind}: ${{ empresa: 'da empresa', cliente: 'de cliente' }[c.value] || 'não classificada'}.`); render(); }
+        try { await api('/finance/maiscontrole/account', { method: 'PUT', body: { key: c.dataset.mcAccKey, label: c.dataset.mcKind, kind: c.value } }); toast(`Conta ${c.dataset.mcKind}: ${{ empresa: 'da empresa (manual)', cliente: 'de cliente (manual)' }[c.value] || 'segue o Mais Controle'}.`); render(); }
         catch (ex) { toast(ex.message, 'error'); c.disabled = false; }
       }));
       root.querySelectorAll('[data-iss]').forEach(b => b.addEventListener('click', () => busy(b, async () => {

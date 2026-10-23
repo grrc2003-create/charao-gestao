@@ -66,7 +66,7 @@ function numOf(v) {
 const COLS = {
   due: ['datadevencimento', 'datavencimento'], paid: ['datadepagamento', 'datapagamento'],
   total: ['valortotalpago'], paidPart: ['valorpagodaparcela', 'valorpago'], fees: ['jurosmultas', 'valorjurosemulta'], discount: ['descontos', 'valordesconto'],
-  category: ['categoria'], supplier: ['fornecedor'], desc: ['descricao'], costCenter: ['centrodecusto'], account: ['contabancaria'], payer: ['quempaga'],
+  category: ['categoria'], supplier: ['fornecedor'], desc: ['descricao'], costCenter: ['centrodecusto'], account: ['contabancaria'], payer: ['quempaga'], plan: ['planodecontas', 'planodeconta'],
   id: ['idlancamento'], installment: ['numeroparcela'],
 };
 function toPayments(grid) {
@@ -94,6 +94,7 @@ function toPayments(grid) {
       category: String(at(r, COLS.category) ?? '').trim(), supplier: String(at(r, COLS.supplier) ?? '').trim(),
       desc: String(at(r, COLS.desc) ?? '').trim().slice(0, 200),
       cost_center: String(at(r, COLS.costCenter) ?? '').trim(), account: String(at(r, COLS.account) ?? '').trim(), payer: String(at(r, COLS.payer) ?? '').trim(),
+      plan: String(at(r, COLS.plan) ?? '').trim(),
     });
   }
   return out;
@@ -124,9 +125,10 @@ function saveFetch(ctx, origin, fileName, pays, raw = null) {
       if (ms.length) run('DELETE FROM ext_payments WHERE source = ? AND ref_month BETWEEN ? AND ?', SOURCE, ms[0], ms.at(-1));
     } else run('DELETE FROM ext_payments WHERE source = ?', SOURCE);
     for (const p of rows) {
-      run(`INSERT OR REPLACE INTO ext_payments (source, ext_key, due_date, paid_date, ref_month, amount, category, supplier, supplier_key, description, account, account_key, cost_center, fetch_id, payer)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, SOURCE, p.key, p.due, p.paid, p.ym, p.amount ?? 0, p.category, p.supplier, hkey(p.supplier), p.desc, p.account, hkey(p.account), p.cost_center || 'Empresa', id, p.payer || null);
+      run(`INSERT OR REPLACE INTO ext_payments (source, ext_key, due_date, paid_date, ref_month, amount, category, supplier, supplier_key, description, account, account_key, cost_center, fetch_id, payer, plan_account)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, SOURCE, p.key, p.due, p.paid, p.ym, p.amount ?? 0, p.category, p.supplier, hkey(p.supplier), p.desc, p.account, hkey(p.account), p.cost_center || 'Empresa', id, p.payer || null, p.plan || null);
     }
+    refreshAccounts();
     audit(actorId(ctx), 'finance', null, origin === 'arquivo' ? 'Pagamentos do Mais Controle enviados por arquivo' : 'Pagamentos buscados no Mais Controle (API)', { arquivo: fileName, pagamentos: pays.length }, null);
     return id;
   });
@@ -233,15 +235,40 @@ export async function autoSync() {
 }
 
 // ---------- Cadastro: contas bancárias ----------
-// Tipo: empresa (conta controlada: os custos entram), cliente (gastos do cliente por obra) ou não classificada
+// Todas as contas bancárias do Mais Controle; o tipo vem do "Quem Paga" dos lançamentos da conta (Empresa ou Cliente).
+// A escolha manual (kind) só existe quando o operador muda o que o Mais Controle informa.
+export function refreshAccounts() {
+  try {
+    run(`INSERT OR IGNORE INTO ext_accounts (source, ext_key, label, active)
+      SELECT source, account_key, COALESCE(NULLIF(MAX(account), ''), '(sem conta)'), 0 FROM ext_payments WHERE source = ? GROUP BY account_key`, SOURCE);
+    for (const a of all(`SELECT account_key, SUM(lower(payer) = 'cliente') AS c, SUM(lower(payer) = 'empresa') AS e FROM ext_payments WHERE source = ? GROUP BY account_key`, SOURCE)) {
+      const auto = a.c > a.e ? 'cliente' : a.e > a.c ? 'empresa' : null;
+      run('UPDATE ext_accounts SET auto_kind = ? WHERE source = ? AND ext_key = ?', auto, SOURCE, a.account_key);
+    }
+    run(`UPDATE ext_accounts SET active = CASE WHEN COALESCE(kind, auto_kind) = 'empresa' THEN 1 ELSE 0 END WHERE source = ?`, SOURCE);
+  } catch { /* antes da migração */ }
+}
+// Plano de Contas e "Quem Paga" da foto atual a partir da última resposta guardada da API (sem nova consulta)
+export function backfillFromRaw() {
+  try {
+    if (!one('SELECT 1 FROM ext_payments WHERE source = ? AND (plan_account IS NULL OR payer IS NULL) LIMIT 1', SOURCE)) return;
+    const f = one(`SELECT * FROM ext_fetches WHERE source = ? AND origin IN ('api', 'auto') AND row_count > 0 AND raw IS NOT NULL ORDER BY id DESC LIMIT 1`, SOURCE);
+    if (!f) return;
+    const pays = withKeys(toPayments(parseCsv(f.raw)));
+    tx(() => { for (const p of pays) run('UPDATE ext_payments SET plan_account = COALESCE(plan_account, ?), payer = COALESCE(payer, ?) WHERE source = ? AND ext_key = ?', p.plan || null, p.payer || null, SOURCE, p.key); });
+  } catch (e) { console.warn(`[mais-controle] plano de contas: ${e.message}`); }
+  refreshAccounts();
+}
+// Tipo manual: empresa ou cliente; vazio = seguir o Mais Controle
 export function setAccount(ctx, body) {
   requireFinance(ctx.user);
   const key = hkey(body.key ?? body.label), label = str(body.label, { max: 160, label: 'Conta' }) || '(sem conta)';
   const kind = 'kind' in body ? (['empresa', 'cliente'].includes(body.kind) ? body.kind : null) : body.active ? 'empresa' : null;
   run(`INSERT INTO ext_accounts (source, ext_key, label, active, kind, updated_by) VALUES (?,?,?,?,?,?)
-    ON CONFLICT(source, ext_key) DO UPDATE SET label = excluded.label, active = excluded.active, kind = excluded.kind, updated_by = excluded.updated_by, updated_at = datetime('now')`,
+    ON CONFLICT(source, ext_key) DO UPDATE SET label = excluded.label, kind = excluded.kind, updated_by = excluded.updated_by, updated_at = datetime('now')`,
     SOURCE, key, label, kind === 'empresa' ? 1 : 0, kind, ctx.user.id);
-  audit(ctx.user.id, 'finance', null, { empresa: 'Conta bancária do Mais Controle: conta da empresa', cliente: 'Conta bancária do Mais Controle: conta de cliente' }[kind] || 'Conta bancária do Mais Controle: não classificada', { conta: label }, null);
+  refreshAccounts();
+  audit(ctx.user.id, 'finance', null, { empresa: 'Conta bancária do Mais Controle: conta da empresa (manual)', cliente: 'Conta bancária do Mais Controle: conta de cliente (manual)' }[kind] || 'Conta bancária do Mais Controle: segue o Mais Controle', { conta: label }, null);
   return { ok: true };
 }
 
@@ -349,7 +376,7 @@ function issueMarks() {
 export function issues() {
   const ex = exclusions();
   const marks = issueMarks();
-  const rows = all(`SELECT p.*, a.active AS acc_active, a.kind AS acc_kind FROM ext_payments p LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key
+  const rows = all(`SELECT p.*, a.active AS acc_active, COALESCE(a.kind, a.auto_kind) AS acc_kind FROM ext_payments p LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key
     WHERE p.source = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa') ORDER BY p.paid_date DESC`, SOURCE);
   const out = [];
   for (const p of rows) {
@@ -381,7 +408,8 @@ export function markIssue(ctx, body, ip) {
 // ---------- Alocação: a partir da foto atual ----------
 // Empresa + conta cadastrada → tarefa de mesmo nome da categoria (realizado por tarefa e mês do vencimento)
 function allocation() {
-  const rows = all(`SELECT p.*, a.active AS acc_active, a.kind AS acc_kind, a.label AS acc_label FROM ext_payments p
+  refreshAccounts();
+  const rows = all(`SELECT p.*, a.active AS acc_active, COALESCE(a.kind, a.auto_kind) AS acc_kind, a.label AS acc_label FROM ext_payments p
     LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key WHERE p.source = ?`, SOURCE);
   const obs = all('SELECT * FROM finance_obligations ORDER BY active DESC, id');
   const byName = new Map();
@@ -441,12 +469,10 @@ function allocation() {
     if (!g.paid_date || p.paid_date > g.paid_date) g.paid_date = p.paid_date;
   }
   for (const a of accounts.values()) a.categories = [...a.categories].map(([label, total]) => ({ label, total })).sort((x, y) => y.total - x.total);
-  for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, kind: a.kind || null, count: 0, total: 0, categories: [] });
-  // Todas as contas bancárias que aparecem no Mais Controle (inclusive só com lançamentos em aberto ou fora do realizado)
-  for (const a of all(`SELECT p.account_key, MAX(p.account) AS account, x.active, x.kind FROM ext_payments p LEFT JOIN ext_accounts x ON x.source = p.source AND x.ext_key = p.account_key
-    WHERE p.source = ? GROUP BY p.account_key`, SOURCE)) {
-    const k = a.account_key || '';
-    if (!accounts.has(k)) accounts.set(k, { key: k, label: a.account || '(sem conta)', active: !!a.active, kind: a.kind || null, count: 0, total: 0, categories: [] });
+  // Todas as contas bancárias do Mais Controle (inclusive só com lançamentos em aberto ou fora do realizado)
+  for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) {
+    if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, count: 0, total: 0, categories: [] });
+    Object.assign(accounts.get(a.ext_key), { kind: a.kind || a.auto_kind || null, manual_kind: a.kind || null, auto_kind: a.auto_kind || null });
   }
   return { real, noTask, projects, clients, accounts, firstYear, unpaid, obs, excludedN, excludedTotal, standbyN, standbyTotal, adjust, rules };
 }

@@ -636,5 +636,6 @@ setInterval(runRecurrences, 60 * 60 * 1000).unref();
 
 server.listen(PORT, () => console.log(`Charão Gestão rodando em http://localhost:${PORT}${DEMO ? ' (modo demonstração)' : ''}`));
 // Mais Controle: sincronização semanal automática (segunda a partir das 8h; confere a cada 30 min se já é hora)
+MaisControle.backfillFromRaw();
 setTimeout(() => MaisControle.autoSync().catch(() => {}), 60e3);
 setInterval(() => MaisControle.autoSync().catch(() => {}), 30 * 60e3).unref();

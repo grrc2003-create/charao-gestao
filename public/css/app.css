@@ -2934,3 +2934,6 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .mc-ver .card-head h2 { color: #B3261E; }
 .fy-cli .fy-cli-h th, .fy-cli .fy-cli-h td { font-weight: 700; background: var(--bg-soft, #F6F7F9); }
 .fy-cli .fy-sub { padding-left: 22px !important; font-weight: 400; }
+
+.mc-acc-k { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; justify-self: end; }
+.mc-acc-k small { font-size: 11.5px; }

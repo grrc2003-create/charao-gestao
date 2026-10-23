@@ -47,7 +47,7 @@ export async function list({ state }) {
 // Seções que o administrador libera por usuário
 const SECTION_GROUPS = [
   ['Gestão de Obras', [['dashboard', 'Visão da empresa', 'dashboard geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Desempenho das pessoas', 'telas de desempenho de outras pessoas'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
-  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Tarefas financeiras', 'obrigações e pagamentos'], ['folha', 'Folha (Administrativa)', 'pessoas da folha, cálculo mensal, recibos e pagamentos (dados sensíveis)'], ['processos', 'Processos da Empresa (edição)', 'criar e editar processos; a publicação depende da aprovação do administrador (leitura livre para todos)']]],
+  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Financeiro', 'obrigações e pagamentos'], ['folha', 'Folha (Administrativa)', 'pessoas da folha, cálculo mensal, recibos e pagamentos (dados sensíveis)'], ['processos', 'Processos da Empresa (edição)', 'criar e editar processos; a publicação depende da aprovação do administrador (leitura livre para todos)']]],
   ['Gestão da Equipe', [['cadastro_usuarios', 'Cadastro da Equipe', 'cadastrar pessoas, função, acesso e permissões'], ['equipe', 'Organograma e Férias', 'organograma, mapa de férias e aprovações']]],
   ['Administração', [['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
 ];
@@ -129,7 +129,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           <span class="hint">Marque as seções que esta pessoa pode abrir. O que não estiver marcado some do menu e fica bloqueado. A própria tela do usuário (com o Planejamento da semana) e as tarefas atribuídas a ela sempre abrem.</span>
           ${SECTION_GROUPS.map(([g, list]) => html`<div class="sec-group"><div class="sub-label">${g}</div>
             <div class="checks sec-checks">${list.map(([k, l, hint]) => html`<label><input type="checkbox" name="section" value="${k}" ${secSet.has(k) ? 'checked' : ''} ${!isAdminMe && !mySecs.has(k) && !secSet.has(k) ? 'disabled' : ''}>${l}<span class="muted" style="font-size:12px">${hint}</span></label>`)}</div></div>`)}
-          <span class="hint">Contratos e Tarefas financeiras também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre o Cadastro da Equipe.</span>
+          <span class="hint">Contratos e Financeiro também liberam as tarefas das áreas restritas correspondentes — inclusive para administradores. Administradores mantêm sempre o Cadastro da Equipe.</span>
           <div class="field" style="max-width:420px"><label for="home">Tela de entrada</label>
             <select id="home" name="home">
               <option value="pessoal" ${u.home !== 'empresa' ? 'selected' : ''}>Meu painel (dashboard da própria pessoa)</option>

@@ -19,7 +19,7 @@ export async function view({ state, navigate }) {
           <div class="page-actions" style="margin-top:16px">
             <a class="btn btn-ghost" href="#/usuarios/${u.id}">${icon('dashboard')}Meu desempenho</a>
             ${state.meta?.can.contracts ? html`<a class="btn btn-ghost" href="#/contratos">${icon('contract')}Contratos</a>` : ''}
-            ${state.meta?.can.finance ? html`<a class="btn btn-ghost" href="#/financeiro">${icon('wallet')}Tarefas financeiras</a>` : ''}
+            ${state.meta?.can.finance ? html`<a class="btn btn-ghost" href="#/financeiro">${icon('wallet')}Financeiro</a>` : ''}
             ${state.meta?.can.manage_settings ? html`<a class="btn btn-ghost" href="#/configuracoes">${icon('settings')}Configurações</a>` : ''}
             <button type="button" class="btn btn-warn" id="logout">${icon('logout')}Sair</button>
           </div>

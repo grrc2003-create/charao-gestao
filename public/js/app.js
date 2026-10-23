@@ -172,7 +172,7 @@ function sectionOfPath(path) {
   if (path === '/configuracoes') return 'configuracoes';
   return null;
 }
-const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Tarefas financeiras', folha: 'Folha (Administrativa)', processos: 'Processos da Empresa (edição)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Financeiro', folha: 'Folha (Administrativa)', processos: 'Processos da Empresa (edição)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
 
 export function navigate(path, { replace = false } = {}) {
   const h = '#' + path;
@@ -205,13 +205,13 @@ export async function reloadMeta() {
 }
 
 // Celular: barra inferior com até 5 botões de rótulo curto; o restante fica em "Mais"
-const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Tarefas financeiras': 'Financeiro', 'Folha (Administrativa)': 'Folha', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes' };
+const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Folha (Administrativa)': 'Folha', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes' };
 function mobileNav() {
   const c = state.meta?.can || {};
   const all = [...navItems(),
     ...(showUsersNav() ? [USERS_NAV] : []),
     ...(c.contracts ? [['/contratos', 'Contratos', 'contract']] : []),
-    ...(c.finance ? [['/financeiro', 'Tarefas financeiras', 'wallet']] : []),
+    ...(c.finance ? [['/financeiro', 'Financeiro', 'wallet']] : []),
     ...(sec('folha') ? [['/folha', 'Folha (Administrativa)', 'users']] : []),
     ['/processos', 'Processos da Empresa', 'checklist'],
     ...(sec('equipe') ? [['/equipe/organograma', 'Organograma', 'team'], ['/equipe/ferias', 'Férias', 'calendar']] : []),
@@ -244,7 +244,7 @@ function shell() {
       <nav>${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
         <div class="sidebar-tag sidebar-group">Gestão da Empresa</div>
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
-        ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Tarefas financeiras</span></a>` : ''}
+        ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Financeiro</span></a>` : ''}
         ${sec('folha') ? html`<a href="#/folha" data-nav="/folha">${icon('users')}<span>Folha (Administrativa)</span></a>` : ''}
         <a href="#/processos" data-nav="/processos">${icon('checklist')}<span>Processos da Empresa</span></a>
         ${rosterOk() ? html`<div class="sidebar-tag sidebar-group">Gestão da Equipe</div>

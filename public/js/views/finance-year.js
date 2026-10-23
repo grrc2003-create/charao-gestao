@@ -1,9 +1,10 @@
-// Tarefas financeiras › Planejamento anual: tarefas (pontuais ou recorrentes) x 12 meses, previsto e real.
+// Financeiro › Planejamento anual: tarefas (pontuais ou recorrentes) x 12 meses, previsto e real.
 // Clique na célula: ajusta o previsto do mês e/ou lança o real (data e comprovante opcional).
 // No celular: um mês por vez, com a lista das tarefas do mês.
 import { html, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
+import { requestSlot, bindRequests } from './mais-controle.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = v => BRL.format(Number(v) || 0);
@@ -33,7 +34,7 @@ function cellHtml(row, c, i, cur) {
 const FOLD = { pj: false, cl: false, obras: new Set() };
 
 export async function view({ state, query, setQuery, render }) {
-  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação de Tarefas financeiras (Usuários → Editar).');
+  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação do Financeiro (Usuários → Editar).');
   const [d, wk] = await Promise.all([api('/finance/year', { query: { ano: query.get('ano') || '' } }), api('/finance/week').catch(() => null)]);
   const wItems = wk?.items || [];
   const al = wk?.alerts || { accounts: [], categories: [] };
@@ -93,8 +94,8 @@ export async function view({ state, query, setQuery, render }) {
   };
 
   return {
-    title: 'Tarefas financeiras',
-    html: html`${pageHead({ eyebrow: 'Acesso restrito · Gestão da Empresa', title: 'Tarefas financeiras',
+    title: 'Financeiro',
+    html: html`${pageHead({ eyebrow: 'Acesso restrito · Gestão da Empresa', title: 'Financeiro',
         sub: 'Planejamento anual: previsto de cada tarefa mês a mês e o real lançado. Clique na célula para lançar o real ou ajustar o previsto.',
         actions: html`<a class="btn btn-ghost" href="#/financeiro/mes">${icon('calendar')}Visão do mês</a>
           <a class="btn btn-ghost" href="#/financeiro/analise">${icon('reports')}Análise</a>
@@ -181,11 +182,13 @@ export async function view({ state, query, setQuery, render }) {
             body: html`<p style="margin:0 0 6px"><b class="ok">✓ Pago ${money(c.real)}</b> · Mais Controle · previsto ${money(c.planned)}</p>
               <p class="muted" style="margin:0 0 8px">Pagamentos do Mais Controle que formam o realizado do mês. Se algum não deve entrar, use “Não trazer”: o realizado é recalculado na hora.</p>
               <ul class="mc-pays">${pays.map(x => html`<li class="${x.excluded || x.standby ? 'is-off' : ''}"><span><b>${x.supplier || '(sem fornecedor)'}</b><small>${fmtDate(x.paid_date)}${x.description ? ` · ${x.description}` : ''}</small>
-                  ${x.fixed_from ? html`<small class="mc-note">corrigida no sistema (no Mais Controle: ${x.fixed_from})</small>` : ''}${x.standby ? html`<small class="mc-note">em stand by: fora do realizado até ser corrigida no Mais Controle (veja em Mais Controle › Conferir categorias)</small>` : ''}</span>
+                  ${x.fixed_from ? html`<small class="mc-note">corrigida no sistema (no Mais Controle: ${x.fixed_from})</small>` : ''}${x.standby ? html`<small class="mc-note">em stand by: fora do realizado até ser corrigida no Mais Controle (veja em Mais Controle › Conferir categorias)</small>` : ''}
+                  ${requestSlot(x)}</span>
                 <span class="mc-pv"><b>${money(x.amount)}</b>${x.excluded ? html`<small>não entra</small>` : html`<span class="mc-pacts">
                   <button type="button" class="btn btn-ghost btn-sm" data-ex="pagamento" data-key="${x.key}">Não trazer</button>
                   ${x.supplier ? html`<button type="button" class="btn btn-ghost btn-sm" data-ex="fornecedor" data-label="${x.supplier}">Não trazer o fornecedor</button>` : ''}</span>`}</span></li>`)}</ul>`,
           });
+          bindRequests([...document.querySelectorAll('.sheet')].at(-1), pays);
           document.querySelectorAll('.sheet [data-ex]').forEach(b => b.addEventListener('click', async () => {
             const forn = b.dataset.ex === 'fornecedor';
             if (!(await confirmSheet(forn ? 'Não trazer o fornecedor' : 'Não trazer este pagamento', forn ? `Nenhum pagamento de “${b.dataset.label}” vai entrar nas tarefas financeiras. Dá para voltar em Mais Controle › Custos que não entram.` : 'Este pagamento deixa de entrar no realizado. Dá para voltar em Mais Controle › Custos que não entram.', 'Não trazer', true))) return;
@@ -243,14 +246,16 @@ export async function view({ state, query, setQuery, render }) {
         try { pays = await api('/finance/maiscontrole/cost-payments', { query }); } catch (ex) { toast(ex.message, 'error'); return; }
         const tot = pays.reduce((s, x) => s + x.amount, 0);
         const title = cli ? `${t.dataset.cc}${t.dataset.cl ? ` · ${t.dataset.cln}` : ''}` : t.dataset.pj;
-        await sheet({
+        const p = sheet({
           title: `${title} · ${ymLabel(ym)}`, submitLabel: 'Fechar',
           body: html`<p style="margin:0 0 6px"><b>${pays.length} lançamento(s) · ${money(tot)}</b> · Mais Controle</p>
             <p class="muted" style="margin:0 0 8px">${cli ? (t.dataset.cl ? 'Gastos pagos por esta conta de cliente na obra.' : 'Gastos pagos pelas contas de cliente nesta obra.') : 'Custos pagos pelas contas da empresa neste centro de custo.'}</p>
             <ul class="mc-pays">${pays.map(x => html`<li><span><b>${x.supplier || '(sem fornecedor)'}</b><small>${fmtDate(x.paid_date)} · ${x.category || '(sem categoria)'}${x.description ? ` · ${x.description}` : ''}</small>
-              ${!(cli && t.dataset.cl) ? html`<small>conta ${x.account || '(sem conta)'}</small>` : ''}</span>
+              ${!(cli && t.dataset.cl) ? html`<small>conta ${x.account || '(sem conta)'}</small>` : ''}${requestSlot(x)}</span>
               <span class="mc-pv"><b>${money(x.amount)}</b></span></li>`)}</ul>`,
         });
+        bindRequests([...document.querySelectorAll('.sheet')].at(-1), pays);
+        await p;
       };
       root.querySelectorAll('.fy-proj, [data-fy-mob]').forEach(el => el.addEventListener('click', onCost));
       root.querySelectorAll('[data-tog]').forEach(b => b.addEventListener('click', () => {

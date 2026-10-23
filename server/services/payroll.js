@@ -5,7 +5,7 @@
 //    VT = 2 passagens × tarifa e VR = valor diário. Dias de férias aprovadas não contam.
 //  · Home office no mês anterior desconta o VT já adiantado (dias × 2 × tarifa).
 //  · Total = valor proporcional + VT + VR + reembolso. Tipo "profissional": sem VT/VR.
-// Fechar a folha congela os valores e gera um pagamento por pessoa em Tarefas financeiras.
+// Fechar a folha congela os valores e gera um pagamento por pessoa no Financeiro.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, notFound, str, date, intOrNull } from '../lib/http.js';
 import { requireSection, hasSection } from '../lib/permissions.js';
@@ -186,7 +186,7 @@ function totalsOf(entries) {
   return t;
 }
 
-// ---------- Folha pré-lançada em Tarefas financeiras ----------
+// ---------- Folha pré-lançada no Financeiro ----------
 const ITEM_SQL = `SELECT i.id, i.ref_month, i.due_date, i.amount_expected, i.estimated, i.status, o.title, o.category
   FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id`;
 // Parcelas pendentes da categoria Folha de pagamento ainda não usadas por outra folha
@@ -200,7 +200,7 @@ function readFinanceItem(v, monthId = 0) {
   if (v === undefined) return undefined;
   if (v === '' || v === null || v === 'nenhuma' || v === 0) return null;
   const id = intOrNull(v);
-  if (!financeCandidates(monthId).some(c => c.id === id)) throw badRequest('Escolha uma folha pré-lançada pendente em Tarefas financeiras (categoria Folha de pagamento).');
+  if (!financeCandidates(monthId).some(c => c.id === id)) throw badRequest('Escolha uma folha pré-lançada pendente no Financeiro (categoria Folha de pagamento).');
   return id;
 }
 
@@ -270,7 +270,7 @@ export function createMonth(ctx, body, ip) {
   const last = one('SELECT * FROM payroll_months ORDER BY ref DESC LIMIT 1');
   const d = readParams(body || {}, last || {});
   const fin = readFinanceItem(body?.finance_item_id) ?? null;
-  if (body?.finance_item_id === undefined && financeCandidates().length) throw badRequest('Selecione a folha pré-lançada em Tarefas financeiras (ou indique que não há).');
+  if (body?.finance_item_id === undefined && financeCandidates().length) throw badRequest('Selecione a folha pré-lançada no Financeiro (ou indique que não há).');
   if (!body?.pay_date) d.pay_date = fin ? one('SELECT due_date FROM finance_items WHERE id = ?', fin).due_date : `${ref}-05`;
   const id = tx(() => {
     const nid = Number(run('INSERT INTO payroll_months (ref, vt_fare, vr_daily, pay_date, notes, finance_item_id, created_by) VALUES (?,?,?,?,?,?,?)', ref, d.vt_fare, d.vr_daily, d.pay_date, d.notes || null, fin, ctx.user.id).lastInsertRowid);
@@ -360,7 +360,7 @@ export function removeEntry(ctx, entryId) {
 const refLabel = ref => `${ref.slice(5, 7)}/${ref.slice(0, 4)}`;
 const brl = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-// Fechar: congela os valores e gera um pagamento por pessoa em Tarefas financeiras
+// Fechar: congela os valores e gera um pagamento por pessoa no Financeiro
 export function closeMonth(ctx, id, ip) {
   requirePayroll(ctx);
   const m = loadMonth(id);
@@ -369,7 +369,7 @@ export function closeMonth(ctx, id, ip) {
   if (!rows.length) throw badRequest('A folha não tem pessoas.');
   const dueDay = Number((m.pay_date || `${m.ref}-05`).slice(8, 10)) || 5;
   const linked = m.finance_item_id ? one('SELECT * FROM finance_items WHERE id = ?', m.finance_item_id) : null;
-  if (m.finance_item_id && (!linked || linked.status !== 'pendente')) throw badRequest('A folha pré-lançada em Tarefas financeiras não está mais pendente. Escolha outra ou retire o vínculo.');
+  if (m.finance_item_id && (!linked || linked.status !== 'pendente')) throw badRequest('A folha pré-lançada no Financeiro não está mais pendente. Escolha outra ou retire o vínculo.');
   let generated = 0;
   tx(() => {
     if (linked) {
@@ -412,9 +412,9 @@ export function reopenMonth(ctx, id, ip) {
   const m = loadMonth(id);
   if (m.status !== 'fechada') throw badRequest('A folha já está aberta.');
   const rows = all('SELECT * FROM payroll_entries WHERE month_id = ?', m.id);
-  if (rows.some(e => e.obligation_id && obligationPaid(e.obligation_id))) throw badRequest('Há pagamento registrado em Tarefas financeiras para esta folha. Desfaça o pagamento antes de reabrir.');
+  if (rows.some(e => e.obligation_id && obligationPaid(e.obligation_id))) throw badRequest('Há pagamento registrado no Financeiro para esta folha. Desfaça o pagamento antes de reabrir.');
   const linked = m.finance_item_id ? one('SELECT * FROM finance_items WHERE id = ?', m.finance_item_id) : null;
-  if (linked?.status === 'paga') throw badRequest('A folha pré-lançada já foi paga em Tarefas financeiras. Desfaça o pagamento antes de reabrir.');
+  if (linked?.status === 'paga') throw badRequest('A folha pré-lançada já foi paga no Financeiro. Desfaça o pagamento antes de reabrir.');
   tx(() => {
     if (linked && m.finance_estimate != null) setItemAmountInternal(linked.id, m.finance_estimate, ctx.user.id, { estimated: 1, history: `Folha ${refLabel(m.ref)} reaberta: volta ao valor estimado` });
     for (const e of rows) if (e.obligation_id) removeObligationInternal(e.obligation_id, ctx.user.id, `Folha ${refLabel(m.ref)} reaberta para correção`);

@@ -1,4 +1,4 @@
-// Tarefas financeiras › Importar planilha: baixar a planilha modelo, enviar preenchida, conferir a prévia
+// Financeiro › Importar planilha: baixar a planilha modelo, enviar preenchida, conferir a prévia
 // (erros por linha, tarefas que já existem) e confirmar. Cada linha vira uma obrigação, com as parcelas geradas como hoje.
 import { html, api, icon } from '../core.js';
 import { toast, confirmSheet } from '../ui.js';
@@ -115,11 +115,11 @@ function lastHtml(l) {
 }
 
 export async function importPage({ state, navigate, render }) {
-  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação das Tarefas financeiras.');
+  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação do Financeiro.');
   const { last } = await api('/finance/import/last');
   return {
     title: 'Importar tarefas financeiras',
-    html: html`${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: 'Importar planilha',
+    html: html`${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Financeiro', title: 'Importar planilha',
         sub: 'Baixe a planilha modelo, preencha uma linha por tarefa e envie. Você confere a prévia antes; nada é gravado sem confirmar.' })}
       <section class="card section">
         <div class="card-body bi-pick">

@@ -1,4 +1,4 @@
-// Tarefas financeiras › Mais Controle (API para Relatórios, rotina "pagamentos", CSV com login e senha da API).
+// Financeiro › Mais Controle (API para Relatórios, rotina "pagamentos", CSV com login e senha da API).
 // O Mais Controle é a fonte do realizado: cada busca guarda a foto dos pagamentos (2024 em diante) e a sincronização
 // recalcula o realizado de cada tarefa e mês — correções feitas lá se refletem sozinhas:
 //  - só contas bancárias cadastradas (custo em outra conta vira alerta: cadastre a conta para trazer);
@@ -269,6 +269,36 @@ function adjustTask(ctx, t, title, description) {
   audit(ctx.user.id, 'finance', null, 'Mais Controle: tarefa de ajuste criada', { tarefa: one('SELECT code FROM tasks WHERE id = ?', id)?.code, titulo: title }, null);
   return id;
 }
+// ---------- Solicitar alteração de um lançamento (tarefa para alterar no Mais Controle) ----------
+export const CHANGE_WHAT = { conta: 'Conta bancária', centro_custo: 'Centro de custo / obra', categoria: 'Categoria', valor_data: 'Valor ou data', fornecedor: 'Fornecedor ou descrição', outro: 'Outro' };
+function lastRequests() {
+  const m = new Map();
+  try { for (const r of all('SELECT * FROM ext_change_requests WHERE source = ? ORDER BY id', SOURCE)) m.set(r.ext_key, r); } catch { /* antes da migração */ }
+  return m;
+}
+const requestOf = (reqs, key) => { const r = reqs.get(key); return r ? { what: CHANGE_WHAT[r.what] || r.what, details: r.details, created_at: r.created_at, task: taskInfo(r.task_id) } : null; };
+export function requestChange(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const p = one('SELECT * FROM ext_payments WHERE source = ? AND ext_key = ?', SOURCE, String(body.key || ''));
+  if (!p) throw notFound('Lançamento não encontrado na última atualização do Mais Controle.');
+  const what = Object.hasOwn(CHANGE_WHAT, body.what) ? body.what : null;
+  if (!what) throw badRequest('Escolha o que deve ser alterado.');
+  const details = str(body.details, { max: 1000, required: true, label: 'Como deve ficar' });
+  if (details.length < 5) throw badRequest('Descreva como o lançamento deve ficar.');
+  if (!body.task) throw badRequest('Escolha quem vai alterar e até que dia.');
+  const taskId = tx(() => {
+    const id = adjustTask(ctx, body.task, `Alterar no Mais Controle: ${CHANGE_WHAT[what].toLowerCase()} · ${p.supplier || '(sem fornecedor)'} · ${brl(p.amount)} · ${dmyOf(p.paid_date || p.due_date)}`,
+      [`Alteração solicitada por ${ctx.user.name}: ${CHANGE_WHAT[what]}.`, `Como deve ficar: ${details}`, '',
+        'Lançamento no Mais Controle:',
+        `Fornecedor: ${p.supplier || '(sem fornecedor)'} · Valor: ${brl(p.amount)} · Vencimento ${dmyOf(p.due_date)}${p.paid_date ? ` · Pago em ${dmyOf(p.paid_date)}` : ''}`,
+        `Categoria: ${p.category || '(sem categoria)'} · Conta: ${p.account || '(sem conta)'} · Centro de custo: ${p.cost_center || 'Empresa'}${p.description ? ` · ${p.description}` : ''}`,
+        'Depois de alterar no Mais Controle, a próxima atualização traz o lançamento corrigido.'].join('\n'));
+    run('INSERT INTO ext_change_requests (source, ext_key, what, details, task_id, created_by) VALUES (?,?,?,?,?,?)', SOURCE, p.ext_key, what, details, id, ctx.user.id);
+    return id;
+  });
+  audit(ctx.user.id, 'finance', null, 'Mais Controle: alteração de lançamento solicitada', { lancamento: `${p.supplier || '(sem fornecedor)'} · ${brl(p.amount)}`, alterar: CHANGE_WHAT[what], como: details }, ip);
+  return { request: requestOf(lastRequests(), p.ext_key), task: taskInfo(taskId) };
+}
 const taskInfo = id => (id ? one(`SELECT t.id, t.code, t.due_date, t.status, t.cancelled_at, u.name AS assignee FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.id = ?`, id) || null : null);
 
 // ---------- Cadastro: contas bancárias ----------
@@ -353,11 +383,12 @@ export function monthPayments(ctx, obligationId, ym) {
   const ex = exclusions(), dec = decisions();
   const rules = categoryRules();
   const catOf = p => effectiveCategory(p, dec, rules);
+  const reqs = lastRequests();
   return all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
     WHERE p.source = ? AND p.ref_month = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa')`, SOURCE, ym)
     .filter(p => hkey(catOf(p)) === hkey(o.title) || (hkey(p.category) === hkey(o.title) && dec.get(p.ext_key)?.decision === 'standby'))
     .map(p => { const d = dec.get(p.ext_key); return { key: p.ext_key, supplier: p.supplier, supplier_key: p.supplier_key, description: p.description, amount: p.amount, due_date: p.due_date, paid_date: p.paid_date, category: p.category,
-      excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category) }; });
+      excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category), request: requestOf(reqs, p.ext_key) }; });
 }
 
 // Lançamentos do mês que formam os quadros "Custos de Projetos pagos pela Empresa" (contas da empresa, centro de custo da obra)
@@ -379,7 +410,8 @@ export function costPayments(ctx, q) {
     rows = all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
       WHERE ${base} AND p.cost_center = ? ORDER BY p.paid_date, p.supplier`, SOURCE, ym, cc);
   }
-  return rows.map(p => ({ supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, category: p.category, cost_center: p.cost_center, account: p.account }));
+  const reqs = lastRequests();
+  return rows.map(p => ({ key: p.ext_key, supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, category: p.category, cost_center: p.cost_center, account: p.account, request: requestOf(reqs, p.ext_key) }));
 }
 
 // ---------- Regras por categoria: enviar para outra tarefa ou ajustar no Mais Controle ----------

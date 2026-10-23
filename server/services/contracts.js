@@ -464,7 +464,7 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
   return action === 'delete' ? { deleted: true, contract_id: m.contract_id } : getMeasurement(ctx, id);
 }
 
-// Faturado por mês (pela data da NF) — usado na análise comparativa das Tarefas financeiras
+// Faturado por mês (pela data da NF) — usado na análise comparativa do Financeiro
 export function billedByMonth() {
   const out = new Map();
   for (const m of all(`SELECT * FROM measurements WHERE nf_date IS NOT NULL AND status IN ('faturada', 'recebida')`)) {

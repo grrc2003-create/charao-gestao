@@ -1,4 +1,4 @@
-// Tarefas financeiras: planilha modelo (.xlsx) para preencher e importação com prévia.
+// Financeiro: planilha modelo (.xlsx) para preencher e importação com prévia.
 // Cada linha vira uma tarefa financeira (mesmas regras de "Nova tarefa"); as parcelas mês a mês são geradas como hoje.
 // Tarefa que já existe (mesma descrição e tipo da despesa) é pulada e avisada; linhas com erro não entram.
 import { all, one, run, tx } from '../db.js';
@@ -58,7 +58,7 @@ export function templateXlsx(ctx) {
     {
       name: 'Instruções', title: true, widths: [30, 90], styles: { 1: 2 },
       rows: [
-        ['Como preencher a planilha de Tarefas financeiras'],
+        ['Como preencher a planilha do Financeiro'],
         [],
         ['Uma linha por tarefa', 'Preencha a aba "Tarefas" a partir da linha 2 (não altere o cabeçalho). Campos com * são obrigatórios.'],
         ['Descrição *', 'Nome da tarefa (ex.: DAS Simples Nacional, Aluguel do escritório).'],
@@ -70,12 +70,12 @@ export function templateXlsx(ctx) {
         ['Dia do vencimento *', 'De 1 a 31 (em meses mais curtos vale o último dia).'],
         ['Início (mês/ano) *', `Mês da primeira parcela, no formato MM/AAAA (ex.: ${mm}).`],
         ['Término (mês/ano)', 'Último mês (opcional). Em branco = sem término.'],
-        ['Responsável', 'Escolha na lista (pessoas com acesso às Tarefas financeiras). Em branco = quem importar.'],
+        ['Responsável', 'Escolha na lista (pessoas com acesso ao Financeiro). Em branco = quem importar.'],
         ['Observações', 'Texto livre (opcional).'],
         [],
         ['Exemplo', `DAS Simples Nacional · Impostos · 1.850,00 · Sim · Sim · Mensal · 20 · ${mm} · (em branco) · (responsável) · Guia no portal do Simples`],
         ['Repetidas', 'Tarefa que já existe no sistema (mesma descrição e tipo da despesa) não é importada de novo: a prévia avisa.'],
-        ['Importar', 'Em Tarefas financeiras › Importar planilha: envie o arquivo, confira a prévia (erros por linha) e confirme.'],
+        ['Importar', 'No Financeiro › Importar planilha: envie o arquivo, confira a prévia (erros por linha) e confirme.'],
         [],
         ['Aba "Pagamentos"', 'Valores pagos (real) mês a mês, como na tela de Planejamento anual: uma linha por tarefa e ano, valor pago na coluna do mês.'],
         ['Tarefa *', 'Nome da tarefa: as já cadastradas vêm listadas; para uma tarefa nova, cadastre-a também na aba "Tarefas" (mesmo nome).'],
@@ -171,7 +171,7 @@ function parse(ctx, file) {
     const who = txt(v('assignee'));
     if (who) {
       const p = people.find(u => hkey(u.name) === hkey(who) || norm(u.email) === norm(who));
-      if (p) assignee = p; else errors.push(`Responsável "${who}" não encontrado entre quem tem acesso às Tarefas financeiras`);
+      if (p) assignee = p; else errors.push(`Responsável "${who}" não encontrado entre quem tem acesso ao Financeiro`);
     }
     const body = {
       title: txt(v('title')), category: txt(v('category')) || 'Outros', payee: txt(v('payee')) || null, amount: amount ?? 0,
@@ -355,7 +355,7 @@ export function applyImport(ctx, body, ip) {
 
 // ---------- Desfazer importação ----------
 // Cada importação deixa na auditoria uma linha por tarefa ("…importada de planilha") e, ao final, a linha do lote
-// ("Tarefas financeiras importadas de planilha"). As tarefas do lote são as registradas entre o lote anterior e este.
+// ("Financeiro importadas de planilha"). As tarefas do lote são as registradas entre o lote anterior e este.
 const BATCH = 'Tarefas financeiras importadas de planilha', ITEM = 'Obrigação financeira importada de planilha', UNDONE = 'Importação de planilha desfeita', PAY = 'Pagamento importado de planilha', PLAN = 'Previsto mensal importado de planilha';
 function batchInfo(b) {
   const prev = one(`SELECT MAX(id) AS id FROM audit_log WHERE entity = 'finance' AND action = ? AND id < ?`, BATCH, b.id)?.id || 0;

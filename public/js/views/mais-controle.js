@@ -1,4 +1,4 @@
-// Tarefas financeiras › Mais Controle: o Mais Controle é a fonte do realizado. Busca os pagamentos (API ou arquivo
+// Financeiro › Mais Controle: o Mais Controle é a fonte do realizado. Busca os pagamentos (API ou arquivo
 // exportado), mostra o que muda nas tarefas (a tarefa é a categoria, pelo nome), os alertas (conta bancária ou categoria
 // não cadastrada), a conferência de alocação (fornecedor numa categoria diferente da habitual) e sincroniza.
 import { html, api, icon } from '../core.js';
@@ -55,6 +55,44 @@ export async function adjustDialog(subject) {
   if (!res) return undefined;
   return res.criar ? { assignee_id: Number(res.assignee_id), due_date: res.due_date, notes: res.notes || '' } : null;
 }
+// Solicitar alteração de um lançamento: o que alterar, como deve ficar, quem altera e até quando (tarefa no INT-001)
+const CHANGE_WHAT = { conta: 'Conta bancária', centro_custo: 'Centro de custo / obra', categoria: 'Categoria', valor_data: 'Valor ou data', fornecedor: 'Fornecedor ou descrição', outro: 'Outro' };
+export async function changeDialog(p) {
+  ADJ = ADJ || await api('/finance/maiscontrole/adjust-info').catch(() => ({ project: null, assignees: [] }));
+  if (!ADJ.project) { toast('Projeto interno INT-001 não encontrado para criar a tarefa.', 'error'); return null; }
+  const d = new Date(Date.now() + 3 * 86400e3 - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
+  return sheet({
+    title: 'Solicitar alteração no Mais Controle', submitLabel: 'Criar tarefa',
+    body: html`<div class="mc-req-p"><b>${p.supplier || '(sem fornecedor)'} · ${money(p.amount)}</b>
+        <small>${dmyT(p.paid_date)} · ${p.category || '(sem categoria)'}${p.account ? ` · conta ${p.account}` : ''}${p.cost_center ? ` · ${p.cost_center}` : ''}${p.description ? ` · ${p.description}` : ''}</small></div>
+      <div class="field"><label for="rq-what">O que alterar</label><select id="rq-what" name="what">${Object.entries(CHANGE_WHAT).map(([k, l]) => html`<option value="${k}">${l}</option>`)}</select></div>
+      <div class="field"><label class="req" for="rq-det">Como deve ficar</label><textarea id="rq-det" name="details" rows="2" maxlength="1000" placeholder="Ex.: centro de custo Reforma - Alphaville Litoral Norte 1"></textarea></div>
+      <div class="field"><label class="req" for="rq-who">Quem vai alterar</label><select id="rq-who" name="assignee_id"><option value="">— escolher —</option>${ADJ.assignees.map(u => html`<option value="${u.id}">${u.name}${u.is_external ? ` · Terceirizado${u.company ? ` (${u.company})` : ''}` : u.job_title ? ` · ${u.job_title}` : ''}</option>`)}</select></div>
+      <div class="field"><label class="req" for="rq-due">Até que dia</label><input type="date" id="rq-due" name="due_date" value="${d}"></div>
+      <p class="muted" style="margin:0;font-size:12.5px">A tarefa vai para ${ADJ.project.code} · ${ADJ.project.name}, classificação “${ADJ.stage}”.</p>`,
+    onSubmit: v => {
+      if (!v.details || v.details.trim().length < 5) throw new Error('Descreva como o lançamento deve ficar.');
+      if (!v.assignee_id) throw new Error('Escolha quem vai alterar no Mais Controle.');
+      if (!v.due_date) throw new Error('Informe até que dia.');
+      return api('/finance/maiscontrole/change-request', { method: 'POST', body: { key: p.key, what: v.what, details: v.details.trim(), task: { assignee_id: Number(v.assignee_id), due_date: v.due_date } } });
+    },
+  });
+}
+// Na lista de lançamentos: botão "Solicitar alteração" ou a tarefa já criada
+export const requestSlot = x => html`<span class="mc-req-slot" data-req-slot="${x.key}">${x.request?.task ? taskLine(x.request.task) : ''}<button type="button" class="btn btn-ghost btn-sm" data-req="${x.key}">${icon('edit')}${x.request ? 'Nova solicitação' : 'Solicitar alteração'}</button></span>`;
+export function bindRequests(scope, pays) {
+  scope.querySelectorAll('[data-req]').forEach(b => b.addEventListener('click', async e => {
+    e.stopPropagation();
+    const p = pays.find(x => x.key === b.dataset.req);
+    const r = p && await changeDialog(p);
+    if (!r) return;
+    p.request = r.request;
+    const slot = scope.querySelector(`[data-req-slot="${CSS.escape(p.key)}"]`);
+    if (slot) slot.insertAdjacentHTML('afterbegin', taskLine(r.task).toString());
+    b.innerHTML = `${icon('edit')}Nova solicitação`;
+    toast(`Tarefa ${r.task.code} criada para ${r.task.assignee}.`);
+  }));
+}
 const dmyT = s => String(s || '').split('-').reverse().join('/');
 export const taskLine = t => (t ? html`<small class="mc-task">${icon('check')}Tarefa <a href="#/tarefas/${t.id}">${t.code}</a> · ${t.assignee || 'sem responsável'} · até ${dmyT(t.due_date)}${t.cancelled_at ? ' · cancelada' : t.status === 'concluida' ? ' · concluída' : ''}</small>` : '');
 export function bindReviewActs(scope, after) {
@@ -79,14 +117,14 @@ export function bindReviewActs(scope, after) {
 }
 
 export async function view({ state, render }) {
-  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação das Tarefas financeiras.');
+  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação do Financeiro.');
   const [st, pv] = await Promise.all([api('/finance/maiscontrole'), api('/finance/maiscontrole/preview')]);
   const t = pv.totals;
   TASKS = pv.tasks || [];
   const nChanges = t.novo + t.alterado + t.removido;
   return {
     title: 'Mais Controle',
-    html: html`${pageHead({ back: { href: '#/financeiro', label: 'Planejamento anual' }, eyebrow: 'Tarefas financeiras', title: 'Mais Controle · pagamentos',
+    html: html`${pageHead({ back: { href: '#/financeiro', label: 'Planejamento anual' }, eyebrow: 'Financeiro', title: 'Mais Controle · pagamentos',
         sub: 'O Mais Controle é a fonte do realizado: a cada atualização o sistema recalcula o real de cada tarefa (a tarefa é a categoria) e mês, e o previsto vem do realizado do ano anterior. Você só cadastra contas bancárias e categorias novas.' })}
       <section class="card section">
         <div class="card-head"><h2>${icon('reschedule')}Buscar pagamentos</h2><span class="sub">API para Relatórios · plano ${PLAN[st.plan] || st.plan}</span></div>

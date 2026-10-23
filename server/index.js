@@ -303,7 +303,7 @@ api.post('/api/tasks/:id/record-links', (req, res, { ctx, params, body }) => { R
 api.delete('/api/tasks/:id/record-links/:rid', (req, res, { ctx, params }) => { Records.unlinkRecordTask(ctx, intOrNull(params.rid), intOrNull(params.id)); send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))); });
 api.get('/api/record-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Records.recordFileForUser(ctx, intOrNull(params.id))));
 
-// ---------- Tarefas financeiras (liberação por usuário) ----------
+// ---------- Financeiro (liberação por usuário) ----------
 api.get('/api/finance/month', (req, res, { ctx, query }) => send(res, 200, Finance.financeMonth(ctx, query.get('mes'))));
 api.get('/api/finance/assignees', (req, res, { ctx }) => send(res, 200, Finance.financeAssignees(ctx)));
 api.get('/api/finance/analysis', (req, res, { ctx, query }) => send(res, 200, Finance.financeAnalysis(ctx, query.get('por'))));
@@ -332,6 +332,7 @@ api.post('/api/finance/maiscontrole/exclusions', (req, res, { ctx, body }) => se
 api.post('/api/finance/maiscontrole/exclusions/remove', (req, res, { ctx, body }) => send(res, 200, MaisControle.removeExclusion(ctx, body, clientIp(req))));
 api.post('/api/finance/maiscontrole/category-rule', (req, res, { ctx, body }) => send(res, 200, MaisControle.setCategoryRule(ctx, body, clientIp(req))));
 api.get('/api/finance/maiscontrole/adjust-info', (req, res, { ctx }) => send(res, 200, MaisControle.adjustInfo(ctx)));
+api.post('/api/finance/maiscontrole/change-request', (req, res, { ctx, body }) => send(res, 200, MaisControle.requestChange(ctx, body, clientIp(req))));
 api.post('/api/finance/maiscontrole/issue', (req, res, { ctx, body }) => send(res, 200, MaisControle.markIssue(ctx, body, clientIp(req))));
 api.post('/api/finance/maiscontrole/review', (req, res, { ctx, body }) => send(res, 200, MaisControle.decideReview(ctx, body, clientIp(req))));
 api.get('/api/finance/import/last', (req, res, { ctx }) => send(res, 200, { last: FinanceImport.lastImport(ctx) }));

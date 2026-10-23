@@ -1,4 +1,4 @@
-// Tarefas financeiras: obrigações mensais/periódicas que geram parcelas (Pendente → Paga, com valor e comprovante).
+// Financeiro: obrigações mensais/periódicas que geram parcelas (Pendente → Paga, com valor e comprovante).
 // Cada parcela é também uma tarefa na área interna restrita "Financeiro" (responsável e prazo), visível só para liberados.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
@@ -32,7 +32,7 @@ const dueOf = (ym, day) => {
 
 export const canFinance = user => !!user?.can_finance;
 export function requireFinance(user) {
-  if (!canFinance(user)) throw forbidden('Acesso restrito: solicite a liberação de Tarefas financeiras ao administrador.');
+  if (!canFinance(user)) throw forbidden('Acesso restrito: solicite a liberação do Financeiro ao administrador.');
 }
 
 // ---------- Área interna restrita "Financeiro" ----------
@@ -43,7 +43,7 @@ export function ensureFinanceArea() {
     const code = `INT-${String((r0?.n || 0) + 1).padStart(3, '0')}`;
     const now = new Date().toISOString();
     const r = run(`INSERT INTO projects (code, name, client, description, status, kind, restricted, created_at, updated_at) VALUES (?,?,?,?, 'em_andamento', 'interno', 2, ?, ?)`,
-      code, 'Financeiro (restrito)', 'Charão Engenharia e Construção', 'Obrigações financeiras mensais e periódicas. Visível somente para quem tem a liberação de Tarefas financeiras.', now, now);
+      code, 'Financeiro (restrito)', 'Charão Engenharia e Construção', 'Obrigações financeiras mensais e periódicas. Visível somente para quem tem a liberação do Financeiro.', now, now);
     const id = Number(r.lastInsertRowid);
     defaultStageId(id);
     run(`INSERT INTO app_settings (key, value) VALUES ('finance_area_created', ?)`, String(id));
@@ -75,7 +75,7 @@ export function monthsOf(o, until, history = true) {
 
 function taskTitle(o, ref) { return `${o.title} — ${monthLabel(ref)}`; }
 function taskDescription(o, amount) {
-  return [`Obrigação financeira · ${o.category}${o.payee ? ` · ${o.payee}` : ''}`, `Valor previsto: ${brl(amount)}${o.variable ? ' (valor variável)' : ''}`, 'Registre o pagamento em Tarefas financeiras (data, valor e comprovante).', o.notes || ''].filter(Boolean).join('\n');
+  return [`Obrigação financeira · ${o.category}${o.payee ? ` · ${o.payee}` : ''}`, `Valor previsto: ${brl(amount)}${o.variable ? ' (valor variável)' : ''}`, 'Registre o pagamento no Financeiro (data, valor e comprovante).', o.notes || ''].filter(Boolean).join('\n');
 }
 
 // Valor da parcela anterior da mesma obrigação (pago, se houver; senão o previsto)
@@ -347,7 +347,7 @@ export function readObligation(body) {
   if (d.due_day < 1 || d.due_day > 31) throw badRequest('Dia de vencimento: informe de 1 a 31.');
   if (d.end_month && d.end_month < d.start_month) throw badRequest('O término deve ser depois do início.');
   if (d.assignee_id && !one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', d.assignee_id)) {
-    throw badRequest('O responsável precisa ter a liberação de Tarefas financeiras.');
+    throw badRequest('O responsável precisa ter a liberação do Financeiro.');
   }
   return d;
 }
@@ -500,7 +500,7 @@ export function payItem(ctx, id, body, ip) {
       run(`UPDATE tasks SET status = 'concluida', started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ?`,
         now, `${pd}T15:00:00.000Z`, now, ctx.user.id, now, now, it.task_id);
       run('UPDATE tasks SET cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL WHERE id = ? AND cancel_reason = ?', it.task_id, ZERO_REASON);
-      taskHistory(it.task_id, ctx.user.id, amount === 0 ? 'Não ocorreu no mês' : 'Pagamento registrado', amount === 0 ? 'Real lançado = R$ 0,00: a previsão não ocorreu neste mês (Tarefas financeiras)' : `${brl(amount)} pago em ${pd.split('-').reverse().join('/')}${files.length ? ` · ${files.length} comprovante(s)` : ''} (Tarefas financeiras)`);
+      taskHistory(it.task_id, ctx.user.id, amount === 0 ? 'Não ocorreu no mês' : 'Pagamento registrado', amount === 0 ? 'Real lançado = R$ 0,00: a previsão não ocorreu neste mês (Financeiro)' : `${brl(amount)} pago em ${pd.split('-').reverse().join('/')}${files.length ? ` · ${files.length} comprovante(s)` : ''} (Financeiro)`);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, amount === 0 ? 'Parcela marcada como não ocorrida (real = 0)' : 'Parcela paga', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount, data: pd }, ip);
   });
@@ -514,7 +514,7 @@ export function unpayItem(ctx, id, ip) {
     run(`UPDATE finance_items SET status = 'pendente', paid_date = NULL, paid_amount = NULL, paid_by = NULL WHERE id = ?`, id);
     if (it.task_id) {
       run(`UPDATE tasks SET status = 'aberta', delivered_at = NULL, completed_at = NULL, review_status = NULL, reviewed_by = NULL, reviewed_at = NULL, progress_pct = NULL, updated_at = ? WHERE id = ?`, new Date().toISOString(), it.task_id);
-      taskHistory(it.task_id, ctx.user.id, 'Pagamento desfeito', 'Parcela voltou a pendente (Tarefas financeiras)');
+      taskHistory(it.task_id, ctx.user.id, 'Pagamento desfeito', 'Parcela voltou a pendente (Financeiro)');
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Pagamento desfeito', { parcela: `${it.title} ${monthLabel(it.ref_month)}` }, ip);
   });
@@ -559,7 +559,7 @@ export function syncFromTask(taskId, action, userId) {
   }
 }
 
-// Quem pode ser responsável: usuários ativos com a liberação de Tarefas financeiras
+// Quem pode ser responsável: usuários ativos com a liberação do Financeiro
 export function financeAssignees(ctx) {
   requireFinance(ctx.user);
   return all('SELECT id, name, job_title FROM users WHERE active = 1 AND can_finance = 1 ORDER BY name');

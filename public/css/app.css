@@ -2988,3 +2988,12 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .ans-photo-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
 .ans-photo-opts .btn { justify-content: center; min-height: 48px; }
 @media (max-width: 480px) { .ans-photo-opts { grid-template-columns: 1fr; } }
+
+/* Solicitar alteração de lançamento */
+.mc-req-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
+.mc-req-slot .btn { min-height: 30px; font-size: 12.5px; }
+.mc-req-p { padding: 10px 12px; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 10px; background: #FBFAF7; }
+.mc-req-p small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+.mc-task { display: block !important; }
+.mc-task svg { vertical-align: -2px; margin-right: 3px; }

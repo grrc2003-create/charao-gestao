@@ -1,4 +1,4 @@
-// Tarefas financeiras (liberação por usuário): obrigações mensais/periódicas, parcelas Pendente → Paga,
+// Financeiro (liberação por usuário): obrigações mensais/periódicas, parcelas Pendente → Paga,
 // calendário do mês, lista por vencimento e resumo por categoria.
 import { html, raw, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
@@ -23,7 +23,7 @@ export const SIT = {
 const sitBadge = s => html`<span class="fs-badge ${SIT[s].cls}">${icon(SIT[s].ic)}${SIT[s].label}</span>`;
 
 function denied(state) {
-  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação de Tarefas financeiras (Usuários → Editar).');
+  if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação do Financeiro (Usuários → Editar).');
 }
 
 // ---------- Pagar / desfazer / ajustar valor ----------
@@ -121,12 +121,12 @@ export async function view({ state, query, setQuery, render }) {
   const maxCat = Math.max(1, ...d.categories.map(c => c.expected));
   const paidPct = T.expected ? Math.round((T.paid / T.expected) * 100) : 0;
   return {
-    title: 'Tarefas financeiras',
+    title: 'Financeiro',
     html: html`
       ${pageHead({
         back: { href: '#/financeiro', label: 'Planejamento anual' },
         eyebrow: 'Acesso restrito · Gestão da Empresa',
-        title: 'Tarefas financeiras · visão do mês',
+        title: 'Financeiro · visão do mês',
         actions: html`${d.area_id ? html`<a class="btn btn-ghost" href="#/projetos/${d.area_id}">${icon('tasks')}Tarefas do financeiro</a>` : ''}
           <a class="btn btn-ghost" href="#/financeiro/analise">${icon('reports')}Análise comparativa</a>
           <a class="btn btn-ghost" href="#/financeiro/obrigacoes">${icon('settings')}Obrigações</a>
@@ -192,7 +192,7 @@ export async function obligations({ state }) {
   return {
     title: 'Obrigações financeiras',
     html: html`
-      ${pageHead({ back: { href: '#/financeiro', label: 'Tarefas financeiras' }, eyebrow: 'Gestão da Empresa', title: 'Obrigações financeiras',
+      ${pageHead({ back: { href: '#/financeiro', label: 'Financeiro' }, eyebrow: 'Gestão da Empresa', title: 'Obrigações financeiras',
         sub: 'Cada obrigação gera as parcelas do período (até 2 meses à frente) e a tarefa de cada parcela.',
         actions: html`<a class="btn btn-ghost" href="#/financeiro/importar">${icon('file')}Importar planilha</a><a class="btn btn-accent" href="#/financeiro/obrigacoes/nova">${icon('plus')}Nova obrigação</a>` })}
       ${list.length ? html`<section class="card"><div class="table-wrap"><table class="data ct-table"><thead><tr><th>Obrigação</th><th>Tipo da despesa</th><th>Periodicidade</th><th>Vencimento</th><th class="num">Valor</th><th>Responsável</th><th>Situação</th></tr></thead>
@@ -223,7 +223,7 @@ export async function form({ params, state, navigate, query }) {
   return {
     title: editing ? `Editar ${o.title}` : 'Nova obrigação',
     html: html`
-      ${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Tarefas financeiras', title: editing ? 'Editar tarefa financeira' : 'Nova tarefa financeira' })}
+      ${pageHead({ back: { href: '#/financeiro/obrigacoes', label: 'Obrigações' }, eyebrow: 'Financeiro', title: editing ? 'Editar tarefa financeira' : 'Nova tarefa financeira' })}
       <form class="card card-pad form" id="fo-form" novalidate style="max-width:760px">
         <div class="segmented fo-kind" role="radiogroup" aria-label="Tipo de tarefa">
           <label><input type="radio" name="fo_kind" value="pontual" ${v.frequency === 'unica' ? 'checked' : ''}>Pontual<small>acontece uma vez (ex.: IPVA, taxa, compra)</small></label>
@@ -250,7 +250,7 @@ export async function form({ params, state, navigate, query }) {
           <div class="field"><label class="req" for="start_month" id="fo-start-l">${v.frequency === 'unica' ? 'Mês' : 'Início'}</label><input id="start_month" name="start_month" type="month" required value="${v.start_month}"></div>
           <div class="field fo-rec"><label for="end_month">Término (opcional)</label><input id="end_month" name="end_month" type="month" value="${v.end_month || ''}"></div>
           <div class="field"><label for="assignee_id">Responsável</label><select id="assignee_id" name="assignee_id">${people.map(p => opt(p.id, p.name, v.assignee_id))}</select>
-            <span class="hint">Só aparecem usuários com a liberação de Tarefas financeiras.</span></div>
+            <span class="hint">Só aparecem usuários com a liberação do Financeiro.</span></div>
         </div>
         <div class="field"><label for="notes">Observações</label><textarea id="notes" name="notes" rows="2" maxlength="2000">${v.notes || ''}</textarea></div>
         ${editing ? html`<label class="switch"><input type="checkbox" name="active" ${v.active ? 'checked' : ''}>Obrigação ativa (desmarque para parar de gerar parcelas)</label>` : ''}
@@ -370,7 +370,7 @@ export async function analysis({ state, query, setQuery, render }) {
   return {
     title: 'Análise financeira',
     html: html`
-      ${pageHead({ back: { href: '#/financeiro', label: 'Tarefas financeiras' }, eyebrow: 'Gestão da Empresa', title: 'Análise comparativa',
+      ${pageHead({ back: { href: '#/financeiro', label: 'Financeiro' }, eyebrow: 'Gestão da Empresa', title: 'Análise comparativa',
         sub: `Gastos por competência (valor pago, ou previsto enquanto não pago)${sb ? ' x faturado (NFs emitidas em Contratos)' : ''}.` })}
       <div class="fin">
         <div class="chips" role="group" aria-label="Periodicidade">${GRAN_L.map(([k, l]) => html`<button class="chip" data-por="${k}" aria-pressed="${por === k}">${l}</button>`)}</div>

@@ -2019,6 +2019,14 @@ async function main() {
     const cob = (await fo('GET', `/finance/maiscontrole/cost-payments?tipo=cliente&cc=${encodeURIComponent('Obra Teste 1')}&mes=${y}-01`)).data;
     ok(ccl.length === 1 && ccl[0].amount === 1000 && cob.length === 1 && cob[0].account === 'Conta Cliente Teste', 'Clientes: clicar no mês lista os lançamentos da obra (todas as contas) ou da conta na obra');
     ok((await biNo('GET', `/finance/maiscontrole/cost-payments?tipo=projeto&cc=x&mes=${y}-01`)).status === 403, 'lançamentos por obra: sem liberação não acessa');
+    const crP = cpj[0];
+    ok(crP.key && crP.request === null, 'lista de lançamentos traz a chave para solicitar alteração');
+    ok((await fo('POST', '/finance/maiscontrole/change-request', { key: crP.key, what: 'centro_custo', details: 'Obra Teste 2' })).status === 400, 'solicitar alteração exige responsável e prazo');
+    const crR = await fo('POST', '/finance/maiscontrole/change-request', { key: crP.key, what: 'centro_custo', details: 'Mudar para a Obra Teste 2', task: { assignee_id: adjI.assignees[0].id, due_date: due3 } });
+    const crL = (await fo('GET', `/finance/maiscontrole/cost-payments?tipo=projeto&cc=${encodeURIComponent('Obra Teste 1')}&mes=${y}-01`)).data[0];
+    const crT = crR.data.task ? (await fo('GET', `/tasks/${crR.data.task.id}`)).data : null;
+    ok(crR.status === 200 && /^INT-001-/.test(crR.data.task.code) && crT?.stage_name === 'Mais Controle' && /Mudar para a Obra Teste 2/.test(crT.description) && crL.request?.task?.id === crR.data.task.id && crL.request.what === 'Centro de custo / obra',
+      'solicitar alteração do lançamento: tarefa no INT-001 (Mais Controle) e a solicitação aparece na lista');
     ok(gy.clients?.length === 1 && gy.clients[0].cost_center === 'Obra Teste 1' && gy.clients[0].accounts[0].client === 'Conta Cliente Teste' && gy.clients[0].months[0] === 1000 && gy.clients[0].total === 1000, 'grade: gastos dos clientes agrupados por obra e depois por conta');
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');

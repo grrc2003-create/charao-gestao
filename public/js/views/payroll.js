@@ -1,5 +1,5 @@
 // Folha (Administrativa): folhas do mês, pessoas da folha, lançamentos (faltas, home office, diferenças, reembolso),
-// fechamento (gera os pagamentos em Tarefas financeiras) e recibos.
+// fechamento (gera os pagamentos no Financeiro) e recibos.
 import { html, api, icon, avatar, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead } from './shared.js';
@@ -70,13 +70,13 @@ export async function list({ navigate, render }) {
             <div class="field"><label for="nf-vr">VR por dia</label><input type="number" id="nf-vr" name="vr_daily" step="0.01" min="0" value="${data.defaults.vr_daily}"></div>
             <div class="field"><label for="nf-pay">Pagamento</label><input type="date" id="nf-pay" name="pay_date"></div>
           </div>
-          <div class="field"><label class="req" for="nf-fin">Folha pré-lançada em Tarefas financeiras</label>
+          <div class="field"><label class="req" for="nf-fin">Folha pré-lançada no Financeiro</label>
             <select id="nf-fin" name="finance_item_id" required>${finOptions(data.finance_candidates, data.suggested_ref)}</select>
             <span class="hint">${data.finance_candidates.length ? 'No fechamento, o valor estimado dessa parcela é corrigido para o total da folha.' : 'Nenhuma folha pré-lançada (categoria Folha de pagamento) pendente: no fechamento será gerado um pagamento por pessoa.'}</span></div>
           <span class="hint">Pessoas ativas da folha entram automaticamente.</span>`,
         submitLabel: 'Criar folha',
         async onSubmit(d) {
-          if (!d.finance_item_id) throw new Error('Selecione a folha pré-lançada em Tarefas financeiras (ou “Nenhuma”).');
+          if (!d.finance_item_id) throw new Error('Selecione a folha pré-lançada no Financeiro (ou “Nenhuma”).');
           const m = await api('/payroll/months', { method: 'POST', body: d });
           toast('Folha criada.');
           navigate(`/folha/${m.id}`);
@@ -129,13 +129,13 @@ export async function month({ params, render }) {
           <label>Passagem (VT)<input type="number" name="vt_fare" step="0.01" min="0" value="${m.vt_fare}" ${open ? '' : 'disabled'}></label>
           <label>VR por dia<input type="number" name="vr_daily" step="0.01" min="0" value="${m.vr_daily}" ${open ? '' : 'disabled'}></label>
           <label>Pagamento<input type="date" name="pay_date" value="${m.pay_date || ''}" ${open ? '' : 'disabled'}></label>
-          ${open ? html`<label class="pf-fin">Folha pré-lançada (Tarefas financeiras)<select name="finance_item_id">${finOptions(m.finance_item ? [m.finance_item, ...m.finance_candidates.filter(c => c.id !== m.finance_item.id)] : m.finance_candidates, m.ref, m.finance_item ? m.finance_item.id : null)}</select></label>` : ''}
+          ${open ? html`<label class="pf-fin">Folha pré-lançada (Financeiro)<select name="finance_item_id">${finOptions(m.finance_item ? [m.finance_item, ...m.finance_candidates.filter(c => c.id !== m.finance_item.id)] : m.finance_candidates, m.ref, m.finance_item ? m.finance_item.id : null)}</select></label>` : ''}
           ${open ? html`<button type="submit" class="btn btn-ghost btn-sm">Salvar</button>` : ''}
         </form>
         ${m.finance_item ? html`<div class="pf-link">${icon('wallet')}<span>${open
           ? html`Vinculada a <b>${m.finance_item.title} · ${refLabel(m.finance_item.ref_month)}</b>: valor ${m.finance_item.estimated ? 'estimado' : 'previsto'} ${money(m.finance_item.amount_expected)} → será corrigido para <b>${money(t.total)}</b> no fechamento.`
-          : html`Valor corrigido em Tarefas financeiras: <b>${m.finance_item.title} · ${refLabel(m.finance_item.ref_month)}</b> = ${money(m.finance_item.amount_expected)}${m.finance_estimate != null ? ` (estimado era ${money(m.finance_estimate)})` : ''}.`}</span></div>`
-          : html`<div class="pf-link pf-link-none">${icon('info')}<span>Sem folha pré-lançada: ${open ? 'no fechamento será gerado um pagamento por pessoa em Tarefas financeiras.' : 'foi gerado um pagamento por pessoa em Tarefas financeiras.'}</span></div>`}
+          : html`Valor corrigido no Financeiro: <b>${m.finance_item.title} · ${refLabel(m.finance_item.ref_month)}</b> = ${money(m.finance_item.amount_expected)}${m.finance_estimate != null ? ` (estimado era ${money(m.finance_estimate)})` : ''}.`}</span></div>`
+          : html`<div class="pf-link pf-link-none">${icon('info')}<span>Sem folha pré-lançada: ${open ? 'no fechamento será gerado um pagamento por pessoa no Financeiro.' : 'foi gerado um pagamento por pessoa no Financeiro.'}</span></div>`}
       </div></section>
       <div class="pf-kpis section">
         <div><span>Bolsa / valores</span><b>${money(t.base)}</b></div>
@@ -177,13 +177,13 @@ export async function month({ params, render }) {
       root.querySelector('[data-close]')?.addEventListener('click', async () => {
         const n = m.entries.filter(e => e.calc.total > 0).length;
         const fi = m.finance_item;
-        const msg = fi ? `Total de ${money(t.total)}. Os valores ficam congelados e a folha pré-lançada "${fi.title} · ${refLabel(fi.ref_month)}" passa de ${money(fi.amount_expected)} para ${money(t.total)} em Tarefas financeiras. Para corrigir depois, use Reabrir.`
-          : `Total de ${money(t.total)}. Os valores ficam congelados e são gerados ${n} pagamento(s) em Tarefas financeiras${m.pay_date ? `, com vencimento em ${fmtDate(m.pay_date)}` : ''}. Para corrigir depois, use Reabrir.`;
+        const msg = fi ? `Total de ${money(t.total)}. Os valores ficam congelados e a folha pré-lançada "${fi.title} · ${refLabel(fi.ref_month)}" passa de ${money(fi.amount_expected)} para ${money(t.total)} no Financeiro. Para corrigir depois, use Reabrir.`
+          : `Total de ${money(t.total)}. Os valores ficam congelados e são gerados ${n} pagamento(s) no Financeiro${m.pay_date ? `, com vencimento em ${fmtDate(m.pay_date)}` : ''}. Para corrigir depois, use Reabrir.`;
         if (!(await confirmSheet(`Fechar a folha ${refLabel(m.ref)}`, msg, fi ? 'Fechar e corrigir o valor' : 'Fechar e gerar pagamentos'))) return;
-        try { const r = await api(`/payroll/months/${m.id}/close`, { method: 'POST' }); toast(r.corrected ? 'Folha fechada. Valor corrigido em Tarefas financeiras.' : `Folha fechada. ${r.generated} pagamento(s) gerado(s).`); render(); } catch (ex) { toast(ex.message, 'error'); }
+        try { const r = await api(`/payroll/months/${m.id}/close`, { method: 'POST' }); toast(r.corrected ? 'Folha fechada. Valor corrigido no Financeiro.' : `Folha fechada. ${r.generated} pagamento(s) gerado(s).`); render(); } catch (ex) { toast(ex.message, 'error'); }
       });
       root.querySelector('[data-reopen]')?.addEventListener('click', async () => {
-        if (!(await confirmSheet('Reabrir a folha', m.finance_item ? 'A folha pré-lançada em Tarefas financeiras volta ao valor estimado e será corrigida de novo no próximo fechamento. Se já foi paga, desfaça o pagamento antes.' : 'Os pagamentos pendentes gerados por esta folha serão removidos de Tarefas financeiras e voltarão a ser gerados no próximo fechamento. Se algum já foi pago, desfaça o pagamento antes.', 'Reabrir', true))) return;
+        if (!(await confirmSheet('Reabrir a folha', m.finance_item ? 'A folha pré-lançada no Financeiro volta ao valor estimado e será corrigida de novo no próximo fechamento. Se já foi paga, desfaça o pagamento antes.' : 'Os pagamentos pendentes gerados por esta folha serão removidos do Financeiro e voltarão a ser gerados no próximo fechamento. Se algum já foi pago, desfaça o pagamento antes.', 'Reabrir', true))) return;
         try { await api(`/payroll/months/${m.id}/reopen`, { method: 'POST' }); toast('Folha reaberta.'); render(); } catch (ex) { toast(ex.message, 'error'); }
       });
     },

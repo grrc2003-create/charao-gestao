@@ -113,7 +113,7 @@ function parse(ctx, project, file) {
   let hi = -1;
   for (const s of sheets) { hi = s.rows.findIndex(isHead); if (hi >= 0) { grid = s.rows; break; } }
   const other = sheets.some(s => s.rows.some(r => r.some(v => hkey(v).startsWith('descricao')) && r.some(v => hkey(v).startsWith('periodicidade'))));
-  if (hi < 0 && other) throw badRequest('Esta é a planilha de tarefas financeiras (Descrição, Periodicidade…), que se importa em Tarefas financeiras. Para o planejamento do projeto, use "Baixar planilha modelo" nesta tela.');
+  if (hi < 0 && other) throw badRequest('Esta é a planilha de tarefas financeiras (Descrição, Periodicidade…), que se importa no Financeiro. Para o planejamento do projeto, use "Baixar planilha modelo" nesta tela.');
   if (hi < 0) throw badRequest(`Não encontrei o cabeçalho da planilha modelo (colunas "ID" e "Título") em nenhuma aba (${sheets.map(s => s.name).join(', ')}). Use a planilha baixada em "Baixar planilha modelo", sem apagar a linha 1, e salve como .xlsx.`);
   const col = {};
   grid[hi].forEach((v, i) => {

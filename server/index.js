@@ -436,6 +436,7 @@ api.post('/api/tasks/:id/reactivate', (req, res, { ctx, params, body }) => {
   Tasks.reactivateTask(ctx, intOrNull(params.id), body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
+api.post('/api/tasks/bulk-delete', (req, res, { ctx, body }) => send(res, 200, Tasks.deleteTasksBulk(ctx, body, clientIp(req))));
 api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200, Tasks.deleteTask(ctx, intOrNull(params.id), body, clientIp(req))));
 // ---------- Check-list (itens) ----------
 const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));

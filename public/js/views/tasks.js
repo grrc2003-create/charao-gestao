@@ -1,5 +1,5 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
-import { sheet } from '../ui.js';
+import { sheet, toast } from '../ui.js';
 import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions } from './shared.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 
@@ -46,6 +46,7 @@ export async function view({ state, query, setQuery }) {
           ${f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?project=${f.project}${f.stage ? `&stage=${f.stage}` : ''}">${icon('checklist')}Lista de campo</a>` : ''}
           ${f.assignee && f.assignee !== 'none' && !f.project ? html`<a class="btn btn-ghost" href="#/imprimir/campo?user=${f.assignee === 'me' ? state.user.id : f.assignee}">${icon('checklist')}Lista de campo</a>` : ''}
           <button type="button" class="btn btn-ghost" id="emit-report">${icon('reports')}Emitir relatório</button>
+          ${state.user.role === 'admin' && tasks.length ? html`<button type="button" class="btn btn-ghost" id="bulk-on">${icon('trash')}Excluir em lote</button>` : ''}
           <a class="btn btn-ghost" href="#/recorrencias${f.project ? `?project=${f.project}` : ''}">${icon('history')}Recorrentes</a>
           <a class="btn btn-ghost" href="#/tarefas/nova?tipo=checklist${f.project ? `&projeto=${f.project}` : ''}">${icon('checklist')}Novo check-list</a>
           <a class="btn btn-accent" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}">${icon('plus')}Nova tarefa</a>`,
@@ -74,6 +75,11 @@ export async function view({ state, query, setQuery }) {
         </div>
       </form>
       <div class="result-count"><span>${tasks.length} ${tasks.length === 1 ? 'tarefa' : 'tarefas'}${f.org ? ' · organizadas pelo prazo' : ''}</span>${orgControl(f.org)}</div>
+      ${state.user.role === 'admin' ? html`<div class="bulk-bar" id="bulk-bar" hidden>
+        <span><b id="bulk-n">0</b> selecionada(s) · toque nas tarefas para marcar</span>
+        <span class="bulk-acts"><button type="button" class="btn btn-ghost btn-sm" id="bulk-all">Selecionar todas (${tasks.length})</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="bulk-off">Cancelar</button>
+          <button type="button" class="btn btn-danger btn-sm" id="bulk-go" disabled>${icon('trash')}Excluir</button></span></div>` : ''}
       ${taskList(tasks, { groupBy: f.org })}
       <a class="fab" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}" aria-label="Nova tarefa">${icon('plus')}</a>`,
     mount(root, ctx) {
@@ -127,6 +133,51 @@ export async function view({ state, query, setQuery }) {
         if (st.length) qs.set('status', st.join(','));
         ctx.navigate(`/imprimir/relatorio?${qs}`);
       });
+      // Exclusão em lote (administrador): modo de seleção sobre a lista; clique marca/desmarca em vez de abrir a tarefa
+      const bar = root.querySelector('#bulk-bar');
+      if (bar) {
+        const sel = new Set();
+        let on = false;
+        const idOf = el => Number((el.getAttribute('href') || el.dataset.href || '').match(/#\/tarefas\/(\d+)$/)?.[1]) || null;
+        const items = () => root.querySelectorAll('a.task-card[href^="#/tarefas/"], tr[data-href^="#/tarefas/"]');
+        const paint = () => {
+          items().forEach(el => el.classList.toggle('is-selected', sel.has(idOf(el))));
+          root.querySelector('#bulk-n').textContent = sel.size;
+          root.querySelector('#bulk-go').disabled = !sel.size;
+        };
+        const setOn = v => { on = v; bar.hidden = !v; root.classList.toggle('is-selecting', v); if (!v) sel.clear(); paint(); };
+        root.querySelector('#bulk-on').addEventListener('click', () => setOn(!on));
+        root.querySelector('#bulk-off').addEventListener('click', () => setOn(false));
+        root.querySelector('#bulk-all').addEventListener('click', () => { tasks.forEach(t => sel.add(t.id)); paint(); });
+        root.addEventListener('click', e => {
+          if (!on || e.target.closest('[data-sub-toggle], [data-sub-all], .bulk-bar, .toolbar, .page-head')) return;
+          const el = e.target.closest('a.task-card[href^="#/tarefas/"], tr[data-href^="#/tarefas/"]');
+          const id = el && idOf(el);
+          if (!id) return;
+          e.preventDefault(); e.stopPropagation();
+          sel.has(id) ? sel.delete(id) : sel.add(id);
+          paint();
+        }, true);
+        root.querySelector('#bulk-go').addEventListener('click', async () => {
+          const chosen = tasks.filter(t => sel.has(t.id));
+          const r = await sheet({
+            title: `Excluir ${chosen.length} tarefa(s)`, submitLabel: 'Excluir definitivamente', danger: true,
+            body: html`<p class="muted" style="margin:0 0 8px">A exclusão é definitiva (histórico e imagens saem junto) e fica registrada na auditoria. Tarefas já iniciadas, enviadas para conferência, com fotos de execução, com subtarefas ou com itens de check-list respondidos não são excluídas: use “Cancelar tarefa”.</p>
+              <ul class="bulk-list">${chosen.slice(0, 40).map(t => html`<li><span class="mono">${t.code}</span> ${t.title}</li>`)}${chosen.length > 40 ? html`<li class="muted">… e mais ${chosen.length - 40}</li>` : ''}</ul>
+              <div class="field"><label class="req" for="bulk-reason">Motivo da exclusão</label><textarea id="bulk-reason" name="reason" rows="2" maxlength="900" required placeholder="Ex.: tarefas cadastradas em duplicidade"></textarea></div>`,
+            onSubmit: d => {
+              if (!d.reason || d.reason.trim().length < 5) throw new Error('Descreva o motivo da exclusão (mínimo de 5 caracteres).');
+              return api('/tasks/bulk-delete', { method: 'POST', body: { ids: chosen.map(t => t.id), reason: d.reason.trim() } });
+            },
+          });
+          if (!r) return;
+          if (r.blocked.length) {
+            await sheet({ title: `${r.deleted} excluída(s) · ${r.blocked.length} não excluída(s)`, submitLabel: 'Fechar',
+              body: html`<ul class="bulk-list">${r.blocked.map(b => html`<li><span class="mono">${b.code}</span> ${b.title}<small>${b.reason}</small></li>`)}</ul>` });
+          } else toast(`${r.deleted} tarefa(s) excluída(s).`);
+          ctx.render();
+        });
+      }
       root.querySelector('#clear')?.addEventListener('click', () => apply({ q: '', status: [], project: '', assignee: '', priority: '', due: '', nivel: '', stage: '', kind: '', tipo: '' }));
     },
   };

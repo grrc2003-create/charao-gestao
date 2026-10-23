@@ -2972,3 +2972,19 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .mc-task { display: flex !important; align-items: center; gap: 4px; color: #2F6FB3 !important; font-weight: 600; }
 .mc-task svg { width: 13px; height: 13px; }
 .mc-task a { color: inherit; text-decoration: underline; }
+
+/* Tarefas: exclusão em lote */
+.bulk-bar { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 10px 14px; margin: 0 0 10px; background: #FDF1EF; border: 1px solid #E8A39C; border-radius: 12px; font-size: 13px; }
+.bulk-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.is-selecting a.task-card, .is-selecting tr[data-href] { cursor: copy; }
+.is-selecting a.task-card.is-selected, .is-selecting tr.is-selected td { background: #FDE7E4 !important; }
+.is-selecting a.task-card.is-selected { box-shadow: inset 0 0 0 2px #B3261E; }
+.is-selecting tr.is-selected td:first-child { box-shadow: inset 4px 0 0 #B3261E; }
+.bulk-list { list-style: none; margin: 0 0 10px; padding: 0; max-height: 40vh; overflow-y: auto; font-size: 13px; }
+.bulk-list li { padding: 6px 0; border-top: 1px solid var(--line); }
+.bulk-list li small { display: block; color: #B3261E; }
+@media (max-width: 899px) { .bulk-bar { top: 64px; } }
+
+.ans-photo-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+.ans-photo-opts .btn { justify-content: center; min-height: 48px; }
+@media (max-width: 480px) { .ans-photo-opts { grid-template-columns: 1fr; } }

@@ -788,11 +788,41 @@ export function bindChecklist(root, t, ctx, refresh) {
     const r = await pending;
     if (r) run(() => api(`/tasks/${t.id}/items/${it.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.' : `Avanço do item ${it.seq}: ${r.progress}%.`);
   }));
+  // Foto opcional (check-list sem foto obrigatória): ao responder Conforme / Não conforme, oferece tirar foto
+  const askPhoto = async (it, target) => {
+    let files = [];
+    const p = sheet({
+      title: `${RESULT[target].label} · item ${it.seq}`, submitLabel: 'Responder sem foto',
+      body: html`<p class="muted" style="margin:0 0 12px"><b>${it.seq}. ${it.text}</b><br>A foto é opcional neste check-list. Quer registrar uma foto junto com a resposta?</p>
+        <div class="ans-photo-opts">
+          <label class="btn btn-primary">${fileInput({ camera: true, data: 'data-ans-photo' })}${icon('camera')}Tirar foto</label>
+          <label class="btn btn-ghost">${fileInput({ data: 'data-ans-photo' })}${icon('image')}Escolher da galeria</label></div>`,
+      onSubmit: () => ({ files }),
+    });
+    const sh = [...document.querySelectorAll('.sheet')].at(-1);
+    sh?.querySelectorAll('[data-ans-photo]').forEach(inp => inp.addEventListener('change', () => {
+      files = [...(inp.files || [])];
+      if (files.length) sh.querySelector('form').requestSubmit();
+    }));
+    const r = await p;
+    return r ? r.files : null;
+  };
   root.querySelectorAll('button[data-answer]').forEach(b => b.addEventListener('click', async () => {
     const it = c.items.find(x => x.id === Number(b.dataset.item));
     if (it.result === b.dataset.answer) return;
     const why = await askReason(it, b.dataset.answer);
     if (!why) return;
+    if (c.photo_rule !== 'obrigatoria' && b.dataset.answer !== 'na') {
+      const files = await askPhoto(it, b.dataset.answer);
+      if (files === null) return;
+      if (files.length) {
+        try {
+          toast(files.length > 1 ? `Enviando ${files.length} fotos…` : 'Enviando foto…', 'warn');
+          const imgs = fitPhotos((await readAttachments(files)).filter(x => !x.pdf).map(x => ({ data: x.data })), PHOTO_LIMIT);
+          return answer(it.id, { result: b.dataset.answer, images: imgs, ...why });
+        } catch (e) { return toast(e.message, 'err'); }
+      }
+    }
     answer(it.id, { result: b.dataset.answer, ...why });
   }));
   // Resposta com foto (câmera) e foto avulsa do item

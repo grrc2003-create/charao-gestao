@@ -407,6 +407,15 @@ async function main() {
   ok(blocked.delete === false && blocked.delete_blocked.includes('Cancelar'), 'tarefa com execução não pode ser excluída (orienta cancelar)');
   ok((await ana('DELETE', `/tasks/${dExec}`, { reason: 'Teste de bloqueio' })).status === 400, 'servidor recusa excluir tarefa com execução');
   ok((await ana('DELETE', `/tasks/${cP2}`, { reason: 'Teste de bloqueio' })).status === 400, 'servidor recusa excluir tarefa com subtarefas');
+  // Exclusão em lote
+  const bA = await mkC('Lote A'), bB = await mkC('Lote B'), bP = await mkC('Lote principal');
+  const bS = (await ricardo('POST', '/tasks', { parent_id: bP, title: 'Lote sub', description: 'Lote sub' })).data.id;
+  ok((await ricardo('POST', '/tasks/bulk-delete', { ids: [bA, bB], reason: 'Teste em lote' })).status === 403, 'exclusão em lote: só administrador');
+  ok((await ana('POST', '/tasks/bulk-delete', { ids: [bA], reason: '' })).status === 400, 'exclusão em lote exige motivo');
+  const bulk = (await ana('POST', '/tasks/bulk-delete', { ids: [bA, bB, bP, bS, dExec], reason: 'Cadastradas por engano' })).data;
+  ok(bulk.deleted === 4 && bulk.blocked.length === 1 && bulk.blocked[0].id === dExec && /Cancelar/.test(bulk.blocked[0].reason)
+    && (await ana('GET', `/tasks/${bP}`)).status === 404 && (await ana('GET', `/tasks/${dExec}`)).status === 200, 'exclusão em lote: exclui (subtarefa antes da principal) e devolve as bloqueadas com o motivo');
+  ok((await ana('GET', '/audit')).data.some(a => a.action === 'Exclusão de tarefas em lote' && a.details.includes('Cadastradas por engano')), 'exclusão em lote registrada na auditoria');
 
   console.log('Tarefas recorrentes');
   const TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());

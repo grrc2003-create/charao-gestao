@@ -1025,6 +1025,26 @@ export function deleteTask(ctx, id, body, ip) {
   return { project_id: t.project_id, parent_id: t.parent_id };
 }
 
+// Exclusão em lote: só administrador; cada tarefa passa pelas mesmas travas da exclusão individual (as bloqueadas
+// voltam com o motivo). Subtarefas são excluídas antes das principais escolhidas junto.
+export function deleteTasksBulk(ctx, body, ip) {
+  if (!isAdmin(ctx.user)) throw forbidden('Apenas administradores excluem tarefas.');
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw badRequest('Selecione as tarefas a excluir.');
+  if (ids.length > 500) throw badRequest('Exclua no máximo 500 tarefas por vez.');
+  const reason = str(body.reason, { max: 900, required: true, label: 'Motivo da exclusão' });
+  if (reason.length < 5) throw badRequest('Descreva o motivo da exclusão.');
+  const rows = ids.map(id => one('SELECT id, parent_id, code, title FROM tasks WHERE id = ?', id)).filter(Boolean)
+    .sort((a, b) => Number(!!b.parent_id) - Number(!!a.parent_id));
+  const deleted = [], blocked = [];
+  for (const r of rows) {
+    try { deleteTask(ctx, r.id, { reason: `${reason} (exclusão em lote)` }, ip); deleted.push(r.code); }
+    catch (e) { blocked.push({ id: r.id, code: r.code, title: r.title, reason: e.message }); }
+  }
+  audit(ctx.user.id, 'task', null, 'Exclusão de tarefas em lote', { excluidas: deleted.length, bloqueadas: blocked.length, motivo: reason, codigos: deleted.join(', ') }, ip);
+  return { deleted: deleted.length, codes: deleted, blocked, not_found: ids.length - rows.length };
+}
+
 // ---------- Filtros da tela Tarefas (compartilhados com o relatório "Tarefas filtradas") ----------
 export const DUE_FILTERS = {
   vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo',

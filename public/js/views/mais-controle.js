@@ -2,7 +2,7 @@
 // exportado), mostra o que muda nas tarefas (a tarefa é a categoria, pelo nome), os alertas (conta bancária ou categoria
 // não cadastrada), a conferência de alocação (fornecedor numa categoria diferente da habitual) e sincroniza.
 import { html, api, icon } from '../core.js';
-import { toast, confirmSheet } from '../ui.js';
+import { toast, confirmSheet, sheet } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -30,17 +30,49 @@ export function reviewActs(r, tasks = TASKS) {
   </span>`;
 }
 let TASKS = [];
+
+// "Ajustar no Mais Controle": pergunta quem ajusta e até quando (tarefa no INT-001, classificação "Mais Controle").
+// Devolve undefined se cancelou, null para só registrar, ou os dados da tarefa.
+let ADJ = null;
+export async function adjustDialog(subject) {
+  ADJ = ADJ || await api('/finance/maiscontrole/adjust-info').catch(() => ({ project: null, assignees: [] }));
+  const d = new Date(Date.now() + 3 * 86400e3 - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
+  const res = await sheet({
+    title: 'Ajustar no Mais Controle', submitLabel: 'Confirmar',
+    body: html`<p class="muted" style="margin:0 0 10px">${subject}</p>
+      ${ADJ.project ? html`<label class="switch"><input type="checkbox" name="criar" value="1" checked><span>Criar tarefa em <b>${ADJ.project.code} · ${ADJ.project.name}</b> (classificação “${ADJ.stage}”)</span></label>
+        <div class="mc-adj">
+          <div class="field"><label for="adj-who">Quem vai ajustar</label><select id="adj-who" name="assignee_id"><option value="">— escolher —</option>${ADJ.assignees.map(u => html`<option value="${u.id}">${u.name}${u.is_external ? ` · Terceirizado${u.company ? ` (${u.company})` : ''}` : u.job_title ? ` · ${u.job_title}` : ''}</option>`)}</select></div>
+          <div class="field"><label for="adj-due">Até que dia</label><input type="date" id="adj-due" name="due_date" value="${d}"></div>
+          <div class="field"><label for="adj-notes">Observação (opcional)</label><textarea id="adj-notes" name="notes" rows="2" maxlength="1000"></textarea></div>
+        </div>` : html`<p class="muted">Projeto interno INT-001 não encontrado: o ajuste fica só registrado aqui.</p>`}`,
+    onSubmit: v => {
+      if (v.criar && !v.assignee_id) throw new Error('Escolha quem vai ajustar no Mais Controle.');
+      if (v.criar && !v.due_date) throw new Error('Informe até que dia.');
+      return v;
+    },
+  });
+  if (!res) return undefined;
+  return res.criar ? { assignee_id: Number(res.assignee_id), due_date: res.due_date, notes: res.notes || '' } : null;
+}
+const dmyT = s => String(s || '').split('-').reverse().join('/');
+export const taskLine = t => (t ? html`<small class="mc-task">${icon('check')}Tarefa <a href="#/tarefas/${t.id}">${t.code}</a> · ${t.assignee || 'sem responsável'} · até ${dmyT(t.due_date)}${t.cancelled_at ? ' · cancelada' : t.status === 'concluida' ? ' · concluída' : ''}</small>` : '');
 export function bindReviewActs(scope, after) {
   scope.querySelectorAll('[data-rv]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
     const body = { key: b.dataset.key, decision: b.dataset.rv, usual: b.dataset.usual };
+    if (b.dataset.rv === 'standby') {
+      const t = await adjustDialog('Stand by: a despesa fica fora do realizado até a categoria ser corrigida no Mais Controle.');
+      if (t === undefined) { b.disabled = false; return; }
+      body.task = t;
+    }
     if (b.dataset.rv === 'corrigido') {
       body.obligation_id = Number(scope.querySelector(`[data-fix-sel="${b.dataset.key}"]`)?.value);
       if (!body.obligation_id) { toast('Escolha a tarefa (categoria) correta.', 'error'); b.disabled = false; return; }
     }
     try {
       await api('/finance/maiscontrole/review', { method: 'POST', body });
-      toast({ ok: 'OK: o fornecedor passa a valer nesta categoria.', corrigido: 'Corrigido: a despesa foi para a tarefa escolhida.', standby: 'Em stand by: fora do realizado até vir corrigido do Mais Controle.', reabrir: 'Decisão desfeita.' }[b.dataset.rv]);
+      toast({ ok: 'OK: o fornecedor passa a valer nesta categoria.', corrigido: 'Corrigido: a despesa foi para a tarefa escolhida.', standby: body.task ? 'Em stand by e tarefa criada no INT-001.' : 'Em stand by: fora do realizado até vir corrigido do Mais Controle.', reabrir: 'Decisão desfeita.' }[b.dataset.rv]);
       after();
     } catch (ex) { toast(ex.message, 'error'); b.disabled = false; }
   }));
@@ -89,7 +121,7 @@ export async function view({ state, render }) {
           <div class="card-body"><p class="muted" style="margin:0">Conta de cliente não deve pagar despesa do centro de custo Empresa. Decida o que fazer com cada lançamento: <b>Ajustar no Mais Controle</b> (trocar a conta ou o centro de custo lá; fica registrado e sai daqui quando vier corrigido) ou <b>Não trazer</b> (ignorar o lançamento). Enquanto isso, fica fora do realizado.</p></div>
           <ul class="mc-cats mc-rev">${ver.map(i => html`<li class="${i.marked_at ? '' : 'is-late'}"><span class="mc-cat"><b>${i.supplier || '(sem fornecedor)'} · ${money(i.amount)}</b>
             <small>${dmy(i.paid_date)} · conta <b>${i.account}</b> · ${i.category || '(sem categoria)'}${i.description ? ` · ${i.description}` : ''}</small>
-            ${i.marked_at ? html`<small class="mc-note">ajustar no Mais Controle · avisado em ${when(i.marked_at)}${i.marked_by ? ` por ${i.marked_by}` : ''}: aguardando a correção</small>` : ''}</span>
+            ${i.marked_at ? html`<small class="mc-note">ajustar no Mais Controle · avisado em ${when(i.marked_at)}${i.marked_by ? ` por ${i.marked_by}` : ''}: aguardando a correção</small>` : ''}${taskLine(i.task)}</span>
             <span class="mc-rev-acts">${i.marked_at ? html`<button type="button" class="btn btn-ghost btn-sm" data-iss="reabrir" data-key="${i.key}">Desfazer</button>`
               : html`<button type="button" class="btn btn-ghost btn-sm mc-wrong" data-iss="ajustar" data-key="${i.key}">Ajustar no Mais Controle</button>`}
               <button type="button" class="btn btn-ghost btn-sm" data-iss-ex="${i.key}">Não trazer</button></span></li>`)}</ul>
@@ -125,13 +157,13 @@ export async function view({ state, render }) {
           <span class="mc-cat"><b>${r.supplier || '(sem fornecedor)'} · ${money(r.amount)}</b>
             <small>${dmy(r.due_date)}${r.description ? ` · ${r.description}` : ''}</small>
             <small><span class="m-badge ${r.state === 'nova' ? 'm-draft' : r.state === 'standby' ? 'fi-err' : 'm-paid'}">${{ nova: 'Despesa nova', conferir: 'Categoria diferente da habitual', standby: 'Stand by' }[r.state]}</span>
-              No Mais Controle: <b>${r.category}</b>${r.usual ? html` · costuma ser <b>${r.usual}</b>` : ''}${r.state === 'standby' ? ` · desde ${when(r.marked_at)}: aguardando ajuste no Mais Controle` : ''}</small></span>
+              No Mais Controle: <b>${r.category}</b>${r.usual ? html` · costuma ser <b>${r.usual}</b>` : ''}${r.state === 'standby' ? ` · desde ${when(r.marked_at)}: aguardando ajuste no Mais Controle` : ''}</small>${taskLine(r.task)}</span>
           ${reviewActs(r)}</li>`)}</ul>
       </section>` : ''}
       ${pv.category_rules?.length ? html`<section class="card section">
         <div class="card-head"><h2>${icon('settings')}Regras por categoria</h2><span class="sub">${pv.category_rules.length}${t.adjust ? ` · ${t.adjust} pagamento(s) aguardando ajuste no Mais Controle (${money(t.adjust_total)} fora do realizado)` : ''}</span></div>
         <ul class="mc-cats">${pv.category_rules.map(r => html`<li class="${r.action === 'ajustar' && r.pending ? 'is-late' : ''}">
-          <span class="mc-cat"><b>${r.label}</b><small>${r.action === 'mapear' ? `todos os pagamentos vão para a tarefa “${r.target || '(tarefa excluída)'}”` : r.pending ? `ajustar no Mais Controle: ${r.pending.count} pagamento(s) ainda nesta categoria · ${money(r.pending.total)} · último em ${ymLabel(r.pending.last)}` : 'ajustada no Mais Controle: não há mais pagamentos nesta categoria'}</small></span>
+          <span class="mc-cat"><b>${r.label}</b>${taskLine(r.task)}<small>${r.action === 'mapear' ? `todos os pagamentos vão para a tarefa “${r.target || '(tarefa excluída)'}”` : r.pending ? `ajustar no Mais Controle: ${r.pending.count} pagamento(s) ainda nesta categoria · ${money(r.pending.total)} · último em ${ymLabel(r.pending.last)}` : 'ajustada no Mais Controle: não há mais pagamentos nesta categoria'}</small></span>
           <button type="button" class="btn btn-ghost btn-sm" data-cr="remover" data-label="${r.label}">Desfazer regra</button></li>`)}</ul>
       </section>` : ''}
       ${pv.exclusions?.length ? html`<section class="card section">
@@ -179,8 +211,15 @@ export async function view({ state, render }) {
         catch (ex) { toast(ex.message, 'error'); c.disabled = false; }
       }));
       root.querySelectorAll('[data-iss]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
-        await api('/finance/maiscontrole/issue', { method: 'POST', body: { key: b.dataset.key, action: b.dataset.iss } });
-        toast(b.dataset.iss === 'ajustar' ? 'Registrado: ajustar no Mais Controle.' : 'Aviso desfeito.'); render();
+        const body = { key: b.dataset.key, action: b.dataset.iss };
+        if (b.dataset.iss === 'ajustar') {
+          const it = pv.issues.find(x => x.key === b.dataset.key);
+          const t = await adjustDialog(`${it?.supplier || '(sem fornecedor)'} · ${money(it?.amount)} · conta ${it?.account || ''}: trocar a conta bancária ou o centro de custo no Mais Controle.`);
+          if (t === undefined) { b.disabled = false; return; }
+          body.task = t;
+        }
+        await api('/finance/maiscontrole/issue', { method: 'POST', body });
+        toast(b.dataset.iss === 'ajustar' ? (body.task ? 'Registrado e tarefa criada no INT-001.' : 'Registrado: ajustar no Mais Controle.') : 'Aviso desfeito.'); render();
       })));
       root.querySelectorAll('[data-iss-ex]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
         if (!(await confirmSheet('Não trazer', 'Este lançamento não vai entrar nem aparecer no verificador. Dá para voltar em “Custos que não entram”.', 'Não trazer'))) { b.disabled = false; return; }
@@ -199,9 +238,13 @@ export async function view({ state, render }) {
           body.obligation_id = Number(root.querySelector(`[data-map-sel="${CSS.escape(label)}"]`)?.value);
           if (!body.obligation_id) { toast('Escolha a tarefa para onde a categoria vai.', 'error'); b.disabled = false; return; }
         }
-        if (action === 'ajustar' && !(await confirmSheet('Ajustar no Mais Controle', `Os pagamentos de “${label}” ficam fora do realizado e em alerta até serem recategorizados no Mais Controle. Quando não houver mais pagamentos nesta categoria, a regra se resolve sozinha.`, 'Confirmar'))) { b.disabled = false; return; }
+        if (action === 'ajustar') {
+          const t = await adjustDialog(`Os pagamentos de “${label}” ficam fora do realizado e em alerta até serem recategorizados no Mais Controle. Quando não houver mais pagamentos nesta categoria, a regra se resolve sozinha.`);
+          if (t === undefined) { b.disabled = false; return; }
+          body.task = t;
+        }
         await api('/finance/maiscontrole/category-rule', { method: 'POST', body });
-        toast({ mapear: 'Categoria enviada para a tarefa: o realizado foi recalculado.', ajustar: 'Categoria em ajuste no Mais Controle.', remover: 'Regra desfeita.' }[action]); render();
+        toast({ mapear: 'Categoria enviada para a tarefa: o realizado foi recalculado.', ajustar: body.task ? 'Categoria em ajuste no Mais Controle e tarefa criada no INT-001.' : 'Categoria em ajuste no Mais Controle.', remover: 'Regra desfeita.' }[action]); render();
       })));
       root.querySelectorAll('[data-unex]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
         await api('/finance/maiscontrole/exclusions/remove', { method: 'POST', body: { kind: b.dataset.unex, key: b.dataset.key } });

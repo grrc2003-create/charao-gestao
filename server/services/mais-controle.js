@@ -9,7 +9,9 @@
 // Toda semana (segunda, 8h) busca e sincroniza sozinho. Credenciais só nas variáveis de ambiente do servidor.
 import crypto from 'node:crypto';
 import { all, one, run, tx } from '../db.js';
-import { badRequest, notFound, str, intOrNull } from '../lib/http.js';
+import { badRequest, notFound, str, intOrNull, date } from '../lib/http.js';
+import { usersWithProjectAccess } from '../lib/permissions.js';
+import { insertTask, validateAssignee } from './tasks.js';
 import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { audit, taskHistory } from './audit.js';
 import { today } from './metrics.js';
@@ -234,6 +236,41 @@ export async function autoSync() {
   } finally { autoRunning = false; }
 }
 
+// ---------- Tarefa de ajuste no Mais Controle: projeto interno INT-001, classificação "Mais Controle" ----------
+const ADJ_STAGE = 'Mais Controle';
+const internalProject = () => one(`SELECT * FROM projects WHERE code = 'INT-001'`) || one(`SELECT * FROM projects WHERE kind = 'interno' AND COALESCE(restricted, 0) = 0 ORDER BY id LIMIT 1`);
+const dmyOf = d => String(d || '').split('-').reverse().join('/');
+export function adjustInfo(ctx) {
+  requireFinance(ctx.user);
+  const p = internalProject();
+  if (!p) return { project: null, assignees: [] };
+  return { project: { id: p.id, code: p.code, name: p.name }, stage: ADJ_STAGE,
+    assignees: usersWithProjectAccess(p.id).map(u => ({ id: u.id, name: u.name, job_title: u.job_title, is_external: !!u.is_external, company: u.company })) };
+}
+// Cria a tarefa (dentro da transação de quem chama); sem pedido de tarefa, devolve null
+function adjustTask(ctx, t, title, description) {
+  if (!t) return null;
+  const p = internalProject();
+  if (!p) throw badRequest('Projeto interno INT-001 não encontrado para criar a tarefa.');
+  const due = date(t.due_date, 'Prazo');
+  if (!due) throw badRequest('Informe até que dia o ajuste deve ser feito.');
+  const assignee = validateAssignee(intOrNull(t.assignee_id), p.id);
+  if (!assignee) throw badRequest('Escolha quem vai fazer o ajuste no Mais Controle.');
+  let stage = one('SELECT id FROM project_stages WHERE project_id = ? AND name = ? COLLATE NOCASE', p.id, ADJ_STAGE)?.id;
+  if (!stage) {
+    const n = one('SELECT COALESCE(MAX(sort_order), 0) AS n FROM project_stages WHERE project_id = ?', p.id).n;
+    stage = Number(run('INSERT INTO project_stages (project_id, name, sort_order) VALUES (?,?,?)', p.id, ADJ_STAGE, n + 1).lastInsertRowid);
+  }
+  const notes = str(t.notes, { max: 1000, label: 'Observação' });
+  const start = today() <= due ? today() : due;
+  const id = insertTask({ project: p, stageInput: stage, creatorId: ctx.user.id, ctx,
+    data: { task_type: 'tarefa', title: title.slice(0, 200), description: [description, notes ? `Observação: ${notes}` : ''].filter(Boolean).join('\n'),
+      field_summary: null, notes: null, due_date: due, start_date: start, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee } });
+  audit(ctx.user.id, 'finance', null, 'Mais Controle: tarefa de ajuste criada', { tarefa: one('SELECT code FROM tasks WHERE id = ?', id)?.code, titulo: title }, null);
+  return id;
+}
+const taskInfo = id => (id ? one(`SELECT t.id, t.code, t.due_date, t.status, t.cancelled_at, u.name AS assignee FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.id = ?`, id) || null : null);
+
 // ---------- Cadastro: contas bancárias ----------
 // Todas as contas bancárias do Mais Controle; o tipo vem do "Quem Paga" dos lançamentos da conta (Empresa ou Cliente).
 // A escolha manual (kind) só existe quando o operador muda o que o Mais Controle informa.
@@ -378,9 +415,20 @@ export function setCategoryRule(ctx, body, ip) {
     if (!o) throw badRequest('Escolha a tarefa para onde a categoria vai.');
     oid = o.id;
   }
-  run(`INSERT INTO ext_category_rules (source, cat_key, label, action, obligation_id, created_by) VALUES (?,?,?,?,?,?)
-    ON CONFLICT(source, cat_key) DO UPDATE SET label = excluded.label, action = excluded.action, obligation_id = excluded.obligation_id, created_by = excluded.created_by, created_at = datetime('now')`,
-    SOURCE, key, label, action, oid, ctx.user.id);
+  tx(() => {
+    let taskId = null;
+    if (action === 'ajustar') {
+      const s = one(`SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS t, MIN(paid_date) AS de, MAX(paid_date) AS ate FROM ext_payments
+        WHERE source = ? AND paid_date IS NOT NULL AND amount > 0 AND (cost_center IS NULL OR lower(cost_center) = 'empresa') AND category = ? COLLATE NOCASE`, SOURCE, label);
+      taskId = adjustTask(ctx, body.task, `Ajustar no Mais Controle: recategorizar “${label}”`,
+        [`Categoria “${label}” marcada para ajuste no Mais Controle: ${s.n} pagamento(s) · ${brl(s.t)}${s.n ? ` · de ${dmyOf(s.de)} a ${dmyOf(s.ate)}` : ''}.`,
+          'O que fazer no Mais Controle: mudar os pagamentos desta categoria para a categoria correta.',
+          'Enquanto houver pagamentos nesta categoria, eles ficam fora do realizado; quando não houver mais, a regra se resolve sozinha.'].join('\n'));
+    }
+    run(`INSERT INTO ext_category_rules (source, cat_key, label, action, obligation_id, created_by, task_id) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(source, cat_key) DO UPDATE SET label = excluded.label, action = excluded.action, obligation_id = excluded.obligation_id, created_by = excluded.created_by, task_id = excluded.task_id, created_at = datetime('now')`,
+      SOURCE, key, label, action, oid, ctx.user.id, taskId);
+  });
   audit(ctx.user.id, 'finance', null, action === 'mapear' ? 'Mais Controle: categoria enviada para outra tarefa' : 'Mais Controle: categoria para ajustar no Mais Controle', { categoria: label, tarefa: oid }, ip);
   return sync(ctx, ip);
 }
@@ -407,7 +455,7 @@ export function issues() {
     if (!kind) continue;
     const mk = marks.get(p.ext_key);
     out.push({ key: p.ext_key, kind, supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, due_date: p.due_date, category: p.category, account: p.account || '(sem conta)', payer: p.payer,
-      marked_at: mk?.marked_at || null, marked_by: mk?.by_name || null });
+      marked_at: mk?.marked_at || null, marked_by: mk?.by_name || null, task: taskInfo(mk?.task_id) });
   }
   return out;
 }
@@ -421,7 +469,14 @@ export function markIssue(ctx, body, ip) {
     run('DELETE FROM ext_issue_marks WHERE source = ? AND ext_key = ?', SOURCE, p.ext_key);
     audit(ctx.user.id, 'finance', null, 'Mais Controle: aviso de ajuste desfeito', { lancamento: label }, ip);
   } else {
-    run(`INSERT OR REPLACE INTO ext_issue_marks (source, ext_key, marked_by) VALUES (?,?,?)`, SOURCE, p.ext_key, ctx.user.id);
+    tx(() => {
+      const taskId = adjustTask(ctx, body.task, `Ajustar no Mais Controle: ${p.supplier || '(sem fornecedor)'} · ${brl(p.amount)} · ${dmyOf(p.paid_date)}`,
+        [`Lançamento do centro de custo ${p.cost_center || 'Empresa'} pago pela conta de cliente “${p.account || '(sem conta)'}”.`,
+          `Fornecedor: ${p.supplier || '(sem fornecedor)'} · Valor: ${brl(p.amount)} · Pago em ${dmyOf(p.paid_date)} · Categoria: ${p.category || '(sem categoria)'}${p.description ? ` · ${p.description}` : ''}`,
+          'O que fazer no Mais Controle: trocar a conta bancária (para uma conta da empresa) ou o centro de custo (para a obra do cliente).',
+          'Depois do ajuste, o lançamento sai do verificador na próxima atualização do Mais Controle.'].join('\n'));
+      run(`INSERT OR REPLACE INTO ext_issue_marks (source, ext_key, marked_by, task_id) VALUES (?,?,?,?)`, SOURCE, p.ext_key, ctx.user.id, taskId);
+    });
     audit(ctx.user.id, 'finance', null, 'Mais Controle: lançamento para ajustar no Mais Controle', { lancamento: label, centro_de_custo: p.cost_center || 'Empresa' }, ip);
   }
   return { ok: true };
@@ -551,7 +606,7 @@ export function reviews() {
     const d = decided.get(p.ext_key);
     const base = { key: p.ext_key, supplier: p.supplier, description: p.description, amount: p.amount, due_date: p.due_date, category: p.category };
     // Stand by: aparece até o Mais Controle mandar a categoria corrigida (qualquer mês)
-    if (d?.decision === 'standby') { if (hkey(p.category) === hkey(d.category)) out.push({ ...base, usual: d.usual, state: 'standby', marked_at: d.decided_at }); continue; }
+    if (d?.decision === 'standby') { if (hkey(p.category) === hkey(d.category)) out.push({ ...base, usual: d.usual, state: 'standby', marked_at: d.decided_at, task: taskInfo(d.task_id) }); continue; }
     if (d && hkey(p.category) === hkey(d.category)) continue; // ok ou corrigido (enquanto a categoria não mudar lá)
     if (p.ref_month < prevM) continue;
     // Despesa nova: o fornecedor não tem pagamento em meses anteriores
@@ -582,9 +637,16 @@ export function decideReview(ctx, body, ip) {
     fix = o.title;
   }
   const usual = str(body.usual, { max: 160, label: 'Categoria habitual' }) || null;
-  run(`INSERT INTO ext_reviews (source, ext_key, supplier_key, decision, category, usual, fix_category, decided_by) VALUES (?,?,?,?,?,?,?,?)
-    ON CONFLICT(source, ext_key) DO UPDATE SET decision = excluded.decision, category = excluded.category, usual = excluded.usual, fix_category = excluded.fix_category, decided_by = excluded.decided_by, decided_at = datetime('now')`,
-    SOURCE, p.ext_key, p.supplier_key, decision, p.category, usual, fix, ctx.user.id);
+  tx(() => {
+    const taskId = decision === 'standby' ? adjustTask(ctx, body.task, `Ajustar no Mais Controle: categoria de ${p.supplier || '(sem fornecedor)'} · ${brl(p.amount)} · ${dmyOf(p.paid_date)}`,
+      [`Despesa em stand by: a categoria no Mais Controle está errada.`,
+        `Fornecedor: ${p.supplier || '(sem fornecedor)'} · Valor: ${brl(p.amount)} · Pago em ${dmyOf(p.paid_date)}${p.description ? ` · ${p.description}` : ''}`,
+        `Categoria no Mais Controle: ${p.category || '(sem categoria)'}${usual ? ` · costuma ser: ${usual}` : ''}`,
+        'O que fazer no Mais Controle: corrigir a categoria do lançamento. Quando vier corrigida, a despesa entra sozinha no realizado.'].join('\n')) : null;
+    run(`INSERT INTO ext_reviews (source, ext_key, supplier_key, decision, category, usual, fix_category, decided_by, task_id) VALUES (?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(source, ext_key) DO UPDATE SET decision = excluded.decision, category = excluded.category, usual = excluded.usual, fix_category = excluded.fix_category, decided_by = excluded.decided_by, task_id = excluded.task_id, decided_at = datetime('now')`,
+      SOURCE, p.ext_key, p.supplier_key, decision, p.category, usual, fix, ctx.user.id, taskId);
+  });
   audit(ctx.user.id, 'finance', null, { ok: 'Alocação conferida: OK (fornecedor passa a valer nesta categoria)', corrigido: 'Alocação corrigida no sistema', standby: 'Alocação em stand by (ajustar no Mais Controle)' }[decision],
     { fornecedor: p.supplier, categoria: p.category, para: fix, valor: p.amount }, ip);
   return sync(ctx, ip);
@@ -608,7 +670,7 @@ export function preview(ctx) {
     first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(), exclusions: listExclusions(ctx),
     issues: issues(),
     clients: cliList.slice(-48),
-    category_rules: [...al.rules.values()].map(r => ({ label: r.label, action: r.action, target: r.target || null, created_at: r.created_at, pending: al.adjust.get(r.cat_key) || null }))
+    category_rules: [...al.rules.values()].map(r => ({ label: r.label, action: r.action, target: r.target || null, created_at: r.created_at, pending: al.adjust.get(r.cat_key) || null, task: taskInfo(r.task_id) }))
       .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
     tasks: al.obs.filter(o => o.active).map(o => ({ id: o.id, title: o.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR')),
     totals: {

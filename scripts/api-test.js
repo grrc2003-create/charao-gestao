@@ -1965,8 +1965,16 @@ async function main() {
     const ver = pv.issues.find(i => i.kind === 'conta_cliente');
     ok(ver && ver.amount === 200 && !ver.marked_at, 'verificador: conta de cliente pagando despesa do centro de custo Empresa');
     ok((await fo('GET', '/finance/week')).data.alerts.client_issues === 1, 'verificador: aparece no alerta das contas da semana');
-    await fo('POST', '/finance/maiscontrole/issue', { key: ver.key, action: 'ajustar' });
+    const adjI = (await fo('GET', '/finance/maiscontrole/adjust-info')).data;
+    ok(adjI.project?.code === 'INT-001' && adjI.assignees.length > 0 && adjI.stage === 'Mais Controle', 'ajuste no Mais Controle: projeto interno INT-001 e quem pode ajustar');
+    const due3 = new Date(Date.now() + 3 * 86400e3).toISOString().slice(0, 10);
+    ok((await fo('POST', '/finance/maiscontrole/issue', { key: ver.key, action: 'ajustar', task: { assignee_id: adjI.assignees[0].id } })).status === 400, 'tarefa de ajuste exige o prazo');
+    await fo('POST', '/finance/maiscontrole/issue', { key: ver.key, action: 'ajustar', task: { assignee_id: adjI.assignees[0].id, due_date: due3, notes: 'trocar a conta' } });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    const vt = pv.issues.find(i => i.key === ver.key)?.task;
+    const vtask = vt ? (await fo('GET', `/tasks/${vt.id}`)).data : null;
+    ok(vt && /^INT-001-/.test(vt.code) && vt.due_date === due3 && vt.assignee === adjI.assignees[0].name && vtask?.stage_name === 'Mais Controle' && /trocar a conta/.test(vtask?.description || ''),
+      'verificador: "ajustar no Mais Controle" cria tarefa no INT-001 (classificação Mais Controle) com responsável e prazo');
     ok(pv.issues.find(i => i.key === ver.key)?.marked_at && (await fo('GET', '/finance/week')).data.alerts.client_issues === 0, 'verificador: decisão "ajustar no Mais Controle" registrada');
     await fo('POST', '/finance/maiscontrole/issue', { key: ver.key, action: 'reabrir' });
     const cartao = pv.accounts.find(a => a.label === 'Cartão Teste');

@@ -2953,3 +2953,15 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 
 .fy td.fy-click, .fy-mrow.fy-click { cursor: pointer; }
 .fy td.fy-click:hover { background: #F3F7FC; box-shadow: inset 0 0 0 1px #9DB9DA; }
+
+/* Projetos / Clientes: detalhamento oculto até clicar */
+.fy-fold:not(.is-open) tbody { display: none; }
+.fy-cli tbody:not(.is-open) tr.fy-acc { display: none; }
+.fy-tog { all: unset; cursor: pointer; display: inline-flex; align-items: flex-start; gap: 6px; font-weight: 700; color: inherit; }
+.fy-tog i { font-style: normal; display: inline-block; transition: transform .15s; color: var(--muted); }
+.fy-fold.is-open tfoot .fy-tog i, .fy-cli tbody.is-open .fy-tog i { transform: rotate(90deg); }
+.fy-tog:hover { color: #2F6FB3; }
+.fy-tog:focus-visible { outline: 2px solid #2F6FB3; outline-offset: 2px; border-radius: 4px; }
+.fy tfoot th small { display: block; font-size: 11px; font-weight: 500; color: var(--muted); }
+
+.fy tfoot .fy-name small { white-space: normal; overflow: visible; text-overflow: clip; }

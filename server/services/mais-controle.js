@@ -3,7 +3,7 @@
 // recalcula o realizado de cada tarefa e mês — correções feitas lá se refletem sozinhas:
 //  - só contas bancárias cadastradas (custo em outra conta vira alerta: cadastre a conta para trazer);
 //  - centro de custo Empresa → tarefa financeira de mesmo nome da categoria (a tarefa É a categoria; sem tarefa vira alerta);
-//  - demais centros de custo → "Custos destinados a Projetos" (uma linha por centro de custo, total do mês);
+//  - demais centros de custo → "Custos de Projetos pagos pela Empresa" (uma linha por centro de custo, total do mês);
 //  - previsto: primeiro ano = o próprio realizado; demais anos = realizado do mesmo mês no ano anterior;
 //  - conferência de alocação: despesa do mês numa categoria diferente da habitual do fornecedor (OK / errado).
 // Toda semana (segunda, 8h) busca e sincroniza sozinho. Credenciais só nas variáveis de ambiente do servidor.
@@ -323,7 +323,7 @@ export function monthPayments(ctx, obligationId, ym) {
       excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category) }; });
 }
 
-// Lançamentos do mês que formam os quadros "Custos destinados a Projetos" (contas da empresa, centro de custo da obra)
+// Lançamentos do mês que formam os quadros "Custos de Projetos pagos pela Empresa" (contas da empresa, centro de custo da obra)
 // e "Gastos dos clientes por obra" (conta do cliente; uma obra ou todas)
 export function costPayments(ctx, q) {
   requireFinance(ctx.user);

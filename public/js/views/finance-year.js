@@ -29,6 +29,9 @@ function cellHtml(row, c, i, cur) {
     <span class="fy-r">${c.status === 'pago' ? html`✓ ${short(c.real)}` : c.status === 'nao_ocorreu' ? 'não ocorreu' : c.status === 'atrasada' ? 'atrasada' : c.status === 'aguardando' ? html`paguei${c.marked_amount != null ? ` ${short(c.marked_amount)}` : ''}?` : c.status === 'nao_encontrado' ? 'não achado' : ''}</span></button></td>`;
 }
 
+// Detalhamento dos quadros de Projetos e de Clientes: fechado por padrão; aberto fica aberto enquanto a página estiver aberta
+const FOLD = { pj: false, cl: false, obras: new Set() };
+
 export async function view({ state, query, setQuery, render }) {
   if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação de Tarefas financeiras (Usuários → Editar).');
   const [d, wk] = await Promise.all([api('/finance/year', { query: { ano: query.get('ano') || '' } }), api('/finance/week').catch(() => null)]);
@@ -130,23 +133,24 @@ export async function view({ state, query, setQuery, render }) {
               return html`<td class="${i === curIdx ? 'is-cur' : ''} ${b?.cls || ''}" title="${b ? b.label : ''}">${b ? html`<b>${sgn(b.v)}</b><small>${b.label}</small>` : '—'}</td>`; })}
               ${(() => { const past = d.month_totals.filter((m, i) => isPast(i)); if (!past.length) return html`<td class="fy-tot">—</td>`;
                 const v = Math.round(past.reduce((s, m) => s + m.planned - m.real, 0));
-                return html`<td class="fy-tot ${v < 0 ? 'is-over' : 'is-under'}" title="soma dos meses fechados"><b>${sgn(v)}</b><small>meses fechados</small></td>`; })()}</tr>
+                const last = MES[d.month_totals.reduce((m, x, i) => (isPast(i) ? i : m), 0)];
+                return html`<td class="fy-tot ${v < 0 ? 'is-over' : 'is-under'}" title="soma dos meses fechados"><b>${sgn(v)}</b><small>até ${last}</small></td>`; })()}</tr>
           </tfoot>
         </table></div>
       </section>
       <section class="card fy-mob" data-fy-mob>${mobileMonth(mobMonth)}</section>
       ${d.projects?.length ? html`<section class="card section fy-proj">
-        <div class="card-head"><h2>${icon('projects')}Custos destinados a Projetos</h2><span class="sub">Mais Controle · centros de custo diferentes de Empresa · ${money(d.projects.reduce((s, p) => s + p.total, 0))}</span></div>
-        <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Centro de custo</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
+        <div class="card-head"><h2>${icon('projects')}Custos de Projetos pagos pela Empresa</h2><span class="sub">Mais Controle · contas da empresa · centros de custo diferentes de Empresa · ${money(d.projects.reduce((s, p) => s + p.total, 0))}</span></div>
+        <div class="fy-wrap"><table class="fy fy-projt fy-fold ${FOLD.pj ? 'is-open' : ''}" data-fold="pj"><thead><tr><th class="fy-name">Centro de custo</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
           <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-pj="${p.cost_center}" data-m="${i}" title="Ver os lançamentos"><span class="fy-dash">${short(v)}</span></td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">—</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody>
-          <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.projects.reduce((s, p) => s + (p.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.projects.reduce((s, p) => s + p.total, 0))}</td></tr></tfoot></table></div>
+          <tfoot><tr><th class="fy-name"><button type="button" class="fy-tog" data-tog="pj" aria-expanded="${FOLD.pj}"><i>▸</i>Total</button><small>${d.projects.length} centro(s) de custo · <span class="fy-tog-l">${FOLD.pj ? 'ocultar' : 'ver'}</span> detalhamento</small></th>${MES.map((m, i) => { const v = d.projects.reduce((s, p) => s + (p.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.projects.reduce((s, p) => s + p.total, 0))}</td></tr></tfoot></table></div>
       </section>` : ''}
       ${d.clients?.length ? html`<section class="card section fy-proj fy-cli">
         <div class="card-head"><h2>${icon('wallet')}Gastos dos clientes por obra</h2><span class="sub">Mais Controle · contas de cliente · ${money(d.clients.reduce((s, c) => s + c.total, 0))}</span></div>
-        <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Obra / conta</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
-          ${d.clients.map(c => html`<tbody><tr class="fy-cli-h"><th class="fy-name">${c.cost_center}</th>${c.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-cl="" data-cc="${c.cost_center}" data-m="${i}" title="Ver os lançamentos">${short(v)}</td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}">—</td>`)}<td class="fy-tot">${short(c.total)}</td></tr>
-            ${c.accounts.map(a => html`<tr><th class="fy-name fy-sub">${a.client}</th>${a.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-cl="${a.key}" data-cln="${a.client}" data-cc="${c.cost_center}" data-m="${i}" title="Ver os lançamentos"><span class="fy-dash">${short(v)}</span></td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">—</span></td>`)}<td class="fy-tot">${short(a.total)}</td></tr>`)}</tbody>`)}
-          <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.clients.reduce((s, c) => s + (c.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.clients.reduce((s, c) => s + c.total, 0))}</td></tr></tfoot></table></div>
+        <div class="fy-wrap"><table class="fy fy-projt fy-fold ${FOLD.cl ? 'is-open' : ''}" data-fold="cl"><thead><tr><th class="fy-name">Obra / conta</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
+          ${d.clients.map(c => html`<tbody class="${FOLD.obras.has(c.cost_center) ? 'is-open' : ''}"><tr class="fy-cli-h"><th class="fy-name"><button type="button" class="fy-tog" data-tog-obra="${c.cost_center}" aria-expanded="${FOLD.obras.has(c.cost_center)}"><i>▸</i>${c.cost_center}</button><small>${c.accounts.length} conta(s)</small></th>${c.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-cl="" data-cc="${c.cost_center}" data-m="${i}" title="Ver os lançamentos">${short(v)}</td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}">—</td>`)}<td class="fy-tot">${short(c.total)}</td></tr>
+            ${c.accounts.map(a => html`<tr class="fy-acc"><th class="fy-name fy-sub">${a.client}</th>${a.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-cl="${a.key}" data-cln="${a.client}" data-cc="${c.cost_center}" data-m="${i}" title="Ver os lançamentos"><span class="fy-dash">${short(v)}</span></td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">—</span></td>`)}<td class="fy-tot">${short(a.total)}</td></tr>`)}</tbody>`)}
+          <tfoot><tr><th class="fy-name"><button type="button" class="fy-tog" data-tog="cl" aria-expanded="${FOLD.cl}"><i>▸</i>Total</button><small>${d.clients.length} obra(s) · <span class="fy-tog-l">${FOLD.cl ? 'ocultar' : 'ver'}</span> detalhamento</small></th>${MES.map((m, i) => { const v = d.clients.reduce((s, c) => s + (c.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.clients.reduce((s, c) => s + c.total, 0))}</td></tr></tfoot></table></div>
       </section>` : ''}`
       : html`<section class="card"><div class="card-body muted">Nenhuma tarefa financeira em ${d.year}. Comece em “Nova tarefa financeira” ou “Importar planilha”.</div></section>`}`,
     mount(root) {
@@ -228,7 +232,7 @@ export async function view({ state, query, setQuery, render }) {
         if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
       };
       root.querySelectorAll('.fy-card, [data-fy-mob]').forEach(el => el.addEventListener('click', onCell));
-      // Custos destinados a Projetos / Gastos dos clientes por obra: lançamentos do mês
+      // Custos de Projetos pagos pela Empresa / Gastos dos clientes por obra: lançamentos do mês
       const onCost = async e => {
         const t = e.target.closest('[data-pj][data-m], [data-cc][data-m]');
         if (!t) return;
@@ -249,6 +253,16 @@ export async function view({ state, query, setQuery, render }) {
         });
       };
       root.querySelectorAll('.fy-proj, [data-fy-mob]').forEach(el => el.addEventListener('click', onCost));
+      root.querySelectorAll('[data-tog]').forEach(b => b.addEventListener('click', () => {
+        const k = b.dataset.tog, t = b.closest('table');
+        FOLD[k] = !FOLD[k]; t.classList.toggle('is-open', FOLD[k]); b.setAttribute('aria-expanded', FOLD[k]);
+        t.querySelector('.fy-tog-l').textContent = FOLD[k] ? 'ocultar' : 'ver';
+      }));
+      root.querySelectorAll('[data-tog-obra]').forEach(b => b.addEventListener('click', () => {
+        const k = b.dataset.togObra, open = !FOLD.obras.has(k);
+        if (open) FOLD.obras.add(k); else FOLD.obras.delete(k);
+        b.closest('tbody').classList.toggle('is-open', open); b.setAttribute('aria-expanded', open);
+      }));
       const wReload = () => { setQuery({ ano: d.year, m: mobMonth }); render(); };
       const wItem = id => wItems.find(i => i.id === Number(id));
       root.querySelectorAll('[data-w-mark]').forEach(b => b.addEventListener('click', async () => {

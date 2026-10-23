@@ -678,7 +678,7 @@ export function markState(it, cov) {
   if (cov && cov.data_until >= it.due_date && tsOf(cov.fetched_at) > tsOf(it.marked_paid_at)) return 'nao_encontrado';
   return 'aguardando';
 }
-// Custos destinados a Projetos (centros de custo diferentes de Empresa), uma linha por centro de custo
+// Custos de Projetos pagos pela Empresa (centros de custo diferentes de Empresa), uma linha por centro de custo
 function projectCosts(keys) {
   let rows = [];
   try {

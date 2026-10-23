@@ -53,6 +53,17 @@ export async function view({ state, query, setQuery, render }) {
     </section>`;
   const T = d.totals;
   const curIdx = d.months.indexOf(d.current);
+  // Saldo do mês (previsto − real): estourou (real acima do previsto) ou positivo (abaixo); mês atual só marca se já estourou
+  const isPast = i => d.months[i] < d.current;
+  const bal = (planned, real, i) => {
+    if (!isPast(i) && i !== curIdx) return null;
+    if (!real && !planned) return null;
+    const v = Math.round((planned || 0) - (real || 0));
+    if (v < 0) return { cls: 'is-over', v, label: 'estourou' };
+    if (i === curIdx) return { cls: 'is-open', v, label: 'mês em andamento' };
+    return { cls: 'is-under', v, label: v ? 'positivo' : 'no previsto' };
+  };
+  const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '') + short(Math.abs(v));
   const qm = query.get('m');
   let mobMonth = qm !== null && qm !== '' && Number(qm) >= 0 && Number(qm) <= 11 ? Number(qm) : curIdx >= 0 ? curIdx : 0;
   const rowsById = new Map(d.groups.flatMap(g => g.rows).map(r => [r.id, r]));
@@ -63,7 +74,8 @@ export async function view({ state, query, setQuery, render }) {
     const m = d.month_totals[k];
     return html`<div class="fy-mnav"><button type="button" class="icon-btn" data-mm="-1" aria-label="Mês anterior" ${k === 0 ? 'disabled' : ''}>‹</button>
         <b>${MESES[k]} ${d.year}</b><button type="button" class="icon-btn" data-mm="1" aria-label="Próximo mês" ${k === 11 ? 'disabled' : ''}>›</button></div>
-      <div class="fy-mtot"><span>Previsto <b>${money(m.planned)}</b></span><span>Real <b>${money(m.real)}</b></span><span>${m.paid} de ${m.count} pago(s)</span></div>
+      <div class="fy-mtot"><span>Previsto <b>${money(m.planned)}</b></span><span>Real <b>${money(m.real)}</b></span><span>${m.paid} de ${m.count} pago(s)</span>
+        ${(() => { const b = bal(m.planned, m.real, k); return b ? html`<span class="fy-mbal ${b.cls}">${b.label === 'mês em andamento' ? 'Em andamento · falta do previsto' : b.cls === 'is-over' ? 'Estourou' : 'Positivo'} <b>${b.cls === 'is-over' ? money(-b.v) : money(b.v)}</b></span>` : ''; })()}</div>
       ${d.groups.map(g => {
         const rows = g.rows.filter(r => r.cells[k]);
         if (!rows.length) return '';
@@ -72,8 +84,8 @@ export async function view({ state, query, setQuery, render }) {
             <span class="fy-mrow-t"><b>${r.title}</b><small>vence ${fmtDate(c.due_date)} · ${r.frequency_label}</small></span>
             <span class="fy-mrow-v"><small>previsto ${money(c.planned)}</small>${c.status === 'pago' ? html`<b class="ok">✓ ${money(c.real)}</b>` : html`<em class="fy-st">${ST[c.status]}</em>`}</span></button>`; })}</div>`;
       })}
-      ${(d.clients || []).some(c => c.months[k]) ? html`<div class="fy-mgrp fy-mcli"><h3>Gastos dos clientes por obra</h3>${d.clients.filter(c => c.months[k]).map(c => html`<div class="fy-mrow">
-          <span class="fy-mrow-t"><b>${c.client}</b>${c.obras.filter(o => o.months[k]).map(o => html`<small>${o.cost_center} · ${money(o.months[k])}</small>`)}</span>
+      ${(d.clients || []).some(c => c.months[k]) ? html`<div class="fy-mgrp fy-mcli"><h3>Gastos dos clientes por obra</h3>${d.clients.filter(c => c.months[k]).map(c => html`<div class="fy-mrow fy-click" data-cl="" data-cc="${c.cost_center}" data-m="${k}" role="button" tabindex="0">
+          <span class="fy-mrow-t"><b>${c.cost_center}</b>${c.accounts.filter(a => a.months[k]).map(a => html`<small>${a.client} · ${money(a.months[k])}</small>`)}</span>
           <span class="fy-mrow-v"><b>${money(c.months[k])}</b></span></div>`)}</div>` : ''}`;
   };
 
@@ -100,11 +112,12 @@ export async function view({ state, query, setQuery, render }) {
       ${weekCard}
       <section class="card fy-card">
         <div class="card-head"><h2>${icon('calendar')}Planejamento anual ${d.year}</h2><span class="sub">previsto × real, mês a mês</span></div>
-        <div class="fy-legend"><span><i class="fy-k is-pago"></i>Pago (real)</span><span><i class="fy-k is-atrasada"></i>Atrasada</span><span><i class="fy-k is-pendente"></i>A pagar</span><span><i class="fy-k is-aguardando"></i>Paguei (aguardando Mais Controle)</span><span><i class="fy-k is-nao_ocorreu"></i>Não ocorreu (real 0)</span><span><i class="fy-k is-projetado"></i>Previsto (projetado)</span><span><i class="fy-k is-custom"></i>Previsto ajustado no mês</span></div>
+        <div class="fy-legend"><span><i class="fy-k is-pago"></i>Pago (real)</span><span><i class="fy-k is-atrasada"></i>Atrasada</span><span><i class="fy-k is-pendente"></i>A pagar</span><span><i class="fy-k is-aguardando"></i>Paguei (aguardando Mais Controle)</span><span><i class="fy-k is-nao_ocorreu"></i>Não ocorreu (real 0)</span><span><i class="fy-k is-projetado"></i>Previsto (projetado)</span><span><i class="fy-k is-custom"></i>Previsto ajustado no mês</span><span><i class="fy-k is-over"></i>Estourou (real acima do previsto)</span><span><i class="fy-k is-under"></i>Positivo (real abaixo do previsto)</span></div>
         <div class="fy-wrap"><table class="fy">
           <thead><tr><th class="fy-name">Tarefa</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
           ${d.groups.map(g => html`<tbody>
-            <tr class="fy-grp"><th class="fy-name">${g.category}<small>${g.rows.length}</small></th>${g.months.map((m, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span>${m.planned ? short(m.planned) : ''}</span>${m.real ? html`<span class="ok">✓ ${short(m.real)}</span>` : ''}</td>`)}
+            <tr class="fy-grp"><th class="fy-name">${g.category}<small>${g.rows.length}</small></th>${g.months.map((m, i) => { const b = bal(m.planned, m.real, i);
+              return html`<td class="${i === curIdx ? 'is-cur' : ''} ${b?.cls === 'is-over' ? 'is-over' : ''}" title="${b?.cls === 'is-over' ? `estourou ${short(-b.v)}` : ''}"><span>${m.planned ? short(m.planned) : ''}</span>${m.real ? html`<span class="ok">${b?.cls === 'is-over' ? '▲' : '✓'} ${short(m.real)}</span>` : ''}</td>`; })}
               <td class="fy-tot"><span>${short(g.planned)}</span>${g.real ? html`<span class="ok">✓ ${short(g.real)}</span>` : ''}</td></tr>
             ${g.rows.map(r => html`<tr class="${r.active ? '' : 'is-inactive'}"><th class="fy-name"><a href="#/financeiro/obrigacoes/${r.id}/editar" title="Editar a tarefa">${r.title}</a><small>${r.frequency_label} · dia ${r.due_day}${r.variable ? ' · variável' : ''}</small></th>
               ${r.cells.map((c, i) => cellHtml(r, c, i, i === curIdx))}
@@ -113,6 +126,11 @@ export async function view({ state, query, setQuery, render }) {
           <tfoot>
             <tr><th class="fy-name">Previsto</th>${d.month_totals.map((m, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}">${m.planned ? short(m.planned) : '—'}</td>`)}<td class="fy-tot">${short(T.planned)}</td></tr>
             <tr class="fy-real"><th class="fy-name">Real</th>${d.month_totals.map((m, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}">${m.real ? short(m.real) : '—'}</td>`)}<td class="fy-tot">${short(T.real)}</td></tr>
+            <tr class="fy-bal"><th class="fy-name">Saldo<small>previsto − real</small></th>${d.month_totals.map((m, i) => { const b = bal(m.planned, m.real, i);
+              return html`<td class="${i === curIdx ? 'is-cur' : ''} ${b?.cls || ''}" title="${b ? b.label : ''}">${b ? html`<b>${sgn(b.v)}</b><small>${b.label}</small>` : '—'}</td>`; })}
+              ${(() => { const past = d.month_totals.filter((m, i) => isPast(i)); if (!past.length) return html`<td class="fy-tot">—</td>`;
+                const v = Math.round(past.reduce((s, m) => s + m.planned - m.real, 0));
+                return html`<td class="fy-tot ${v < 0 ? 'is-over' : 'is-under'}" title="soma dos meses fechados"><b>${sgn(v)}</b><small>meses fechados</small></td>`; })()}</tr>
           </tfoot>
         </table></div>
       </section>
@@ -120,14 +138,14 @@ export async function view({ state, query, setQuery, render }) {
       ${d.projects?.length ? html`<section class="card section fy-proj">
         <div class="card-head"><h2>${icon('projects')}Custos destinados a Projetos</h2><span class="sub">Mais Controle · centros de custo diferentes de Empresa · ${money(d.projects.reduce((s, p) => s + p.total, 0))}</span></div>
         <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Centro de custo</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
-          <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody>
+          <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-pj="${p.cost_center}" data-m="${i}" title="Ver os lançamentos"><span class="fy-dash">${short(v)}</span></td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">—</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody>
           <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.projects.reduce((s, p) => s + (p.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.projects.reduce((s, p) => s + p.total, 0))}</td></tr></tfoot></table></div>
       </section>` : ''}
       ${d.clients?.length ? html`<section class="card section fy-proj fy-cli">
         <div class="card-head"><h2>${icon('wallet')}Gastos dos clientes por obra</h2><span class="sub">Mais Controle · contas de cliente · ${money(d.clients.reduce((s, c) => s + c.total, 0))}</span></div>
-        <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Cliente / obra</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
-          ${d.clients.map(c => html`<tbody><tr class="fy-cli-h"><th class="fy-name">${c.client}</th>${c.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`)}<td class="fy-tot">${short(c.total)}</td></tr>
-            ${c.obras.map(o => html`<tr><th class="fy-name fy-sub">${o.cost_center}</th>${o.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(o.total)}</td></tr>`)}</tbody>`)}
+        <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Obra / conta</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
+          ${d.clients.map(c => html`<tbody><tr class="fy-cli-h"><th class="fy-name">${c.cost_center}</th>${c.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-cl="" data-cc="${c.cost_center}" data-m="${i}" title="Ver os lançamentos">${short(v)}</td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}">—</td>`)}<td class="fy-tot">${short(c.total)}</td></tr>
+            ${c.accounts.map(a => html`<tr><th class="fy-name fy-sub">${a.client}</th>${a.months.map((v, i) => v ? html`<td class="${i === curIdx ? 'is-cur' : ''} fy-click" data-cl="${a.key}" data-cln="${a.client}" data-cc="${c.cost_center}" data-m="${i}" title="Ver os lançamentos"><span class="fy-dash">${short(v)}</span></td>` : html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">—</span></td>`)}<td class="fy-tot">${short(a.total)}</td></tr>`)}</tbody>`)}
           <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.clients.reduce((s, c) => s + (c.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.clients.reduce((s, c) => s + c.total, 0))}</td></tr></tfoot></table></div>
       </section>` : ''}`
       : html`<section class="card"><div class="card-body muted">Nenhuma tarefa financeira em ${d.year}. Comece em “Nova tarefa financeira” ou “Importar planilha”.</div></section>`}`,
@@ -210,6 +228,27 @@ export async function view({ state, query, setQuery, render }) {
         if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
       };
       root.querySelectorAll('.fy-card, [data-fy-mob]').forEach(el => el.addEventListener('click', onCell));
+      // Custos destinados a Projetos / Gastos dos clientes por obra: lançamentos do mês
+      const onCost = async e => {
+        const t = e.target.closest('[data-pj][data-m], [data-cc][data-m]');
+        if (!t) return;
+        const ym = d.months[Number(t.dataset.m)];
+        const cli = 'cl' in t.dataset;
+        const query = cli ? { tipo: 'cliente', cc: t.dataset.cc, mes: ym, ...(t.dataset.cl ? { conta: t.dataset.cl } : {}) } : { tipo: 'projeto', cc: t.dataset.pj, mes: ym };
+        let pays;
+        try { pays = await api('/finance/maiscontrole/cost-payments', { query }); } catch (ex) { toast(ex.message, 'error'); return; }
+        const tot = pays.reduce((s, x) => s + x.amount, 0);
+        const title = cli ? `${t.dataset.cc}${t.dataset.cl ? ` · ${t.dataset.cln}` : ''}` : t.dataset.pj;
+        await sheet({
+          title: `${title} · ${ymLabel(ym)}`, submitLabel: 'Fechar',
+          body: html`<p style="margin:0 0 6px"><b>${pays.length} lançamento(s) · ${money(tot)}</b> · Mais Controle</p>
+            <p class="muted" style="margin:0 0 8px">${cli ? (t.dataset.cl ? 'Gastos pagos por esta conta de cliente na obra.' : 'Gastos pagos pelas contas de cliente nesta obra.') : 'Custos pagos pelas contas da empresa neste centro de custo.'}</p>
+            <ul class="mc-pays">${pays.map(x => html`<li><span><b>${x.supplier || '(sem fornecedor)'}</b><small>${fmtDate(x.paid_date)} · ${x.category || '(sem categoria)'}${x.description ? ` · ${x.description}` : ''}</small>
+              ${!(cli && t.dataset.cl) ? html`<small>conta ${x.account || '(sem conta)'}</small>` : ''}</span>
+              <span class="mc-pv"><b>${money(x.amount)}</b></span></li>`)}</ul>`,
+        });
+      };
+      root.querySelectorAll('.fy-proj, [data-fy-mob]').forEach(el => el.addEventListener('click', onCost));
       const wReload = () => { setQuery({ ano: d.year, m: mobMonth }); render(); };
       const wItem = id => wItems.find(i => i.id === Number(id));
       root.querySelectorAll('[data-w-mark]').forEach(b => b.addEventListener('click', async () => {

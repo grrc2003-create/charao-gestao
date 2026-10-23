@@ -2937,3 +2937,19 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 
 .mc-acc-k { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; justify-self: end; }
 .mc-acc-k small { font-size: 11.5px; }
+
+/* Saldo do mês: estourou / positivo */
+.fy tfoot .fy-bal td { font-weight: 600; line-height: 1.15; }
+.fy tfoot .fy-bal td small, .fy tfoot .fy-bal th small { display: block; font-size: 10px; font-weight: 500; opacity: .85; }
+.fy tfoot .fy-bal td.is-over, .fy td.is-over .ok, .fy-mbal.is-over, .fy-mbal.is-over b { color: #B3261E; }
+.fy tfoot .fy-bal td.is-over { background: #FDF1EF; }
+.fy tfoot .fy-bal td.is-under, .fy-mbal.is-under, .fy-mbal.is-under b { color: #1F7A4A; }
+.fy tfoot .fy-bal td.is-under { background: #EEF7F1; }
+.fy tfoot .fy-bal td.is-open { color: var(--muted); }
+.fy .fy-grp td.is-over { box-shadow: inset 0 -3px 0 #E8A39C; }
+.fy-k.is-over { background: #FDF1EF; border-color: #E8A39C; }
+.fy-k.is-under { background: #EEF7F1; border-color: #9BCBAE; }
+.fy-mbal { font-weight: 600; }
+
+.fy td.fy-click, .fy-mrow.fy-click { cursor: pointer; }
+.fy td.fy-click:hover { background: #F3F7FC; box-shadow: inset 0 0 0 1px #9DB9DA; }

@@ -694,7 +694,7 @@ function projectCosts(keys) {
   }
   return [...by.values()].map(g => ({ ...g, total: r2(g.months.reduce((s, v) => s + v, 0)) })).sort((a, b) => a.cost_center.localeCompare(b.cost_center, 'pt-BR'));
 }
-// Gastos dos clientes (contas bancárias do tipo Cliente) por obra e mês, sem detalhar os lançamentos
+// Gastos dos clientes (contas bancárias do tipo Cliente) por obra e, dentro da obra, por conta
 function clientCosts(keys) {
   let rows = [];
   try {
@@ -705,17 +705,17 @@ function clientCosts(keys) {
   } catch { return []; }
   const by = new Map();
   for (const r of rows) {
-    if (!by.has(r.acc)) by.set(r.acc, { client: r.client, obras: new Map() });
-    const c = by.get(r.acc);
-    if (!c.obras.has(r.cost_center)) c.obras.set(r.cost_center, { cost_center: r.cost_center, months: keys.map(() => 0) });
-    c.obras.get(r.cost_center).months[keys.indexOf(r.ref_month)] = r2(r.total);
+    if (!by.has(r.cost_center)) by.set(r.cost_center, { cost_center: r.cost_center, accounts: new Map() });
+    const o = by.get(r.cost_center);
+    if (!o.accounts.has(r.acc)) o.accounts.set(r.acc, { key: r.acc, client: r.client, months: keys.map(() => 0) });
+    o.accounts.get(r.acc).months[keys.indexOf(r.ref_month)] = r2(r.total);
   }
   const sum = ms => r2(ms.reduce((s, v) => s + v, 0));
-  return [...by.values()].map(c => {
-    const obras = [...c.obras.values()].map(o => ({ ...o, total: sum(o.months) })).sort((a, b) => a.cost_center.localeCompare(b.cost_center, 'pt-BR'));
-    const months = keys.map((k, i) => r2(obras.reduce((s, o) => s + o.months[i], 0)));
-    return { client: c.client, obras, months, total: sum(months) };
-  }).sort((a, b) => a.client.localeCompare(b.client, 'pt-BR'));
+  return [...by.values()].map(o => {
+    const accounts = [...o.accounts.values()].map(a => ({ ...a, total: sum(a.months) })).sort((a, b) => a.client.localeCompare(b.client, 'pt-BR'));
+    const months = keys.map((k, i) => r2(accounts.reduce((s, a) => s + a.months[i], 0)));
+    return { cost_center: o.cost_center, accounts, months, total: sum(months) };
+  }).sort((a, b) => a.cost_center.localeCompare(b.cost_center, 'pt-BR'));
 }
 export function markPaid(ctx, id, body, ip) {
   const it = loadItem(ctx, id);

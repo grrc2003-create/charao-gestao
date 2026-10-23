@@ -326,6 +326,7 @@ api.post('/api/finance/items/:id/mark', (req, res, { ctx, params, body }) => sen
 api.post('/api/finance/items/:id/unmark', (req, res, { ctx, params }) => send(res, 200, Finance.unmarkPaid(ctx, intOrNull(params.id), clientIp(req))));
 api.post('/api/finance/items/:id/justify', (req, res, { ctx, params, body }) => send(res, 200, Finance.justifyItem(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/finance/maiscontrole/sync', (req, res, { ctx, body }) => send(res, 200, MaisControle.sync(ctx, clientIp(req), { resetManualPlans: !!body?.reset_plans })));
+api.get('/api/finance/maiscontrole/cost-payments', (req, res, { ctx, query }) => send(res, 200, MaisControle.costPayments(ctx, { tipo: query.get('tipo'), cc: query.get('cc'), conta: query.get('conta'), mes: query.get('mes') })));
 api.get('/api/finance/maiscontrole/payments', (req, res, { ctx, query }) => send(res, 200, MaisControle.monthPayments(ctx, intOrNull(query.get('tarefa')), query.get('mes'))));
 api.post('/api/finance/maiscontrole/exclusions', (req, res, { ctx, body }) => send(res, 200, MaisControle.addExclusion(ctx, body, clientIp(req))));
 api.post('/api/finance/maiscontrole/exclusions/remove', (req, res, { ctx, body }) => send(res, 200, MaisControle.removeExclusion(ctx, body, clientIp(req))));

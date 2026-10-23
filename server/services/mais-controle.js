@@ -323,6 +323,28 @@ export function monthPayments(ctx, obligationId, ym) {
       excluded: excluded(ex, p), fixed_from: catOf(p) !== p.category ? p.category : null, standby: d?.decision === 'standby' && hkey(p.category) === hkey(d.category) }; });
 }
 
+// Lançamentos do mês que formam os quadros "Custos destinados a Projetos" (contas da empresa, centro de custo da obra)
+// e "Gastos dos clientes por obra" (conta do cliente; uma obra ou todas)
+export function costPayments(ctx, q) {
+  requireFinance(ctx.user);
+  const ym = String(q.mes || '');
+  if (!/^\d{4}-\d{2}$/.test(ym)) throw notFound('Mês não encontrado.');
+  const cc = q.cc ? String(q.cc) : null;
+  const base = `p.source = ? AND p.ref_month = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND COALESCE(p.cost_center, '') <> '' AND lower(p.cost_center) <> 'empresa'`;
+  let rows;
+  if (q.tipo === 'cliente') {
+    const conta = q.conta ? String(q.conta) : null;
+    if (!conta && !cc) throw notFound('Obra ou conta não informada.');
+    rows = all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND COALESCE(a.kind, a.auto_kind) = 'cliente'
+      WHERE ${base}${conta ? ' AND p.account_key = ?' : ''}${cc ? ' AND p.cost_center = ?' : ''} ORDER BY p.paid_date, p.supplier`, ...[SOURCE, ym, ...(conta ? [conta] : []), ...(cc ? [cc] : [])]);
+  } else {
+    if (!cc) throw notFound('Centro de custo não informado.');
+    rows = all(`SELECT p.* FROM ext_payments p JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key AND a.active = 1
+      WHERE ${base} AND p.cost_center = ? ORDER BY p.paid_date, p.supplier`, SOURCE, ym, cc);
+  }
+  return rows.map(p => ({ supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, category: p.category, cost_center: p.cost_center, account: p.account }));
+}
+
 // ---------- Regras por categoria: enviar para outra tarefa ou ajustar no Mais Controle ----------
 function categoryRules() {
   const m = new Map();

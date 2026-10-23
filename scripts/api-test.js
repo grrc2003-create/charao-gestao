@@ -1996,7 +1996,13 @@ async function main() {
     ok(hist && !hist.task_id, 'meses do histórico não geram tarefas "a fazer"');
     ok(gy.projects.some(p => p.cost_center === 'Obra Teste 1' && p.months[0] === 900), 'grade: Custos destinados a Projetos por centro de custo');
     ok(gy.groups.some(g => g.category === 'Gerais e Administrativas' && g.rows.some(r => r.title === 'Contabilidade MC teste')), 'grade: agrupada pelo Plano de Contas do Mais Controle (o mais frequente da categoria)');
-    ok(gy.clients?.length === 1 && gy.clients[0].client === 'Conta Cliente Teste' && gy.clients[0].obras[0].cost_center === 'Obra Teste 1' && gy.clients[0].months[0] === 1000 && gy.clients[0].total === 1000, 'grade: gastos dos clientes por obra e mês');
+    const cpj = (await fo('GET', `/finance/maiscontrole/cost-payments?tipo=projeto&cc=${encodeURIComponent('Obra Teste 1')}&mes=${y}-01`)).data;
+    ok(cpj.length === 1 && cpj[0].amount === 900 && cpj[0].supplier === 'Fornecedor Obra', 'Projetos: clicar no mês lista os lançamentos do centro de custo');
+    const ccl = (await fo('GET', `/finance/maiscontrole/cost-payments?tipo=cliente&cc=${encodeURIComponent('Obra Teste 1')}&conta=${gy.clients?.[0]?.accounts?.[0]?.key}&mes=${y}-01`)).data;
+    const cob = (await fo('GET', `/finance/maiscontrole/cost-payments?tipo=cliente&cc=${encodeURIComponent('Obra Teste 1')}&mes=${y}-01`)).data;
+    ok(ccl.length === 1 && ccl[0].amount === 1000 && cob.length === 1 && cob[0].account === 'Conta Cliente Teste', 'Clientes: clicar no mês lista os lançamentos da obra (todas as contas) ou da conta na obra');
+    ok((await biNo('GET', `/finance/maiscontrole/cost-payments?tipo=projeto&cc=x&mes=${y}-01`)).status === 403, 'lançamentos por obra: sem liberação não acessa');
+    ok(gy.clients?.length === 1 && gy.clients[0].cost_center === 'Obra Teste 1' && gy.clients[0].accounts[0].client === 'Conta Cliente Teste' && gy.clients[0].months[0] === 1000 && gy.clients[0].total === 1000, 'grade: gastos dos clientes agrupados por obra e depois por conta');
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');
     // Conferência: stand by (fora do realizado até vir corrigido), corrigir a categoria no sistema, reabrir e "Está OK"

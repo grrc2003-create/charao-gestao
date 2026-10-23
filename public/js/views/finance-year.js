@@ -36,8 +36,9 @@ export async function view({ state, query, setQuery, render }) {
   const al = wk?.alerts || { accounts: [], categories: [] };
   const weekCard = !wk ? '' : html`<section class="card section fw-card">
       <div class="card-head"><h2>${icon('alert')}Contas da semana</h2><span class="sub">até ${fmtDate(wk.week_end)}${wk.data_until ? ` · Mais Controle até ${fmtDate(wk.data_until)}` : ''}</span></div>
-      ${al.accounts.length || al.categories.length || al.reviews || al.issues ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
-        ${[...al.accounts.map(a => `custo de ${money(a.total)} na conta ${a.label} (não cadastrada: ${a.categories.map(c => c.label).join(', ')})`),
+      ${al.accounts.length || al.categories.length || al.reviews || al.issues || al.client_issues ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
+        ${[al.client_issues ? `${al.client_issues} despesa(s) do centro de custo Empresa paga(s) por conta de cliente: decida o ajuste no Mais Controle` : '',
+          ...al.accounts.map(a => `custo de ${money(a.total)} na conta ${a.label} (não classificada: ${a.categories.map(c => c.label).join(', ')})`),
           al.categories.length ? `${al.categories.length} categoria(s) sem tarefa (${money(al.categories.reduce((s, c) => s + c.total, 0))}): cadastre para trazer` : '',
           al.reviews ? `${al.reviews} despesa(s) para conferir a categoria` : '',
           al.issues ? `${al.issues} lançamento(s) para ajustar no Mais Controle (cliente ou conta fora do centro de custo Empresa)` : ''].filter(Boolean).join(' · ')}</span></a>` : ''}
@@ -70,7 +71,10 @@ export async function view({ state, query, setQuery, render }) {
           return html`<button type="button" class="fy-mrow is-${c.status}" data-o="${r.id}" data-i="${k}">
             <span class="fy-mrow-t"><b>${r.title}</b><small>vence ${fmtDate(c.due_date)} · ${r.frequency_label}</small></span>
             <span class="fy-mrow-v"><small>previsto ${money(c.planned)}</small>${c.status === 'pago' ? html`<b class="ok">✓ ${money(c.real)}</b>` : html`<em class="fy-st">${ST[c.status]}</em>`}</span></button>`; })}</div>`;
-      })}`;
+      })}
+      ${(d.clients || []).some(c => c.months[k]) ? html`<div class="fy-mgrp fy-mcli"><h3>Gastos dos clientes por obra</h3>${d.clients.filter(c => c.months[k]).map(c => html`<div class="fy-mrow">
+          <span class="fy-mrow-t"><b>${c.client}</b>${c.obras.filter(o => o.months[k]).map(o => html`<small>${o.cost_center} · ${money(o.months[k])}</small>`)}</span>
+          <span class="fy-mrow-v"><b>${money(c.months[k])}</b></span></div>`)}</div>` : ''}`;
   };
 
   return {
@@ -118,6 +122,13 @@ export async function view({ state, query, setQuery, render }) {
         <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Centro de custo</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
           <tbody>${d.projects.map(p => html`<tr><th class="fy-name">${p.cost_center}<small>${p.count} pagamento(s)</small></th>${p.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(p.total)}</td></tr>`)}</tbody>
           <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.projects.reduce((s, p) => s + (p.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.projects.reduce((s, p) => s + p.total, 0))}</td></tr></tfoot></table></div>
+      </section>` : ''}
+      ${d.clients?.length ? html`<section class="card section fy-proj fy-cli">
+        <div class="card-head"><h2>${icon('wallet')}Gastos dos clientes por obra</h2><span class="sub">Mais Controle · contas de cliente · ${money(d.clients.reduce((s, c) => s + c.total, 0))}</span></div>
+        <div class="fy-wrap"><table class="fy fy-projt"><thead><tr><th class="fy-name">Cliente / obra</th>${MES.map((m, i) => html`<th class="${i === curIdx ? 'is-cur' : ''}">${m}</th>`)}<th class="fy-tot">Ano</th></tr></thead>
+          ${d.clients.map(c => html`<tbody><tr class="fy-cli-h"><th class="fy-name">${c.client}</th>${c.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`)}<td class="fy-tot">${short(c.total)}</td></tr>
+            ${c.obras.map(o => html`<tr><th class="fy-name fy-sub">${o.cost_center}</th>${o.months.map((v, i) => html`<td class="${i === curIdx ? 'is-cur' : ''}"><span class="fy-dash">${v ? short(v) : '—'}</span></td>`)}<td class="fy-tot">${short(o.total)}</td></tr>`)}</tbody>`)}
+          <tfoot><tr><th class="fy-name">Total</th>${MES.map((m, i) => { const v = d.clients.reduce((s, c) => s + (c.months[i] || 0), 0); return html`<td class="${i === curIdx ? 'is-cur' : ''}">${v ? short(v) : '—'}</td>`; })}<td class="fy-tot">${short(d.clients.reduce((s, c) => s + c.total, 0))}</td></tr></tfoot></table></div>
       </section>` : ''}`
       : html`<section class="card"><div class="card-body muted">Nenhuma tarefa financeira em ${d.year}. Comece em “Nova tarefa financeira” ou “Importar planilha”.</div></section>`}`,
     mount(root) {

@@ -233,13 +233,15 @@ export async function autoSync() {
 }
 
 // ---------- Cadastro: contas bancárias ----------
+// Tipo: empresa (conta controlada: os custos entram), cliente (gastos do cliente por obra) ou não classificada
 export function setAccount(ctx, body) {
   requireFinance(ctx.user);
   const key = hkey(body.key ?? body.label), label = str(body.label, { max: 160, label: 'Conta' }) || '(sem conta)';
-  run(`INSERT INTO ext_accounts (source, ext_key, label, active, updated_by) VALUES (?,?,?,?,?)
-    ON CONFLICT(source, ext_key) DO UPDATE SET label = excluded.label, active = excluded.active, updated_by = excluded.updated_by, updated_at = datetime('now')`,
-    SOURCE, key, label, body.active ? 1 : 0, ctx.user.id);
-  audit(ctx.user.id, 'finance', null, body.active ? 'Conta bancária do Mais Controle cadastrada' : 'Conta bancária do Mais Controle desativada', { conta: label }, null);
+  const kind = 'kind' in body ? (['empresa', 'cliente'].includes(body.kind) ? body.kind : null) : body.active ? 'empresa' : null;
+  run(`INSERT INTO ext_accounts (source, ext_key, label, active, kind, updated_by) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(source, ext_key) DO UPDATE SET label = excluded.label, active = excluded.active, kind = excluded.kind, updated_by = excluded.updated_by, updated_at = datetime('now')`,
+    SOURCE, key, label, kind === 'empresa' ? 1 : 0, kind, ctx.user.id);
+  audit(ctx.user.id, 'finance', null, { empresa: 'Conta bancária do Mais Controle: conta da empresa', cliente: 'Conta bancária do Mais Controle: conta de cliente' }[kind] || 'Conta bancária do Mais Controle: não classificada', { conta: label }, null);
   return { ok: true };
 }
 
@@ -336,31 +338,55 @@ export function setCategoryRule(ctx, body, ip) {
 
 // ---------- Ajustar no Mais Controle: lançamentos no centro de custo Empresa que não são custo da empresa ----------
 //  - pago pelo cliente (Quem Paga = Cliente) no centro de custo Empresa;
-//  - conta bancária não cadastrada como da empresa no centro de custo Empresa.
-// Ficam fora do realizado; saem da lista quando forem ajustados lá (ou quando a conta for cadastrada).
+//  - conta bancária de cliente pagando despesa do centro de custo Empresa (verificador);
+//  - conta bancária não classificada no centro de custo Empresa.
+// Ficam fora do realizado; saem da lista quando forem ajustados lá (ou quando a conta for classificada como da empresa).
+function issueMarks() {
+  const m = new Map();
+  try { for (const r of all('SELECT k.*, u.name AS by_name FROM ext_issue_marks k LEFT JOIN users u ON u.id = k.marked_by WHERE k.source = ?', SOURCE)) m.set(r.ext_key, r); } catch { /* antes da migração */ }
+  return m;
+}
 export function issues() {
   const ex = exclusions();
-  const rows = all(`SELECT p.*, a.active AS acc_active FROM ext_payments p LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key
+  const marks = issueMarks();
+  const rows = all(`SELECT p.*, a.active AS acc_active, a.kind AS acc_kind FROM ext_payments p LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key
     WHERE p.source = ? AND p.paid_date IS NOT NULL AND p.amount > 0 AND (p.cost_center IS NULL OR lower(p.cost_center) = 'empresa') ORDER BY p.paid_date DESC`, SOURCE);
   const out = [];
   for (const p of rows) {
     if (excluded(ex, p)) continue;
-    const kind = hkey(p.payer) === 'cliente' ? 'cliente' : !p.acc_active ? 'conta' : null;
+    const kind = p.acc_kind === 'cliente' ? 'conta_cliente' : hkey(p.payer) === 'cliente' ? 'cliente' : !p.acc_active ? 'conta' : null;
     if (!kind) continue;
-    out.push({ key: p.ext_key, kind, supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, due_date: p.due_date, category: p.category, account: p.account || '(sem conta)', payer: p.payer });
+    const mk = marks.get(p.ext_key);
+    out.push({ key: p.ext_key, kind, supplier: p.supplier, description: p.description, amount: p.amount, paid_date: p.paid_date, due_date: p.due_date, category: p.category, account: p.account || '(sem conta)', payer: p.payer,
+      marked_at: mk?.marked_at || null, marked_by: mk?.by_name || null });
   }
   return out;
+}
+// Decisão do operador no verificador: "vou ajustar no Mais Controle" (fica registrado até o lançamento sair da lista) ou desfazer
+export function markIssue(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const p = one('SELECT * FROM ext_payments WHERE source = ? AND ext_key = ?', SOURCE, String(body.key || ''));
+  if (!p) throw notFound('Lançamento não encontrado na última atualização do Mais Controle.');
+  const label = `${p.supplier || '(sem fornecedor)'} · ${brl(p.amount)} · conta ${p.account || '(sem conta)'}`;
+  if (body.action === 'reabrir') {
+    run('DELETE FROM ext_issue_marks WHERE source = ? AND ext_key = ?', SOURCE, p.ext_key);
+    audit(ctx.user.id, 'finance', null, 'Mais Controle: aviso de ajuste desfeito', { lancamento: label }, ip);
+  } else {
+    run(`INSERT OR REPLACE INTO ext_issue_marks (source, ext_key, marked_by) VALUES (?,?,?)`, SOURCE, p.ext_key, ctx.user.id);
+    audit(ctx.user.id, 'finance', null, 'Mais Controle: lançamento para ajustar no Mais Controle', { lancamento: label, centro_de_custo: p.cost_center || 'Empresa' }, ip);
+  }
+  return { ok: true };
 }
 
 // ---------- Alocação: a partir da foto atual ----------
 // Empresa + conta cadastrada → tarefa de mesmo nome da categoria (realizado por tarefa e mês do vencimento)
 function allocation() {
-  const rows = all(`SELECT p.*, a.active AS acc_active, a.label AS acc_label FROM ext_payments p
+  const rows = all(`SELECT p.*, a.active AS acc_active, a.kind AS acc_kind, a.label AS acc_label FROM ext_payments p
     LEFT JOIN ext_accounts a ON a.source = p.source AND a.ext_key = p.account_key WHERE p.source = ?`, SOURCE);
   const obs = all('SELECT * FROM finance_obligations ORDER BY active DESC, id');
   const byName = new Map();
   for (const o of obs) if (!byName.has(hkey(o.title))) byName.set(hkey(o.title), o);
-  const real = new Map(), noTask = new Map(), otherAcc = new Map(), projects = new Map(), accounts = new Map();
+  const real = new Map(), noTask = new Map(), otherAcc = new Map(), projects = new Map(), accounts = new Map(), clients = new Map();
   const ex = exclusions();
   const fixes = decisions();
   const rules = categoryRules();
@@ -369,10 +395,18 @@ function allocation() {
   for (const p of rows) {
     if (!p.paid_date || !(p.amount > 0)) { unpaid++; continue; }
     if (excluded(ex, p)) { excludedN++; excludedTotal = r2(excludedTotal + p.amount); continue; }
-    if (hkey(p.payer) === 'cliente' && isEmpresa(p.cost_center)) continue; // ajustar no Mais Controle (lista de ajustes)
+    if (p.acc_kind !== 'cliente' && hkey(p.payer) === 'cliente' && isEmpresa(p.cost_center)) continue; // ajustar no Mais Controle (lista de ajustes)
     const ak = p.account_key || '';
-    if (!accounts.has(ak)) accounts.set(ak, { key: ak, label: p.account || '(sem conta)', active: !!p.acc_active, count: 0, total: 0, categories: new Map() });
+    if (!accounts.has(ak)) accounts.set(ak, { key: ak, label: p.account || '(sem conta)', active: !!p.acc_active, kind: p.acc_kind || null, count: 0, total: 0, categories: new Map() });
     const acc = accounts.get(ak); acc.count++; acc.total = r2(acc.total + p.amount);
+    // Conta de cliente: gastos do cliente por obra; no centro de custo Empresa vai para o verificador
+    if (p.acc_kind === 'cliente') {
+      if (isEmpresa(p.cost_center)) continue;
+      const k = `${ak}|${p.cost_center}|${p.ref_month}`;
+      if (!clients.has(k)) clients.set(k, { client: acc.label, cost_center: p.cost_center, ym: p.ref_month, amount: 0, count: 0 });
+      const g = clients.get(k); g.amount = r2(g.amount + p.amount); g.count++;
+      continue;
+    }
     if (!p.acc_active) { acc.categories.set(p.category || '(sem categoria)', r2((acc.categories.get(p.category || '(sem categoria)') || 0) + p.amount)); continue; }
     if (!isEmpresa(p.cost_center)) {
       const k = `${p.cost_center}|${p.ref_month}`;
@@ -407,8 +441,14 @@ function allocation() {
     if (!g.paid_date || p.paid_date > g.paid_date) g.paid_date = p.paid_date;
   }
   for (const a of accounts.values()) a.categories = [...a.categories].map(([label, total]) => ({ label, total })).sort((x, y) => y.total - x.total);
-  for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, count: 0, total: 0, categories: [] });
-  return { real, noTask, projects, accounts, firstYear, unpaid, obs, excludedN, excludedTotal, standbyN, standbyTotal, adjust, rules };
+  for (const a of all('SELECT * FROM ext_accounts WHERE source = ?', SOURCE)) if (!accounts.has(a.ext_key)) accounts.set(a.ext_key, { key: a.ext_key, label: a.label, active: !!a.active, kind: a.kind || null, count: 0, total: 0, categories: [] });
+  // Todas as contas bancárias que aparecem no Mais Controle (inclusive só com lançamentos em aberto ou fora do realizado)
+  for (const a of all(`SELECT p.account_key, MAX(p.account) AS account, x.active, x.kind FROM ext_payments p LEFT JOIN ext_accounts x ON x.source = p.source AND x.ext_key = p.account_key
+    WHERE p.source = ? GROUP BY p.account_key`, SOURCE)) {
+    const k = a.account_key || '';
+    if (!accounts.has(k)) accounts.set(k, { key: k, label: a.account || '(sem conta)', active: !!a.active, kind: a.kind || null, count: 0, total: 0, categories: [] });
+  }
+  return { real, noTask, projects, clients, accounts, firstYear, unpaid, obs, excludedN, excludedTotal, standbyN, standbyTotal, adjust, rules };
 }
 
 // O que a sincronização muda nas parcelas (novo / alterado / removido / pago à mão)
@@ -510,13 +550,16 @@ export function preview(ctx) {
   const ch = changes(al);
   const projList = [...al.projects.values()].sort((a, b) => a.cost_center.localeCompare(b.cost_center, 'pt-BR') || a.ym.localeCompare(b.ym));
   const noTask = [...al.noTask.values()].sort((a, b) => b.total - a.total);
-  const accounts = [...al.accounts.values()].sort((a, b) => Number(b.active) - Number(a.active) || b.total - a.total);
-  const otherAcc = accounts.filter(a => !a.active && a.count);
+  const ord = { empresa: 0, cliente: 1 };
+  const accounts = [...al.accounts.values()].sort((a, b) => (ord[a.kind] ?? 2) - (ord[b.kind] ?? 2) || b.total - a.total || a.label.localeCompare(b.label, 'pt-BR'));
+  const otherAcc = accounts.filter(a => !a.kind && a.count);
+  const cliList = [...al.clients.values()].sort((a, b) => a.client.localeCompare(b.client, 'pt-BR') || a.cost_center.localeCompare(b.cost_center, 'pt-BR') || a.ym.localeCompare(b.ym));
   const cnt = k => ch.filter(c => c.kind === k).length;
   return {
     fetch: f ? { id: f.id, origin: f.origin, file_name: f.file_name, fetched_at: f.fetched_at, rows: f.row_count, data_until: f.data_until } : null,
     first_year: al.firstYear, accounts, categories: noTask, changes: ch, projects: projList.slice(-24), reviews: reviews(), exclusions: listExclusions(ctx),
     issues: issues(),
+    clients: cliList.slice(-48),
     category_rules: [...al.rules.values()].map(r => ({ label: r.label, action: r.action, target: r.target || null, created_at: r.created_at, pending: al.adjust.get(r.cat_key) || null }))
       .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
     tasks: al.obs.filter(o => o.active).map(o => ({ id: o.id, title: o.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR')),
@@ -526,6 +569,7 @@ export function preview(ctx) {
       unmapped: noTask.reduce((s, c) => s + c.count, 0), unmapped_total: r2(noTask.reduce((s, c) => s + c.total, 0)),
       other_account: otherAcc.reduce((s, a) => s + a.count, 0), other_account_total: r2(otherAcc.reduce((s, a) => s + a.total, 0)),
       projects: projList.reduce((s, g) => s + g.count, 0), projects_total: r2(projList.reduce((s, g) => s + g.amount, 0)), unpaid: al.unpaid,
+      clients: cliList.reduce((s, g) => s + g.count, 0), clients_total: r2(cliList.reduce((s, g) => s + g.amount, 0)),
       excluded: al.excludedN, excluded_total: al.excludedTotal, standby: al.standbyN, standby_total: al.standbyTotal,
       adjust: [...al.adjust.values()].reduce((s, a) => s + a.count, 0), adjust_total: r2([...al.adjust.values()].reduce((s, a) => s + a.total, 0)),
     },
@@ -639,10 +683,11 @@ export function financeWeek(ctx) {
   try {
     const pv = preview(ctx);
     alerts = {
-      accounts: pv.accounts.filter(a => !a.active && a.count).map(a => ({ label: a.label, count: a.count, total: a.total, categories: a.categories.slice(0, 4) })),
+      accounts: pv.accounts.filter(a => !a.kind && a.count).map(a => ({ label: a.label, count: a.count, total: a.total, categories: a.categories.slice(0, 4) })),
       categories: pv.categories.map(c => ({ label: c.label, count: c.count, total: c.total })),
       reviews: pv.reviews.length,
-      issues: pv.issues.length,
+      issues: pv.issues.filter(i => i.kind !== 'conta_cliente').length,
+      client_issues: pv.issues.filter(i => i.kind === 'conta_cliente' && !i.marked_at).length,
     };
   } catch { /* sem dados ainda */ }
   return { today: ref, week_end: end, data_until: cov?.data_until || null, items, alerts };

@@ -71,21 +71,39 @@ export async function view({ state, render }) {
         </div>
       </section>
       ${pv.accounts.length ? html`<section class="card section">
-        <div class="card-head"><h2>${icon('wallet')}Contas bancárias</h2><span class="sub">${pv.accounts.filter(a => a.active).length} cadastrada(s)${t.other_account ? ` · ${t.other_account} custo(s) em conta não cadastrada (${money(t.other_account_total)})` : ''}</span></div>
-        <div class="card-body"><p class="muted" style="margin:0">Só entram os custos das contas marcadas. Custo em outra conta aparece como alerta: para trazê-lo, cadastre a conta.</p></div>
-        <ul class="mc-cats">${pv.accounts.map(a => html`<li class="${!a.active && a.count ? 'is-pending' : ''}">
-          <span class="mc-cat"><b>${a.label}</b><small>${a.count ? `${a.count} pagamento(s) · ${money(a.total)}` : 'sem pagamentos'}${!a.active && a.categories?.length ? ` · ${a.categories.slice(0, 5).map(c => `${c.label} ${money(c.total)}`).join(' · ')}` : ''}</small></span>
-          <label class="switch mc-acc"><input type="checkbox" data-mc-acc="${a.label}" data-mc-acc-key="${a.key}" ${a.active ? 'checked' : ''}>${a.active ? 'Cadastrada: traz os custos' : 'Não cadastrada'}</label></li>`)}</ul>
+        <div class="card-head"><h2>${icon('wallet')}Contas bancárias</h2><span class="sub">${pv.accounts.length} no Mais Controle · ${pv.accounts.filter(a => a.kind === 'empresa').length} da empresa · ${pv.accounts.filter(a => a.kind === 'cliente').length} de cliente${t.other_account ? ` · ${t.other_account} custo(s) em conta não classificada (${money(t.other_account_total)})` : ''}</span></div>
+        <div class="card-body"><p class="muted" style="margin:0"><b>Empresa</b>: conta controlada, os custos do centro de custo Empresa entram nas tarefas financeiras. <b>Cliente</b>: o que o cliente gastou em cada obra por mês (quadro “Gastos dos clientes por obra” no planejamento anual); conta de cliente pagando despesa do centro de custo Empresa vai para o verificador. Conta não classificada fica de fora e aparece como alerta.</p></div>
+        <ul class="mc-cats">${pv.accounts.map(a => html`<li class="${!a.kind && a.count ? 'is-pending' : ''}">
+          <span class="mc-cat"><b>${a.label}</b><small>${a.count ? `${a.count} pagamento(s) · ${money(a.total)}` : 'sem pagamentos no realizado'}${!a.kind && a.categories?.length ? ` · ${a.categories.slice(0, 5).map(c => `${c.label} ${money(c.total)}`).join(' · ')}` : ''}</small></span>
+          <select class="mc-acc-kind" data-mc-kind="${a.label}" data-mc-acc-key="${a.key}" aria-label="Tipo da conta ${a.label}">
+            <option value="" ${!a.kind ? 'selected' : ''}>Não classificada</option>
+            <option value="empresa" ${a.kind === 'empresa' ? 'selected' : ''}>Empresa (controlada)</option>
+            <option value="cliente" ${a.kind === 'cliente' ? 'selected' : ''}>Cliente</option></select></li>`)}</ul>
       </section>` : ''}
-      ${pv.issues?.length ? (() => {
-        const cli = pv.issues.filter(i => i.kind === 'cliente'), acc = pv.issues.filter(i => i.kind === 'conta');
+      ${pv.issues?.some(i => i.kind === 'conta_cliente') ? (() => {
+        const ver = pv.issues.filter(i => i.kind === 'conta_cliente').sort((a, b) => Number(!!a.marked_at) - Number(!!b.marked_at));
+        const open = ver.filter(i => !i.marked_at);
+        return html`<section class="card section mc-issues mc-ver">
+          <div class="card-head"><h2>${icon('alert')}Verificador: conta de cliente pagando despesa da empresa</h2><span class="sub">${ver.length} lançamento(s) · ${money(ver.reduce((s, i) => s + i.amount, 0))} fora do realizado${open.length < ver.length ? ` · ${ver.length - open.length} já em ajuste` : ''}</span></div>
+          <div class="card-body"><p class="muted" style="margin:0">Conta de cliente não deve pagar despesa do centro de custo Empresa. Decida o que fazer com cada lançamento: <b>Ajustar no Mais Controle</b> (trocar a conta ou o centro de custo lá; fica registrado e sai daqui quando vier corrigido) ou <b>Não trazer</b> (ignorar o lançamento). Enquanto isso, fica fora do realizado.</p></div>
+          <ul class="mc-cats mc-rev">${ver.map(i => html`<li class="${i.marked_at ? '' : 'is-late'}"><span class="mc-cat"><b>${i.supplier || '(sem fornecedor)'} · ${money(i.amount)}</b>
+            <small>${dmy(i.paid_date)} · conta <b>${i.account}</b> · ${i.category || '(sem categoria)'}${i.description ? ` · ${i.description}` : ''}</small>
+            ${i.marked_at ? html`<small class="mc-note">ajustar no Mais Controle · avisado em ${when(i.marked_at)}${i.marked_by ? ` por ${i.marked_by}` : ''}: aguardando a correção</small>` : ''}</span>
+            <span class="mc-rev-acts">${i.marked_at ? html`<button type="button" class="btn btn-ghost btn-sm" data-iss="reabrir" data-key="${i.key}">Desfazer</button>`
+              : html`<button type="button" class="btn btn-ghost btn-sm mc-wrong" data-iss="ajustar" data-key="${i.key}">Ajustar no Mais Controle</button>`}
+              <button type="button" class="btn btn-ghost btn-sm" data-iss-ex="${i.key}">Não trazer</button></span></li>`)}</ul>
+        </section>`;
+      })() : ''}
+      ${pv.issues?.some(i => i.kind !== 'conta_cliente') ? (() => {
+        const iss = pv.issues.filter(i => i.kind !== 'conta_cliente');
+        const cli = iss.filter(i => i.kind === 'cliente'), acc = iss.filter(i => i.kind === 'conta');
         const byAcc = [...new Set(acc.map(i => i.account))].map(a => ({ account: a, items: acc.filter(i => i.account === a) }));
         const item = i => html`<li><span class="mc-cat"><b>${i.supplier || '(sem fornecedor)'} · ${money(i.amount)}</b><small>${dmy(i.paid_date)} · ${i.category || '(sem categoria)'}${i.description ? ` · ${i.description}` : ''}${i.kind === 'cliente' ? ` · conta ${i.account}` : ''}</small></span></li>`;
         return html`<section class="card section mc-issues">
-          <div class="card-head"><h2>${icon('alert')}Ajustar no Mais Controle</h2><span class="sub">centro de custo Empresa · ${pv.issues.length} lançamento(s) fora do realizado · ${money(pv.issues.reduce((s, i) => s + i.amount, 0))}</span></div>
-          <div class="card-body"><p class="muted" style="margin:0">Só entra o que é custo da empresa (centro de custo Empresa, pago pela empresa, em conta bancária cadastrada). Estes lançamentos estão no centro de custo Empresa mas não seguem a regra: ajuste no Mais Controle (ou cadastre a conta, se ela for da empresa). Ao ajustar, saem desta lista na próxima atualização.</p></div>
+          <div class="card-head"><h2>${icon('alert')}Ajustar no Mais Controle</h2><span class="sub">centro de custo Empresa · ${iss.length} lançamento(s) fora do realizado · ${money(iss.reduce((s, i) => s + i.amount, 0))}</span></div>
+          <div class="card-body"><p class="muted" style="margin:0">Só entra o que é custo da empresa (centro de custo Empresa, pago pela empresa, em conta bancária da empresa). Estes lançamentos estão no centro de custo Empresa mas não seguem a regra: ajuste no Mais Controle (ou classifique a conta, se ela for da empresa). Ao ajustar, saem desta lista na próxima atualização.</p></div>
           ${cli.length ? html`<details open class="mc-iss"><summary><b>Pago pelo cliente no centro de custo Empresa</b> · ${cli.length} · ${money(cli.reduce((s, i) => s + i.amount, 0))}</summary><ul class="mc-cats">${cli.map(item)}</ul></details>` : ''}
-          ${byAcc.map(g => html`<details class="mc-iss"><summary><b>Conta não cadastrada: ${g.account}</b> · ${g.items.length} · ${money(g.items.reduce((s, i) => s + i.amount, 0))}</summary><ul class="mc-cats">${g.items.map(item)}</ul></details>`)}
+          ${byAcc.map(g => html`<details class="mc-iss"><summary><b>Conta não classificada: ${g.account}</b> · ${g.items.length} · ${money(g.items.reduce((s, i) => s + i.amount, 0))}</summary><ul class="mc-cats">${g.items.map(item)}</ul></details>`)}
         </section>`;
       })() : ''}
       ${pv.categories.length ? html`<section class="card section">
@@ -154,10 +172,20 @@ export async function view({ state, render }) {
         try { const r = await api('/finance/maiscontrole/upload', { method: 'POST', body: { file: { name: f.name, data: await readB64(f) } } }); toast(`${r.rows} pagamento(s) lido(s) de ${f.name}. Confira e sincronize.`); render(); }
         catch (ex) { toast(ex.message, 'error'); }
       });
-      root.querySelectorAll('[data-mc-acc]').forEach(c => c.addEventListener('change', async () => {
-        try { await api('/finance/maiscontrole/account', { method: 'PUT', body: { key: c.dataset.mcAccKey, label: c.dataset.mcAcc, active: c.checked } }); render(); }
-        catch (ex) { toast(ex.message, 'error'); c.checked = !c.checked; }
+      root.querySelectorAll('[data-mc-kind]').forEach(c => c.addEventListener('change', async () => {
+        c.disabled = true;
+        try { await api('/finance/maiscontrole/account', { method: 'PUT', body: { key: c.dataset.mcAccKey, label: c.dataset.mcKind, kind: c.value } }); toast(`Conta ${c.dataset.mcKind}: ${{ empresa: 'da empresa', cliente: 'de cliente' }[c.value] || 'não classificada'}.`); render(); }
+        catch (ex) { toast(ex.message, 'error'); c.disabled = false; }
       }));
+      root.querySelectorAll('[data-iss]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        await api('/finance/maiscontrole/issue', { method: 'POST', body: { key: b.dataset.key, action: b.dataset.iss } });
+        toast(b.dataset.iss === 'ajustar' ? 'Registrado: ajustar no Mais Controle.' : 'Aviso desfeito.'); render();
+      })));
+      root.querySelectorAll('[data-iss-ex]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
+        if (!(await confirmSheet('Não trazer', 'Este lançamento não vai entrar nem aparecer no verificador. Dá para voltar em “Custos que não entram”.', 'Não trazer'))) { b.disabled = false; return; }
+        await api('/finance/maiscontrole/exclusions', { method: 'POST', body: { kind: 'pagamento', key: b.dataset.issEx } });
+        toast('Lançamento não entra mais.'); render();
+      })));
       root.querySelectorAll('[data-ign]').forEach(b => b.addEventListener('click', () => busy(b, async () => {
         if (!(await confirmSheet('Ignorar categoria', `Os pagamentos da categoria “${b.dataset.ign}” não vão entrar nas tarefas financeiras nem aparecer como alerta. Dá para voltar em “Custos que não entram”.`, 'Ignorar'))) { b.disabled = false; return; }
         await api('/finance/maiscontrole/exclusions', { method: 'POST', body: { kind: 'categoria', label: b.dataset.ign } });

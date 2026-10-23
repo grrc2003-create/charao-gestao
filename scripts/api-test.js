@@ -32,7 +32,9 @@ const MC_CSV = [MC_HEAD,
   mcRow(116, `${mcY}-${mcM}-01`, `${mcY}-${mcM}-01`, '120.00', '0.00', 'Fornecedor Teste A', 'Serviço avulso teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(117, `${mcY}-01-12`, `${mcY}-01-12`, '100.00', '0.00', 'Fornecedor Manual', 'Manual teste', 'Manual MC teste', 'Conta Teste PJ', 'Empresa'),
   mcRow(118, `${mcY}-${mcM}-02`, `${mcY}-${mcM}-02`, '40.00', '0.00', 'Fornecedor Novo Teste', 'Primeira compra teste', 'Outra categoria MC teste', 'Conta Teste PJ', 'Empresa'),
-  mcRow(119, `${mcY}-01-22`, `${mcY}-01-22`, '555.00', '0.00', 'Fornecedor Cliente', 'Pago pelo cliente teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa', 'Cliente')].join('\r\n');
+  mcRow(119, `${mcY}-01-22`, `${mcY}-01-22`, '555.00', '0.00', 'Fornecedor Cliente', 'Pago pelo cliente teste', 'Contabilidade MC teste', 'Conta Teste PJ', 'Empresa', 'Cliente'),
+  mcRow(120, `${mcY}-01-23`, `${mcY}-01-23`, '1000.00', '0.00', 'Fornecedor Obra', 'Material pago pelo cliente teste', 'Materiais', 'Conta Cliente Teste', 'Obra Teste 1', 'Cliente'),
+  mcRow(121, `${mcY}-01-24`, `${mcY}-01-24`, '200.00', '0.00', 'Loja Teste', 'Despesa da empresa na conta do cliente', 'Materiais de Copa', 'Conta Cliente Teste', 'Empresa', 'Cliente')].join('\r\n');
 let mcHits = 0;
 const mcServer = http.createServer((req, res) => {
   mcHits++;
@@ -1944,18 +1946,28 @@ async function main() {
     ok(st.configured === true && st.plan === 'semanal' && !st.next_allowed, 'Mais Controle: configurado pelas variáveis do servidor');
     ok((await biNo('GET', '/finance/maiscontrole')).status === 403, 'Mais Controle: sem liberação não acessa');
     const f1 = await fo('POST', '/finance/maiscontrole/fetch', {});
-    ok(f1.status === 200 && f1.data.rows === 11 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
+    ok(f1.status === 200 && f1.data.rows === 13 && mcHits === 1, 'busca na API: lê o CSV no formato da API (data_vencimento, valor_pago, id_lancamento; BOM, ; e aspas) com a credencial do servidor');
     ok((await fo('POST', '/finance/maiscontrole/reprocess', {})).status === 404 && !(await fo('GET', '/finance/maiscontrole')).data.pending, 'resposta da API lida: nada pendente para reprocessar');
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
-    ok(pv.totals.other_account === 9 && pv.totals.novo === 0 && pv.accounts.length === 2 && pv.issues.length === 9, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
+    ok(pv.totals.other_account === 10 && pv.totals.novo === 0 && pv.accounts.length === 3 && pv.issues.length === 10, 'sem conta bancária cadastrada: nada entra, tudo vira alerta');
     await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Teste PJ', label: 'Conta Teste PJ', active: true });
+    await fo('PUT', '/finance/maiscontrole/account', { key: 'Conta Cliente Teste', label: 'Conta Cliente Teste', kind: 'cliente' });
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(pv.accounts.find(a => a.label === 'Conta Teste PJ')?.kind === 'empresa' && pv.accounts.find(a => a.label === 'Conta Cliente Teste')?.kind === 'cliente', 'contas bancárias: todas do Mais Controle, tipo Empresa ou Cliente');
+    ok(pv.clients.length === 1 && pv.clients[0].client === 'Conta Cliente Teste' && pv.clients[0].cost_center === 'Obra Teste 1' && pv.clients[0].amount === 1000, 'conta de cliente: gasto do cliente por obra (fora dos Projetos e do realizado)');
+    const ver = pv.issues.find(i => i.kind === 'conta_cliente');
+    ok(ver && ver.amount === 200 && !ver.marked_at, 'verificador: conta de cliente pagando despesa do centro de custo Empresa');
+    ok((await fo('GET', '/finance/week')).data.alerts.client_issues === 1, 'verificador: aparece no alerta das contas da semana');
+    await fo('POST', '/finance/maiscontrole/issue', { key: ver.key, action: 'ajustar' });
+    pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
+    ok(pv.issues.find(i => i.key === ver.key)?.marked_at && (await fo('GET', '/finance/week')).data.alerts.client_issues === 0, 'verificador: decisão "ajustar no Mais Controle" registrada');
+    await fo('POST', '/finance/maiscontrole/issue', { key: ver.key, action: 'reabrir' });
     const cartao = pv.accounts.find(a => a.label === 'Cartão Teste');
     ok(pv.totals.other_account === 1 && cartao && !cartao.active && cartao.total === 70 && cartao.categories[0].label === 'Materiais de Copa', 'conta não cadastrada: alerta com o custo e a categoria');
     ok(pv.totals.projects === 1 && pv.projects[0].cost_center === 'Obra Teste 1', 'outro centro de custo: vai para Custos destinados a Projetos');
-    ok(pv.issues.length === 2 && pv.issues.some(i => i.kind === 'cliente' && i.amount === 555) && pv.issues.some(i => i.kind === 'conta' && i.account === 'Cartão Teste'), 'ajustar no Mais Controle: pago pelo cliente e conta não cadastrada no centro de custo Empresa');
+    ok(pv.issues.length === 3 && pv.issues.some(i => i.kind === 'cliente' && i.amount === 555) && pv.issues.some(i => i.kind === 'conta' && i.account === 'Cartão Teste'), 'ajustar no Mais Controle: pago pelo cliente e conta não cadastrada no centro de custo Empresa');
     ok(pv.categories.length === 1 && pv.categories[0].label === 'Tarifa MC teste' && pv.totals.unpaid === 1, 'a tarefa é a categoria (mesmo nome); categoria sem tarefa vira alerta; linha sem pagamento fora');
     ok(pv.first_year === Number(yp) && pv.changes.filter(c => c.kind === 'novo' && c.title === 'Contabilidade MC teste').length === 3 && pv.changes.some(c => c.kind === 'novo' && c.title === 'Manual MC teste'), 'prévia: meses novos do histórico (ano anterior e atual)');
     const rv = pv.reviews.find(r => r.category === 'Outra categoria MC teste');
@@ -1978,6 +1990,7 @@ async function main() {
     const hist = (await fo('GET', `/finance/obligations/${cont}`)).data.items.find(i => i.ref_month === `${yp}-01`);
     ok(hist && !hist.task_id, 'meses do histórico não geram tarefas "a fazer"');
     ok(gy.projects.some(p => p.cost_center === 'Obra Teste 1' && p.months[0] === 900), 'grade: Custos destinados a Projetos por centro de custo');
+    ok(gy.clients?.length === 1 && gy.clients[0].client === 'Conta Cliente Teste' && gy.clients[0].obras[0].cost_center === 'Obra Teste 1' && gy.clients[0].months[0] === 1000 && gy.clients[0].total === 1000, 'grade: gastos dos clientes por obra e mês');
     pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     ok(pv.totals.novo === 0 && pv.totals.alterado === 0 && pv.totals.removido === 0, 'sincronizar de novo não muda nada (idempotente)');
     // Conferência: stand by (fora do realizado até vir corrigido), corrigir a categoria no sistema, reabrir e "Está OK"

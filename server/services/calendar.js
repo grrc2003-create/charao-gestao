@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 // Calendário de trabalho de cada obra: fins de semana (Configurações), feriados nacionais (calculados), estaduais e
 // municipais (base aberta "feriados-brasil" no GitHub, buscada na internet pelo código IBGE da cidade), dias não
 // trabalhados da empresa (Configurações) e ajustes manuais por obra. Dias úteis = dias fora desse calendário.
@@ -94,8 +95,19 @@ async function getJSON(url) {
   return data;
 }
 
+// Lista oficial de municípios do IBGE guardada no sistema (server/reference/municipios-ibge.json): a API do IBGE costuma
+// recusar acessos de servidores fora do Brasil. Só consulta a internet se a lista local não tiver o estado.
+let LOCAL_MUN = null;
+const localMunicipios = uf => {
+  if (!LOCAL_MUN) {
+    try { LOCAL_MUN = JSON.parse(readFileSync(new URL('../reference/municipios-ibge.json', import.meta.url), 'utf8')); } catch { LOCAL_MUN = {}; }
+  }
+  return LOCAL_MUN[uf]?.length ? LOCAL_MUN[uf].map(([id, nome]) => ({ id, nome })) : null;
+};
 export async function municipios(uf) {
   if (!UFS.includes(uf)) throw badRequest('Estado inválido.');
+  const local = localMunicipios(uf);
+  if (local) return local;
   try {
     const list = await getJSON(`${IBGE_UF}/${uf}/municipios`);
     return list.map(m => ({ id: m.id, nome: m.nome })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));

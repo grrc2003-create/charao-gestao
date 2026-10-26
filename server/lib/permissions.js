@@ -64,11 +64,16 @@ export function accessContext(user) {
   return { user, projects: accessibleProjectIds(user), team: teamIds(user.id), checklist, hidden: hiddenProjectIds(user) };
 }
 
+// Responsável do projeto: acompanha e confere as tarefas dos colaboradores no projeto (além do líder de cada pessoa)
+const leadOf = t => (t.project_lead_id !== undefined ? t.project_lead_id : one('SELECT lead_id FROM projects WHERE id = ?', t.project_id)?.lead_id);
+export const isProjectLead = (ctx, t) => !!ctx.user?.id && leadOf(t) === ctx.user.id;
+
 export function canSeeTask(ctx, t) {
   const { user } = ctx;
   // Tarefas da área restrita (Contratos): somente liberados, inclusive administradores
   if ((ctx.hidden || hiddenProjectIds(user)).has(t.project_id)) return false;
   if (isAdmin(user)) return true;
+  if (isProjectLead(ctx, t)) return true;
   if (t.assignee_id === user.id || t.creator_id === user.id) return true;
   if (t.assignee_id && ctx.team.has(t.assignee_id)) return true; // gestor acompanha a equipe
   if (ctx.checklist?.has(t.id)) return true; // responsável por itens do check-list
@@ -96,6 +101,8 @@ export const isLeaderOfNoLogin = (ctx, t) => !!t.assignee_external && !t.assigne
 // Coordenador confere as tarefas da equipe e também as próprias.
 export function canReviewTask(ctx, t) {
   if (isLeaderOfNoLogin(ctx, t)) return true;
+  // Responsável do projeto confere as entregas dos colaboradores no projeto (não a própria)
+  if (isProjectLead(ctx, t) && t.assignee_id !== ctx.user.id) return true;
   if (!canManageTask(ctx, t)) return false;
   return isAdmin(ctx.user) || ctx.user.role === 'coordenador' || t.assignee_id !== ctx.user.id;
 }

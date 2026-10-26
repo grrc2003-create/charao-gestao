@@ -154,6 +154,19 @@ async function main() {
   t = (await ricardo('POST', `/tasks/${tid}/actions/approve`, { comment: 'Ok' })).data;
   ok(t.status === 'concluida' && t.on_time === true, 'gestor aprova; entrega no prazo');
   const actions = t.history.map(h => h.action);
+  // Responsável do projeto também confere as entregas dos colaboradores no projeto (além do líder da pessoa)
+  {
+    const camId = (await ana('GET', '/users/directory')).data.find(u => u.name.startsWith('Camila')).id;
+    await ana('PUT', '/projects/1', { lead_id: camId });
+    const lt = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Conferência pelo responsável do projeto', description: 'Teste', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', due_date: '2099-06-30' })).data.id;
+    await marcos('POST', `/tasks/${lt}/actions/submit`, SD);
+    const lv = await camila('GET', `/tasks/${lt}`);
+    ok(lv.status === 200 && lv.data.can.review === true && lv.data.project_lead_name?.startsWith('Camila'), 'responsável do projeto vê e pode conferir a entrega do colaborador');
+    ok((await ricardo('GET', `/tasks/${lt}`)).data.can.review === true, 'o líder da pessoa continua conferindo');
+    ok((await camila('POST', `/tasks/${lt}/actions/approve`, { comment: 'Conferido pelo responsável do projeto' })).data.status === 'concluida', 'responsável do projeto aprova a entrega');
+    await ana('PUT', '/projects/1', { lead_id: 2 });
+    ok((await camila('GET', `/tasks/${lt}`)).status === 404, 'deixando de ser responsável do projeto, deixa de conferir');
+  }
   ok(['Tarefa criada', 'Enviada para conferência', 'Devolvida para ajustes', 'Conferência aprovada — tarefa concluída'].every(a => actions.includes(a)), 'histórico registra criação, envio, devolução e conclusão');
   ok(t.history.every(h => h.user_name && h.created_at), 'histórico registra usuário, data e hora');
   const fileId = t.files[0].id;

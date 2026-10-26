@@ -21,6 +21,7 @@ const PROOF_LABEL = { nenhuma: 'Nenhuma', foto: 'Somente foto', descricao: 'Some
 const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', concluida: 'Concluída' };
 
 const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
+    p.lead_id AS project_lead_id, (SELECT pl.name FROM users pl WHERE pl.id = p.lead_id) AS project_lead_name,
     a.name AS assignee_name, a.is_external AS assignee_external, a.login_enabled AS assignee_login, a.manager_id AS assignee_leader_id, a.company AS assignee_company, (SELECT lu.name FROM users lu WHERE lu.id = a.manager_id) AS assignee_leader_name,
     c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
     (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id AND f.kind = 'referencia') AS ref_count,

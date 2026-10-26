@@ -64,8 +64,13 @@ function build(t, ctx) {
     ${rmBtn(f, removable)}</figure>`))}`;
 
   const reviewBox = () => {
-    if (t.status === 'aguardando_conferencia') return html`<div class="review-box review-pendente"><b>${icon('clock')} Aguardando conferência</b>
-      Enviada em ${fmtDateTime(t.delivered_at)}${t.on_time === false ? ` · entregue com ${t.days_late} dia(s) de atraso` : t.on_time ? ' · dentro do prazo' : ''}.</div>`;
+    if (t.status === 'aguardando_conferencia') {
+      // Quem pode conferir: o líder da pessoa e o responsável do projeto
+      const who = [t.assignee_leader_name && t.assignee_leader_id !== t.assignee_id ? `${t.assignee_leader_name} (líder${t.assignee_name ? ` de ${t.assignee_name.split(' ')[0]}` : ''})` : '',
+        t.project_lead_name && t.project_lead_id !== t.assignee_id && t.project_lead_id !== t.assignee_leader_id ? `${t.project_lead_name} (responsável do projeto)` : ''].filter(Boolean);
+      return html`<div class="review-box review-pendente"><b>${icon('clock')} Aguardando conferência</b>
+      Enviada em ${fmtDateTime(t.delivered_at)}${t.on_time === false ? ` · entregue com ${t.days_late} dia(s) de atraso` : t.on_time ? ' · dentro do prazo' : ''}.${who.length ? html`<div class="muted" style="margin-top:4px">Pode conferir: ${who.join(' ou ')}${t.project_lead_name && t.project_lead_id === t.assignee_leader_id ? ' (líder e responsável do projeto)' : ''}.</div>` : ''}</div>`;
+    }
     if (t.review_status === 'aprovada') return html`<div class="review-box review-aprovada"><b>${icon('check')} Conferência aprovada</b>
       Por ${t.reviewer_name || '—'} em ${fmtDateTime(t.reviewed_at)}${t.review_comment ? html`<div class="text-content" style="margin-top:4px">“${t.review_comment}”</div>` : ''}</div>`;
     if (t.review_status === 'devolvida') return html`<div class="review-box review-devolvida"><b>${icon('alert')} Devolvida para ajustes</b>

@@ -4,13 +4,21 @@ import { html, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 
 const TYPE = { tarefa: 'Tarefa', subtarefa: 'Subtarefa', checklist: 'Check-list', item: 'Item' };
-const sit = d => (d.cancelled ? html`<span class="dep-st is-cancel">cancelada</span>` : d.done ? html`<span class="dep-st is-done">concluída</span>` : html`<span class="dep-st is-open">em aberto</span>`);
+const sit = d => (d.cancelled ? html`<span class="dep-st is-cancel">cancelada</span>` : d.done ? html`<span class="dep-st is-done">concluída</span>`
+  : d.delivered ? html`<span class="dep-st is-done">em conferência</span>` : html`<span class="dep-st is-open">em aberto</span>`);
+// Data real da finalização x prazo
+const finished = d => {
+  if (!d.finish_date) return '';
+  const diff = d.due_date ? Math.round((Date.parse(d.finish_date) - Date.parse(d.due_date)) / 86400e3) : null;
+  const rel = diff === null ? '' : diff > 0 ? ` · ${diff} dia${diff > 1 ? 's' : ''} de atraso` : diff < 0 ? ` · ${-diff} dia${diff < -1 ? 's' : ''} antes do prazo` : ' · no prazo';
+  return html`<span class="dep-fin ${diff > 0 ? 'is-late' : 'is-ok'}">${icon('check')}finalizada em <b>${fmtDate(d.finish_date)}</b>${rel}</span>`;
+};
 
 // Linha de uma ligação
 const depRow = (d, canEdit) => html`<li class="dep-row">
   <span class="dep-type">${TYPE[d.type] || d.type}</span>
   <div class="dep-main">${d.link ? html`<a href="${d.link}"><b class="mono">${d.code}</b> ${d.title}</a>` : html`<b class="mono">${d.code}</b> ${d.title}`}
-    <span class="dep-meta">prazo ${d.due_date ? fmtDate(d.due_date) : '—'}${d.lag_days ? ` · folga de ${d.lag_days} dia${d.lag_days > 1 ? 's' : ''}` : ''}</span></div>
+    <span class="dep-meta">${d.start_date && !d.finish_date ? `início ${fmtDate(d.start_date)} · ` : ''}prazo ${d.due_date ? fmtDate(d.due_date) : '—'}${d.lag_days ? ` · folga de ${d.lag_days} dia${d.lag_days > 1 ? 's' : ''}` : ''}</span>${finished(d)}</div>
   ${sit(d)}
   ${canEdit ? html`<button type="button" class="icon-btn" data-dep-rm="${d.id}" aria-label="Remover dependência" title="Remover dependência">✕</button>` : ''}
 </li>`;

@@ -3002,3 +3002,8 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .dep-pull { background: #EEF5FB; border-color: #B9D2EA; }
 .dep-pull ul { margin: 6px 0; padding-left: 18px; font-size: 13px; }
 .dep-pull .switch { align-items: flex-start; }
+
+.dep-fin { display: block; font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+.dep-fin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+.dep-fin.is-ok { color: #1F7A4A; }
+.dep-fin.is-late { color: #B3261E; }

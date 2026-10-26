@@ -952,6 +952,8 @@ async function main() {
   const dpVF = (await ricardo('GET', `/tasks/${xF}`)).data;
   ok(dpVF.start_date > '2020-01-06' && dpVF.due_date > '2020-01-08' && !dpVF.reschedule_count && (await ricardo('GET', `/tasks/${xE}`)).data.impact?.tasks === 1,
     'predecessora concluída com atraso empurra a sucessora (sem penalizá-la) e registra o impacto');
+  const dpFin = (await ricardo('GET', `/tasks/${xF}`)).data.dependencies.predecessors.find(p => p.key === `t:${xE}`);
+  ok(dpFin?.done && dpFin.finish_date && dpFin.finish_date > '2020-01-05', `dependências mostram a data real da finalização (${dpFin?.finish_date})`);
   // Etapa 3: Gantt com ligações e caminho crítico; impacto no relatório e na pessoa
   const dpXG = await mkDep('Dep G (fim)', '2099-12-01', '2099-12-31');
   await ricardo('POST', '/dependencies', { pred: `t:${xC}`, succ: `t:${dpXG}` });

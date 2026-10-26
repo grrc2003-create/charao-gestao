@@ -7,7 +7,7 @@ import { badRequest, forbidden, notFound, intOrNull } from '../lib/http.js';
 import { canSeeTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { loadVisible, checklistMaxDue, syncParentDue, moveSubtasks, hasDatedSubtasks, subtasksMinStart, subtasksMaxDue } from './tasks.js';
-import { addDays, daysBetween, today } from './metrics.js';
+import { addDays, daysBetween, today, localDate } from './metrics.js';
 import { addWorkingDays, workingDaysBetween, prevWorkingDay } from './calendar.js';
 
 const fmt = d => (d ? d.split('-').reverse().join('/') : 'sem prazo');
@@ -25,14 +25,16 @@ function node(key) {
     if (!t) throw notFound('Tarefa não encontrada.');
     return { key: `t:${t.id}`, kind: 'tarefa', type: t.parent_id ? 'subtarefa' : t.task_type === 'checklist' ? 'checklist' : 'tarefa', id: t.id,
       code: t.code, title: t.title, project_id: t.project_id, due_date: t.due_date, start_date: t.start_date,
-      done: t.status === 'concluida', cancelled: !!t.cancelled_at, owner: t, parent_id: t.parent_id };
+      done: t.status === 'concluida', cancelled: !!t.cancelled_at, owner: t, parent_id: t.parent_id,
+      // Data real da finalização: entrega (concluída ou aguardando conferência)
+      finish_date: ['concluida', 'aguardando_conferencia'].includes(t.status) ? localDate(t.delivered_at || t.completed_at) : null, delivered: ['concluida', 'aguardando_conferencia'].includes(t.status) };
   }
   const i = one('SELECT * FROM checklist_items WHERE id = ?', id);
   if (!i) throw notFound('Item não encontrado.');
   const t = one('SELECT * FROM tasks WHERE id = ?', i.task_id);
   return { key: `i:${i.id}`, kind: 'item', type: 'item', id: i.id, code: `${t.code}·${i.seq}`, title: i.text, project_id: t.project_id,
     due_date: i.due_date || t.due_date, start_date: i.start_date, done: i.result === 'conforme' || i.result === 'na', cancelled: !!t.cancelled_at,
-    owner: t, task_id: t.id };
+    owner: t, task_id: t.id, finish_date: i.result === 'conforme' || i.result === 'na' ? localDate(i.answered_at) : null, delivered: i.result === 'conforme' || i.result === 'na' };
 }
 const cols = n => (n.kind === 'item' ? { task: null, item: n.id } : { task: n.id, item: null });
 const label = n => `${n.code} · ${n.title}`;
@@ -44,7 +46,8 @@ function edges(n, ctx) {
     const o = node(otherKey);
     const visible = canSeeTask(ctx, o.owner);
     return { id: row.id, lag_days: row.lag_days, key: o.key, type: o.type, code: o.code, title: visible ? o.title : 'Tarefa restrita',
-      due_date: o.due_date, done: o.done, cancelled: o.cancelled, link: visible ? `#/tarefas/${o.kind === 'item' ? o.task_id : o.id}` : null };
+      due_date: o.due_date, start_date: o.start_date, done: o.done, cancelled: o.cancelled, finish_date: o.finish_date, delivered: o.delivered && !o.done,
+      link: visible ? `#/tarefas/${o.kind === 'item' ? o.task_id : o.id}` : null };
   };
   const preds = all(`SELECT * FROM dependencies WHERE ${c.task ? 'succ_task_id = ?' : 'succ_item_id = ?'} ORDER BY id`, c.task || c.item)
     .map(r => view(r, r.pred_task_id ? `t:${r.pred_task_id}` : `i:${r.pred_item_id}`));

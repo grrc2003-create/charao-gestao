@@ -9,7 +9,7 @@ import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } 
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
 import { workingDaysBetween, vacationsOverlapping } from './calendar.js';
-import { taskDependencies, itemDependencies, applyShift, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
+import { taskDependencies, itemDependencies, applyShift, applyPull, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask } from './finance.js';
 import { originOfTask, recordsOfTask } from './records.js';
 import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
@@ -582,10 +582,22 @@ export function updateTask(ctx, id, body, { trusted = false } = {}) {
       applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: id, code: t.code, title: t.title }, kind: 'reagendamento',
         causeOldDue: t.due_date, causeNewDue: next.due_date, sources: [{ key: `t:${id}`, finish: next.due_date }], projectEndBefore: endBefore });
     }
+    // Prazo antecipado com a opção marcada: puxa as sucessoras o mesmo número de dias (mantendo a duração)
+    const pull = [true, 'true', '1', 'on', 1].includes(body.pull_successors);
+    if (pull && next.due_date && t.due_date && next.due_date < t.due_date) {
+      applyPull({ userId: ctx.user.id, cause: { taskId: id, code: t.code, title: t.title }, sources: [{ key: `t:${id}`, oldFinish: t.due_date, newFinish: next.due_date }] });
+    }
     // Datas mudaram: alinha com as predecessoras e preenche o que estiver em branco (planejamento)
     if ('start_date' in next || 'due_date' in next) scheduleAround(`t:${id}`, ctx.user.id);
-    // Subtarefa: a tarefa principal acompanha a maior data final das subtarefas
-    if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
+    // Subtarefa: a tarefa principal acompanha a maior data final das subtarefas (e, se ela também antecipou, puxa as sucessoras dela)
+    if (t.parent_id) {
+      const pBefore = pull ? one('SELECT due_date, code, title FROM tasks WHERE id = ?', t.parent_id) : null;
+      syncParentDue(t.parent_id, ctx.user.id, t.code);
+      const pAfter = pBefore ? one('SELECT due_date FROM tasks WHERE id = ?', t.parent_id).due_date : null;
+      if (pBefore?.due_date && pAfter && pAfter < pBefore.due_date) {
+        applyPull({ userId: ctx.user.id, cause: { taskId: t.parent_id, code: pBefore.code, title: pBefore.title }, sources: [{ key: `t:${t.parent_id}`, oldFinish: pBefore.due_date, newFinish: pAfter }] });
+      }
+    }
   });
 }
 
@@ -691,7 +703,7 @@ export function rescheduleTask(ctx, id, body) {
   const nd = date(body.due_date, 'Novo prazo');
   if (!nd) throw badRequest('Informe o novo prazo.');
   if (nd === t.due_date) throw badRequest('O novo prazo deve ser diferente do atual.');
-  updateTask(ctx, id, { due_date: nd, reschedule_reason_id: body.reason_id, reschedule_note: body.note });
+  updateTask(ctx, id, { due_date: nd, reschedule_reason_id: body.reason_id, reschedule_note: body.note, pull_successors: body.pull_successors });
 }
 
 // Retorno do responsável (descrição/observações da execução)

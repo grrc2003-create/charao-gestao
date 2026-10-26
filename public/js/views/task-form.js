@@ -153,7 +153,7 @@ export async function view({ params, query, state, navigate }) {
           // Prévia das sucessoras empurradas (dependências)
           let box = reschedBox.querySelector('#impact-prev');
           if (!box) { box = document.createElement('div'); box.id = 'impact-prev'; reschedBox.querySelector('div')?.appendChild(box); }
-          if (f.due_date.value > t.due_date) renderImpactPreview(box, t.id, f.due_date.value); else box.innerHTML = '';
+          if (f.due_date.value && f.due_date.value !== t.due_date) renderImpactPreview(box, t.id, f.due_date.value); else box.innerHTML = '';
         };
         f.due_date.addEventListener('input', sync);
         f.due_date.addEventListener('change', sync);

@@ -8,7 +8,7 @@ import { canExecuteTask, canManageTask } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
 import { loadVisible, validateAssignee, autoStart, checklistMaxDue, readProgress } from './tasks.js';
-import { applyShift, projectEndOf } from './dependencies.js';
+import { applyShift, applyPull, projectEndOf } from './dependencies.js';
 
 export const PHOTO_RULES = ['obrigatoria', 'livre'];
 export const PHOTO_RULE_LABEL = { obrigatoria: 'Foto obrigatória em todos os itens', livre: 'Foto opcional (livre escolha)' };
@@ -470,6 +470,12 @@ export function updateItem(ctx, taskId, itemId, body) {
       applyShift({ userId: ctx.user.id, projectId: t.project_id, cause: { taskId: t.id, itemId: item.id, code: `${t.code}·${item.seq}`, title: item.text }, kind: 'prazo_item',
         causeOldDue: item.due_date, causeNewDue: next.due_date, projectEndBefore: endBefore,
         sources: [{ key: `i:${item.id}`, finish: next.due_date }, ...(clDueAfter && clDueAfter !== clDueBefore ? [{ key: `t:${t.id}`, finish: clDueAfter }] : [])] });
+    }
+    // Prazo do item antecipado com a opção marcada: puxa as sucessoras (do item e, se o prazo do check-list diminuiu, as dele)
+    if ([true, 'true', '1', 'on', 1].includes(body.pull_successors) && next.due_date && item.due_date && next.due_date < item.due_date) {
+      const clDueAfter = checklistMaxDue(t.id) || t.due_date;
+      applyPull({ userId: ctx.user.id, cause: { taskId: t.id, itemId: item.id, code: `${t.code}·${item.seq}`, title: item.text },
+        sources: [{ key: `i:${item.id}`, oldFinish: item.due_date, newFinish: next.due_date }, ...(clDueBefore && clDueAfter && clDueAfter < clDueBefore ? [{ key: `t:${t.id}`, oldFinish: clDueBefore, newFinish: clDueAfter }] : [])] });
     }
   });
 }

@@ -446,7 +446,7 @@ function mount(root, t, ctx) {
       setTimeout(() => {
         const nd = document.querySelector('.sheet #nd');
         const box = document.querySelector('.sheet #impact-prev');
-        nd?.addEventListener('change', () => { if (nd.value > t.due_date) renderImpactPreview(box, t.id, nd.value); else if (box) box.innerHTML = ''; });
+        nd?.addEventListener('change', () => { if (nd.value && nd.value !== t.due_date) renderImpactPreview(box, t.id, nd.value); else if (box) box.innerHTML = ''; });
       }, 0);
       const r = await sheet({
         title: 'Reagendar prazo',

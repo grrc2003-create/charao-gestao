@@ -399,6 +399,7 @@ api.get('/api/projects/:id/plan-dates', (req, res, { ctx, params, query }) => se
 api.get('/api/tasks/:id/dep-dates', (req, res, { ctx, params }) => send(res, 200, Deps.suggestedDates(ctx, intOrNull(params.id))));
 api.get('/api/projects/:id/nodes', (req, res, { ctx, params }) => send(res, 200, Deps.projectNodes(ctx, intOrNull(params.id))));
 api.post('/api/tasks/:id/parent-dates', (req, res, { ctx, params }) => { Tasks.useParentDates(ctx, intOrNull(params.id)); send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))); });
+api.post('/api/checklist-items/:id/impact-preview', (req, res, { ctx, params, body }) => send(res, 200, Deps.previewItem(ctx, intOrNull(params.id), body.due_date || null)));
 api.post('/api/tasks/:id/impact-preview', (req, res, { ctx, params, body }) => send(res, 200, Deps.previewReschedule(ctx, intOrNull(params.id), body.due_date || null)));
 api.get('/api/impact-ranking', (req, res, { ctx, query }) => send(res, 200, Deps.impactRanking(ctx, { projectId: intOrNull(query.get('project')) })));
 api.post('/api/dependencies', (req, res, { ctx, body }) => send(res, 201, { id: Deps.addDependency(ctx, body) }));

@@ -96,16 +96,21 @@ export function bindDeps(root, { projectId, exclude = new Set(), onChange }) {
   }));
 }
 
-// Prévia do reagendamento: quais sucessoras serão empurradas (mostrada antes de confirmar)
-export async function renderImpactPreview(box, taskId, newDue) {
+// Prévia da mudança de prazo: adiar mostra as sucessoras que serão empurradas; antecipar oferece puxá-las
+// (o campo pull_successors entra no formulário onde a caixa está). itemId: prévia de um item de check-list.
+export async function renderImpactPreview(box, taskId, newDue, { itemId = null } = {}) {
   if (!box) return;
   if (!newDue) { box.innerHTML = ''; return; }
   try {
-    const r = await api(`/tasks/${taskId}/impact-preview`, { method: 'POST', body: { due_date: newDue } });
+    const r = await api(itemId ? `/checklist-items/${itemId}/impact-preview` : `/tasks/${taskId}/impact-preview`, { method: 'POST', body: { due_date: newDue } });
     box.innerHTML = (r.impacted.length ? html`<div class="notice dep-preview">${icon('alert')}<div><b>Esta mudança empurra ${r.impacted.length} tarefa(s)/item(ns)</b>
       (ajuste por dependência, sem penalizá-las; o impacto fica registrado nesta tarefa):
       <ul>${r.impacted.map(i => html`<li><b class="mono">${i.code}</b> ${i.title} · ${fmtDate(i.old_due)} → <b>${fmtDate(i.new_due)}</b> (+${i.days}d)</li>`)}</ul></div></div>`
-      : html`<p class="hint" style="margin:0">Nenhuma sucessora precisa ser empurrada.</p>`).toString();
+      : r.pullable?.length ? html`<div class="notice dep-pull">${icon('calendar')}<div>
+        <label class="switch"><input type="checkbox" name="pull_successors" value="1" checked><span><b>Antecipar também ${r.pullable.length} sucessora(s)</b> o mesmo número de dias, mantendo a duração de cada uma</span></label>
+        <ul>${r.pullable.map(i => html`<li><b class="mono">${i.code}</b> ${i.title} · ${fmtDate(i.old_start || i.old_due)} → <b>${fmtDate(i.new_start || i.new_due)}</b>${i.old_start && i.old_due ? html` · término ${fmtDate(i.old_due)} → <b>${fmtDate(i.new_due)}</b>` : ''} (${i.days}d)</li>`)}</ul>
+        <span class="hint">Só sucessoras ainda não iniciadas; nenhuma volta para antes do que as outras predecessoras permitem nem antes de hoje. Não conta como reagendamento.</span></div></div>`
+      : html`<p class="hint" style="margin:0">Nenhuma sucessora precisa ser ${newDue ? 'ajustada' : 'empurrada'}.</p>`).toString();
   } catch { box.innerHTML = ''; }
 }
 

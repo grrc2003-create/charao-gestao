@@ -2997,3 +2997,8 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 
 .mc-task { display: block !important; }
 .mc-task svg { vertical-align: -2px; margin-right: 3px; }
+
+/* Antecipar: puxar as sucessoras */
+.dep-pull { background: #EEF5FB; border-color: #B9D2EA; }
+.dep-pull ul { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.dep-pull .switch { align-items: flex-start; }

@@ -221,11 +221,22 @@ export function planShift(sources) {
 const planView = list => list.map(p => ({ key: p.node.key, type: p.node.type, code: p.node.code, title: p.node.title,
   old_due: p.oldDue, new_due: p.newDue, old_start: p.oldStart, new_start: p.newStart, days: p.days }));
 
-// Prévia do reagendamento (para mostrar antes de confirmar)
+// Prévia do reagendamento (para mostrar antes de confirmar): adiar empurra as sucessoras; antecipar pode puxá-las
 export function previewReschedule(ctx, taskId, newDue) {
   const t = loadVisible(ctx, taskId);
-  if (!newDue) return { impacted: [] };
-  return { impacted: planView(planShift([{ key: `t:${t.id}`, finish: newDue }])) };
+  if (!newDue) return { impacted: [], pullable: [] };
+  const cur = datesOf(node(`t:${t.id}`)).due;
+  if (cur && newDue < cur) return { impacted: [], pullable: planView(planPull([{ key: `t:${t.id}`, oldFinish: cur, newFinish: newDue }])) };
+  return { impacted: planView(planShift([{ key: `t:${t.id}`, finish: newDue }])), pullable: [] };
+}
+// Prévia para um item de check-list (prazo do item)
+export function previewItem(ctx, itemId, newDue) {
+  const n = node(`i:${itemId}`);
+  loadVisible(ctx, n.task_id);
+  const cur = datesOf(n).due;
+  if (!newDue || !cur) return { impacted: [], pullable: [] };
+  if (newDue < cur) return { impacted: [], pullable: planView(planPull([{ key: n.key, oldFinish: cur, newFinish: newDue }])) };
+  return { impacted: planView(planShift([{ key: n.key, finish: newDue }])), pullable: [] };
 }
 
 const WHY = { reagendamento: 'reagendamento', conclusao_atrasada: 'término com atraso', prazo_item: 'prazo do item alterado' };
@@ -278,6 +289,103 @@ export function applyShift({ userId, projectId, cause, kind, causeOldDue, causeN
 }
 
 export const projectEndOf = projectEnd;
+
+// ===================== Puxar as sucessoras (antecipação) =====================
+// A predecessora antecipou o término: as sucessoras ainda não iniciadas andam o mesmo número de dias para trás,
+// mantendo a duração em dias úteis (e em cascata). Nunca antes do que as outras predecessoras permitem
+// (término + 1 + folga, em dias úteis) nem antes de hoje. Não conta como reagendamento nem como impacto.
+const predEdges = key => {
+  const n = parseKey(key);
+  return all(`SELECT pred_task_id, pred_item_id, lag_days FROM dependencies WHERE ${n.kind === 't' ? 'succ_task_id' : 'succ_item_id'} = ?`, n.id)
+    .map(r => ({ key: r.pred_task_id ? `t:${r.pred_task_id}` : `i:${r.pred_item_id}`, lag: r.lag_days }));
+};
+const canPull = n => {
+  if (n.done || n.cancelled) return false;
+  if (n.kind === 'item') return !one('SELECT result FROM checklist_items WHERE id = ?', n.id)?.result && n.owner.status !== 'concluida';
+  return n.owner.status === 'aberta';
+};
+export function planPull(sources) {
+  const ref = today();
+  const planned = new Map();
+  const finishOf = new Map(sources.map(s => [s.key, s.newFinish]));
+  const queue = sources.map(s => ({ ...s }));
+  let guard = 0;
+  while (queue.length && guard++ < 5000) {
+    const { key, oldFinish, newFinish } = queue.shift();
+    if (!oldFinish || !newFinish || newFinish >= oldFinish) continue;
+    const delta = daysBetween(oldFinish, newFinish); // negativo
+    for (const e of succEdges(key)) {
+      const n = node(e.key);
+      if (!canPull(n)) continue;
+      const cur = planned.get(n.key) || fresh(n.key);
+      const anchor = cur.newStart || cur.newDue;
+      const orig = cur.oldStart || cur.oldDue;
+      if (!anchor || !orig) continue;
+      let target = addWorkingDays(n.project_id, addDays(orig, delta), 0);
+      for (const p of predEdges(n.key)) {
+        const f = finishOf.has(p.key) ? finishOf.get(p.key) : datesOf(node(p.key)).due;
+        if (!f) continue;
+        const req = addWorkingDays(n.project_id, f, 1 + p.lag);
+        if (target < req) target = req;
+      }
+      const floor = addWorkingDays(n.project_id, ref, 0);
+      if (target < floor) target = floor;
+      if (target >= anchor) continue;
+      const before = cur.newDue || cur.newStart;
+      if (cur.newStart && cur.newDue) {
+        // Mantém a duração em dias úteis
+        const wd = workingDaysBetween(n.project_id, cur.newStart, cur.newDue);
+        cur.newDue = wd ? addWorkingDays(n.project_id, target, wd - 1) : addDays(cur.newDue, daysBetween(anchor, target));
+        cur.newStart = target;
+      } else if (cur.newStart) cur.newStart = target;
+      else cur.newDue = target;
+      planned.set(n.key, cur);
+      const fin = cur.newDue || cur.newStart;
+      finishOf.set(n.key, fin);
+      queue.push({ key: n.key, oldFinish: before, newFinish: fin });
+      // Item puxado: o prazo do check-list (maior prazo dos itens) pode diminuir e puxar as sucessoras dele
+      if (n.kind === 'item') {
+        const ok = `t:${n.task_id}`;
+        const owner = planned.get(ok) || fresh(ok);
+        const max = all('SELECT id, due_date FROM checklist_items WHERE task_id = ? AND due_date IS NOT NULL', n.task_id)
+          .map(i => planned.get(`i:${i.id}`)?.newDue || i.due_date).sort().at(-1);
+        if (max && owner.newDue && max < owner.newDue) {
+          const b = owner.newDue;
+          owner.newDue = max; owner.derived = true;
+          planned.set(ok, owner); finishOf.set(ok, max);
+          queue.push({ key: ok, oldFinish: b, newFinish: max });
+        }
+      }
+    }
+  }
+  // Dias que a sucessora andou (pelo início; sem início, pelo término)
+  return [...planned.values()].map(p => ({ ...p, days: daysBetween(p.oldStart || p.oldDue, p.newStart || p.newDue) })).filter(p => p.days < 0);
+}
+export function applyPull({ userId, cause, sources }) {
+  const plan = planPull(sources);
+  if (!plan.length) return 0;
+  const causeLabel = `${cause.code} · ${cause.title}`;
+  const dd = n => `${n} dia${n > 1 ? 's' : ''}`;
+  for (const p of plan) {
+    if (p.derived) continue; // check-list: acompanha os itens
+    const n = p.node;
+    const back = -p.days;
+    if (n.kind === 'tarefa') {
+      const t = one('SELECT * FROM tasks WHERE id = ?', n.id);
+      if (t.task_type === 'checklist' && checklistMaxDue(t.id)) {
+        // Check-list puxado como sucessora: os itens em aberto andam juntos
+        for (const i of all(`SELECT id, start_date, due_date FROM checklist_items WHERE task_id = ? AND result IS NULL AND (start_date IS NOT NULL OR due_date IS NOT NULL)`, t.id)) {
+          run('UPDATE checklist_items SET start_date = ?, due_date = ? WHERE id = ?', i.start_date ? addDays(i.start_date, p.days) : null, i.due_date ? addDays(i.due_date, p.days) : null, i.id);
+        }
+        run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', p.newStart, checklistMaxDue(t.id), new Date().toISOString(), t.id);
+      } else setDates(n, p.newStart, p.newDue);
+    } else setDates(n, p.newStart, p.newDue);
+    taskHistory(ownerOf(n), userId, 'Prazo antecipado por dependência',
+      `${n.kind === 'item' ? `Item ${n.code}: ` : ''}início ${fmtD(p.oldStart)} → ${fmtD(p.newStart)} · término ${fmtD(p.oldDue)} → ${fmtD(p.newDue)} (−${dd(back)}, mesma duração) · causa: ${causeLabel} foi antecipada · não conta como reagendamento`);
+  }
+  taskHistory(cause.taskId, userId, 'Sucessoras antecipadas', `${cause.itemId ? `Item ${cause.code}: ` : ''}${plan.filter(p => !p.derived).length} tarefa(s)/item(ns) puxada(s) junto com a antecipação`);
+  return plan.length;
+}
 
 // ===================== Indicador de impacto =====================
 const endDaysOf = ev => ev.reduce((n, e) => n + (e.project_end_old && e.project_end_new && e.project_end_new > e.project_end_old ? daysBetween(e.project_end_old, e.project_end_new) : 0), 0);

@@ -3,7 +3,7 @@
 import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 import { periodKey, periodInfo } from './periods.js';
-import { depLists } from './deps-ui.js';
+import { depLists, renderImpactPreview } from './deps-ui.js';
 import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
 import { doneToggle } from './shared.js';
@@ -915,6 +915,7 @@ export function bindChecklist(root, t, ctx, refresh) {
         <div class="field"><label for="ei-who">Responsável</label><select id="ei-who" name="assignee_id">${personOptions(team(), it.assignee_id, t.assignee_name)}</select></div>
         <div class="form-row"><div class="field"><label for="ei-start">Data de início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
           <div class="field"><label for="ei-end">Data de término</label><input id="ei-end" name="due_date" type="date" value="${it.due_date || ''}"></div></div>
+        <div id="ei-impact"></div>
         <div class="field"><label for="ei-desc">Observação</label><textarea id="ei-desc" name="description" rows="3" maxlength="2000">${it.description || ''}</textarea></div>
         <div class="field"><span class="label">Fotos da não conformidade · cadastro (${it.refs.length} de ${PHOTO_LIMIT})</span>
           <div class="cli-photos">${it.refs.map(f => html`<figure class="cli-ph"><img src="/api/checklist-files/${f.id}" alt="Foto de entrada"><button type="button" class="rm" data-rm-ref="${f.id}" aria-label="Remover foto de entrada">✕</button></figure>`)}
@@ -924,7 +925,13 @@ export function bindChecklist(root, t, ctx, refresh) {
         ${!it.result ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-del-in-sheet>${icon('trash')}Excluir este item</button>`
           : html`<span class="hint">Item já respondido: pode ser editado, mas não excluído.</span>`}`,
       onSubmit: d => api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, ...('specialty' in d ? { specialty: d.specialty || null } : {}), assignee_id: d.assignee_id || null,
-        description: d.description, start_date: d.start_date || null, due_date: d.due_date || null } }),
+        description: d.description, start_date: d.start_date || null, due_date: d.due_date || null, ...(d.pull_successors ? { pull_successors: true } : {}) } }),
+    });
+    // Prazo do item: prévia das sucessoras empurradas (adiar) ou da opção de puxá-las (antecipar)
+    const eiEnd = document.querySelector('.sheet #ei-end');
+    eiEnd?.addEventListener('change', () => {
+      const box = document.querySelector('.sheet #ei-impact');
+      if (it.due_date && eiEnd.value && eiEnd.value !== it.due_date) renderImpactPreview(box, t.id, eiEnd.value, { itemId: it.id }); else if (box) box.innerHTML = '';
     });
     // Fotos de entrada: incluir/remover direto pela janela (fecha e atualiza a tela)
     document.querySelectorAll('.sheet input[data-ref-photo]').forEach(inp => inp.addEventListener('change', async () => {

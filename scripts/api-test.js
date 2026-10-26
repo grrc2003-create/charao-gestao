@@ -935,6 +935,15 @@ async function main() {
   // Antecipar não puxa as sucessoras de volta
   await ricardo('PATCH', `/tasks/${xA}`, { due_date: '2099-01-11', reschedule_reason_id: dpReason });
   ok((await ricardo('GET', `/tasks/${xB}`)).data.due_date === dpVB2.due_date, 'antecipar a predecessora não puxa as sucessoras de volta');
+  // Antecipar com a opção: puxa as sucessoras o mesmo número de dias, mantendo a duração
+  const pvPull = (await ricardo('POST', `/tasks/${xA}/impact-preview`, { due_date: '2099-01-06' })).data;
+  ok(!pvPull.impacted.length && pvPull.pullable.some(i => i.key === `t:${xB}`) && pvPull.pullable.every(i => i.days < 0), `prévia ao antecipar: oferece puxar as sucessoras (${JSON.stringify(pvPull.pullable.map(i => [i.code, i.days]))})`);
+  const pB0 = (await ricardo('GET', `/tasks/${xB}`)).data, pC0 = (await ricardo('GET', `/tasks/${xC}`)).data, pD0 = (await ricardo('GET', `/tasks/${xD}`)).data;
+  ok((await ricardo('POST', `/tasks/${xA}/reschedule`, { due_date: '2099-01-06', reason_id: dpReason, pull_successors: true })).status === 200, 'antecipa a predecessora puxando as sucessoras');
+  const pB1 = (await ricardo('GET', `/tasks/${xB}`)).data, pC1 = (await ricardo('GET', `/tasks/${xC}`)).data, pD1 = (await ricardo('GET', `/tasks/${xD}`)).data;
+  ok(pB1.start_date < pB0.start_date && pB1.work_days === pB0.work_days && pB1.start_date > '2099-01-06' && pC1.start_date < pC0.start_date && pC1.work_days === pC0.work_days && pC1.start_date > pB1.due_date && pD1.start_date < pD0.start_date,
+    `sucessoras puxadas em cascata mantendo a duração (B ${pB0.start_date}→${pB1.start_date}, C ${pC0.start_date}→${pC1.start_date}, D ${pD0.start_date}→${pD1.start_date})`);
+  ok(!pB1.reschedule_count && pB1.history.some(h => h.action === 'Prazo antecipado por dependência') && (await ricardo('GET', `/tasks/${xA}`)).data.history.some(h => h.action === 'Sucessoras antecipadas'), 'puxada não conta como reagendamento e fica no histórico das duas pontas');
   // Término com atraso: empurra pelo atraso real
   const xE = await mkDep('Dep E (atrasada)', '2020-01-01', '2020-01-05');
   const xF = await mkDep('Dep F', '2020-01-06', '2020-01-08');

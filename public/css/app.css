@@ -3007,3 +3007,28 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .dep-fin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
 .dep-fin.is-ok { color: #1F7A4A; }
 .dep-fin.is-late { color: #B3261E; }
+
+/* Meu painel: Para conferir */
+.rq-group { padding: 4px 16px 12px; }
+.rq-group .sub-label { margin: 10px 0 4px; }
+.rq-list { list-style: none; margin: 0; padding: 0; }
+.rq-item { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.rq-item.is-done { opacity: .6; }
+.rq-title { font-weight: 700; color: var(--ink); text-decoration: none; }
+.rq-title .mono { font-size: 12px; color: var(--muted); margin-right: 4px; }
+.rq-main small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.rq-ok { color: #1F7A4A; font-weight: 600; }
+.rq-late { color: #B3261E; font-weight: 600; }
+.rq-desc { margin: 6px 0 0; font-size: 13px; color: var(--ink-2, #3B4651); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.rq-photos { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.rq-ph { all: unset; cursor: zoom-in; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.rq-ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rq-more { font-size: 12px; color: var(--muted); }
+.rq-acts { display: flex; flex-direction: column; gap: 6px; align-items: stretch; justify-content: center; min-width: 140px; }
+.rq-approve { background: #2E8B57; color: #fff; border-color: #2E8B57; }
+.rq-approve:hover { background: #25744A; }
+.rq-return { color: #B3261E; }
+.rq-block { color: var(--muted); font-size: 12px; display: flex; gap: 4px; align-items: flex-start; }
+.rq-block svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.rq-doneTxt { font-weight: 700; font-size: 13px; color: #1F7A4A; }
+@media (max-width: 640px) { .rq-item { grid-template-columns: 1fr; } .rq-acts { flex-direction: row; } .rq-acts .btn { flex: 1; } }

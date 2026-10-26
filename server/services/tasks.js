@@ -2,7 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
-  canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole } from '../lib/permissions.js';
+  canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole, isLeaderOfNoLogin, isProjectLead } from '../lib/permissions.js';
 import { decorate, today, daysBetween, localDate, summarize, addDays } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
@@ -1056,6 +1056,31 @@ export function deleteTasksBulk(ctx, body, ip) {
   }
   audit(ctx.user.id, 'task', null, 'Exclusão de tarefas em lote', { excluidas: deleted.length, bloqueadas: blocked.length, motivo: reason, codigos: deleted.join(', ') }, ip);
   return { deleted: deleted.length, codes: deleted, blocked, not_found: ids.length - rows.length };
+}
+
+// Fila de conferência do Meu painel: entregas aguardando conferência da equipe (liderados) e dos projetos em que a
+// pessoa é responsável, com o necessário para aprovar ou devolver sem abrir a tarefa
+export function reviewQueue(ctx) {
+  const out = [];
+  for (const t of listVisible(ctx, "t.status = 'aguardando_conferencia'")) {
+    if (!canReviewTask(ctx, t)) continue;
+    const team = (!!t.assignee_id && ctx.team.has(t.assignee_id)) || isLeaderOfNoLogin(ctx, t);
+    const lead = isProjectLead(ctx, t);
+    if (!team && !lead) continue;
+    const files = all(`SELECT id, mime, caption FROM task_files WHERE task_id = ? AND kind = 'execucao' ORDER BY id`, t.id);
+    const subsOpen = one(`SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND cancelled_at IS NULL AND status <> 'concluida'`, t.id).n;
+    const blockers = [
+      !t.start_date && t.task_type !== 'checklist' ? 'sem data de início' : '',
+      t.done_date_status === 'pendente' && t.claimed_done_date ? 'data de conclusão informada para decidir' : '',
+      subsOpen ? `${subsOpen} subtarefa(s) em aberto` : '',
+    ].filter(Boolean);
+    out.push({ id: t.id, code: t.code, title: t.title, task_type: t.task_type, project_code: t.project_code, project_name: t.project_name,
+      assignee_name: t.assignee_name, delivered_at: t.delivered_at, delivered_date: t.delivered_date, due_date: t.due_date, on_time: t.on_time, days_late: t.days_late,
+      exec_description: t.exec_description, exec_notes: t.exec_notes, cl_total: t.cl_total, cl_done: t.cl_done,
+      photos: files.filter(f => f.mime !== 'application/pdf').map(f => ({ id: f.id, caption: f.caption })), pdfs: files.filter(f => f.mime === 'application/pdf').length,
+      group: team ? (lead ? 'ambos' : 'equipe') : 'projeto', blockers });
+  }
+  return out.sort((a, b) => String(a.delivered_at).localeCompare(String(b.delivered_at)));
 }
 
 // ---------- Filtros da tela Tarefas (compartilhados com o relatório "Tarefas filtradas") ----------

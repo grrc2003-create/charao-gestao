@@ -164,6 +164,13 @@ async function main() {
     ok(lv.status === 200 && lv.data.can.review === true && lv.data.project_lead_name?.startsWith('Camila'), 'responsável do projeto vê e pode conferir a entrega do colaborador');
     ok((await ricardo('GET', `/tasks/${lt}`)).data.can.review === true, 'o líder da pessoa continua conferindo');
     ok((await camila('POST', `/tasks/${lt}/actions/approve`, { comment: 'Conferido pelo responsável do projeto' })).data.status === 'concluida', 'responsável do projeto aprova a entrega');
+    // Fila "Para conferir" do Meu painel: equipe do líder e projetos em que é responsável
+    const lt2 = (await ricardo('POST', '/tasks', { project_id: 1, title: 'Fila de conferência', description: 'Teste', assignee_id: 4, priority: 'media', proof_type: 'nenhuma', due_date: '2099-06-30', start_date: '2099-06-01' })).data.id;
+    await marcos('POST', `/tasks/${lt2}/actions/submit`, SD);
+    const qCam = (await camila('GET', '/review-queue')).data, qRic = (await ricardo('GET', '/review-queue')).data;
+    ok(qCam.some(t => t.id === lt2 && t.group === 'projeto') && qRic.some(t => t.id === lt2 && t.group === 'equipe'), 'Para conferir: aparece para o líder (equipe) e para o responsável do projeto');
+    ok(!(await marcos('GET', '/review-queue')).data.some(t => t.id === lt2), 'Para conferir: quem entregou não vê a própria entrega');
+    ok((await camila('POST', `/tasks/${lt2}/actions/return`, { comment: 'Ajustar' })).data.status === 'em_andamento' && !(await camila('GET', '/review-queue')).data.some(t => t.id === lt2), 'devolvida pela fila sai da lista');
     await ana('PUT', '/projects/1', { lead_id: 2 });
     ok((await camila('GET', `/tasks/${lt}`)).status === 404, 'deixando de ser responsável do projeto, deixa de conferir');
   }

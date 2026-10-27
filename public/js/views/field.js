@@ -662,39 +662,44 @@ function sheetPayList(people, contracts, calcP, calcC) {
 
 export async function paymentsView({ query, navigate, render }) {
   const obra = Number(query.get('obra')) || 0;
-  const showPaid = query.get('pagos') === '1';
-  const d = await api('/field/payments', { query: { obra: obra || '', pagos: showPaid ? '1' : '' } });
-  const qsOf = (o, p) => { const q = new URLSearchParams(); if (o) q.set('obra', o); if (p) q.set('pagos', '1'); const x = q.toString(); return `/campo/pagamentos${x ? `?${x}` : ''}`; };
+  // Sempre com o histórico: já pago, a pagar e previsto por pessoa. Filtro: todos ou só quem tem a receber
+  const onlyDue = query.get('ver') === 'areceber';
+  const d = await api('/field/payments', { query: { obra: obra || '', pagos: '1' } });
+  const qsOf = (o, due) => { const q = new URLSearchParams(); if (o) q.set('obra', o); if (due) q.set('ver', 'areceber'); const x = q.toString(); return `/campo/pagamentos${x ? `?${x}` : ''}`; };
   const t = d.totals;
+  const people = d.people.filter(p => !onlyDue || p.pending > 0 || p.open > 0)
+    .map(p => ({ ...p, items: [...p.items].sort((a, b) => ({ pending: 0, open: 1, paid: 2 }[a.state] - { pending: 0, open: 1, paid: 2 }[b.state]) || String(b.paid_at || b.period).localeCompare(String(a.paid_at || a.period))) }));
+  const nDue = d.people.filter(p => p.pending > 0 || p.open > 0).length;
   const pendList = d.people.filter(p => p.pending > 0).map(p => ({ ...p, amount: p.pending }));
   const stTxt = i => (i.state === 'pending' ? html`<span class="fc-pay">A pagar${i.due_date ? ` ${fmtDate(i.due_date)}` : ''}</span><button type="button" class="btn btn-ghost btn-sm" data-pay="${i.line}" data-who="${i.code}" data-amt="${i.amount}">Marcar pago</button>`
     : i.state === 'paid' ? paidTag(i.paid_at, i.line) : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
   return {
     title: 'Pagamentos · Folha de Campo',
-    html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Pagamentos', sub: 'Quem recebe, quanto e o PIX: parte da empresa ainda não paga, de todas as folhas.',
+    html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Pagamentos', sub: 'Quem recebe, quanto e o PIX: o que já foi pago, o que está a pagar e o previsto de cada pessoa, em todas as folhas.',
         actions: pendList.length ? html`<button type="button" class="btn btn-primary" data-copy="${payText(pendList)}" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista a pagar</button>` : '' })}
       ${fieldTabs('pag', obra)}
       <div class="fc-filter section"><label for="fp-obra">Obra</label><select id="fp-obra"><option value="">Todas as obras</option>${d.projects.map(p => html`<option value="${p.id}" ${obra === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select>
-        <label class="fp-show"><input type="checkbox" id="fp-paid" ${showPaid ? 'checked' : ''}> Mostrar pagos</label></div>
+      </div>
+      <div class="fc-chips section"><a href="#${qsOf(obra, false)}" class="fc-chip ${!onlyDue ? 'on' : ''}">Todos <b>${d.people.length}</b></a><a href="#${qsOf(obra, true)}" class="fc-chip ${onlyDue ? 'on' : ''}">Com valor a receber <b>${nDue}</b></a></div>
       <div class="pf-kpis fp-kpis section">
         <div class="pf-kt"><span>A pagar (folhas fechadas)</span><b>${money(t.pending)}</b></div>
         <div><span>Previsto (folhas abertas)</span><b>${money(t.open)}</b></div>
-        ${showPaid ? html`<div><span>Pago</span><b>${money(t.paid)}</b></div>` : html`<div><span>Pessoas a receber</span><b>${d.people.filter(p => p.pending || p.open).length}</b></div>`}
+        <div><span>Já pago</span><b class="fr-ok">${money(t.paid)}</b></div>
       </div>
-      ${d.people.length ? html`<section class="card section"><ul class="fp-list fp-list2">
-          <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">A pagar</span><span class="fp-num">Previsto</span><span></span></li>
-          ${d.people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small></span>${pixCell(p)}
-            <strong class="fp-num fp-val" data-l="A pagar">${p.pending ? money(p.pending) : p.paid ? html`<span class="fp-paid">${icon('check')}${money(p.paid)}</span>` : '—'}</strong><span class="fp-num fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span>
+      ${people.length ? html`<section class="card section"><ul class="fp-list fp-list2">
+          <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Já pago</span><span class="fp-num">A pagar</span><span class="fp-num">Previsto</span><span></span></li>
+          ${people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small></span>${pixCell(p)}
+            <span class="fp-num fp-pd" data-l="Já pago">${p.paid ? money(p.paid) : '—'}</span>
+            <strong class="fp-num fp-val" data-l="A pagar">${p.pending ? money(p.pending) : '—'}</strong><span class="fp-num fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span>
             ${actCell({ ...p, amount: p.pending }, { canPay: p.pending > 0, lines: p.items.filter(i => i.state === 'pending').map(i => i.line).join(',') })}
-            <details class="fp-det"><summary>${p.items.length} lançamento(s)</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}</ul></details></li>`)}
-          <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><strong class="fp-num fp-val" data-l="A pagar">${money(t.pending)}</strong><span class="fp-num fp-open" data-l="Previsto">${money(t.open)}</span><span></span></li></ul></section>`
-        : html`<div class="empty-state"><h2>Nada a pagar</h2><p>Todas as folhas fechadas estão pagas. Marque “Mostrar pagos” para ver o histórico.</p></div>`}
+            <details class="fp-det"><summary>${p.items.length} lançamento(s) · total ${money(p.paid + p.pending + p.open)}</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}</ul></details></li>`)}
+          <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><span class="fp-num fp-pd" data-l="Já pago">${money(people.reduce((a, p) => a + p.paid, 0))}</span><strong class="fp-num fp-val" data-l="A pagar">${money(people.reduce((a, p) => a + p.pending, 0))}</strong><span class="fp-num fp-open" data-l="Previsto">${money(people.reduce((a, p) => a + p.open, 0))}</span><span></span></li></ul></section>`
+        : html`<div class="empty-state"><h2>${onlyDue ? 'Ninguém com valor a receber' : 'Nenhum pagamento ainda'}</h2><p>${onlyDue ? 'Todas as folhas fechadas estão pagas.' : 'Os valores aparecem aqui quando houver folhas com diárias ou empreitadas.'}</p></div>`}
       <p class="muted pf-foot">O pagamento é registrado no Financeiro (uma tarefa por folha fechada, com esta mesma lista). Folhas abertas aparecem como previsto até serem fechadas.</p>`,
     mount(root) {
       bindCopy(root);
       bindPaid(root, render);
-      root.querySelector('#fp-obra').addEventListener('change', e => navigate(qsOf(e.target.value, showPaid)));
-      root.querySelector('#fp-paid').addEventListener('change', e => navigate(qsOf(obra, e.target.checked)));
+      root.querySelector('#fp-obra').addEventListener('change', e => navigate(qsOf(e.target.value, onlyDue)));
     },
   };
 }

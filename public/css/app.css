@@ -3040,3 +3040,55 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fs-acts, .fs-all { display: flex; gap: 6px; flex-wrap: wrap; }
 .fs-all { padding: 10px 16px; border-top: 1px solid var(--line); justify-content: flex-end; }
 @media (max-width: 640px) { .fs-list li { grid-template-columns: 1fr; } }
+
+/* Folha de Campo */
+.fc-tabs { display: flex; gap: 4px; margin: 0 0 14px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.fc-tabs a { padding: 8px 12px; color: var(--muted); font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+.fc-tabs a.on { color: var(--navy); border-bottom-color: var(--orange); }
+.fc-filter { display: flex; align-items: center; gap: 8px; }
+.fc-filter label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.fc-filter select { flex: 1; max-width: 420px; }
+.fc-list { list-style: none; margin: 0; padding: 0; }
+.fc-person { padding: 12px 16px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.fc-ph { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.fc-ph small { display: block; color: var(--muted); font-size: 12.5px; }
+.fc-pa { display: flex; gap: 4px; align-items: center; }
+.fc-days { display: flex; flex-wrap: wrap; gap: 4px; }
+.fc-day { width: 44px; min-height: 52px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 2px; cursor: pointer; font: inherit; color: var(--navy); }
+.fc-day small { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.fc-day span { font-size: 13px; font-weight: 600; }
+.fc-day b { font-size: 12px; min-height: 14px; line-height: 14px; }
+.fc-day.we { background: #F6F7F9; }
+.fc-day.q1 { background: var(--navy); border-color: var(--navy); color: #fff; }
+.fc-day.q1 small { color: #C5D0DB; }
+.fc-day.qh { background: var(--orange-50); border-color: var(--orange); color: var(--orange-700); }
+.fc-day:disabled { cursor: default; }
+.fc-pf { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.fc-pf label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.fc-calc { font-size: 13px; color: var(--ink, #333); }
+.fc-bar { position: relative; height: 6px; background: #E9ECF1; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.fc-bar span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--navy); }
+.fc-bar i { position: absolute; top: 0; bottom: 0; background: var(--orange); }
+.fc-save { position: sticky; bottom: 12px; display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 12px; z-index: 5; }
+.fc-save span { background: var(--orange-50); color: var(--orange-700); font-size: 13px; padding: 4px 10px; border-radius: 12px; }
+.fc-payd { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; font-size: 12px; color: var(--muted); font-weight: 600; max-width: 220px; }
+#fc-act { width: 100%; }
+.fc-wrow { display: flex; gap: 10px; align-items: center; padding: 12px 16px; }
+.fc-add select { flex: 1; min-width: 0; }
+.fc-off { opacity: .6; }
+.fc-warn { color: #C0392B; }
+.fc-pay { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: #FDF0E6; color: #8C3D0B; }
+.fc-pay-ok { background: #E5F4EC; color: #1F6B41; }
+.fc-table-wrap { overflow-x: auto; }
+.fc-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.fc-table th, .fc-table td { padding: 8px 12px; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fc-table th { color: var(--muted); font-weight: 600; font-size: 12px; border-top: 0; }
+.fc-table th:first-child, .fc-table td:first-child { text-align: left; white-space: normal; }
+.fc-table td small { display: block; color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) {
+  .fc-day { width: calc((100% - 24px) / 7); min-width: 38px; }
+  .fc-save { bottom: 76px; }
+  .fc-filter { flex-wrap: wrap; }
+  .fc-add { flex-wrap: wrap; }
+  .fc-add select { flex: 1 1 100%; }
+}

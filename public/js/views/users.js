@@ -47,7 +47,7 @@ export async function list({ state }) {
 // Seções que o administrador libera por usuário
 const SECTION_GROUPS = [
   ['Gestão de Obras', [['dashboard', 'Visão da empresa', 'dashboard geral'], ['projetos', 'Projetos', 'obras e áreas'], ['tarefas', 'Tarefas', 'lista e criação de tarefas'], ['usuarios', 'Desempenho das pessoas', 'telas de desempenho de outras pessoas'], ['relatorios', 'Relatórios', 'relatórios em PDF']]],
-  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Financeiro', 'obrigações e pagamentos'], ['folha', 'Folha (Administrativa)', 'pessoas da folha, cálculo mensal, recibos e pagamentos (dados sensíveis)'], ['processos', 'Processos da Empresa (edição)', 'criar e editar processos; a publicação depende da aprovação do administrador (leitura livre para todos)']]],
+  ['Gestão da Empresa', [['contratos', 'Contratos', 'medições e faturamento'], ['financeiro', 'Financeiro', 'obrigações e pagamentos'], ['folha', 'Folha (Administrativa)', 'pessoas da folha, cálculo mensal, recibos e pagamentos (dados sensíveis)'], ['folha_campo', 'Folha de Campo (valores e fechamento)', 'diárias, empreitadas, PIX e fechamento com pagamento; sem a seção, o responsável e o gestor do projeto só lançam diárias e % das empreitadas'], ['processos', 'Processos da Empresa (edição)', 'criar e editar processos; a publicação depende da aprovação do administrador (leitura livre para todos)']]],
   ['Gestão da Equipe', [['cadastro_usuarios', 'Cadastro da Equipe', 'cadastrar pessoas, função, acesso e permissões'], ['equipe', 'Organograma e Férias', 'organograma, mapa de férias e aprovações']]],
   ['Administração', [['auditoria', 'Auditoria', 'registro de ações'], ['configuracoes', 'Configurações', 'cadastros gerais']]],
 ];

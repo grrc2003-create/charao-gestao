@@ -32,6 +32,7 @@ import * as Team from './services/team.js';
 import * as Vacations from './services/vacations.js';
 import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
+import * as Field from './services/field.js';
 import * as Reimb from './services/reimbursements.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
@@ -230,6 +231,8 @@ api.get('/api/meta', (req, res, { ctx }) => {
       edit_processes: Processes.canEditProcesses(ctx.user),
       approve_processes: Processes.canApproveProcesses(ctx.user),
       payroll: Payroll.canPayroll(ctx.user),
+      field: Field.canUseField(ctx),
+      field_money: Field.canFieldMoney(ctx.user),
     },
     // Fotos de perfil (id → versão), para trocar as iniciais pela foto
     avatars: Users.avatarMap(),
@@ -254,6 +257,22 @@ api.post('/api/processes/:id/files', (req, res, { ctx, params, body }) => send(r
 api.delete('/api/processes/:id/files/:fid', (req, res, { ctx, params }) => send(res, 200, Processes.removeProcessFile(ctx, intOrNull(params.id), intOrNull(params.fid))));
 api.post('/api/processes/:id/:action', (req, res, { ctx, params, body }) => send(res, 200, Processes.processAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 api.get('/api/process-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Processes.processFileForUser(ctx, intOrNull(params.id))));
+// ---------- Folha de Campo: diárias e empreitadas por obra ----------
+api.get('/api/field/workers', (req, res, { ctx }) => send(res, 200, Field.listWorkers(ctx)));
+api.post('/api/field/workers', (req, res, { ctx, body }) => send(res, 201, Field.createWorker(ctx, body, clientIp(req))));
+api.put('/api/field/workers/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.updateWorker(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/field/contracts', (req, res, { ctx, query }) => send(res, 200, Field.listContracts(ctx, intOrNull(query.get('obra')))));
+api.post('/api/field/contracts', (req, res, { ctx, body }) => send(res, 201, Field.createContract(ctx, body, clientIp(req))));
+api.put('/api/field/contracts/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.updateContract(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/field/sheets', (req, res, { ctx, query }) => send(res, 200, Field.listSheets(ctx, intOrNull(query.get('obra')))));
+api.post('/api/field/sheets', (req, res, { ctx, body }) => send(res, 201, Field.createSheet(ctx, body, clientIp(req))));
+api.get('/api/field/sheets/:id', (req, res, { ctx, params }) => send(res, 200, Field.getSheet(ctx, intOrNull(params.id))));
+api.put('/api/field/sheets/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.saveSheet(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/field/sheets/:id', (req, res, { ctx, params }) => send(res, 200, Field.deleteSheet(ctx, intOrNull(params.id), clientIp(req))));
+api.post('/api/field/sheets/:id/close', (req, res, { ctx, params, body }) => send(res, 200, Field.closeSheet(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/field/sheets/:id/reopen', (req, res, { ctx, params }) => send(res, 200, Field.reopenSheet(ctx, intOrNull(params.id), clientIp(req))));
+api.get('/api/field/summary', (req, res, { ctx, query }) => send(res, 200, Field.summary(ctx, intOrNull(query.get('obra')))));
+
 // ---------- Folha (Administrativa): seção folha ----------
 api.get('/api/payroll/people', (req, res, { ctx }) => send(res, 200, Payroll.listPeople(ctx)));
 api.post('/api/payroll/people', (req, res, { ctx, body }) => send(res, 201, Payroll.createPerson(ctx, body, clientIp(req))));
@@ -534,7 +553,7 @@ api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
 api.get('/api/audit', (req, res, { user }) => {
   requireSection(user, 'auditoria');
   // Registros de contratos só para quem tem a liberação
-  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance') && (hasSection(user, 'folha') || !['payroll', 'reimbursement'].includes(a.entity))));
+  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance') && (hasSection(user, 'folha') || !['payroll', 'reimbursement'].includes(a.entity)) && (hasSection(user, 'folha_campo') || a.entity !== 'field')));
 });
 
 // ---------- Tarefas recorrentes ----------

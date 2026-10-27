@@ -40,6 +40,7 @@ import * as ProcessesPrint from './views/processes-print.js';
 import * as ProcessMap from './views/process-map.js';
 import * as Payroll from './views/payroll.js';
 import * as PayrollPrint from './views/payroll-print.js';
+import * as Field from './views/field.js';
 import * as Reimb from './views/reimb-ui.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
@@ -110,6 +111,11 @@ const routes = [
   ['/contratos/:id', Contracts.view],
   ['/contratos/:id/editar', Contracts.form],
   ['/medicoes/:id', Contracts.measurement],
+  ['/campo', Field.list],
+  ['/campo/profissionais', Field.workers],
+  ['/campo/empreitadas', Field.contracts],
+  ['/campo/consolidado', Field.summary],
+  ['/campo/:id', Field.view],
   ['/folha', Payroll.list],
   ['/folha/pessoas', Payroll.people],
   ['/folha/pessoas/nova', Payroll.personForm],
@@ -205,10 +211,11 @@ export async function reloadMeta() {
 }
 
 // Celular: barra inferior com até 5 botões de rótulo curto; o restante fica em "Mais"
-const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Folha (Administrativa)': 'Folha', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes' };
+const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Folha (Administrativa)': 'Folha', 'Folha de Campo': 'Campo', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes' };
 function mobileNav() {
   const c = state.meta?.can || {};
   const all = [...navItems(),
+    ...(c.field ? [['/campo', 'Folha de Campo', 'team']] : []),
     ...(showUsersNav() ? [USERS_NAV] : []),
     ...(c.contracts ? [['/contratos', 'Contratos', 'contract']] : []),
     ...(c.finance ? [['/financeiro', 'Financeiro', 'wallet']] : []),
@@ -242,6 +249,7 @@ function shell() {
       <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
       <div class="sidebar-tag">Gestão de Obras</div>
       <nav>${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
+        ${state.meta?.can.field ? html`<a href="#/campo" data-nav="/campo">${icon('team')}<span>Folha de Campo</span></a>` : ''}
         <div class="sidebar-tag sidebar-group">Gestão da Empresa</div>
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Financeiro</span></a>` : ''}

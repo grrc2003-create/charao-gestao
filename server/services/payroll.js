@@ -194,6 +194,7 @@ export function financeCandidates(exceptMonthId = 0) {
   return all(`${ITEM_SQL} WHERE i.status = 'pendente' AND o.category = 'Folha de pagamento'
     AND NOT EXISTS (SELECT 1 FROM payroll_months pm WHERE pm.finance_item_id = i.id AND pm.id <> ?)
     AND NOT EXISTS (SELECT 1 FROM payroll_entries pe WHERE pe.obligation_id = o.id)
+    AND NOT EXISTS (SELECT 1 FROM field_sheets fs WHERE fs.obligation_id = o.id)
     ORDER BY i.ref_month, o.title`, exceptMonthId);
 }
 function readFinanceItem(v, monthId = 0) {

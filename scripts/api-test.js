@@ -2333,6 +2333,67 @@ async function main() {
   ok(nfD.contracts.find(c => c.id === nfCt).summary.billed === 2000 && nfAnn.billed[2] >= 1000 && nfAnn.received[2] >= 1000, 'sem NF também conta no faturado e recebido do painel');
   ok((await fo('POST', `/measurements/${nfB}/actions/undo`)).data.status === 'faturada' && (await fo('POST', `/measurements/${nfB}/actions/undo`)).data.status === 'emitida', 'desfazer volta para faturada e depois emitida');
 
+  // ---------- Folha de Campo (dados fictícios) ----------
+  { const g = await login('ana@charao.eng.br'); const u = (await g('GET', '/users/1')).data.user; await g('PUT', '/users/1', { ...u, sections: [...u.section_list, 'folha_campo'] }); }
+  const fcAna = await login('ana@charao.eng.br'), fcJul = await login('juliana@charao.eng.br'), fcCam = await login('camila@charao.eng.br');
+  const fcMetaA = (await fcAna('GET', '/meta')).data.can, fcMetaJ = (await fcJul('GET', '/meta')).data.can, fcMetaC = (await fcCam('GET', '/meta')).data.can;
+  ok(fcMetaA.field && fcMetaA.field_money && fcMetaJ.field && !fcMetaJ.field_money && !fcMetaC.field, 'Folha de Campo: admin vê valores; responsável do projeto só lança; colaborador sem obra não acessa');
+  ok((await fcCam('GET', '/field/sheets')).status === 403, 'colaborador que não é responsável não acessa a Folha de Campo');
+  const fcP = (await fcAna('POST', '/field/workers', { name: 'Pedreiro Teste FC', kind: 'diarista', role: 'Pedreiro', daily_rate: 180, pix: 'pix-ficticio-1', pix_type: 'E-mail' })).data;
+  const fcH = (await fcAna('POST', '/field/workers', { name: 'Ajudante Teste FC', kind: 'diarista', role: 'Ajudante', daily_rate: '110' })).data;
+  const fcE = (await fcAna('POST', '/field/workers', { name: 'Empreiteiro Teste FC', kind: 'empreiteiro', pix: 'pix-ficticio-2' })).data;
+  const fcJw = (await fcJul('POST', '/field/workers', { name: 'Servente Teste FC', role: 'Servente', daily_rate: 999, pix: 'x' })).data;
+  ok(fcJw.id && fcJw.daily_rate === undefined && (await fcAna('GET', '/field/workers')).data.workers.find(w => w.id === fcJw.id).daily_rate === 0, 'responsável cadastra profissional sem valor/PIX (o escritório completa)');
+  ok((await fcJul('GET', '/field/workers')).data.workers.every(w => w.pix === undefined && w.daily_rate === undefined), 'sem a seção: lista de profissionais sem diária e PIX');
+  ok((await fcJul('PUT', `/field/workers/${fcP.id}`, { name: 'x' })).status === 403, 'sem a seção não edita o cadastro do profissional');
+  ok((await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcP.id, service: 'x', total: 10 })).status === 400, 'empreitada exige um empreiteiro');
+  const fcC = (await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'Pintura teste', total: 5000 })).data;
+  ok(fcC.measured_pct === 0 && fcC.balance === 5000, 'empreitada cadastrada com saldo integral');
+  ok((await fcJul('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'y', total: 1 })).status === 403, 'só a seção cadastra empreitada');
+  ok((await fcCam('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-09-13' })).status === 403, 'colaborador não cria folha na obra');
+  ok((await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-10-20' })).status === 400, 'período da folha até 31 dias');
+  const fcS = (await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-09-13' })).data;
+  ok(fcS.code === 'FC-01' && fcS.days.length === 7 && fcS.can.edit && !fcS.can.close, 'responsável cria a folha FC-01 (período livre), sem poder fechar');
+  const fcDays = { '2026-09-07': 1, '2026-09-08': 1, '2026-09-09': 1, '2026-09-10': 1, '2026-09-11': 1 };
+  const fcJs = (await fcJul('PUT', `/field/sheets/${fcS.id}`, { activities: 'Atividade teste', people: [
+    { worker_id: fcP.id, days: fcDays, service: 'Alvenaria' },
+    { worker_id: fcH.id, days: { ...fcDays, '2026-09-11': 0.5 }, service: 'Alvenaria', client_paid: 999 }],
+    contracts: [{ contract_id: fcC.id, pct: 40 }] })).data;
+  ok(fcJs.totals.diarias === 9.5 && fcJs.people.every(e => e.rate === undefined && e.total === undefined && e.pix === undefined) && fcJs.contracts[0].amount === undefined, 'responsável lança diárias (½ inclusive) e % sem ver valores');
+  ok((await fcJul('PUT', `/field/sheets/${fcS.id}`, { people: [{ worker_id: fcP.id, days: { '2026-09-20': 1 } }] })).status === 400, 'diária fora do período é recusada');
+  const fcA1 = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data;
+  ok(fcA1.people.find(e => e.worker_id === fcH.id).client_paid === 0, 'quem não tem a seção não grava pago pelo cliente');
+  const fcA2 = (await fcAna('PUT', `/field/sheets/${fcS.id}`, { people: fcA1.people.map(e => ({ worker_id: e.worker_id, days: e.days, service: e.service, ...(e.worker_id === fcH.id ? { client_paid: 100, adjust: -20, adjust_note: 'Adiantamento teste' } : {}) })),
+    contracts: [{ contract_id: fcC.id, pct: 40 }] })).data;
+  const fcPe = fcA2.people.find(e => e.worker_id === fcP.id), fcHe = fcA2.people.find(e => e.worker_id === fcH.id);
+  ok(fcPe.total === 900 && fcHe.gross === 495 && fcHe.total === 475 && fcHe.company === 375, 'valor = diárias × diária + ajuste; empresa paga o valor menos o cliente');
+  ok(fcA2.contracts[0].amount === 2000 && fcA2.contracts[0].after_pct === 40 && fcA2.totals.total === 3375 && fcA2.totals.company === 3275, 'empreitada medida em % do contrato; totais da folha');
+  const fcS2 = (await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-14', end_date: '2026-09-20' })).data;
+  ok(fcS2.code === 'FC-02' && fcS2.people.length === 2 && fcS2.people.find(e => e.worker_id === fcP.id).service === 'Alvenaria', 'nova folha começa com as pessoas e serviços da anterior');
+  ok((await fcJul('PUT', `/field/sheets/${fcS2.id}`, { contracts: [{ contract_id: fcC.id, pct: 70 }] })).status === 400, 'empreitada não passa de 100% medido');
+  const fcS2b = (await fcJul('PUT', `/field/sheets/${fcS2.id}`, { contracts: [{ contract_id: fcC.id, pct: 60 }] })).data;
+  ok(fcS2b.contracts[0].before_pct === 40 && fcS2b.contracts[0].after_pct === 100 && fcS2b.contracts[0].balance_pct === 0, 'acumulado e saldo da empreitada entre as folhas');
+  ok((await fcJul('POST', `/field/sheets/${fcS.id}/close`, {})).status === 403, 'sem a seção não fecha a folha');
+  const fcCl = (await fcAna('POST', `/field/sheets/${fcS.id}/close`, { pay_date: '2026-09-18' })).data;
+  ok(fcCl.status === 'fechada' && fcCl.generated && fcCl.payment?.amount === 3275 && fcCl.payment.due_date === '2026-09-18' && fcCl.payment.status === 'pendente', 'fechar gera o pagamento (parte da empresa) no Financeiro');
+  const fcObl = (await fcAna('GET', '/finance/obligations')).data;
+  const fcOb = (Array.isArray(fcObl) ? fcObl : fcObl.obligations || []).find(o => /Folha de Campo PRJ-002 FC-01/.test(o.title));
+  ok(fcOb && /pix-ficticio-1/.test(fcOb.notes || '') && /Empreiteiro Teste FC/.test(fcOb.notes || ''), 'pagamento com a lista de PIX por pessoa e empreiteiro');
+  ok(!(await fcAna('GET', '/payroll/months')).data.finance_candidates.some(c => /Folha de Campo/.test(c.title)), 'pagamento da Folha de Campo não vira folha pré-lançada da Folha Administrativa');
+  ok((await fcAna('PUT', `/field/sheets/${fcS.id}`, { activities: 'x' })).status === 400, 'folha fechada não aceita alteração');
+  await fcAna('PUT', `/field/workers/${fcP.id}`, { name: 'Pedreiro Teste FC', kind: 'diarista', role: 'Pedreiro', daily_rate: 300, active: 1 });
+  ok((await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcP.id).total === 900, 'folha fechada mantém a diária congelada');
+  ok((await fcJul('POST', `/field/sheets/${fcS.id}/reopen`)).status === 403 && (await fcJul('DELETE', `/field/sheets/${fcS.id}`)).status === 400, 'sem a seção não reabre; folha fechada não é excluída');
+  const fcRe = (await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).data;
+  ok(fcRe.status === 'aberta' && !fcRe.payment && fcRe.people.find(e => e.worker_id === fcP.id).total === 1500, 'reabrir remove o pagamento pendente e volta aos valores do cadastro');
+  const fcCl2 = (await fcAna('POST', `/field/sheets/${fcS.id}/close`, { pay_date: '2026-09-18' })).data;
+  const fcSum = (await fcAna('GET', '/field/summary?obra=2')).data;
+  const fcSumP = fcSum.workers.find(w => w.worker_id === fcP.id);
+  ok(fcSum.sheets === 2 && fcSumP.diarias === 5 && fcSumP.company_pending === 1500 && fcSum.totals.pending === fcCl2.payment.amount && fcSum.contracts.find(c => c.id === fcC.id).measured_pct === 100, 'consolidado da obra: diárias, a pagar e empreitada');
+  ok((await fcJul('GET', '/field/summary?obra=2')).status === 403, 'consolidado com valores só para a seção');
+  ok((await fcJul('DELETE', `/field/sheets/${fcS2.id}`)).data.ok && (await fcAna('GET', '/field/contracts?obra=2')).data.find(c => c.id === fcC.id).measured_pct === 40, 'excluir folha aberta devolve o saldo da empreitada');
+  ok((await fcAna('GET', '/audit')).data.some(a => a.entity === 'field' && a.action === 'Folha de campo fechada') && !(await fcCam('GET', '/audit')).data?.some?.(a => a.entity === 'field'), 'ações da Folha de Campo na auditoria (só para a seção)');
+
 }
 
 main()

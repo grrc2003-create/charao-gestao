@@ -115,6 +115,7 @@ const routes = [
   ['/campo/profissionais', Field.workers],
   ['/campo/empreitadas', Field.contracts],
   ['/campo/consolidado', Field.summary],
+  ['/campo/resumo', Field.analysisView],
   ['/campo/:id', Field.view],
   ['/folha', Payroll.list],
   ['/folha/pessoas', Payroll.people],

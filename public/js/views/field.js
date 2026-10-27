@@ -20,6 +20,7 @@ const fieldTabs = (cur, obra) => html`<nav class="fc-tabs">
   <a href="#/campo${obra ? `?obra=${obra}` : ''}" class="${cur === 'folhas' ? 'on' : ''}">Folhas</a>
   <a href="#/campo/profissionais" class="${cur === 'prof' ? 'on' : ''}">Profissionais</a>
   <a href="#/campo/empreitadas${obra ? `?obra=${obra}` : ''}" class="${cur === 'emp' ? 'on' : ''}">Empreitadas</a>
+  <a href="#/campo/resumo${obra ? `?obra=${obra}` : ''}" class="${cur === 'ana' ? 'on' : ''}" data-money-tab>Resumo e análise</a>
   ${cur === 'cons' || obra ? html`<a href="#/campo/consolidado?obra=${obra || ''}" class="${cur === 'cons' ? 'on' : ''}" data-money-tab>Consolidado</a>` : ''}</nav>`;
 
 // ---------- Folhas ----------
@@ -50,7 +51,7 @@ export async function list({ query, navigate, state }) {
       <button type="button" class="fab" data-new aria-label="Nova folha">${icon('plus')}</button>`,
     mount(root) {
       root.querySelector('#fc-obra').addEventListener('change', e => navigate(`/campo${e.target.value ? `?obra=${e.target.value}` : ''}`));
-      if (!mny) root.querySelector('[data-money-tab]')?.remove();
+      if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
       root.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
         if (!d.projects.length) return toast('Nenhuma obra liberada para a Folha de Campo.', 'error');
         const last = obra && d.sheets.find(s => s.project_id === obra);
@@ -313,7 +314,7 @@ export async function workers({ render }) {
       ${fieldTabs('prof', 0)}
       ${group('diarista', 'Diaristas (mão de obra própria)')}${group('empreiteiro', 'Empreiteiros')}`,
     mount(root) {
-      if (!mny) root.querySelector('[data-money-tab]')?.remove();
+      if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
       root.querySelector('[data-new]').addEventListener('click', () => workerSheet(null, mny, () => { toast('Profissional cadastrado.'); render(); }, d.pix_types));
       root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => workerSheet(d.workers.find(w => w.id === Number(b.dataset.ed)), mny, () => { toast('Cadastro salvo.'); render(); }, d.pix_types)));
     },
@@ -359,7 +360,7 @@ export async function contracts({ query, navigate, render }) {
           ${mny ? html`<button type="button" class="btn btn-ghost btn-sm" data-ed="${c.id}">${icon('edit')}Editar</button>` : ''}</li>`)}</ul></section>`
         : html`<div class="empty-state"><h2>Nenhuma empreitada${obra ? ' nesta obra' : ''}</h2><p>${mny ? 'Cadastre a empreitada (empreiteiro, serviço e valor total) para medi-la nas folhas.' : 'O escritório cadastra as empreitadas da obra.'}</p></div>`}`,
     mount(root) {
-      if (!mny) root.querySelector('[data-money-tab]')?.remove();
+      if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
       root.querySelector('#ec-obra').addEventListener('change', e => navigate(`/campo/empreitadas${e.target.value ? `?obra=${e.target.value}` : ''}`));
       root.querySelector('[data-new]')?.addEventListener('click', () => form(null));
       root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => form(list.find(c => c.id === Number(b.dataset.ed)))));
@@ -395,6 +396,128 @@ export async function summary({ query, navigate }) {
             <div class="fc-bar"><span style="width:${Math.min(100, c.measured_pct)}%"></span></div></div></li>`)}</ul>` : html`<p class="muted card-body">Nenhuma empreitada.</p>`}</section>`}`,
     mount(root) {
       root.querySelector('#cs-obra')?.addEventListener('change', e => navigate(`/campo/consolidado?obra=${e.target.value}`));
+    },
+  };
+}
+
+// ---------- Resumo por obra e análise ----------
+// Cores validadas (daltonismo e contraste): mão de obra própria e empreitadas
+const C_MO = '#2563A8', C_EMP = '#E0661C';
+const MON = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const monLabel = ym => `${MON[Number(ym.slice(5, 7)) - 1]}/${ym.slice(2, 4)}`;
+const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+const kfmt = v => (Math.abs(v) >= 1000 ? `R$ ${n2(Math.round(v / 100) / 10)} mil` : money(v));
+const tip = (title, rows) => `${title}|${rows.join('|')}`;
+const legend = html`<div class="fa-legend"><span><i style="background:${C_MO}"></i>Mão de obra própria</span><span><i style="background:${C_EMP}"></i>Empreitadas</span></div>`;
+
+function insights(d) {
+  const t = d.totals, out = [];
+  if (!t.sheets) return out;
+  out.push(`Total medido de ${money(t.total)} em ${t.sheets} folha(s): ${pct(t.people, t.total)}% mão de obra própria e ${pct(t.contracts, t.total)}% empreitadas.`);
+  if (t.diarias) out.push(`${n2(t.diarias)} diárias com custo médio de ${money(t.avg_daily)} por diária e equipe média de ${n2(t.avg_team)} pessoa(s) por dia trabalhado.`);
+  if (d.obras.length > 1) { const o = d.obras[0]; out.push(`${o.code} · ${o.name} concentra ${pct(o.total, t.total)}% do custo medido (${money(o.total)}).`); }
+  if (d.months.length > 1) {
+    const top = [...d.months].sort((a, b) => b.total - a.total)[0];
+    const [prev, last] = d.months.slice(-2);
+    const v = prev.total ? Math.round(((last.total - prev.total) / prev.total) * 100) : null;
+    out.push(`Mês de maior custo: ${monLabel(top.month)} (${money(top.total)}).${v !== null ? ` ${monLabel(last.month)} ${v >= 0 ? 'subiu' : 'caiu'} ${Math.abs(v)}% em relação a ${monLabel(prev.month)}.` : ''}`);
+  }
+  const sv = d.services.filter(s => s.name !== 'Sem apropriação');
+  if (sv.length) out.push(`Serviço com maior custo: ${sv[0].name} (${money(sv[0].total)}, ${pct(sv[0].total, t.total)}%).`);
+  const none = d.services.find(s => s.name === 'Sem apropriação');
+  if (none && none.total) out.push(`${money(none.total)} de mão de obra sem serviço apropriado — preencha "Apropriar" nas folhas para a análise por serviço ficar completa.`);
+  if (t.client) out.push(`O cliente pagou diretamente ${money(t.client)} (${pct(t.client, t.total)}% do medido).`);
+  if (t.pending) out.push(`${money(t.pending)} a pagar no Financeiro (folhas fechadas ainda não pagas).`);
+  if (t.open) out.push(`${money(t.open)} em folhas ainda abertas (não fechadas).`);
+  const ct = d.contracts.filter(c => c.status === 'ativa');
+  if (ct.length) { const tot = ct.reduce((a, c) => a + c.total, 0), med = ct.reduce((a, c) => a + c.measured, 0); out.push(`Empreitadas ativas: ${pct(med, tot)}% medido, saldo de ${money(tot - med)} a medir.`); }
+  return out;
+}
+
+export async function analysisView({ query, navigate }) {
+  const qs = { obra: query.get('obra') || '', de: query.get('de') || '', ate: query.get('ate') || '' };
+  const d = await api('/field/analysis', { query: qs });
+  const t = d.totals;
+  const maxM = Math.max(1, ...d.months.map(m => m.total));
+  const maxS = Math.max(1, ...d.services.map(s => s.total));
+  const maxO = Math.max(1, ...d.obras.map(o => o.total));
+  const maxW = Math.max(1, ...d.workers.map(w => w.total));
+  const sbar = (a, b, max) => html`<div class="fa-hbar">${a ? html`<span style="width:${(a / max) * 100}%;background:${C_MO}"></span>` : ''}${b ? html`<span style="width:${(b / max) * 100}%;background:${C_EMP}"></span>` : ''}</div>`;
+  const ins = insights(d);
+  return {
+    title: 'Resumo e análise · Folha de Campo',
+    html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Resumo e análise', sub: 'Resumo por obra e análise do custo de mão de obra própria e empreitadas. Cada folha entra no mês do seu fim.' })}
+      ${fieldTabs('ana', Number(qs.obra) || 0)}
+      <form class="fa-filters section" id="fa-f">
+        <label>Obra<select name="obra"><option value="">Todas as obras</option>${d.projects.map(p => html`<option value="${p.id}" ${Number(qs.obra) === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></label>
+        <label>De<input type="month" name="de" value="${qs.de}"></label>
+        <label>Até<input type="month" name="ate" value="${qs.ate}"></label>
+        ${qs.obra || qs.de || qs.ate ? html`<a class="btn btn-ghost btn-sm" href="#/campo/resumo">Limpar</a>` : ''}
+      </form>
+      ${!t.sheets ? html`<div class="empty-state"><h2>Nenhuma folha no filtro</h2><p>Ajuste a obra ou o período.</p></div>` : html`
+      <div class="pf-kpis fa-kpis section">
+        <div class="pf-kt"><span>Total medido</span><b>${money(t.total)}</b></div>
+        <div><span>Mão de obra própria</span><b>${money(t.people)}</b></div>
+        <div><span>Empreitadas</span><b>${money(t.contracts)}</b></div>
+        <div><span>Diárias</span><b>${n2(t.diarias)}</b></div>
+        <div><span>Custo médio / diária</span><b>${money(t.avg_daily)}</b></div>
+        <div><span>Equipe média / dia</span><b>${n2(t.avg_team)}</b></div>
+        <div><span>Pago pelo cliente</span><b>${money(t.client)}</b></div>
+        <div><span>Empresa: pago</span><b>${money(t.paid)}</b></div>
+        <div><span>Empresa: a pagar</span><b>${money(t.pending)}</b></div>
+        <div><span>Em folhas abertas</span><b>${money(t.open)}</b></div>
+      </div>
+      ${ins.length ? html`<section class="card section"><div class="card-head"><h2>${icon('info')}Destaques</h2></div><ul class="fa-ins">${ins.map(x => html`<li>${x}</li>`)}</ul></section>` : ''}
+      <section class="card section"><div class="card-head"><h2>${icon('projects')}Resumo por obra</h2><span class="sub">${d.obras.length}</span></div>
+        <div class="fc-table-wrap"><table class="fc-table fa-obras"><thead><tr><th>Obra</th><th>Folhas</th><th>Diárias</th><th>Equipe/dia</th><th>Mão de obra</th><th>Empreitadas</th><th>Total</th><th class="fa-barcol"></th><th>Cliente</th><th>Empresa paga</th><th>A pagar</th><th>Em aberto</th></tr></thead>
+          <tbody>${d.obras.map(o => html`<tr data-href="#/campo/consolidado?obra=${o.project_id}" data-tip="${tip(`${o.code} · ${o.name}`, [`Mão de obra: ${money(o.people)}`, `Empreitadas: ${money(o.contracts)}`, `Custo médio/diária: ${money(o.avg_daily)}`, `Última folha até ${fmtDate(o.last_end)}`])}">
+            <td><b>${o.code}</b><small>${o.name}${o.open_sheets ? ` · ${o.open_sheets} aberta(s)` : ''}</small></td><td>${o.sheets}</td><td>${n2(o.diarias)}</td><td>${n2(o.avg_team)}</td>
+            <td>${money(o.people)}</td><td>${money(o.contracts)}</td><td><b>${money(o.total)}</b></td><td class="fa-barcol">${sbar(o.people, o.contracts, maxO)}</td>
+            <td>${money(o.client)}</td><td>${money(o.paid)}</td><td class="${o.pending ? 'fc-warn' : ''}">${money(o.pending)}</td><td>${money(o.open)}</td></tr>`)}</tbody>
+          ${d.obras.length > 1 ? html`<tfoot><tr><td><b>Total</b></td><td>${t.sheets}</td><td>${n2(t.diarias)}</td><td>${n2(t.avg_team)}</td><td>${money(t.people)}</td><td>${money(t.contracts)}</td><td><b>${money(t.total)}</b></td><td class="fa-barcol"></td><td>${money(t.client)}</td><td>${money(t.paid)}</td><td>${money(t.pending)}</td><td>${money(t.open)}</td></tr></tfoot>` : ''}</table></div>
+        <p class="hint card-body">Toque na obra para ver o consolidado por profissional.</p></section>
+      <div class="fa-grid">
+        <section class="card section"><div class="card-head"><h2>${icon('calendar')}Custo por mês</h2></div><div class="card-body">${legend}
+          <div class="fa-cols">${d.months.map(m => html`<div class="fa-col" data-tip="${tip(monLabel(m.month), [`Mão de obra: ${money(m.people)}`, `Empreitadas: ${money(m.contracts)}`, `Total: ${money(m.total)}`, `${n2(m.diarias)} diárias`])}">
+            <em>${kfmt(m.total)}</em><div class="fa-stack" style="height:${(m.total / maxM) * 100}%">${m.contracts ? html`<span style="flex:${m.contracts};background:${C_EMP}"></span>` : ''}${m.people ? html`<span style="flex:${m.people};background:${C_MO}"></span>` : ''}</div><small>${monLabel(m.month)}</small></div>`)}</div></div></section>
+        <section class="card section"><div class="card-head"><h2>${icon('checklist')}Custo por serviço (apropriação)</h2></div><div class="card-body">${legend}
+          <ul class="fa-bars">${d.services.slice(0, 12).map(s => html`<li data-tip="${tip(s.name, [`Mão de obra: ${money(s.people)} (${n2(s.diarias)} diárias)`, `Empreitadas: ${money(s.contracts)}`, `${pct(s.total, t.total)}% do total`])}"><div class="fa-bl"><span>${s.name}</span><b>${money(s.total)}</b></div>${sbar(s.people, s.contracts, maxS)}</li>`)}</ul></div></section>
+      </div>
+      <div class="fa-grid">
+        <section class="card section"><div class="card-head"><h2>${icon('users')}Por função</h2></div>
+          <div class="fc-table-wrap"><table class="fc-table"><thead><tr><th>Função</th><th>Pessoas</th><th>Diárias</th><th>Custo</th><th>Média/diária</th></tr></thead>
+            <tbody>${d.roles.map(r => html`<tr><td><b>${r.name}</b></td><td>${r.workers}</td><td>${n2(r.diarias)}</td><td>${money(r.total)}</td><td>${money(r.avg_daily)}</td></tr>`)}</tbody></table></div></section>
+        <section class="card section"><div class="card-head"><h2>${icon('user')}Maiores valores por profissional</h2></div><div class="card-body">${legend}
+          <ul class="fa-bars">${d.workers.map(w => html`<li data-tip="${tip(w.name, [w.kind === 'empreiteiro' ? 'Empreiteiro' : `${w.role || 'Diarista'} · ${n2(w.diarias)} diárias`, `Total: ${money(w.total)}`, `Obras: ${w.obras.join(', ')}`])}"><div class="fa-bl"><span>${w.name}<small>${w.kind === 'empreiteiro' ? 'Empreiteiro' : `${w.role || ''} · ${n2(w.diarias)} diárias`}</small></span><b>${money(w.total)}</b></div>
+            <div class="fa-hbar"><span style="width:${(w.total / maxW) * 100}%;background:${w.kind === 'empreiteiro' ? C_EMP : C_MO}"></span></div></li>`)}</ul></div></section>
+      </div>
+      ${d.contracts.length ? html`<section class="card section"><div class="card-head"><h2>${icon('contract')}Empreitadas: medido e saldo</h2></div><ul class="rows">${d.contracts.map(c => html`<li class="fc-wrow ${c.status === 'encerrada' ? 'fc-off' : ''}"><div class="grow">
+        <div class="row-title">${c.service} · ${c.worker_name}</div><div class="row-meta"><span>${c.project_code}</span><span>Contrato ${money(c.total)}</span><span>Medido ${money(c.measured)} (${n2(c.measured_pct)}%)</span><span>Saldo ${money(c.balance)}</span></div>
+        <div class="fc-bar"><span style="width:${Math.min(100, c.measured_pct)}%"></span></div></div></li>`)}</ul></section>` : ''}`}
+      <div class="fa-tip" hidden></div>`,
+    mount(root) {
+      const form = root.querySelector('#fa-f');
+      form.addEventListener('change', () => {
+        const q = new URLSearchParams([...new FormData(form)].filter(([, v]) => v)).toString();
+        navigate(`/campo/resumo${q ? `?${q}` : ''}`);
+      });
+      root.querySelectorAll('tr[data-href]').forEach(tr => tr.addEventListener('click', () => { location.hash = tr.dataset.href; }));
+      // Dica ao passar o mouse (ou tocar) em barras, colunas e linhas
+      const box = root.querySelector('.fa-tip');
+      const show = (el, x, y) => {
+        const [title, ...rows] = el.dataset.tip.split('|');
+        box.innerHTML = html`<b>${title}</b>${rows.map(r => html`<span>${r}</span>`)}`.toString();
+        box.hidden = false;
+        const w = box.offsetWidth, h = box.offsetHeight;
+        box.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, x + 12))}px`;
+        box.style.top = `${Math.max(8, y - h - 12)}px`;
+      };
+      root.querySelectorAll('[data-tip]').forEach(el => {
+        el.addEventListener('mousemove', e => show(el, e.clientX, e.clientY));
+        el.addEventListener('mouseleave', () => { box.hidden = true; });
+        el.addEventListener('touchstart', e => { const p = e.touches[0]; show(el, p.clientX, p.clientY); }, { passive: true });
+      });
+      window.addEventListener('scroll', function hide() { if (!root.isConnected) return window.removeEventListener('scroll', hide); box.hidden = true; }, { passive: true });
     },
   };
 }

@@ -418,3 +418,62 @@ export function summary(ctx, projectId) {
     totals: { open, pending, paid, contracts_total: r2(contracts.reduce((a, c) => a + c.total, 0)), contracts_measured: r2(contracts.reduce((a, c) => a + c.measured, 0)) },
   };
 }
+
+// ---------- Resumo por obra e análise (seção folha_campo) ----------
+// Cada folha entra no mês do seu fim. Filtros: período (AAAA-MM a AAAA-MM) e obra.
+const ymOk = v => (/^\d{4}-(0[1-9]|1[0-2])$/.test(v || '') ? v : null);
+export function analysis(ctx, { from, to, obra } = {}) {
+  requireMoney(ctx);
+  const projects = fillableProjects(ctx);
+  const ids = new Set(projects.map(p => p.id));
+  const f = ymOk(from), t = ymOk(to);
+  if (f && t && t < f) throw badRequest('O fim do período não pode ser antes do início.');
+  const sheets = all('SELECT * FROM field_sheets ORDER BY end_date, id').filter(s => ids.has(s.project_id) && (!obra || s.project_id === obra)
+    && (!f || s.end_date.slice(0, 7) >= f) && (!t || s.end_date.slice(0, 7) <= t));
+  const byObra = new Map(), byMonth = new Map(), byService = new Map(), byRole = new Map(), byWorker = new Map();
+  const add = (m, k, init) => { if (!m.has(k)) m.set(k, init()); return m.get(k); };
+  const tot = { sheets: 0, diarias: 0, people: 0, contracts: 0, client: 0, company: 0, paid: 0, pending: 0, open: 0, workdays: 0 };
+  for (const s of sheets) {
+    const c = computeSheet(s);
+    const pay = paymentOf(s);
+    const state = s.status === 'aberta' ? 'open' : pay?.status === 'paga' || !pay ? 'paid' : 'pending';
+    const p = projects.find(x => x.id === s.project_id);
+    const o = add(byObra, s.project_id, () => ({ project_id: p.id, code: p.code, name: p.name, status: p.status, sheets: 0, diarias: 0, people: 0, contracts: 0, client: 0, company: 0, paid: 0, pending: 0, open: 0, workdays: 0, last_end: null, open_sheets: 0 }));
+    const workdays = new Set(c.people.flatMap(e => Object.keys(e.days).filter(d => Number(e.days[d]) > 0))).size;
+    const company = Math.max(0, c.totals.company);
+    for (const x of [o, tot]) {
+      x.sheets++; x.diarias = r2(x.diarias + c.totals.diarias); x.people = r2(x.people + c.totals.people); x.contracts = r2(x.contracts + c.totals.contracts);
+      x.client = r2(x.client + c.totals.client); x.company = r2(x.company + company); x[state] = r2(x[state] + company); x.workdays += workdays;
+    }
+    o.last_end = s.end_date; if (s.status === 'aberta') o.open_sheets++;
+    const mo = add(byMonth, s.end_date.slice(0, 7), () => ({ month: s.end_date.slice(0, 7), people: 0, contracts: 0, diarias: 0 }));
+    mo.people = r2(mo.people + c.totals.people); mo.contracts = r2(mo.contracts + c.totals.contracts); mo.diarias = r2(mo.diarias + c.totals.diarias);
+    for (const e of c.people) {
+      const sv = add(byService, e.service || 'Sem apropriação', () => ({ name: e.service || 'Sem apropriação', people: 0, contracts: 0, diarias: 0 }));
+      sv.people = r2(sv.people + e.total); sv.diarias = r2(sv.diarias + e.diarias);
+      const rl = add(byRole, e.role || 'Sem função', () => ({ name: e.role || 'Sem função', diarias: 0, total: 0, workers: new Set() }));
+      rl.diarias = r2(rl.diarias + e.diarias); rl.total = r2(rl.total + e.total); rl.workers.add(e.worker_id);
+      const wk = add(byWorker, e.worker_id, () => ({ worker_id: e.worker_id, name: e.name, role: e.role, kind: 'diarista', diarias: 0, total: 0, obras: new Set() }));
+      wk.diarias = r2(wk.diarias + e.diarias); wk.total = r2(wk.total + e.total); wk.obras.add(p.code);
+    }
+    for (const x of c.contracts) {
+      const sv = add(byService, x.service, () => ({ name: x.service, people: 0, contracts: 0, diarias: 0 }));
+      sv.contracts = r2(sv.contracts + x.amount);
+      const wk = add(byWorker, `e${x.worker_name}`, () => ({ name: x.worker_name, role: 'Empreiteiro', kind: 'empreiteiro', diarias: 0, total: 0, obras: new Set() }));
+      wk.total = r2(wk.total + x.amount); wk.obras.add(p.code);
+    }
+  }
+  const fin = o => ({ ...o, total: r2(o.people + o.contracts), avg_daily: o.diarias ? r2(o.people / o.diarias) : 0, avg_team: o.workdays ? r2(o.diarias / o.workdays) : 0 });
+  const months = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)).map(m => ({ ...m, total: r2(m.people + m.contracts) }));
+  return {
+    filters: { from: f, to: t, obra: obra || null },
+    projects,
+    totals: fin(tot),
+    obras: [...byObra.values()].map(fin).sort((a, b) => b.total - a.total),
+    months,
+    services: [...byService.values()].map(x => ({ ...x, total: r2(x.people + x.contracts) })).sort((a, b) => b.total - a.total),
+    roles: [...byRole.values()].map(x => ({ name: x.name, diarias: x.diarias, total: x.total, workers: x.workers.size, avg_daily: x.diarias ? r2(x.total / x.diarias) : 0 })).sort((a, b) => b.total - a.total),
+    workers: [...byWorker.values()].map(x => ({ name: x.name, role: x.role, kind: x.kind, diarias: x.diarias, total: x.total, obras: [...x.obras] })).sort((a, b) => b.total - a.total).slice(0, 15),
+    contracts: listContracts(ctx).filter(c => !obra || c.project_id === obra),
+  };
+}

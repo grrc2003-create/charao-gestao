@@ -2391,6 +2391,13 @@ async function main() {
   const fcSumP = fcSum.workers.find(w => w.worker_id === fcP.id);
   ok(fcSum.sheets === 2 && fcSumP.diarias === 5 && fcSumP.company_pending === 1500 && fcSum.totals.pending === fcCl2.payment.amount && fcSum.contracts.find(c => c.id === fcC.id).measured_pct === 100, 'consolidado da obra: diárias, a pagar e empreitada');
   ok((await fcJul('GET', '/field/summary?obra=2')).status === 403, 'consolidado com valores só para a seção');
+  const fcAn = (await fcAna('GET', '/field/analysis')).data;
+  const fcAnO = fcAn.obras.find(o => o.project_id === 2);
+  ok(fcAnO && fcAnO.sheets === 2 && fcAnO.people === 1975 && fcAnO.contracts === 5000 && fcAnO.pending === fcCl2.payment.amount && fcAnO.diarias === 9.5, 'resumo por obra: folhas, mão de obra, empreitadas e a pagar');
+  ok(fcAn.months.find(m => m.month === '2026-09').total === 6975 && fcAn.services.find(s => s.name === 'Pintura teste').contracts === 5000 && fcAn.services.find(s => s.name === 'Alvenaria').people === 1975, 'análise por mês e por serviço (apropriação e empreitada)');
+  ok(fcAn.roles.find(r => r.name === 'Pedreiro').avg_daily === 300 && fcAn.workers[0].name === 'Empreiteiro Teste FC' && fcAnO.avg_team === 1.9, 'análise por função, profissionais e equipe média por dia');
+  ok((await fcAna('GET', '/field/analysis?de=2026-10')).data.totals.sheets === 0 && (await fcAna('GET', '/field/analysis?obra=2&de=2026-09&ate=2026-09')).data.totals.sheets === 2, 'filtros de obra e período');
+  ok((await fcJul('GET', '/field/analysis')).status === 403 && (await fcAna('GET', '/field/analysis?de=2026-10&ate=2026-09')).status === 400, 'análise só para a seção; período inválido recusado');
   ok((await fcJul('DELETE', `/field/sheets/${fcS2.id}`)).data.ok && (await fcAna('GET', '/field/contracts?obra=2')).data.find(c => c.id === fcC.id).measured_pct === 40, 'excluir folha aberta devolve o saldo da empreitada');
   ok((await fcAna('GET', '/audit')).data.some(a => a.entity === 'field' && a.action === 'Folha de campo fechada') && !(await fcCam('GET', '/audit')).data?.some?.(a => a.entity === 'field'), 'ações da Folha de Campo na auditoria (só para a seção)');
 

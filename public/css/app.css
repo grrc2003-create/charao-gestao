@@ -3157,3 +3157,37 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
 .fp-grid + .pf-foot { margin-top: 14px; }
 @media (max-width: 640px) { .fp-grid { grid-template-columns: 1fr; } .fp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .fp-val { font-size: 18px; } }
+
+/* Pagamentos em lista */
+.fp-list { list-style: none; margin: 0; padding: 0; }
+.fp-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(220px, 1.6fr) 130px 120px; gap: 6px 14px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); }
+.fp-list2 .fp-row { grid-template-columns: minmax(180px, 1.2fr) minmax(220px, 1.6fr) 120px 120px 120px; }
+.fp-head { font-size: 12px; color: var(--muted); font-weight: 600; border-top: 0; padding-top: 8px; padding-bottom: 8px; background: var(--navy-50); }
+.fp-foot { background: var(--navy-50); }
+.fp-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fp-row .fp-who { min-width: 0; }
+.fp-row .fp-who b { display: block; font-size: 14px; }
+.fp-row .fp-who small { display: block; color: var(--muted); font-size: 12px; }
+.fp-row .fp-val { font-size: 15.5px; color: var(--navy); }
+.fp-open { color: #1F5F9E; font-weight: 600; }
+.fp-row .fp-pix { background: none; padding: 0; gap: 8px; }
+.fp-row .fp-nopix { color: #A93226; font-size: 13px; }
+.fp-copy { justify-self: end; }
+.fp-row .fp-det { grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  .fp-row, .fp-list2 .fp-row { grid-template-columns: 1fr auto; gap: 4px 10px; }
+  .fp-head { display: none; }
+  .fp-row .fp-who { grid-column: 1; grid-row: 1; }
+  .fp-row .fp-val { grid-column: 2; grid-row: 1; }
+  .fp-row .fp-pix { grid-column: 1; grid-row: 2; min-width: 0; }
+  .fp-copy { grid-column: 2; grid-row: 2; }
+  .fp-list2 .fp-row .fp-open { grid-column: 2; grid-row: 3; font-size: 13px; }
+  .fp-list2 .fp-row .fp-det { grid-column: 1; grid-row: 3; }
+  .fp-foot.fp-row .fp-open { grid-row: 2; }
+  .fp-list2 [data-l]::before { content: attr(data-l) ' '; font-size: 11px; color: var(--muted); font-weight: 600; }
+}
+@media (max-width: 640px) {
+  .fp-card .card-head { flex-wrap: wrap; row-gap: 8px; }
+  .fp-card .card-head h2 { flex: 1 1 100%; }
+  .fp-card .fp-tot { display: none; }
+}

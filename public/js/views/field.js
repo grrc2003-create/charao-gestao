@@ -157,7 +157,7 @@ export async function view({ params, navigate, render }) {
       ${mny ? html`<section class="card section fp-card"><div class="card-head"><h2>${icon('wallet')}${edit ? 'A pagar nesta folha' : 'Pagamentos desta folha'}</h2><span id="fc-paytot" class="fp-tot"></span>
           <button type="button" class="btn btn-ghost btn-sm" id="fc-paycopy" data-copy="" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista</button></div>
         ${s.payment ? html`<p class="card-body fp-state">${icon('wallet')}No Financeiro: <b>${money(s.payment.amount)}</b> · vence ${fmtDate(s.payment.due_date)} · ${s.payment.status === 'paga' ? html`<span class="fc-pay fc-pay-ok">Pago</span>` : html`<span class="fc-pay">A pagar</span>`}</p>` : ''}
-        <ul class="fp-grid fp-in" id="fc-pay"></ul></section>` : ''}
+        <ul class="fp-list" id="fc-pay"></ul></section>` : ''}
       <datalist id="fc-services">${s.services.map(x => html`<option value="${x}">`)}</datalist>
       <section class="card section">
         <div class="card-head"><h2>${icon('users')}Mão de obra própria (diárias)</h2><span class="sub">${st.people.length}</span></div>
@@ -184,7 +184,9 @@ export async function view({ params, navigate, render }) {
         const box = root.querySelector('#fc-pay');
         if (!box) return;
         const list = sheetPayList(st.people, st.contracts, pCalc, cCalc);
-        box.innerHTML = list.length ? list.map(p => payCard(p).toString()).join('') : html`<li class="muted fp-none">Nada a pagar pela empresa nesta folha.</li>`.toString();
+        const sum = list.reduce((a, p) => a + p.amount, 0);
+        box.innerHTML = list.length ? html`${payHead}${list.map(payRow)}<li class="fp-row fp-foot"><span><b>Total</b></span><span></span><strong class="fp-num fp-val">${money(sum)}</strong><span></span></li>`.toString()
+          : html`<li class="muted fp-none">Nada a pagar pela empresa nesta folha.</li>`.toString();
         root.querySelector('#fc-paytot').textContent = list.length ? `${list.length} · ${money(list.reduce((a, p) => a + p.amount, 0))}` : '';
         root.querySelector('#fc-paycopy').dataset.copy = payText(list);
       };
@@ -538,7 +540,6 @@ export async function analysisView({ query, navigate }) {
 }
 
 // ---------- Pagamentos: quem recebe, quanto e o PIX ----------
-const initialsOf = n => String(n || '?').replace(/^Demo — /, '').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
   catch {
@@ -555,13 +556,14 @@ function bindCopy(root) {
     toast(b.dataset.copyMsg || 'Copiado.');
   });
 }
-const pixLine = p => (p.pix
-  ? html`<div class="fp-pix"><span class="fp-pt">${p.pix_type || 'PIX'}</span><code>${p.pix}</code><button type="button" class="btn btn-ghost btn-sm" data-copy="${p.pix}" data-copy-msg="PIX de ${p.name} copiado.">Copiar PIX</button></div>`
-  : html`<div class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX no cadastro — <a href="#/campo/profissionais">completar</a></span></div>`);
+const pixCell = p => (p.pix
+  ? html`<span class="fp-pix"><span class="fp-pt">${p.pix_type || 'PIX'}</span><code>${p.pix}</code></span>`
+  : html`<span class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX — <a href="#/campo/profissionais">completar</a></span></span>`);
+const copyBtn = p => (p.pix ? html`<button type="button" class="btn btn-ghost btn-sm fp-copy" data-copy="${p.pix}" data-copy-msg="PIX de ${p.name} copiado.">Copiar PIX</button>` : html`<span class="fp-copy"></span>`);
 const payText = list => list.map(p => `${p.name} — ${money(p.amount)}${p.pix ? ` — PIX ${p.pix_type ? `(${p.pix_type}) ` : ''}${p.pix}` : ' — SEM PIX'}`).join('\n');
-const payCard = (p, extra = '') => html`<li class="fp-item">
-  <div class="fp-top"><span class="fp-av">${initialsOf(p.name)}</span><div class="fp-who"><b>${p.name}</b><small>${p.what || p.role || ''}</small></div><strong class="fp-val">${money(p.amount)}</strong></div>
-  ${pixLine(p)}${extra}</li>`;
+// Lista da folha: Quem recebe · PIX · Valor · Copiar
+const payHead = html`<li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Valor</span><span></span></li>`;
+const payRow = p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.what || p.role || ''}</small></span>${pixCell(p)}<strong class="fp-num fp-val">${money(p.amount)}</strong>${copyBtn(p)}</li>`;
 
 // Lista da própria folha (valores ao vivo enquanto aberta)
 function sheetPayList(people, contracts, calcP, calcC) {
@@ -587,9 +589,12 @@ export async function paymentsView({ query, navigate }) {
         <div><span>Previsto (folhas abertas)</span><b>${money(t.open)}</b></div>
         <div><span>Pessoas a receber</span><b>${d.people.length}</b></div>
       </div>
-      ${d.people.length ? html`<ul class="fp-grid section">${d.people.map(p => payCard({ ...p, amount: p.total }, html`
-          <div class="fp-split">${p.pending ? html`<span class="fc-pay">A pagar ${money(p.pending)}</span>` : ''}${p.open ? html`<span class="fp-prev">Previsto ${money(p.open)}</span>` : ''}</div>
-          <details class="fp-det"><summary>${p.items.length} lançamento(s)</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}</ul></details>`))}</ul>`
+      ${d.people.length ? html`<section class="card section"><ul class="fp-list fp-list2">
+          <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">A pagar</span><span class="fp-num">Previsto</span><span></span></li>
+          ${d.people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small></span>${pixCell(p)}
+            <strong class="fp-num fp-val" data-l="A pagar">${p.pending ? money(p.pending) : '—'}</strong><span class="fp-num fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span>${copyBtn(p)}
+            <details class="fp-det"><summary>${p.items.length} lançamento(s)</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}</ul></details></li>`)}
+          <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><strong class="fp-num fp-val" data-l="A pagar">${money(t.pending)}</strong><span class="fp-num fp-open" data-l="Previsto">${money(t.open)}</span><span></span></li></ul></section>`
         : html`<div class="empty-state"><h2>Nada a pagar</h2><p>Todas as folhas fechadas estão pagas no Financeiro.</p></div>`}
       <p class="muted pf-foot">O pagamento é registrado no Financeiro (uma tarefa por folha fechada, com esta mesma lista). Folhas abertas aparecem como previsto até serem fechadas.</p>`,
     mount(root) {

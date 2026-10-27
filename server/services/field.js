@@ -9,7 +9,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, notFound, forbidden, str, date, intOrNull } from '../lib/http.js';
 import { hasSection, canAccessProject, canManageProject } from '../lib/permissions.js';
 import { audit } from './audit.js';
-import { createObligationInternal, obligationPaid, removeObligationInternal } from './finance.js';
+import { createObligationInternal, obligationPaid, removeObligationInternal, payItemInternal, unpayItemInternal } from './finance.js';
 import { today } from './metrics.js';
 
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
@@ -172,7 +172,7 @@ function computeSheet(s) {
     const gross = r2(diarias * rate);
     const total = r2(gross + e.adjust);
     return { id: e.id, worker_id: e.worker_id, name: f.name ?? e.name, role: f.role ?? e.role, pix: f.pix ?? e.pix, pix_type: f.pix_type ?? e.pix_type, doc: f.doc ?? e.doc,
-      days, diarias, rate, gross, adjust: e.adjust, adjust_note: e.adjust_note, total, client_paid: e.client_paid, company: r2(total - e.client_paid), service: e.service };
+      days, diarias, rate, gross, adjust: e.adjust, adjust_note: e.adjust_note, total, client_paid: e.client_paid, company: r2(total - e.client_paid), service: e.service, paid_at: e.paid_at };
   });
   const contracts = all(`SELECT sc.*, c.service, c.total AS c_total, c.worker_id, w.name AS worker_name, w.pix, w.pix_type FROM field_sheet_contracts sc
     JOIN field_contracts c ON c.id = sc.contract_id JOIN field_workers w ON w.id = c.worker_id WHERE sc.sheet_id = ? ORDER BY w.name, c.service`, s.id).map(x => {
@@ -181,7 +181,7 @@ function computeSheet(s) {
     const amount = r2(cTotal * x.pct / 100);
     const before = measuredBefore(x.contract_id, s);
     return { id: x.id, contract_id: x.contract_id, worker_id: x.worker_id, service: f.service ?? x.service, worker_name: f.worker_name ?? x.worker_name, pix: f.pix ?? x.pix, pix_type: f.pix_type ?? x.pix_type,
-      contract_total: cTotal, pct: x.pct, before_pct: before, after_pct: r2(before + x.pct), balance_pct: r2(100 - before - x.pct), amount, client_paid: x.client_paid, company: r2(amount - x.client_paid), notes: x.notes };
+      contract_total: cTotal, pct: x.pct, before_pct: before, after_pct: r2(before + x.pct), balance_pct: r2(100 - before - x.pct), amount, client_paid: x.client_paid, company: r2(amount - x.client_paid), notes: x.notes, paid_at: x.paid_at };
   });
   const totals = {
     diarias: r2(people.reduce((a, e) => a + e.diarias, 0)),
@@ -197,14 +197,14 @@ function computeSheet(s) {
 const measuredBefore = (contractId, s) => r2(one(`SELECT COALESCE(SUM(sc.pct), 0) AS t FROM field_sheet_contracts sc JOIN field_sheets f ON f.id = sc.sheet_id
   WHERE sc.contract_id = ? AND sc.sheet_id <> ? AND (f.start_date < ? OR (f.start_date = ? AND f.id < ?))`, contractId, s.id, s.start_date, s.start_date, s.id).t);
 
-const MONEY_PEOPLE = ['rate', 'gross', 'adjust', 'adjust_note', 'total', 'client_paid', 'company', 'pix', 'pix_type', 'doc'];
-const MONEY_CONTRACT = ['worker_id', 'contract_total', 'amount', 'client_paid', 'company', 'pix', 'pix_type'];
+const MONEY_PEOPLE = ['paid_at', 'rate', 'gross', 'adjust', 'adjust_note', 'total', 'client_paid', 'company', 'pix', 'pix_type', 'doc'];
+const MONEY_CONTRACT = ['paid_at', 'worker_id', 'contract_total', 'amount', 'client_paid', 'company', 'pix', 'pix_type'];
 const strip = (o, keys) => { const c = { ...o }; for (const k of keys) delete c[k]; return c; };
 
 function paymentOf(s) {
   if (!s.obligation_id) return null;
-  const it = one('SELECT id, status, due_date, amount_expected FROM finance_items WHERE obligation_id = ? ORDER BY id LIMIT 1', s.obligation_id);
-  return it ? { item_id: it.id, status: it.status, due_date: it.due_date, amount: it.amount_expected } : null;
+  const it = one('SELECT id, status, due_date, amount_expected, paid_date FROM finance_items WHERE obligation_id = ? ORDER BY id LIMIT 1', s.obligation_id);
+  return it ? { item_id: it.id, status: it.status, due_date: it.due_date, amount: it.amount_expected, paid_date: it.paid_date } : null;
 }
 
 export function listSheets(ctx, projectId) {
@@ -379,6 +379,7 @@ export function reopenSheet(ctx, id, ip) {
   const { s, p } = loadSheet(ctx, id);
   if (s.status !== 'fechada') throw badRequest('A folha já está aberta.');
   if (s.obligation_id && obligationPaid(s.obligation_id)) throw badRequest('O pagamento desta folha já foi registrado no Financeiro. Desfaça o pagamento antes de reabrir.');
+  if (linesPaid(s.id)) throw badRequest('Há pessoas marcadas como pagas nesta folha. Desfaça esses pagamentos antes de reabrir.');
   tx(() => {
     if (s.obligation_id) removeObligationInternal(s.obligation_id, ctx.user.id, `Folha de Campo ${p.code} ${fcCode(s.seq)} reaberta para correção`);
     run(`UPDATE field_sheets SET status = 'aberta', snapshot = NULL, obligation_id = NULL, closed_at = NULL, closed_by = NULL, updated_at = datetime('now') WHERE id = ?`, s.id);
@@ -402,12 +403,13 @@ export function summary(ctx, projectId) {
       const w = byWorker.get(e.worker_id) || { worker_id: e.worker_id, name: e.name, role: e.role, sheets: 0, diarias: 0, total: 0, client: 0, company_paid: 0, company_pending: 0, open: 0 };
       w.sheets++; w.diarias = r2(w.diarias + e.diarias); w.total = r2(w.total + e.total); w.client = r2(w.client + e.client_paid);
       if (state === 'aberta') w.open = r2(w.open + e.company);
-      else if (state === 'pendente') w.company_pending = r2(w.company_pending + Math.max(0, e.company));
+      else if (state === 'pendente' && !e.paid_at) w.company_pending = r2(w.company_pending + Math.max(0, e.company));
       else w.company_paid = r2(w.company_paid + Math.max(0, e.company));
       byWorker.set(e.worker_id, w);
     }
     const company = r2(c.totals.company);
-    if (state === 'aberta') open = r2(open + company); else if (state === 'pendente') pending = r2(pending + company); else paid = r2(paid + company);
+    const paidLines = state === 'pendente' ? r2([...c.people, ...c.contracts].filter(x => x.paid_at && x.company > 0).reduce((t, x) => t + x.company, 0)) : 0;
+    if (state === 'aberta') open = r2(open + company); else if (state === 'pendente') { pending = r2(pending + company - paidLines); paid = r2(paid + paidLines); } else paid = r2(paid + company);
   }
   const contracts = listContracts(ctx, p.id);
   return {
@@ -439,11 +441,13 @@ export function analysis(ctx, { from, to, obra } = {}) {
     const state = s.status === 'aberta' ? 'open' : pay?.status === 'paga' || !pay ? 'paid' : 'pending';
     const p = projects.find(x => x.id === s.project_id);
     const o = add(byObra, s.project_id, () => ({ project_id: p.id, code: p.code, name: p.name, status: p.status, sheets: 0, diarias: 0, people: 0, contracts: 0, client: 0, company: 0, paid: 0, pending: 0, open: 0, workdays: 0, last_end: null, open_sheets: 0 }));
+    const paidLines = state === 'pending' ? r2([...c.people, ...c.contracts].filter(x => x.paid_at && x.company > 0).reduce((t, x) => t + x.company, 0)) : 0;
     const workdays = new Set(c.people.flatMap(e => Object.keys(e.days).filter(d => Number(e.days[d]) > 0))).size;
     const company = Math.max(0, c.totals.company);
     for (const x of [o, tot]) {
       x.sheets++; x.diarias = r2(x.diarias + c.totals.diarias); x.people = r2(x.people + c.totals.people); x.contracts = r2(x.contracts + c.totals.contracts);
-      x.client = r2(x.client + c.totals.client); x.company = r2(x.company + company); x[state] = r2(x[state] + company); x.workdays += workdays;
+      x.client = r2(x.client + c.totals.client); x.company = r2(x.company + company); x.workdays += workdays;
+      if (state === 'pending') { x.pending = r2(x.pending + company - paidLines); x.paid = r2(x.paid + paidLines); } else x[state] = r2(x[state] + company);
     }
     o.last_end = s.end_date; if (s.status === 'aberta') o.open_sheets++;
     const mo = add(byMonth, s.end_date.slice(0, 7), () => ({ month: s.end_date.slice(0, 7), people: 0, contracts: 0, diarias: 0 }));
@@ -480,25 +484,28 @@ export function analysis(ctx, { from, to, obra } = {}) {
 
 // ---------- Pagamentos: quem recebe, quanto e o PIX (parte da empresa ainda não paga) ----------
 // Folhas fechadas com pagamento pendente no Financeiro ("a pagar") e folhas abertas ("previsto").
-export function payments(ctx, projectId) {
+export function payments(ctx, projectId, showPaid = false) {
   requireMoney(ctx);
   const ids = new Set(fillableProjects(ctx).map(p => p.id));
   const groups = new Map();
-  const totals = { pending: 0, open: 0 };
+  const totals = { pending: 0, open: 0, paid: 0 };
   for (const s of all(`SELECT f.*, p.code AS project_code, p.name AS project_name FROM field_sheets f JOIN projects p ON p.id = f.project_id ORDER BY f.end_date, f.id`)) {
     if (!ids.has(s.project_id) || (projectId && s.project_id !== projectId)) continue;
     const pay = paymentOf(s);
-    const state = s.status === 'aberta' ? 'open' : pay && pay.status !== 'paga' ? 'pending' : null;
-    if (!state) continue;
+    const sheetPaid = s.status === 'fechada' && (!pay || pay.status === 'paga');
+    if (sheetPaid && !showPaid) continue;
     const c = computeSheet(s);
-    const lines = [...c.people.map(e => ({ worker_id: e.worker_id, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, doc: e.doc, amount: e.company, what: `${n2txt(e.diarias)} diária(s)${e.service ? ` · ${e.service}` : ''}` })),
-      ...c.contracts.map(x => ({ worker_id: x.worker_id, name: x.worker_name, role: 'Empreiteiro', pix: x.pix, pix_type: x.pix_type, doc: null, amount: x.company, what: `Empreitada ${x.service} (${n2txt(x.pct)}%)` }))];
+    const lines = [...c.people.map(e => ({ line: `p${e.id}`, paid_at: e.paid_at, worker_id: e.worker_id, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, doc: e.doc, amount: e.company, what: `${n2txt(e.diarias)} diária(s)${e.service ? ` · ${e.service}` : ''}` })),
+      ...c.contracts.map(x => ({ line: `c${x.id}`, paid_at: x.paid_at, worker_id: x.worker_id, name: x.worker_name, role: 'Empreiteiro', pix: x.pix, pix_type: x.pix_type, doc: null, amount: x.company, what: `Empreitada ${x.service} (${n2txt(x.pct)}%)` }))];
     for (const l of lines) {
       if (!(l.amount > 0)) continue;
-      const g = groups.get(l.worker_id) || { worker_id: l.worker_id, name: l.name, role: l.role, pix: l.pix, pix_type: l.pix_type, doc: l.doc, pending: 0, open: 0, items: [] };
+      const state = s.status === 'aberta' ? 'open' : l.paid_at || sheetPaid ? 'paid' : 'pending';
+      if (state === 'paid' && !showPaid) continue;
+      const g = groups.get(l.worker_id) || { worker_id: l.worker_id, name: l.name, role: l.role, pix: l.pix, pix_type: l.pix_type, doc: l.doc, pending: 0, open: 0, paid: 0, items: [] };
       if (!g.pix && l.pix) { g.pix = l.pix; g.pix_type = l.pix_type; }
       g[state] = r2(g[state] + l.amount);
-      g.items.push({ sheet_id: s.id, code: `${s.project_code} ${fcCode(s.seq)}`, project_name: s.project_name, period: `${dm(s.start_date)} a ${dm(s.end_date)}`, state, due_date: pay?.due_date || s.pay_date || null, amount: r2(l.amount), what: l.what });
+      g.items.push({ sheet_id: s.id, line: l.line, code: `${s.project_code} ${fcCode(s.seq)}`, project_name: s.project_name, period: `${dm(s.start_date)} a ${dm(s.end_date)}`, state,
+        paid_at: l.paid_at || (state === 'paid' ? pay?.paid_date || null : null), due_date: pay?.due_date || s.pay_date || null, amount: r2(l.amount), what: l.what });
       groups.set(l.worker_id, g);
       totals[state] = r2(totals[state] + l.amount);
     }
@@ -506,9 +513,60 @@ export function payments(ctx, projectId) {
   // PIX atual do cadastro quando a folha não tinha
   for (const g of groups.values()) if (!g.pix) { const w = one('SELECT pix, pix_type FROM field_workers WHERE id = ?', g.worker_id); if (w?.pix) { g.pix = w.pix; g.pix_type = w.pix_type; } }
   return {
-    people: [...groups.values()].map(g => ({ ...g, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total),
+    people: [...groups.values()].map(g => ({ ...g, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total || b.paid - a.paid),
     totals: { ...totals, total: r2(totals.pending + totals.open) },
     projects: fillableProjects(ctx),
   };
 }
 const n2txt = v => String(r2(v)).replace('.', ',');
+
+// ---------- Marcar como pago (por pessoa / empreiteiro) ----------
+// Só em folha fechada. Quando todos os valores da folha estão pagos, a parcela do Financeiro é baixada (e a tarefa concluída);
+// ao desfazer, volta a pendente.
+const linesPaid = sheetId => one('SELECT (SELECT COUNT(*) FROM field_sheet_people WHERE sheet_id = ? AND paid_at IS NOT NULL) + (SELECT COUNT(*) FROM field_sheet_contracts WHERE sheet_id = ? AND paid_at IS NOT NULL) AS n', sheetId, sheetId).n;
+function lineRef(ref) {
+  const m = /^([pc])(\d+)$/.exec(String(ref || ''));
+  if (!m) throw badRequest('Lançamento inválido.');
+  const table = m[1] === 'p' ? 'field_sheet_people' : 'field_sheet_contracts';
+  const row = one(`SELECT * FROM ${table} WHERE id = ?`, Number(m[2]));
+  if (!row) throw notFound('Lançamento não encontrado.');
+  return { table, row };
+}
+function syncSheetPayment(s, userId) {
+  const pay = paymentOf(s);
+  if (!pay) return;
+  const c = computeSheet(s);
+  const due = [...c.people, ...c.contracts].filter(x => x.company > 0);
+  const allPaid = due.length && due.every(x => x.paid_at);
+  if (allPaid && pay.status !== 'paga') payItemInternal(pay.item_id, userId, due.map(x => x.paid_at).sort().pop(), 'todos marcados como pagos na Folha de Campo');
+  if (!allPaid && pay.status === 'paga') unpayItemInternal(pay.item_id, userId, 'Pagamento desfeito na Folha de Campo');
+}
+export function markPaid(ctx, body, ip) {
+  requireMoney(ctx);
+  const b = body || {};
+  const refs = [...new Set(Array.isArray(b.lines) ? b.lines : [])];
+  if (!refs.length) throw badRequest('Escolha quem foi pago.');
+  const paid = b.paid !== false;
+  const pd = paid ? date(b.paid_date, 'Data do pagamento') || today() : null;
+  if (pd && pd > today()) throw badRequest('A data do pagamento não pode ser no futuro.');
+  const sheets = new Map();
+  tx(() => {
+    for (const ref of refs) {
+      const { table, row } = lineRef(ref);
+      const { s } = loadSheet(ctx, row.sheet_id);
+      if (s.status !== 'fechada') throw badRequest('Feche a folha antes de marcar pagamentos (os valores ainda podem mudar).');
+      if (!paid) {
+        const pay = paymentOf(s);
+        if (!row.paid_at && pay?.status === 'paga') {
+          // Pago direto no Financeiro: desfazer um vale para a folha toda (os demais ficam marcados como pagos)
+          for (const t of ['field_sheet_people', 'field_sheet_contracts']) run(`UPDATE ${t} SET paid_at = ?, paid_by = ? WHERE sheet_id = ? AND paid_at IS NULL`, pay.paid_date || today(), ctx.user.id, s.id);
+        }
+      }
+      run(`UPDATE ${table} SET paid_at = ?, paid_by = ? WHERE id = ?`, pd, paid ? ctx.user.id : null, row.id);
+      sheets.set(s.id, s);
+    }
+    for (const s of sheets.values()) syncSheetPayment(s, ctx.user.id);
+  });
+  audit(ctx.user.id, 'field', null, paid ? 'Pagamento marcado (Folha de Campo)' : 'Pagamento desfeito (Folha de Campo)', { lancamentos: refs.length, data: pd }, ip);
+  return { ok: true, count: refs.length };
+}

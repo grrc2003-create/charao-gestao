@@ -65,6 +65,8 @@ CREATE TABLE field_sheet_people (
   client_paid  REAL NOT NULL DEFAULT 0,
   adjust       REAL NOT NULL DEFAULT 0,
   adjust_note  TEXT,
+  paid_at      TEXT,                                            -- pago (data), marcado por pessoa
+  paid_by      INTEGER REFERENCES users(id),
   UNIQUE (sheet_id, worker_id)
 );
 
@@ -76,6 +78,8 @@ CREATE TABLE field_sheet_contracts (
   pct          REAL NOT NULL DEFAULT 0,
   client_paid  REAL NOT NULL DEFAULT 0,
   notes        TEXT,
+  paid_at      TEXT,
+  paid_by      INTEGER REFERENCES users(id),
   UNIQUE (sheet_id, contract_id)
 );
 

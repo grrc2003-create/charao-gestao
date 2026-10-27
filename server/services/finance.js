@@ -496,6 +496,27 @@ export function setItemAmountInternal(itemId, amount, userId, { estimated = 0, h
     if (history) taskHistory(it.task_id, userId, history, `${brl(it.amount_expected)} → ${brl(amount)}`);
   }
 }
+// Folha de Campo: baixa a parcela (e conclui a tarefa) quando todos da folha foram pagos; estorna ao desfazer
+export function payItemInternal(itemId, userId, pd, note) {
+  const it = one('SELECT * FROM finance_items WHERE id = ?', itemId);
+  if (!it || it.status === 'paga') return;
+  const now = new Date().toISOString();
+  run(`UPDATE finance_items SET status = 'paga', estimated = 0, paid_date = ?, paid_amount = amount_expected, paid_by = ? WHERE id = ?`, pd, userId, itemId);
+  if (it.task_id) {
+    run(`UPDATE tasks SET status = 'concluida', started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ? AND cancelled_at IS NULL`,
+      now, `${pd}T15:00:00.000Z`, now, userId, now, now, it.task_id);
+    taskHistory(it.task_id, userId, 'Pagamento registrado', `${brl(it.amount_expected)} pago em ${pd.split('-').reverse().join('/')}${note ? ` (${note})` : ''}`);
+  }
+}
+export function unpayItemInternal(itemId, userId, note) {
+  const it = one('SELECT * FROM finance_items WHERE id = ?', itemId);
+  if (!it || it.status !== 'paga') return;
+  run(`UPDATE finance_items SET status = 'pendente', paid_date = NULL, paid_amount = NULL, paid_by = NULL WHERE id = ?`, itemId);
+  if (it.task_id) {
+    run(`UPDATE tasks SET status = 'aberta', delivered_at = NULL, completed_at = NULL, review_status = NULL, reviewed_by = NULL, reviewed_at = NULL, progress_pct = NULL, updated_at = ? WHERE id = ?`, new Date().toISOString(), it.task_id);
+    taskHistory(it.task_id, userId, 'Pagamento desfeito', note || 'Parcela voltou a pendente');
+  }
+}
 // Algum pagamento já registrado? (a folha só reabre se nada foi pago)
 export const obligationPaid = id => !!one(`SELECT 1 FROM finance_items WHERE obligation_id = ? AND status = 'paga' LIMIT 1`, id);
 export function removeObligationInternal(id, userId, reason) {

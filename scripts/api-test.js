@@ -2395,6 +2395,26 @@ async function main() {
   const fcPayP = fcPay.people.find(p => p.worker_id === fcP.id), fcPayE = fcPay.people.find(p => p.worker_id === fcE.id);
   ok(fcPayP.pending === 1500 && !fcPayP.pix && fcPayP.items[0].state === 'pending' && fcPayE.pending === 2000 && fcPayE.open === 3000 && fcPayE.pix === 'pix-ficticio-2', 'pagamentos: quem recebe, quanto (a pagar e previsto) e o PIX (sem PIX quando o cadastro não tem)');
   ok(fcPay.totals.pending === fcCl2.payment.amount && (await fcJul('GET', '/field/payments')).status === 403, 'total a pagar confere com o Financeiro; só a seção vê');
+  // Marcar como pago por pessoa
+  const fcLines = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data;
+  const lP = `p${fcLines.people.find(e => e.worker_id === fcP.id).id}`, lH = `p${fcLines.people.find(e => e.worker_id === fcH.id).id}`, lC = `c${fcLines.contracts[0].id}`;
+  ok((await fcJul('POST', '/field/paid', { lines: [lP] })).status === 403, 'sem a seção não marca pagamento');
+  const fcS2open = (await fcAna('GET', `/field/sheets/${fcS2.id}`)).data;
+  ok((await fcAna('POST', '/field/paid', { lines: [`p${fcS2open.people[0].id}`] })).status === 400, 'folha aberta não aceita marcar pago');
+  ok((await fcAna('POST', '/field/paid', { lines: [lP], paid_date: '2099-01-01' })).status === 400, 'data do pagamento não pode ser no futuro');
+  await fcAna('POST', '/field/paid', { lines: [lP], paid_date: '2026-09-18' });
+  const fcPg1 = (await fcAna('GET', '/field/payments?obra=2')).data;
+  ok(!fcPg1.people.find(p => p.worker_id === fcP.id) && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.payment.status === 'pendente', 'pessoa marcada como paga sai da lista a pagar; folha segue pendente até todos serem pagos');
+  ok((await fcAna('GET', '/field/payments?obra=2&pagos=1')).data.people.find(p => p.worker_id === fcP.id).items[0].paid_at === '2026-09-18', 'histórico de pagos com a data');
+  ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com alguém marcado como pago, a folha não reabre');
+  await fcAna('POST', '/field/paid', { lines: [lH, lC], paid_date: '2026-09-19' });
+  const fcPgS = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data;
+  const fcPgIt = (await fcAna('GET', '/finance/obligations')).data;
+  ok(fcPgS.payment.status === 'paga' && fcPgS.payment.paid_date === '2026-09-19', 'todos pagos: pagamento da folha baixado no Financeiro');
+  await fcAna('POST', '/field/paid', { lines: [lH], paid: false });
+  ok((await fcAna('GET', `/field/sheets/${fcS.id}`)).data.payment.status === 'pendente', 'desfazer um pagamento volta a folha a pendente no Financeiro');
+  await fcAna('POST', '/field/paid', { lines: [lP, lC], paid: false });
+  ok((await fcAna('GET', '/field/payments?obra=2')).data.totals.pending === fcCl2.payment.amount, 'desfeitos: tudo volta a pagar');
   const fcAn = (await fcAna('GET', '/field/analysis')).data;
   const fcAnO = fcAn.obras.find(o => o.project_id === 2);
   ok(fcAnO && fcAnO.sheets === 2 && fcAnO.people === 1975 && fcAnO.contracts === 5000 && fcAnO.pending === fcCl2.payment.amount && fcAnO.diarias === 9.5, 'resumo por obra: folhas, mão de obra, empreitadas e a pagar');

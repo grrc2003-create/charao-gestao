@@ -16,6 +16,7 @@ const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const pad = n => String(n).padStart(2, '0');
 export const KINDS = { diarista: 'Diarista (mão de obra própria)', empreiteiro: 'Empreiteiro' };
 export const PIX_TYPES = ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória'];
+export const CONTRACT_STATUS = { andamento: 'Em andamento', paralisada: 'Paralisada', concluida: 'Concluída', cancelada: 'Cancelada' };
 const MAX_DAYS = 31;
 
 export const canFieldMoney = user => hasSection(user, 'folha_campo');
@@ -114,7 +115,7 @@ export function listContracts(ctx, projectId) {
   const allowed = new Set(fillableProjects(ctx).map(p => p.id));
   if (!allowed.size && !canFieldMoney(ctx.user)) throw forbidden('A Folha de Campo não está liberada para o seu usuário.');
   const money = canFieldMoney(ctx.user);
-  return all(`${CONTRACT_SQL} ORDER BY c.status, p.code, w.name`).filter(c => allowed.has(c.project_id) && (!projectId || c.project_id === projectId)).map(c => contractView(c, money));
+  return all(`${CONTRACT_SQL} ORDER BY CASE c.status WHEN 'andamento' THEN 0 WHEN 'paralisada' THEN 1 WHEN 'concluida' THEN 2 ELSE 3 END, p.code, w.name`).filter(c => allowed.has(c.project_id) && (!projectId || c.project_id === projectId)).map(c => contractView(c, money));
 }
 function readContract(ctx, b) {
   const projectId = intOrNull(b.project_id);
@@ -129,7 +130,7 @@ function readContract(ctx, b) {
     service: str(b.service, { max: 200, required: true, label: 'Serviço' }),
     start_date: date(b.start_date, 'Início'),
     notes: str(b.notes, { max: 1000, label: 'Observações' }),
-    status: b.status === 'encerrada' ? 'encerrada' : 'ativa',
+    status: CONTRACT_STATUS[b.status] ? b.status : 'andamento',
   };
 }
 export function createContract(ctx, body, ip) {
@@ -262,7 +263,7 @@ export function getSheet(ctx, id) {
     pay_date: money ? s.pay_date : undefined,
     payment: money ? paymentOf(s) : undefined,
     available_workers: open ? all(`SELECT id, name, role FROM field_workers WHERE active = 1 AND kind = 'diarista' ORDER BY name`).filter(w => !inSheet.has(w.id)) : [],
-    available_contracts: open ? listContracts(ctx, p.id).filter(x => x.status === 'ativa' && !inContracts.has(x.id) && x.balance_pct > 0) : [],
+    available_contracts: open ? listContracts(ctx, p.id).filter(x => x.status === 'andamento' && !inContracts.has(x.id) && x.balance_pct > 0) : [],
     services: [...new Set([...all('SELECT name FROM project_stages WHERE project_id = ? ORDER BY sort_order, name', p.id).map(r => r.name),
       ...all('SELECT DISTINCT e.service FROM field_sheet_people e JOIN field_sheets f ON f.id = e.sheet_id WHERE f.project_id = ? AND e.service IS NOT NULL', p.id).map(r => r.service)])],
     can: { money, edit: open, close: money && open, reopen: money && !open, delete: open },

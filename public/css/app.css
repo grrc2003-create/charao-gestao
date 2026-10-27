@@ -3234,3 +3234,16 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fr-pay b { font-size: 18px; font-variant-numeric: tabular-nums; }
 .fr-ok { color: #1F6B41; }
 .fr-due { color: #B03A2E; }
+
+/* Folha de Campo: filtros de situação */
+.fc-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.fc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 13px; font-weight: 600; }
+.fc-chip b { font-size: 11.5px; background: var(--navy-50); border-radius: 9px; padding: 0 7px; }
+.fc-chip.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+.fc-chip.on b { background: rgba(255,255,255,.18); }
+.fc-cst { display: inline-block; vertical-align: middle; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; border-radius: 10px; padding: 2px 8px; margin-left: 4px; }
+.fc-cst-andamento { background: #E7F0FA; color: #1F5F9E; }
+.fc-cst-paralisada { background: #FFF4D6; color: #8A5A00; }
+.fc-cst-concluida { background: #E5F4EC; color: #1F6B41; }
+.fc-cst-cancelada { background: #F2F2F2; color: #6B6B6B; }
+.fc-wrow .grow { flex: 1; min-width: 0; }

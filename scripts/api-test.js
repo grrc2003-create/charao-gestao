@@ -2349,11 +2349,15 @@ async function main() {
   ok((await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcP.id, service: 'x', total: 10 })).status === 400, 'empreitada exige um empreiteiro');
   const fcC = (await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'Pintura teste', total: 5000 })).data;
   ok(fcC.measured_pct === 0 && fcC.balance === 5000, 'empreitada cadastrada com saldo integral');
+  const fcC2 = (await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'Reboco teste', total: 1000 })).data;
+  const fcC2p = (await fcAna('PUT', `/field/contracts/${fcC2.id}`, { worker_id: fcE.id, service: 'Reboco teste', total: 1000, status: 'paralisada' })).data;
+  ok(fcC2.status === 'andamento' && fcC2p.status === 'paralisada', 'empreitada nasce em andamento e pode ser paralisada');
   ok((await fcJul('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'y', total: 1 })).status === 403, 'só a seção cadastra empreitada');
   ok((await fcCam('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-09-13' })).status === 403, 'colaborador não cria folha na obra');
   ok((await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-10-20' })).status === 400, 'período da folha até 31 dias');
   const fcS = (await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-09-13' })).data;
   ok(fcS.code === 'FC-01' && fcS.days.length === 7 && fcS.can.edit && !fcS.can.close, 'responsável cria a folha FC-01 (período livre), sem poder fechar');
+  ok(fcS.available_contracts.some(c => c.id === fcC.id) && !fcS.available_contracts.some(c => c.id === fcC2.id), 'só empreitada em andamento aparece para medir');
   const fcDays = { '2026-09-07': 1, '2026-09-08': 1, '2026-09-09': 1, '2026-09-10': 1, '2026-09-11': 1 };
   const fcJs = (await fcJul('PUT', `/field/sheets/${fcS.id}`, { activities: 'Atividade teste', people: [
     { worker_id: fcP.id, days: fcDays, service: 'Alvenaria' },

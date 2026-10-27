@@ -365,19 +365,23 @@ function workerSheet(w, mny, done, pixTypes = ['CPF', 'CNPJ', 'Telefone', 'E-mai
   });
 }
 
-export async function workers({ render }) {
+export async function workers({ render, query, navigate }) {
   const d = await api('/field/workers');
+  const sit = ['inativos', 'todos'].includes(query.get('sit')) ? query.get('sit') : 'ativos';
+  const shown = d.workers.filter(w => sit === 'todos' || (sit === 'ativos' ? w.active : !w.active));
+  const nAt = d.workers.filter(w => w.active).length;
   const mny = d.can_money;
   const row = w => html`<li class="fc-wrow ${w.active ? '' : 'fc-off'}"><div class="grow"><div class="row-title">${w.name}${w.active ? '' : ' (inativo)'}</div>
     <div class="row-meta"><span>${w.kind === 'empreiteiro' ? 'Empreiteiro' : 'Diarista'}</span>${w.role ? html`<span>${w.role}</span>` : ''}${mny && w.kind === 'diarista' ? html`<span>Diária ${money(w.daily_rate)}</span>` : ''}${mny && w.pix ? html`<span>PIX ${w.pix_type ? `(${w.pix_type}) ` : ''}${w.pix}</span>` : ''}${mny && !w.daily_rate && w.kind === 'diarista' ? html`<span class="fc-warn">sem valor da diária</span>` : ''}</div></div>
     ${mny ? html`<button type="button" class="btn btn-ghost btn-sm" data-ed="${w.id}">${icon('edit')}Editar</button>` : ''}</li>`;
-  const group = (k, label) => { const l = d.workers.filter(w => w.kind === k); return html`<section class="card section"><div class="card-head"><h2>${label}</h2><span class="sub">${l.length}</span></div>
+  const group = (k, label) => { const l = shown.filter(w => w.kind === k); return html`<section class="card section"><div class="card-head"><h2>${label}</h2><span class="sub">${l.length}</span></div>
     ${l.length ? html`<ul class="rows">${l.map(row)}</ul>` : html`<p class="muted card-body">Nenhum cadastrado.</p>`}</section>`; };
   return {
     title: 'Profissionais · Folha de Campo',
     html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Profissionais', sub: mny ? 'Diaristas (função e valor da diária) e empreiteiros, com documento e PIX.' : 'Diaristas e empreiteiros da Folha de Campo.',
         actions: html`<button type="button" class="btn btn-primary" data-new>${icon('plus')}Novo profissional</button>` })}
       ${fieldTabs('prof', 0)}
+      <div class="fc-chips section">${[['ativos', 'Ativos', nAt], ['inativos', 'Inativos', d.workers.length - nAt], ['todos', 'Todos', d.workers.length]].map(([k, l, n]) => html`<a href="#/campo/profissionais${k === 'ativos' ? '' : `?sit=${k}`}" class="fc-chip ${sit === k ? 'on' : ''}">${l} <b>${n}</b></a>`)}</div>
       ${group('diarista', 'Diaristas (mão de obra própria)')}${group('empreiteiro', 'Empreiteiros')}`,
     mount(root) {
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
@@ -388,9 +392,14 @@ export async function workers({ render }) {
 }
 
 // ---------- Empreitadas ----------
+const C_ST = { andamento: 'Em andamento', paralisada: 'Paralisada', concluida: 'Concluída', cancelada: 'Cancelada' };
+const cTag = st => html`<span class="fc-cst fc-cst-${st}">${C_ST[st] || st}</span>`;
 export async function contracts({ query, navigate, render }) {
   const obra = Number(query.get('obra')) || 0;
-  const [list, sh, wk] = await Promise.all([api('/field/contracts', { query: { obra: obra || '' } }), api('/field/sheets'), api('/field/workers')]);
+  const sit = C_ST[query.get('sit')] ? query.get('sit') : 'todas';
+  const [all_, sh, wk] = await Promise.all([api('/field/contracts', { query: { obra: obra || '' } }), api('/field/sheets'), api('/field/workers')]);
+  const list = all_.filter(c => sit === 'todas' || c.status === sit);
+  const sitUrl = k => { const q = new URLSearchParams(); if (obra) q.set('obra', obra); if (k !== 'todas') q.set('sit', k); const x = q.toString(); return `#/campo/empreitadas${x ? `?${x}` : ''}`; };
   const mny = wk.can_money;
   const projects = sh.projects;
   const emp = wk.workers.filter(w => w.kind === 'empreiteiro' && w.active);
@@ -403,10 +412,11 @@ export async function contracts({ query, navigate, render }) {
       <div class="form-row"><div class="field"><label class="req" for="ec-t">Valor total</label><input type="number" step="0.01" min="0" id="ec-t" name="total" required value="${c?.total ?? ''}"></div>
         <div class="field"><label for="ec-d">Início</label><input type="date" id="ec-d" name="start_date" value="${c?.start_date || ''}"></div></div>
       <div class="field"><label for="ec-n">Observações</label><textarea id="ec-n" name="notes" rows="2">${c?.notes || ''}</textarea></div>
-      ${c ? html`<label class="pr-se-check"><input type="checkbox" name="encerrada" value="1" ${c.status === 'encerrada' ? 'checked' : ''}> Encerrada (não aparece mais para medir)</label>` : ''}`,
+      <div class="field"><label for="ec-st">Situação</label><select id="ec-st" name="status">${Object.entries(C_ST).map(([k, l]) => html`<option value="${k}" ${(c?.status || 'andamento') === k ? 'selected' : ''}>${l}</option>`)}</select>
+        <span class="hint">Só empreitadas em andamento podem ser medidas nas folhas.</span></div>`,
     submitLabel: c ? 'Salvar' : 'Cadastrar',
     async onSubmit(f) {
-      if (c) { f.project_id = c.project_id; f.status = f.encerrada ? 'encerrada' : 'ativa'; }
+      if (c) f.project_id = c.project_id;
       const r = await api(c ? `/field/contracts/${c.id}` : '/field/contracts', { method: c ? 'PUT' : 'POST', body: f });
       toast(c ? 'Empreitada salva.' : 'Empreitada cadastrada.');
       render();
@@ -419,15 +429,16 @@ export async function contracts({ query, navigate, render }) {
         actions: mny ? html`<button type="button" class="btn btn-primary" data-new>${icon('plus')}Nova empreitada</button>` : '' })}
       ${fieldTabs('emp', mny ? obra : 0)}
       <div class="fc-filter section"><label for="ec-obra">Obra</label><select id="ec-obra"><option value="">Todas as obras</option>${projects.map(p => html`<option value="${p.id}" ${obra === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></div>
-      ${list.length ? html`<section class="card section"><ul class="rows">${list.map(c => html`<li class="fc-wrow ${c.status === 'encerrada' ? 'fc-off' : ''}"><div class="grow">
-          <div class="row-title">${c.service} · ${c.worker_name}${c.status === 'encerrada' ? ' (encerrada)' : ''}</div>
+      <div class="fc-chips section">${[['todas', 'Todas', all_.length], ...Object.entries(C_ST).map(([k, l]) => [k, l, all_.filter(c => c.status === k).length])].map(([k, l, n]) => html`<a href="${sitUrl(k)}" class="fc-chip ${sit === k ? 'on' : ''}">${l} <b>${n}</b></a>`)}</div>
+      ${list.length ? html`<section class="card section"><ul class="rows">${list.map(c => html`<li class="fc-wrow ${['concluida', 'cancelada'].includes(c.status) ? 'fc-off' : ''}"><div class="grow">
+          <div class="row-title">${c.service} · ${c.worker_name} ${cTag(c.status)}</div>
           <div class="row-meta"><span>${c.project_code}</span>${mny ? html`<span>Contrato ${money(c.total)}</span><span>Medido ${money(c.measured)}</span><span>Saldo ${money(c.balance)}</span>` : ''}<span>${n2(c.measured_pct)}% medido</span></div>
           <div class="fc-bar"><span style="width:${Math.min(100, c.measured_pct)}%"></span></div></div>
           ${mny ? html`<button type="button" class="btn btn-ghost btn-sm" data-ed="${c.id}">${icon('edit')}Editar</button>` : ''}</li>`)}</ul></section>`
-        : html`<div class="empty-state"><h2>Nenhuma empreitada${obra ? ' nesta obra' : ''}</h2><p>${mny ? 'Cadastre a empreitada (empreiteiro, serviço e valor total) para medi-la nas folhas.' : 'O escritório cadastra as empreitadas da obra.'}</p></div>`}`,
+        : html`<div class="empty-state"><h2>Nenhuma empreitada${sit !== 'todas' ? ` ${C_ST[sit].toLowerCase()}` : ''}${obra ? ' nesta obra' : ''}</h2><p>${mny ? 'Cadastre a empreitada (empreiteiro, serviço e valor total) para medi-la nas folhas.' : 'O escritório cadastra as empreitadas da obra.'}</p></div>`}`,
     mount(root) {
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
-      root.querySelector('#ec-obra').addEventListener('change', e => navigate(`/campo/empreitadas${e.target.value ? `?obra=${e.target.value}` : ''}`));
+      root.querySelector('#ec-obra').addEventListener('change', e => { const q = new URLSearchParams(); if (e.target.value) q.set('obra', e.target.value); if (sit !== 'todas') q.set('sit', sit); const x = q.toString(); navigate(`/campo/empreitadas${x ? `?${x}` : ''}`); });
       root.querySelector('[data-new]')?.addEventListener('click', () => form(null));
       root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => form(list.find(c => c.id === Number(b.dataset.ed)))));
     },
@@ -495,8 +506,8 @@ function insights(d) {
   if (t.client) out.push(`O cliente pagou diretamente ${money(t.client)} (${pct(t.client, t.total)}% do medido).`);
   if (t.pending) out.push(`${money(t.pending)} a pagar no Financeiro (folhas fechadas ainda não pagas).`);
   if (t.open) out.push(`${money(t.open)} em folhas ainda abertas (não fechadas).`);
-  const ct = d.contracts.filter(c => c.status === 'ativa');
-  if (ct.length) { const tot = ct.reduce((a, c) => a + c.total, 0), med = ct.reduce((a, c) => a + c.measured, 0); out.push(`Empreitadas ativas: ${pct(med, tot)}% medido, saldo de ${money(tot - med)} a medir.`); }
+  const ct = d.contracts.filter(c => c.status === 'andamento');
+  if (ct.length) { const tot = ct.reduce((a, c) => a + c.total, 0), med = ct.reduce((a, c) => a + c.measured, 0); out.push(`Empreitadas em andamento: ${pct(med, tot)}% medido, saldo de ${money(tot - med)} a medir.`); }
   return out;
 }
 
@@ -557,8 +568,8 @@ export async function analysisView({ query, navigate }) {
           <ul class="fa-bars">${d.workers.map(w => html`<li data-tip="${tip(w.name, [w.kind === 'empreiteiro' ? 'Empreiteiro' : `${w.role || 'Diarista'} · ${n2(w.diarias)} diárias`, `Total: ${money(w.total)}`, `Obras: ${w.obras.join(', ')}`])}"><div class="fa-bl"><span>${w.name}<small>${w.kind === 'empreiteiro' ? 'Empreiteiro' : `${w.role || ''} · ${n2(w.diarias)} diárias`}</small></span><b>${money(w.total)}</b></div>
             <div class="fa-hbar"><span style="width:${(w.total / maxW) * 100}%;background:${w.kind === 'empreiteiro' ? C_EMP : C_MO}"></span></div></li>`)}</ul></div></section>
       </div>
-      ${d.contracts.length ? html`<section class="card section"><div class="card-head"><h2>${icon('contract')}Empreitadas: medido e saldo</h2></div><ul class="rows">${d.contracts.map(c => html`<li class="fc-wrow ${c.status === 'encerrada' ? 'fc-off' : ''}"><div class="grow">
-        <div class="row-title">${c.service} · ${c.worker_name}</div><div class="row-meta"><span>${c.project_code}</span><span>Contrato ${money(c.total)}</span><span>Medido ${money(c.measured)} (${n2(c.measured_pct)}%)</span><span>Saldo ${money(c.balance)}</span></div>
+      ${d.contracts.length ? html`<section class="card section"><div class="card-head"><h2>${icon('contract')}Empreitadas: medido e saldo</h2></div><ul class="rows">${d.contracts.map(c => html`<li class="fc-wrow ${['concluida', 'cancelada'].includes(c.status) ? 'fc-off' : ''}"><div class="grow">
+        <div class="row-title">${c.service} · ${c.worker_name} ${cTag(c.status)}</div><div class="row-meta"><span>${c.project_code}</span><span>Contrato ${money(c.total)}</span><span>Medido ${money(c.measured)} (${n2(c.measured_pct)}%)</span><span>Saldo ${money(c.balance)}</span></div>
         <div class="fc-bar"><span style="width:${Math.min(100, c.measured_pct)}%"></span></div></div></li>`)}</ul></section>` : ''}`}
       <div class="fa-tip" hidden></div>`,
     mount(root) {

@@ -28,7 +28,7 @@ CREATE TABLE field_contracts (
   total       REAL NOT NULL DEFAULT 0,
   start_date  TEXT,
   notes       TEXT,
-  status      TEXT NOT NULL DEFAULT 'ativa' CHECK (status IN ('ativa', 'encerrada')),
+  status      TEXT NOT NULL DEFAULT 'andamento' CHECK (status IN ('andamento', 'paralisada', 'concluida', 'cancelada')), -- só em andamento é medida
   created_by  INTEGER REFERENCES users(id),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))

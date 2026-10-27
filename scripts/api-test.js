@@ -1242,9 +1242,27 @@ async function main() {
   ok((await fAna('POST', '/finance/obligations', { title: 'X', amount: 10, assignee_id: (await ricardo('GET', '/auth/me')).data.user.id })).status === 400, 'responsável precisa ter a liberação financeira');
   const fObId = (await fAna('POST', '/finance/obligations', { title: 'DAS Simples Nacional', category: 'Impostos', payee: 'Receita Federal', amount: '1.234,50', frequency: 'mensal', due_day: 20, start_month: fRef })).data.id;
   let fMonth = (await fAna('GET', '/finance/month')).data;
-  const fIt = fMonth.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
-  ok(fIt && fIt.amount_expected === 1234.5 && fIt.due_date === `${fRef}-20` && fIt.status === 'pendente' && fIt.task_id, 'obrigação mensal gera a parcela do mês (vencimento dia 20, valor previsto) e a tarefa');
+  const fIt0 = fMonth.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
+  ok(fIt0 && fIt0.amount_expected === 1234.5 && fIt0.due_date === `${fRef}-20` && fIt0.status === 'pendente' && !fIt0.task_id, 'obrigação mensal gera a parcela do mês (vencimento dia 20, valor previsto), sem criar a tarefa sozinha');
+  const fSug = (await fAna('GET', '/finance/task-suggestions')).data;
+  ok(fSug.some(i => i.id === fIt0.id), 'Criar tarefa?: a parcela sem tarefa aparece para a pessoa decidir');
   const fOb = (await fAna('GET', `/finance/obligations/${fObId}`)).data;
+  const fSugR = (await fAna('POST', '/finance/task-suggestions', { ids: fOb.items.map(i => i.id), create: true })).data;
+  ok(fSugR.count === 3, 'Criar tarefa?: "criar" gera as tarefas das parcelas escolhidas');
+  const fIt = (await fAna('GET', '/finance/month')).data.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
+  ok(fIt.task_id && !(await fAna('GET', '/finance/task-suggestions')).data.some(i => i.id === fIt.id), 'parcela com tarefa sai da pergunta');
+  {
+    const nObId = (await fAna('POST', '/finance/obligations', { title: 'Pergunta teste', category: 'Outros', amount: 50, frequency: 'mensal', due_day: 10, start_month: fRef })).data.id;
+    const nItems = (await fAna('GET', `/finance/obligations/${nObId}`)).data.items;
+    await fAna('POST', '/finance/task-suggestions', { ids: [nItems[0].id], create: false });
+    ok(!(await fAna('GET', '/finance/task-suggestions')).data.some(i => i.id === nItems[0].id) && !(await fAna('GET', `/finance/items/${nItems[0].id}`)).data.task_id, 'Criar tarefa?: "não criar" não pergunta de novo');
+    await fAna('POST', '/finance/task-suggestions', { ids: [nItems[1].id], create: true });
+    const nTask = (await fAna('GET', `/finance/items/${nItems[1].id}`)).data.task_id;
+    await fAna('DELETE', `/tasks/${nTask}`, { reason: 'Não precisa de tarefa' });
+    await fAna('GET', '/finance/month');
+    ok(!(await fAna('GET', '/finance/task-suggestions')).data.some(i => i.id === nItems[1].id) && !(await fAna('GET', `/finance/items/${nItems[1].id}`)).data.task_id, 'tarefa da parcela excluída não volta nem é perguntada de novo');
+    await fAna('PUT', `/finance/obligations/${nObId}`, { active: false });
+  }
   ok(fOb.items.length === 3, 'gera as parcelas até 2 meses à frente');
   const fTask = (await fAna('GET', `/tasks/${fIt.task_id}`)).data;
   ok(fTask.title.startsWith('DAS Simples Nacional —') && fTask.assignee_id === kAnaId && fTask.stage_name === 'Impostos', 'tarefa da parcela: título com o mês, responsável e classificação = categoria');
@@ -1266,6 +1284,8 @@ async function main() {
   ok(fMonth.totals.count >= 1 && fMonth.categories.some(c => c.category === 'Impostos'), 'visão do mês com totais e resumo por categoria');
   // Concluir a tarefa pela tela de tarefas marca a parcela como paga
   const fOb2 = (await fAna('POST', '/finance/obligations', { title: 'Aluguel do escritório', category: 'Aluguel e condomínio', amount: 3000, due_day: 5, start_month: fRef })).data.id;
+  const fIt2a = (await fAna('GET', `/finance/obligations/${fOb2}`)).data.items.find(i => i.ref_month === fRef);
+  await fAna('POST', '/finance/task-suggestions', { ids: [fIt2a.id], create: true });
   const fIt2 = (await fAna('GET', `/finance/obligations/${fOb2}`)).data.items.find(i => i.ref_month === fRef);
   await fAna('POST', `/tasks/${fIt2.task_id}/actions/conclude`, { start_date: '2020-01-01' });
   ok((await fAna('GET', `/finance/items/${fIt2.id}`)).data.status === 'paga', 'concluir a tarefa da parcela marca a parcela como paga');
@@ -2159,6 +2179,7 @@ async function main() {
     const oid = (await fo('POST', '/finance/obligations', body)).data.id;
     const row = async () => (await fo('GET', `/finance/year?ano=${y}`)).data.groups.flatMap(g => g.rows).find(r => r.id === oid);
     const before = await row();
+    await fo('POST', '/finance/task-suggestions', { ids: (await fo('GET', `/finance/obligations/${oid}`)).data.items.map(i => i.id), create: true });
     const plan = Array(12).fill(0); plan[11] = 250; // tudo 0, só DEZ com 250
     const file = writeXlsx([{ name: 'Previsto 2026', header: true, rows: [['Tarefa *', 'Tipo da despesa', 'Ano *', 'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'],
       ['Previsto mensal teste', null, y, ...plan], ['TOTAL', null, null, ...plan]] }]).toString('base64');

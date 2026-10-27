@@ -744,7 +744,9 @@ export function sync(ctx, ip, { resetManualPlans = false } = {}) {
       const wasPaid = it.status === 'paga';
       run(`UPDATE finance_items SET status = 'paga', paid_amount = ?, paid_date = ?, paid_by = ?, source = ?, estimated = 0, marked_paid_at = NULL, marked_amount = NULL WHERE id = ?`, g.amount, pd, uid, SOURCE, it.id);
       if (it.task_id) {
-        if (!wasPaid) run(`UPDATE tasks SET status = 'concluida', cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ?`,
+        // Cancelada pela pessoa: fica cancelada (só a do "previsto R$ 0,00", cancelada pelo sistema, volta e conclui)
+        if (!wasPaid) run(`UPDATE tasks SET status = 'concluida', cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ?, progress_pct = 100, updated_at = ? WHERE id = ?
+          AND (cancelled_at IS NULL OR cancel_reason = 'Sem previsão no mês (previsto R$ 0,00)')`,
           now, `${pd}T15:00:00.000Z`, now, uid, now, now, it.task_id);
         taskHistory(it.task_id, uid, wasPaid ? 'Pagamento atualizado' : 'Pagamento registrado', `Mais Controle: ${brl(g.amount)} (${g.count} pagamento(s)) · pago em ${pd.split('-').reverse().join('/')}`);
       }

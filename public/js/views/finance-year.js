@@ -35,9 +35,17 @@ const FOLD = { pj: false, cl: false, obras: new Set() };
 
 export async function view({ state, query, setQuery, render }) {
   if (!state.meta.can.finance) throw new Error('Acesso restrito: solicite ao administrador a liberação do Financeiro (Usuários → Editar).');
-  const [d, wk] = await Promise.all([api('/finance/year', { query: { ano: query.get('ano') || '' } }), api('/finance/week').catch(() => null)]);
+  const [d, wk, sug] = await Promise.all([api('/finance/year', { query: { ano: query.get('ano') || '' } }), api('/finance/week').catch(() => null), api('/finance/task-suggestions').catch(() => [])]);
   const wItems = wk?.items || [];
   const al = wk?.alerts || { accounts: [], categories: [] };
+  // Criar tarefa? As parcelas não criam tarefa sozinhas: aqui a pessoa decide
+  const sugCard = !sug.length ? '' : html`<section class="card section fs-card">
+      <div class="card-head"><h2>${icon('plus')}Criar tarefas?</h2><span class="sub">${sug.length} parcela(s) do mês anterior, atual e próximo sem tarefa</span></div>
+      <div class="card-body"><p class="muted" style="margin:0">As parcelas não criam mais tarefa sozinhas (nem quando o Mais Controle atualiza). Escolha quais viram tarefa no Financeiro; “Não criar” não pergunta de novo. Tarefa excluída também não volta.</p></div>
+      <ul class="fs-list">${sug.map(i => html`<li data-fs="${i.id}"><span><b>${i.title} — ${i.month_label}</b><small>${i.category} · vence ${fmtDate(i.due_date)} · previsto ${money(i.amount_expected)}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></span>
+        <span class="fs-acts"><button type="button" class="btn btn-primary btn-sm" data-fs-yes="${i.id}">${icon('plus')}Criar</button><button type="button" class="btn btn-ghost btn-sm" data-fs-no="${i.id}">Não criar</button></span></li>`)}</ul>
+      ${sug.length > 1 ? html`<div class="fs-all"><button type="button" class="btn btn-primary btn-sm" data-fs-all="1">Criar todas (${sug.length})</button><button type="button" class="btn btn-ghost btn-sm" data-fs-all="0">Não criar nenhuma</button></div>` : ''}
+    </section>`;
   const weekCard = !wk ? '' : html`<section class="card section fw-card">
       <div class="card-head"><h2>${icon('alert')}Contas da semana</h2><span class="sub">até ${fmtDate(wk.week_end)}${wk.data_until ? ` · Mais Controle até ${fmtDate(wk.data_until)}` : ''}</span></div>
       ${al.accounts.length || al.categories.length || al.reviews || al.issues || al.client_issues ? html`<a class="fw-alert" href="#/financeiro/mais-controle">${icon('alert')}<span><b>Mais Controle:</b>
@@ -113,6 +121,7 @@ export async function view({ state, query, setQuery, render }) {
         </div>
       </div>
       ${d.groups.length ? html`
+      ${sugCard}
       ${weekCard}
       <section class="card fy-card">
         <div class="card-head"><h2>${icon('calendar')}Planejamento anual ${d.year}</h2><span class="sub">previsto × real, mês a mês</span></div>
@@ -234,6 +243,18 @@ export async function view({ state, query, setQuery, render }) {
         });
         if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
       };
+      // Criar tarefa? (uma parcela ou todas)
+      const answer = async (ids, create, btn) => {
+        if (btn) btn.disabled = true;
+        try {
+          const r = await api('/finance/task-suggestions', { method: 'POST', body: { ids, create } });
+          toast(create ? `${r.count} tarefa(s) criada(s) no Financeiro.` : `${r.count} parcela(s) ficam sem tarefa.`);
+          render();
+        } catch (ex) { toast(ex.message, 'error'); if (btn) btn.disabled = false; }
+      };
+      root.querySelectorAll('[data-fs-yes]').forEach(b => b.addEventListener('click', () => answer([Number(b.dataset.fsYes)], true, b)));
+      root.querySelectorAll('[data-fs-no]').forEach(b => b.addEventListener('click', () => answer([Number(b.dataset.fsNo)], false, b)));
+      root.querySelectorAll('[data-fs-all]').forEach(b => b.addEventListener('click', () => answer(sug.map(i => i.id), b.dataset.fsAll === '1', b)));
       root.querySelectorAll('.fy-card, [data-fy-mob]').forEach(el => el.addEventListener('click', onCell));
       // Custos de Projetos pagos pela Empresa / Gastos dos clientes por obra: lançamentos do mês
       const onCost = async e => {

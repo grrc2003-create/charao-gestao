@@ -93,16 +93,52 @@ function createItem(o, ref, userId, { noTask = false } = {}) {
   const r = run('INSERT INTO finance_items (obligation_id, ref_month, due_date, amount_expected, estimated) VALUES (?,?,?,?,?)', o.id, ref, due, amount, o.variable ? 1 : 0);
   const itemId = Number(r.lastInsertRowid);
   if (noTask) return itemId;
+  itemTask(o, one('SELECT * FROM finance_items WHERE id = ?', itemId), userId, area);
+  return itemId;
+}
+// Tarefa da parcela (área restrita do Financeiro)
+function itemTask(o, it, userId, area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId())) {
   const assignee = o.assignee_id && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', o.assignee_id) ? o.assignee_id : null;
+  const amount = r2(it.amount_expected);
   const taskId = insertTask({
     project: area,
-    data: { task_type: 'tarefa', title: taskTitle(o, ref), description: taskDescription(o, amount), field_summary: null, notes: null, due_date: due, start_date: due, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
+    data: { task_type: 'tarefa', title: taskTitle(o, it.ref_month), description: taskDescription(o, amount), field_summary: null, notes: null, due_date: it.due_date, start_date: it.due_date, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
     stageInput: stageFor(area.id, o.category),
     creatorId: userId || o.created_by,
   });
-  run('UPDATE finance_items SET task_id = ? WHERE id = ?', taskId, itemId);
+  run('UPDATE finance_items SET task_id = ?, task_skip = 0 WHERE id = ?', taskId, it.id);
   if (amount === 0) syncZeroTask(taskId, 0, userId || o.created_by);
-  return itemId;
+  return taskId;
+}
+
+// ---------- Criar tarefa? As parcelas não criam tarefa sozinhas: o sistema pergunta (mês passado, atual e próximo) ----------
+export function taskSuggestions(ctx) {
+  requireFinance(ctx.user);
+  const cur = today().slice(0, 7);
+  try {
+    return all(`SELECT i.id, i.ref_month, i.due_date, i.amount_expected, o.id AS obligation_id, o.title, o.category, u.name AS assignee_name
+      FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id LEFT JOIN users u ON u.id = o.assignee_id
+      WHERE i.task_id IS NULL AND i.task_skip = 0 AND i.status = 'pendente' AND i.amount_expected > 0 AND o.active = 1 AND i.ref_month BETWEEN ? AND ?
+      ORDER BY i.due_date, o.title`, addMonths(cur, -1), addMonths(cur, 1))
+      .map(i => ({ ...i, month_label: monthLabel(i.ref_month) }));
+  } catch { return []; } // antes da migração
+}
+export function answerTaskSuggestions(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw badRequest('Escolha as parcelas.');
+  const create = body.create === true || body.create === 'true' || body.create === 1;
+  let n = 0;
+  tx(() => {
+    for (const id of ids) {
+      const it = one('SELECT * FROM finance_items WHERE id = ? AND task_id IS NULL', id);
+      if (!it) continue;
+      if (create) { itemTask(one('SELECT * FROM finance_obligations WHERE id = ?', it.obligation_id), it, ctx.user.id); n++; }
+      else { run('UPDATE finance_items SET task_skip = 1 WHERE id = ?', id); n++; }
+    }
+  });
+  audit(ctx.user.id, 'finance', null, create ? 'Tarefas financeiras criadas (pergunta do sistema)' : 'Parcelas sem tarefa (respondido: não criar)', { parcelas: n }, ip);
+  return { ok: true, count: n };
 }
 
 // Previsto 0 = nada esperado no mês: a tarefa do mês sai da lista (cancelada); voltando a ter previsto, ela reabre
@@ -166,7 +202,7 @@ export function generateItems(userId = null) {
   let n = 0;
   for (const o of all('SELECT * FROM finance_obligations WHERE active = 1')) {
     const have = new Set(all('SELECT ref_month FROM finance_items WHERE obligation_id = ?', o.id).map(r => r.ref_month));
-    for (const ref of monthsOf(o, until, false)) if (!have.has(ref)) { tx(() => createItem(o, ref, userId)); n++; }
+    for (const ref of monthsOf(o, until, false)) if (!have.has(ref)) { tx(() => createItem(o, ref, userId, { noTask: true })); n++; }
   }
   return n;
 }
@@ -778,7 +814,7 @@ export function justifyItem(ctx, id, body, ip) {
 export function ensureItemInternal(o, ym, userId) {
   const it = one('SELECT * FROM finance_items WHERE obligation_id = ? AND ref_month = ?', o.id, ym);
   if (it) return it;
-  const id = createItem(o, ym, userId, { noTask: ym < today().slice(0, 7) });
+  const id = createItem(o, ym, userId, { noTask: true });
   return one('SELECT * FROM finance_items WHERE id = ?', id);
 }
 // Ajuste manual do previsto de um mês (fica por cima do previsto calculado pelo ano anterior)

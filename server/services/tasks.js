@@ -1026,6 +1026,7 @@ export function deleteTask(ctx, id, body, ip) {
   const files = [...all('SELECT stored_name FROM task_files WHERE task_id = ?', id), ...checklistStoredFiles(id)];
   const resch = one('SELECT COUNT(*) AS n FROM task_reschedules WHERE task_id = ?', id).n;
   tx(() => {
+    run('UPDATE finance_items SET task_skip = 1 WHERE task_id = ?', id); // parcela do Financeiro: não pergunta nem recria
     run('DELETE FROM tasks WHERE id = ?', id); // histórico, imagens e reagendamentos saem em cascata
     if (t.parent_id) taskHistory(t.parent_id, ctx.user.id, 'Subtarefa excluída', `${t.code} · ${t.title} · Motivo: ${reason}`);
     if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);

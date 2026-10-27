@@ -3032,3 +3032,11 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .rq-block svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
 .rq-doneTxt { font-weight: 700; font-size: 13px; color: #1F7A4A; }
 @media (max-width: 640px) { .rq-item { grid-template-columns: 1fr; } .rq-acts { flex-direction: row; } .rq-acts .btn { flex: 1; } }
+
+/* Financeiro: Criar tarefas? */
+.fs-list { list-style: none; margin: 0; padding: 0; }
+.fs-list li { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); }
+.fs-list li small { display: block; color: var(--muted); font-size: 12.5px; }
+.fs-acts, .fs-all { display: flex; gap: 6px; flex-wrap: wrap; }
+.fs-all { padding: 10px 16px; border-top: 1px solid var(--line); justify-content: flex-end; }
+@media (max-width: 640px) { .fs-list li { grid-template-columns: 1fr; } }

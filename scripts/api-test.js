@@ -2391,6 +2391,10 @@ async function main() {
   const fcSumP = fcSum.workers.find(w => w.worker_id === fcP.id);
   ok(fcSum.sheets === 2 && fcSumP.diarias === 5 && fcSumP.company_pending === 1500 && fcSum.totals.pending === fcCl2.payment.amount && fcSum.contracts.find(c => c.id === fcC.id).measured_pct === 100, 'consolidado da obra: diárias, a pagar e empreitada');
   ok((await fcJul('GET', '/field/summary?obra=2')).status === 403, 'consolidado com valores só para a seção');
+  const fcPay = (await fcAna('GET', '/field/payments?obra=2')).data;
+  const fcPayP = fcPay.people.find(p => p.worker_id === fcP.id), fcPayE = fcPay.people.find(p => p.worker_id === fcE.id);
+  ok(fcPayP.pending === 1500 && !fcPayP.pix && fcPayP.items[0].state === 'pending' && fcPayE.pending === 2000 && fcPayE.open === 3000 && fcPayE.pix === 'pix-ficticio-2', 'pagamentos: quem recebe, quanto (a pagar e previsto) e o PIX (sem PIX quando o cadastro não tem)');
+  ok(fcPay.totals.pending === fcCl2.payment.amount && (await fcJul('GET', '/field/payments')).status === 403, 'total a pagar confere com o Financeiro; só a seção vê');
   const fcAn = (await fcAna('GET', '/field/analysis')).data;
   const fcAnO = fcAn.obras.find(o => o.project_id === 2);
   ok(fcAnO && fcAnO.sheets === 2 && fcAnO.people === 1975 && fcAnO.contracts === 5000 && fcAnO.pending === fcCl2.payment.amount && fcAnO.diarias === 9.5, 'resumo por obra: folhas, mão de obra, empreitadas e a pagar');

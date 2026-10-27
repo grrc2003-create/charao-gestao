@@ -20,6 +20,7 @@ const fieldTabs = (cur, obra) => html`<nav class="fc-tabs">
   <a href="#/campo${obra ? `?obra=${obra}` : ''}" class="${cur === 'folhas' ? 'on' : ''}">Folhas</a>
   <a href="#/campo/profissionais" class="${cur === 'prof' ? 'on' : ''}">Profissionais</a>
   <a href="#/campo/empreitadas${obra ? `?obra=${obra}` : ''}" class="${cur === 'emp' ? 'on' : ''}">Empreitadas</a>
+  <a href="#/campo/pagamentos${obra ? `?obra=${obra}` : ''}" class="${cur === 'pag' ? 'on' : ''}" data-money-tab>Pagamentos</a>
   <a href="#/campo/resumo${obra ? `?obra=${obra}` : ''}" class="${cur === 'ana' ? 'on' : ''}" data-money-tab>Resumo e análise</a>
   ${cur === 'cons' || obra ? html`<a href="#/campo/consolidado?obra=${obra || ''}" class="${cur === 'cons' ? 'on' : ''}" data-money-tab>Consolidado</a>` : ''}</nav>`;
 
@@ -151,9 +152,12 @@ export async function view({ params, navigate, render }) {
           ${s.can.close ? html`<button type="button" class="btn btn-primary" data-close>${icon('check')}Fechar folha</button>` : ''}
           ${s.can.reopen ? html`<button type="button" class="btn btn-ghost" data-reopen>${icon('edit')}Reabrir</button>` : ''}`,
       })}
-      ${mny && s.payment ? html`<div class="notice section">${icon('wallet')}<span>Pagamento no Financeiro: <b>${money(s.payment.amount)}</b> com vencimento em ${fmtDate(s.payment.due_date)} — ${s.payment.status === 'paga' ? 'pago' : 'pendente'}.</span></div>` : ''}
       ${!mny ? html`<div class="notice section">${icon('info')}<span>Marque as diárias de cada pessoa por dia (toque: 1 → ½ → vazio) e o % executado das empreitadas. Valores e fechamento ficam com o escritório.</span></div>` : ''}
       <div class="pf-kpis section" id="fc-tot">${totals()}</div>
+      ${mny ? html`<section class="card section fp-card"><div class="card-head"><h2>${icon('wallet')}${edit ? 'A pagar nesta folha' : 'Pagamentos desta folha'}</h2><span id="fc-paytot" class="fp-tot"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="fc-paycopy" data-copy="" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista</button></div>
+        ${s.payment ? html`<p class="card-body fp-state">${icon('wallet')}No Financeiro: <b>${money(s.payment.amount)}</b> · vence ${fmtDate(s.payment.due_date)} · ${s.payment.status === 'paga' ? html`<span class="fc-pay fc-pay-ok">Pago</span>` : html`<span class="fc-pay">A pagar</span>`}</p>` : ''}
+        <ul class="fp-grid fp-in" id="fc-pay"></ul></section>` : ''}
       <datalist id="fc-services">${s.services.map(x => html`<option value="${x}">`)}</datalist>
       <section class="card section">
         <div class="card-head"><h2>${icon('users')}Mão de obra própria (diárias)</h2><span class="sub">${st.people.length}</span></div>
@@ -174,8 +178,18 @@ export async function view({ params, navigate, render }) {
         ${mny && edit ? html`<label class="fc-payd">Pagamento previsto<input type="date" id="fc-payd" value="${s.pay_date || ''}"></label>` : ''}</div></section>
       ${edit ? html`<div class="fc-save"><span id="fc-dirty" hidden>Alterações não salvas</span><button type="button" class="btn btn-primary" id="fc-save">${icon('check')}Salvar folha</button></div>` : ''}`,
     mount(root) {
+      bindCopy(root);
       const markDirty = () => { dirty = true; const el = root.querySelector('#fc-dirty'); if (el) el.hidden = false; };
+      const payBox = () => {
+        const box = root.querySelector('#fc-pay');
+        if (!box) return;
+        const list = sheetPayList(st.people, st.contracts, pCalc, cCalc);
+        box.innerHTML = list.length ? list.map(p => payCard(p).toString()).join('') : html`<li class="muted fp-none">Nada a pagar pela empresa nesta folha.</li>`.toString();
+        root.querySelector('#fc-paytot').textContent = list.length ? `${list.length} · ${money(list.reduce((a, p) => a + p.amount, 0))}` : '';
+        root.querySelector('#fc-paycopy').dataset.copy = payText(list);
+      };
       const refresh = () => {
+        payBox();
         root.querySelector('#fc-tot').innerHTML = totals().toString();
         for (const e of st.people) { const el = root.querySelector(`[data-calc="${e.worker_id}"]`); if (el) el.innerHTML = personCalc(e).toString(); }
         for (const c of st.contracts) {
@@ -183,6 +197,7 @@ export async function view({ params, navigate, render }) {
           const bar = root.querySelector(`[data-bar="${c.contract_id}"]`); if (bar) bar.style.width = `${Math.min(100 - c.before_pct, num(c.pct))}%`;
         }
       };
+      payBox();
       const body = () => ({
         activities: root.querySelector('#fc-act').value,
         ...(root.querySelector('#fc-payd') ? { pay_date: root.querySelector('#fc-payd').value } : {}),
@@ -518,6 +533,68 @@ export async function analysisView({ query, navigate }) {
         el.addEventListener('touchstart', e => { const p = e.touches[0]; show(el, p.clientX, p.clientY); }, { passive: true });
       });
       window.addEventListener('scroll', function hide() { if (!root.isConnected) return window.removeEventListener('scroll', hide); box.hidden = true; }, { passive: true });
+    },
+  };
+}
+
+// ---------- Pagamentos: quem recebe, quanto e o PIX ----------
+const initialsOf = n => String(n || '?').replace(/^Demo — /, '').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+}
+// Botões "Copiar" (PIX ou lista) em qualquer tela da Folha de Campo
+function bindCopy(root) {
+  root.addEventListener('click', async e => {
+    const b = e.target.closest('[data-copy]');
+    if (!b) return;
+    await copyText(b.dataset.copy);
+    toast(b.dataset.copyMsg || 'Copiado.');
+  });
+}
+const pixLine = p => (p.pix
+  ? html`<div class="fp-pix"><span class="fp-pt">${p.pix_type || 'PIX'}</span><code>${p.pix}</code><button type="button" class="btn btn-ghost btn-sm" data-copy="${p.pix}" data-copy-msg="PIX de ${p.name} copiado.">Copiar PIX</button></div>`
+  : html`<div class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX no cadastro — <a href="#/campo/profissionais">completar</a></span></div>`);
+const payText = list => list.map(p => `${p.name} — ${money(p.amount)}${p.pix ? ` — PIX ${p.pix_type ? `(${p.pix_type}) ` : ''}${p.pix}` : ' — SEM PIX'}`).join('\n');
+const payCard = (p, extra = '') => html`<li class="fp-item">
+  <div class="fp-top"><span class="fp-av">${initialsOf(p.name)}</span><div class="fp-who"><b>${p.name}</b><small>${p.what || p.role || ''}</small></div><strong class="fp-val">${money(p.amount)}</strong></div>
+  ${pixLine(p)}${extra}</li>`;
+
+// Lista da própria folha (valores ao vivo enquanto aberta)
+function sheetPayList(people, contracts, calcP, calcC) {
+  return [...people.map(e => ({ name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: calcP(e).company, what: `${e.role || 'Diarista'} · ${n2(calcP(e).diarias)} diária(s)` })),
+    ...contracts.map(c => ({ name: c.worker_name, role: 'Empreiteiro', pix: c.pix, pix_type: c.pix_type, amount: calcC(c).company, what: `Empreitada ${c.service} · ${n2(num(c.pct))}%` }))]
+    .filter(p => p.amount > 0.004).sort((a, b) => b.amount - a.amount);
+}
+
+export async function paymentsView({ query, navigate }) {
+  const obra = Number(query.get('obra')) || 0;
+  const d = await api('/field/payments', { query: { obra: obra || '' } });
+  const t = d.totals;
+  const pendList = d.people.filter(p => p.pending > 0).map(p => ({ ...p, amount: p.pending }));
+  const stTxt = i => (i.state === 'pending' ? html`<span class="fc-pay">A pagar${i.due_date ? ` ${fmtDate(i.due_date)}` : ''}</span>` : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
+  return {
+    title: 'Pagamentos · Folha de Campo',
+    html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Pagamentos', sub: 'Quem recebe, quanto e o PIX: parte da empresa ainda não paga, de todas as folhas.',
+        actions: pendList.length ? html`<button type="button" class="btn btn-primary" data-copy="${payText(pendList)}" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista a pagar</button>` : '' })}
+      ${fieldTabs('pag', obra)}
+      <div class="fc-filter section"><label for="fp-obra">Obra</label><select id="fp-obra"><option value="">Todas as obras</option>${d.projects.map(p => html`<option value="${p.id}" ${obra === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></div>
+      <div class="pf-kpis fp-kpis section">
+        <div class="pf-kt"><span>A pagar (folhas fechadas)</span><b>${money(t.pending)}</b></div>
+        <div><span>Previsto (folhas abertas)</span><b>${money(t.open)}</b></div>
+        <div><span>Pessoas a receber</span><b>${d.people.length}</b></div>
+      </div>
+      ${d.people.length ? html`<ul class="fp-grid section">${d.people.map(p => payCard({ ...p, amount: p.total }, html`
+          <div class="fp-split">${p.pending ? html`<span class="fc-pay">A pagar ${money(p.pending)}</span>` : ''}${p.open ? html`<span class="fp-prev">Previsto ${money(p.open)}</span>` : ''}</div>
+          <details class="fp-det"><summary>${p.items.length} lançamento(s)</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}</ul></details>`))}</ul>`
+        : html`<div class="empty-state"><h2>Nada a pagar</h2><p>Todas as folhas fechadas estão pagas no Financeiro.</p></div>`}
+      <p class="muted pf-foot">O pagamento é registrado no Financeiro (uma tarefa por folha fechada, com esta mesma lista). Folhas abertas aparecem como previsto até serem fechadas.</p>`,
+    mount(root) {
+      bindCopy(root);
+      root.querySelector('#fp-obra').addEventListener('change', e => navigate(`/campo/pagamentos${e.target.value ? `?obra=${e.target.value}` : ''}`));
     },
   };
 }

@@ -272,6 +272,7 @@ api.delete('/api/field/sheets/:id', (req, res, { ctx, params }) => send(res, 200
 api.post('/api/field/sheets/:id/close', (req, res, { ctx, params, body }) => send(res, 200, Field.closeSheet(ctx, intOrNull(params.id), body, clientIp(req))));
 api.post('/api/field/sheets/:id/reopen', (req, res, { ctx, params }) => send(res, 200, Field.reopenSheet(ctx, intOrNull(params.id), clientIp(req))));
 api.get('/api/field/analysis', (req, res, { ctx, query }) => send(res, 200, Field.analysis(ctx, { from: query.get('de'), to: query.get('ate'), obra: intOrNull(query.get('obra')) })));
+api.get('/api/field/payments', (req, res, { ctx, query }) => send(res, 200, Field.payments(ctx, intOrNull(query.get('obra')))));
 api.get('/api/field/summary', (req, res, { ctx, query }) => send(res, 200, Field.summary(ctx, intOrNull(query.get('obra')))));
 
 // ---------- Folha (Administrativa): seção folha ----------

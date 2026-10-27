@@ -180,7 +180,7 @@ function computeSheet(s) {
     const cTotal = f.total ?? x.c_total;
     const amount = r2(cTotal * x.pct / 100);
     const before = measuredBefore(x.contract_id, s);
-    return { id: x.id, contract_id: x.contract_id, service: f.service ?? x.service, worker_name: f.worker_name ?? x.worker_name, pix: f.pix ?? x.pix, pix_type: f.pix_type ?? x.pix_type,
+    return { id: x.id, contract_id: x.contract_id, worker_id: x.worker_id, service: f.service ?? x.service, worker_name: f.worker_name ?? x.worker_name, pix: f.pix ?? x.pix, pix_type: f.pix_type ?? x.pix_type,
       contract_total: cTotal, pct: x.pct, before_pct: before, after_pct: r2(before + x.pct), balance_pct: r2(100 - before - x.pct), amount, client_paid: x.client_paid, company: r2(amount - x.client_paid), notes: x.notes };
   });
   const totals = {
@@ -198,7 +198,7 @@ const measuredBefore = (contractId, s) => r2(one(`SELECT COALESCE(SUM(sc.pct), 0
   WHERE sc.contract_id = ? AND sc.sheet_id <> ? AND (f.start_date < ? OR (f.start_date = ? AND f.id < ?))`, contractId, s.id, s.start_date, s.start_date, s.id).t);
 
 const MONEY_PEOPLE = ['rate', 'gross', 'adjust', 'adjust_note', 'total', 'client_paid', 'company', 'pix', 'pix_type', 'doc'];
-const MONEY_CONTRACT = ['contract_total', 'amount', 'client_paid', 'company', 'pix', 'pix_type'];
+const MONEY_CONTRACT = ['worker_id', 'contract_total', 'amount', 'client_paid', 'company', 'pix', 'pix_type'];
 const strip = (o, keys) => { const c = { ...o }; for (const k of keys) delete c[k]; return c; };
 
 function paymentOf(s) {
@@ -477,3 +477,38 @@ export function analysis(ctx, { from, to, obra } = {}) {
     contracts: listContracts(ctx).filter(c => !obra || c.project_id === obra),
   };
 }
+
+// ---------- Pagamentos: quem recebe, quanto e o PIX (parte da empresa ainda não paga) ----------
+// Folhas fechadas com pagamento pendente no Financeiro ("a pagar") e folhas abertas ("previsto").
+export function payments(ctx, projectId) {
+  requireMoney(ctx);
+  const ids = new Set(fillableProjects(ctx).map(p => p.id));
+  const groups = new Map();
+  const totals = { pending: 0, open: 0 };
+  for (const s of all(`SELECT f.*, p.code AS project_code, p.name AS project_name FROM field_sheets f JOIN projects p ON p.id = f.project_id ORDER BY f.end_date, f.id`)) {
+    if (!ids.has(s.project_id) || (projectId && s.project_id !== projectId)) continue;
+    const pay = paymentOf(s);
+    const state = s.status === 'aberta' ? 'open' : pay && pay.status !== 'paga' ? 'pending' : null;
+    if (!state) continue;
+    const c = computeSheet(s);
+    const lines = [...c.people.map(e => ({ worker_id: e.worker_id, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, doc: e.doc, amount: e.company, what: `${n2txt(e.diarias)} diária(s)${e.service ? ` · ${e.service}` : ''}` })),
+      ...c.contracts.map(x => ({ worker_id: x.worker_id, name: x.worker_name, role: 'Empreiteiro', pix: x.pix, pix_type: x.pix_type, doc: null, amount: x.company, what: `Empreitada ${x.service} (${n2txt(x.pct)}%)` }))];
+    for (const l of lines) {
+      if (!(l.amount > 0)) continue;
+      const g = groups.get(l.worker_id) || { worker_id: l.worker_id, name: l.name, role: l.role, pix: l.pix, pix_type: l.pix_type, doc: l.doc, pending: 0, open: 0, items: [] };
+      if (!g.pix && l.pix) { g.pix = l.pix; g.pix_type = l.pix_type; }
+      g[state] = r2(g[state] + l.amount);
+      g.items.push({ sheet_id: s.id, code: `${s.project_code} ${fcCode(s.seq)}`, project_name: s.project_name, period: `${dm(s.start_date)} a ${dm(s.end_date)}`, state, due_date: pay?.due_date || s.pay_date || null, amount: r2(l.amount), what: l.what });
+      groups.set(l.worker_id, g);
+      totals[state] = r2(totals[state] + l.amount);
+    }
+  }
+  // PIX atual do cadastro quando a folha não tinha
+  for (const g of groups.values()) if (!g.pix) { const w = one('SELECT pix, pix_type FROM field_workers WHERE id = ?', g.worker_id); if (w?.pix) { g.pix = w.pix; g.pix_type = w.pix_type; } }
+  return {
+    people: [...groups.values()].map(g => ({ ...g, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total),
+    totals: { ...totals, total: r2(totals.pending + totals.open) },
+    projects: fillableProjects(ctx),
+  };
+}
+const n2txt = v => String(r2(v)).replace('.', ',');

@@ -2043,6 +2043,16 @@ async function main() {
     ok((await fo('POST', '/finance/maiscontrole/reprocess', {})).status === 404 && !(await fo('GET', '/finance/maiscontrole')).data.pending, 'resposta da API lida: nada pendente para reprocessar');
     const f2 = await fo('POST', '/finance/maiscontrole/fetch', {});
     ok(f2.status === 400 && /próxima busca/.test(f2.data.error) && mcHits === 1, 'plano semanal: segunda busca na mesma semana é bloqueada sem consultar a API');
+    {
+      // Busca automática só na segunda, 8h (SP), e nunca antes de a cota liberar: busca manual não a empurra para outro dia
+      const stA = (await fo('GET', '/finance/maiscontrole')).data;
+      const na = new Date(stA.next_auto), sp = new Date(na.getTime() - 3 * 3600e3);
+      ok(sp.getUTCDay() === 1 && sp.getUTCHours() >= 8 && na.getTime() >= Date.parse(stA.next_allowed), `busca automática: próxima numa segunda a partir das 8h, depois da cota liberar (${stA.next_auto})`);
+      const todayIso = new Date().toISOString().slice(0, 10);
+      ok(/^\d{4}-\d{2}-\d{2}$/.test(stA.snapshot.ultimo_pagamento || '') && stA.snapshot.ultimo_pagamento <= todayIso,
+        `dados até: a maior data de pagamento que veio do Mais Controle (${stA.snapshot.ultimo_pagamento})`);
+      ok(Date.parse(stA.next_auto) - Date.now() > 6 * 86400e3 && Date.parse(stA.next_auto) - Date.now() <= 14 * 86400e3, 'busca automática: a cota presa pula para a segunda seguinte (regulariza)');
+    }
     let pv = (await fo('GET', '/finance/maiscontrole/preview')).data;
     const acc0 = l => pv.accounts.find(a => a.label === l);
     ok(pv.accounts.length === 3 && acc0('Conta Teste PJ')?.kind === 'empresa' && !acc0('Conta Teste PJ').manual_kind && acc0('Conta Cliente Teste')?.kind === 'cliente' && !acc0('Cartão Teste')?.kind && pv.totals.other_account === 1,
@@ -2057,6 +2067,11 @@ async function main() {
     ok(pv.clients.length === 1 && pv.clients[0].client === 'Conta Cliente Teste' && pv.clients[0].cost_center === 'Obra Teste 1' && pv.clients[0].amount === 1000, 'conta de cliente: gasto do cliente por obra (fora dos Projetos e do realizado)');
     const ver = pv.issues.find(i => i.kind === 'conta_cliente');
     ok(ver && ver.amount === 200 && !ver.marked_at, 'verificador: conta de cliente pagando despesa do centro de custo Empresa');
+    const rawV = (await fo('GET', `/finance/maiscontrole/raw?key=${encodeURIComponent(ver.key)}`)).data;
+    ok(rawV.fetch?.fetched_at && rawV.stored.account === 'Conta Cliente Teste' && rawV.stored.account_kind === 'cliente' && rawV.stored.amount === 200,
+      'dado bruto: como o sistema leu o lançamento e de qual busca');
+    ok(Array.isArray(rawV.raw) && rawV.raw.some(c => c.col === 'conta_bancaria' && c.value === 'Conta Cliente Teste') && rawV.raw.some(c => c.col === 'id_lancamento'), 'dado bruto: a linha original da API com todas as colunas');
+    ok((await biNo('GET', `/finance/maiscontrole/raw?key=${encodeURIComponent(ver.key)}`)).status === 403, 'dado bruto exige a liberação do Financeiro');
     ok((await fo('GET', '/finance/week')).data.alerts.client_issues === 1, 'verificador: aparece no alerta das contas da semana');
     const adjI = (await fo('GET', '/finance/maiscontrole/adjust-info')).data;
     ok(adjI.project?.code === 'INT-001' && adjI.assignees.length > 0 && adjI.stage === 'Mais Controle', 'ajuste no Mais Controle: projeto interno INT-001 e quem pode ajustar');

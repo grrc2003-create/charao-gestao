@@ -12,6 +12,7 @@ const ymLabel = ym => (ym ? `${MES[Number(ym.slice(5, 7)) - 1]}/${ym.slice(0, 4)
 const dmy = s => (s ? s.split('-').reverse().join('/') : '');
 const when = s => (s ? new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   .format(new Date(/Z$|T/.test(s) ? s : `${s.replace(' ', 'T')}Z`)) : '');
+const wday = s => new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(s));
 const readB64 = f => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = () => rej(new Error(`Não foi possível ler ${f.name}.`)); fr.readAsDataURL(f); });
 const PLAN = { semanal: 'semanal (gratuito)', diario: 'diário', horario: 'de hora em hora' };
 const CH = { novo: ['Novo', 'm-paid'], alterado: ['Alterado', 'm-paid'], removido: ['Retirado', 'fi-err'], manual: ['Pago à mão: não muda', 'm-draft'] };
@@ -30,6 +31,33 @@ export function reviewActs(r, tasks = TASKS) {
   </span>`;
 }
 let TASKS = [];
+
+// Dado bruto: a linha do lançamento como veio do Mais Controle e de qual busca
+const KIND = { empresa: 'Empresa', cliente: 'Cliente' };
+async function rawDialog(key) {
+  let d;
+  try { d = await api('/finance/maiscontrole/raw', { query: { key } }); } catch (ex) { toast(ex.message, 'error'); return; }
+  const s = d.stored, f = d.fetch;
+  const line = (k, v) => html`<tr><th>${k}</th><td>${v || '—'}</td></tr>`;
+  await sheet({
+    title: 'Dado bruto do Mais Controle', submitLabel: 'Fechar', wide: true,
+    body: html`<p class="mc-raw-src">${f ? html`Busca <b>${f.origin === 'arquivo' ? `arquivo ${f.file_name}` : f.origin === 'auto' ? 'automática (API)' : 'API'}</b> em <b>${when(f.fetched_at)}</b>` : 'Busca não identificada.'}</p>
+      <h3 class="mc-raw-h">Como o sistema leu</h3>
+      <div class="table-wrap"><table class="data mc-raw"><tbody>
+        ${line('Fornecedor', s.supplier)}${line('Valor pago', money(s.amount))}${line('Vencimento', dmy(s.due_date))}${line('Pagamento', dmy(s.paid_date))}
+        ${line('Conta bancária', html`${s.account || ''}${s.account_kind ? html` <small class="muted">(tratada como conta de ${KIND[s.account_kind]}${s.account_kind_manual ? ', escolha manual' : ', pelo “Quem paga” da maioria dos lançamentos dela'})</small>` : ''}`)}
+        ${line('Centro de custo', s.cost_center)}${line('Quem paga', s.payer)}${line('Categoria', s.category)}${line('Plano de contas', s.plan_account)}${line('Descrição', s.description)}
+      </tbody></table></div>
+      <h3 class="mc-raw-h">Linha original (todas as colunas)</h3>
+      ${d.raw ? html`<div class="table-wrap"><table class="data mc-raw"><tbody>${d.raw.map(c => line(c.col, c.value))}</tbody></table></div>`
+        : html`<p class="muted">A linha original não está guardada (dados vindos de arquivo exportado ou de busca antiga).</p>`}
+      <h3 class="mc-raw-h">Lançamentos parecidos na mesma busca</h3>
+      ${d.similar.length ? html`<div class="table-wrap"><table class="data mc-raw"><thead><tr><th>Pagamento</th><th>Conta</th><th>Centro de custo</th><th>Quem paga</th><th>Categoria</th></tr></thead>
+        <tbody>${d.similar.map(x => html`<tr><td>${dmy(x.paid_date) || 'em aberto'}</td><td>${x.account}</td><td>${x.cost_center}</td><td>${x.payer || '—'}</td><td>${x.category}</td></tr>`)}</tbody></table></div>`
+        : html`<p class="muted">Nenhum outro lançamento do mesmo fornecedor com o mesmo valor.</p>`}`,
+    onSubmit: () => true,
+  });
+}
 
 // "Ajustar no Mais Controle": pergunta quem ajusta e até quando (tarefa no INT-001, classificação "Mais Controle").
 // Devolve undefined se cancelou, null para só registrar, ou os dados da tarefa.
@@ -131,13 +159,14 @@ export async function view({ state, render }) {
         <div class="card-body mc-fetch">
           ${st.configured ? html`<div>
               <button type="button" class="btn btn-primary" data-mc-fetch ${st.next_allowed ? 'disabled' : ''}>${icon('reschedule')}Buscar no Mais Controle</button>
-              <small class="hint">${st.next_allowed ? `Pelo plano ${PLAN[st.plan] || st.plan}, a próxima busca fica liberada em ${when(st.next_allowed)}.` : 'Traz todo o histórico (2024 em diante) e usa 1 consulta da cota do plano.'}${st.auto ? ' Automático: toda segunda-feira a partir das 8h o sistema busca e sincroniza sozinho.' : ''}</small></div>`
+              <small class="hint">${st.next_allowed ? `Pelo plano ${PLAN[st.plan] || st.plan}, a próxima busca fica liberada em ${when(st.next_allowed)}.` : 'Traz todo o histórico (2024 em diante) e usa 1 consulta da cota do plano.'}${st.auto ? ' Automático: às segundas-feiras, a partir das 8h, o sistema busca e sincroniza sozinho.' : ''}</small>
+              ${st.auto && st.next_auto ? html`<small class="hint mc-next">${icon('calendar')}Próxima busca automática: <b>${wday(st.next_auto)}</b></small>` : ''}</div>`
             : html`<div class="mc-cfg"><b>Integração ainda não configurada.</b> No painel do servidor (Render › Environment), cadastre <code>MAISCONTROLE_USUARIO</code> e <code>MAISCONTROLE_SENHA</code> com a credencial da API para Relatórios (Mais Controle › Configurações › Integração). Opcional: <code>MAISCONTROLE_PLANO</code> = semanal, diario ou horario. A senha fica só no servidor.</div>`}
           ${st.pending ? html`<div class="mc-cfg">A última resposta da API (${when(st.pending.fetched_at)}) não foi lida${st.pending.error ? `: ${st.pending.error}` : ''}. <button type="button" class="btn btn-ghost btn-sm" data-mc-reprocess>${icon('reschedule')}Ler de novo a resposta guardada</button> <small>(não gasta outra consulta)</small></div>` : ''}
           <div class="mc-or">ou envie o arquivo de Pagamentos exportado do Mais Controle (substitui só os meses do arquivo)
             <label class="btn btn-ghost btn-sm" for="mc-file">${icon('file')}Escolher arquivo (.xlsx ou .csv)</label>
             <input type="file" id="mc-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
-          ${pv.fetch ? html`<p class="muted mc-last">Última atualização: <b>${pv.fetch.origin === 'arquivo' ? pv.fetch.file_name : 'API'}</b> em ${when(pv.fetch.fetched_at)} · dados até ${dmy(pv.fetch.data_until)}${st.snapshot?.n ? ` · ${st.snapshot.n} pagamento(s) de ${ymLabel(st.snapshot.desde)} a ${ymLabel(st.snapshot.ate)}` : ''}</p>` : ''}
+          ${pv.fetch ? html`<p class="muted mc-last">Última atualização: <b>${pv.fetch.origin === 'arquivo' ? pv.fetch.file_name : 'API'}</b> em ${when(pv.fetch.fetched_at)}${st.snapshot?.ultimo_pagamento ? html` · <b>dados até ${dmy(st.snapshot.ultimo_pagamento)}</b> (último pagamento registrado no Mais Controle)` : ` · dados até ${dmy(pv.fetch.data_until)}`}${st.snapshot?.n ? ` · ${st.snapshot.n} pagamento(s) de ${ymLabel(st.snapshot.desde)} a ${ymLabel(st.snapshot.ate)}` : ''}</p>` : ''}
         </div>
       </section>
       ${pv.accounts.length ? html`<section class="card section">
@@ -162,14 +191,16 @@ export async function view({ state, render }) {
             ${i.marked_at ? html`<small class="mc-note">ajustar no Mais Controle · avisado em ${when(i.marked_at)}${i.marked_by ? ` por ${i.marked_by}` : ''}: aguardando a correção</small>` : ''}${taskLine(i.task)}</span>
             <span class="mc-rev-acts">${i.marked_at ? html`<button type="button" class="btn btn-ghost btn-sm" data-iss="reabrir" data-key="${i.key}">Desfazer</button>`
               : html`<button type="button" class="btn btn-ghost btn-sm mc-wrong" data-iss="ajustar" data-key="${i.key}">Ajustar no Mais Controle</button>`}
-              <button type="button" class="btn btn-ghost btn-sm" data-iss-ex="${i.key}">Não trazer</button></span></li>`)}</ul>
+              <button type="button" class="btn btn-ghost btn-sm" data-iss-ex="${i.key}">Não trazer</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-raw="${i.key}">${icon('file')}Dado bruto</button></span></li>`)}</ul>
         </section>`;
       })() : ''}
       ${pv.issues?.some(i => i.kind !== 'conta_cliente') ? (() => {
         const iss = pv.issues.filter(i => i.kind !== 'conta_cliente');
         const cli = iss.filter(i => i.kind === 'cliente'), acc = iss.filter(i => i.kind === 'conta');
         const byAcc = [...new Set(acc.map(i => i.account))].map(a => ({ account: a, items: acc.filter(i => i.account === a) }));
-        const item = i => html`<li><span class="mc-cat"><b>${i.supplier || '(sem fornecedor)'} · ${money(i.amount)}</b><small>${dmy(i.paid_date)} · ${i.category || '(sem categoria)'}${i.description ? ` · ${i.description}` : ''}${i.kind === 'cliente' ? ` · conta ${i.account}` : ''}</small></span></li>`;
+        const item = i => html`<li><span class="mc-cat"><b>${i.supplier || '(sem fornecedor)'} · ${money(i.amount)}</b><small>${dmy(i.paid_date)} · ${i.category || '(sem categoria)'}${i.description ? ` · ${i.description}` : ''}${i.kind === 'cliente' ? ` · conta ${i.account}` : ''}</small></span>
+          <button type="button" class="btn btn-ghost btn-sm" data-raw="${i.key}">${icon('file')}Dado bruto</button></li>`;
         return html`<section class="card section mc-issues">
           <div class="card-head"><h2>${icon('alert')}Ajustar no Mais Controle</h2><span class="sub">centro de custo Empresa · ${iss.length} lançamento(s) fora do realizado · ${money(iss.reduce((s, i) => s + i.amount, 0))}</span></div>
           <div class="card-body"><p class="muted" style="margin:0">Só entra o que é custo da empresa (centro de custo Empresa, pago pela empresa, em conta bancária da empresa). Estes lançamentos estão no centro de custo Empresa mas não seguem a regra: ajuste no Mais Controle (ou classifique a conta, se ela for da empresa). Ao ajustar, saem desta lista na próxima atualização.</p></div>
@@ -230,6 +261,9 @@ export async function view({ state, render }) {
     mount(root) {
       const busy = async (b, fn) => { b.disabled = true; try { await fn(); } catch (ex) { toast(ex.message, 'error'); b.disabled = false; } };
       root.querySelector('[data-mc-fetch]')?.addEventListener('click', e => busy(e.currentTarget, async () => {
+        // Busca manual gasta a cota: avisa quando ela empurra a busca automática de segunda
+        if (st.auto && st.next_auto_if_now && st.next_auto && st.next_auto_if_now !== st.next_auto
+          && !(await confirmSheet('Buscar agora?', `Esta busca usa a consulta do plano ${PLAN[st.plan] || st.plan}. A busca automática de ${wday(st.next_auto)} passa para ${wday(st.next_auto_if_now)}. Para trazer correções sem gastar a cota, envie o arquivo exportado do Mais Controle.`, 'Buscar mesmo assim'))) { e.target.closest('button').disabled = false; return; }
         const r = await api('/finance/maiscontrole/fetch', { method: 'POST', body: {} });
         toast(`${r.rows} pagamento(s) recebido(s) do Mais Controle. Confira e sincronize.`); render();
       }));
@@ -288,6 +322,7 @@ export async function view({ state, render }) {
         await api('/finance/maiscontrole/exclusions/remove', { method: 'POST', body: { kind: b.dataset.unex, key: b.dataset.key } });
         toast('Volta a entrar: o realizado foi recalculado.'); render();
       })));
+      root.querySelectorAll('[data-raw]').forEach(b => b.addEventListener('click', () => rawDialog(b.dataset.raw)));
       bindReviewActs(root, render);
       const doSync = async (b, reset) => busy(b, async () => {
         if (reset && !(await confirmSheet('Refazer todo o previsto', 'O previsto de todos os meses das tarefas do Mais Controle volta a ser o realizado do ano anterior (no primeiro ano, o próprio realizado). Ajustes manuais do previsto dessas tarefas são descartados.', 'Refazer', true))) { b.disabled = false; return; }

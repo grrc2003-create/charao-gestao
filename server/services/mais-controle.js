@@ -145,12 +145,29 @@ function nextAllowed() {
   const t = tsOf(l.fetched_at) + PLAN_HOURS[plan()] * 3600e3;
   return t > Date.now() ? new Date(t).toISOString() : null;
 }
+// Busca automática só às segundas (a partir das 8h, depois da atualização de domingo da API). Busca manual no meio da
+// semana não empurra a automática para outro dia: se a cota ainda estiver presa na segunda, fica para a segunda seguinte.
+const SP = 3 * 3600e3; // America/Sao_Paulo: UTC−3 (sem horário de verão)
+function nextAuto(lastTs = lastApiFetch() ? tsOf(lastApiFetch().fetched_at) : null, now = Date.now()) {
+  const loc = new Date(now - SP);
+  let mon = Date.UTC(loc.getUTCFullYear(), loc.getUTCMonth(), loc.getUTCDate() - ((loc.getUTCDay() + 6) % 7), 8) + SP; // segunda 8h (SP)
+  const allowed = lastTs == null ? 0 : lastTs + PLAN_HOURS[plan()] * 3600e3;
+  for (let i = 0; i < 10; i++, mon += 7 * 86400e3) {
+    const end = mon + 16 * 3600e3; // até o fim da segunda
+    if (end <= now || (lastTs != null && lastTs >= mon) || allowed > end) continue;
+    return Math.max(mon, allowed);
+  }
+  return null;
+}
 export function status(ctx) {
   requireFinance(ctx.user);
   const f = one('SELECT id, origin, file_name, row_count, data_until, fetched_at FROM ext_fetches WHERE source = ? AND row_count > 0 ORDER BY id DESC LIMIT 1', SOURCE);
-  const span = one(`SELECT COUNT(*) AS n, MIN(ref_month) AS desde, MAX(ref_month) AS ate FROM ext_payments WHERE source = ?`, SOURCE);
+  const span = one(`SELECT COUNT(*) AS n, MIN(ref_month) AS desde, MAX(ref_month) AS ate, MAX(CASE WHEN paid_date <= ? THEN paid_date END) AS ultimo_pagamento
+    FROM ext_payments WHERE source = ?`, today(), SOURCE);
   const pending = one(`SELECT id, fetched_at, error FROM ext_fetches WHERE source = ? AND origin IN ('api', 'auto') AND row_count = 0 AND raw IS NOT NULL ORDER BY id DESC LIMIT 1`, SOURCE);
-  return { configured: configured(), plan: plan(), next_allowed: nextAllowed(), last_fetch: f || null, auto: process.env.MAISCONTROLE_AUTO !== '0', snapshot: span, pending: pending || null };
+  const iso = t => (t ? new Date(t).toISOString() : null);
+  return { configured: configured(), plan: plan(), next_allowed: nextAllowed(), last_fetch: f || null, auto: process.env.MAISCONTROLE_AUTO !== '0', snapshot: span, pending: pending || null,
+    next_auto: iso(nextAuto()), next_auto_if_now: iso(nextAuto(Date.now())) };
 }
 
 // ---------- Buscar ----------
@@ -219,12 +236,8 @@ export function uploadFile(ctx, body) {
 let autoRunning = false;
 export async function autoSync() {
   if (autoRunning || !configured() || process.env.MAISCONTROLE_AUTO === '0') return null;
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-  const monday = new Date(now); monday.setHours(8, 0, 0, 0); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-  if (now < monday) monday.setDate(monday.getDate() - 7);
-  const l = lastApiFetch();
-  const lastLocal = l ? new Date(new Date(tsOf(l.fetched_at)).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })) : null;
-  if ((lastLocal && lastLocal >= monday) || nextAllowed()) return null;
+  const at = nextAuto();
+  if (!at || Date.now() < at || nextAllowed()) return null;
   autoRunning = true;
   const ctx = { user: { id: null, can_finance: 1, role: 'admin', name: 'Sincronização automática' } };
   try {
@@ -490,6 +503,34 @@ export function issues() {
       marked_at: mk?.marked_at || null, marked_by: mk?.by_name || null, task: taskInfo(mk?.task_id) });
   }
   return out;
+}
+// Dado bruto de um lançamento: a linha como veio do Mais Controle (todas as colunas) e de qual busca, mais os
+// lançamentos parecidos (mesmo fornecedor e valor) — para conferir se a correção feita lá chegou
+export function rawPayment(ctx, key) {
+  requireFinance(ctx.user);
+  const p = one('SELECT * FROM ext_payments WHERE source = ? AND ext_key = ?', SOURCE, String(key || ''));
+  if (!p) throw notFound('Lançamento não encontrado na última atualização do Mais Controle.');
+  const f = one('SELECT id, origin, file_name, fetched_at, data_until, raw FROM ext_fetches WHERE id = ?', p.fetch_id);
+  let raw = null;
+  const m = /^id:(.*):([^:]*)$/.exec(p.ext_key);
+  if (f?.raw && m) {
+    const grid = parseCsv(f.raw);
+    const hi = grid.findIndex(r => r.some(v => hkey(v) === 'idlancamento'));
+    if (hi >= 0) {
+      const H = grid[hi].map(hkey), iId = H.indexOf('idlancamento'), iPar = H.indexOf('numeroparcela');
+      const row = grid.slice(hi + 1).find(r => String(r[iId] ?? '').trim() === m[1] && (iPar < 0 || String(r[iPar] ?? '1').trim() === m[2]));
+      if (row) raw = grid[hi].map((h, i) => ({ col: String(h).trim(), value: String(row[i] ?? '') }));
+    }
+  }
+  const similar = all(`SELECT ext_key, due_date, paid_date, amount, category, account, cost_center, payer, description FROM ext_payments
+    WHERE source = ? AND ext_key <> ? AND supplier_key = ? AND ABS(amount - ?) < 0.01 ORDER BY paid_date DESC LIMIT 10`, SOURCE, p.ext_key, p.supplier_key, p.amount);
+  const acc = one('SELECT label, kind, auto_kind FROM ext_accounts WHERE source = ? AND ext_key = ?', SOURCE, p.account_key);
+  return {
+    fetch: f ? { origin: f.origin, file_name: f.file_name, fetched_at: f.fetched_at, data_until: f.data_until } : null,
+    stored: { due_date: p.due_date, paid_date: p.paid_date, amount: p.amount, category: p.category, supplier: p.supplier, description: p.description,
+      account: p.account, account_kind: acc ? acc.kind || acc.auto_kind : null, account_kind_manual: !!acc?.kind, cost_center: p.cost_center, payer: p.payer, plan_account: p.plan_account },
+    raw, similar,
+  };
 }
 // Decisão do operador no verificador: "vou ajustar no Mais Controle" (fica registrado até o lançamento sair da lista) ou desfazer
 export function markIssue(ctx, body, ip) {

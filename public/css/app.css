@@ -3277,3 +3277,14 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
   .card-head:has(#fin-cs) .sub { order: 5; flex-basis: 100%; }
   #fin-cs { margin-left: 0; }
 }
+/* Mais Controle: dado bruto do lançamento */
+.mc-raw-src { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: #F6F4EF; font-size: 13.5px; }
+.mc-raw-h { font-size: 14px; margin: 16px 0 6px; }
+.mc-raw th { text-align: left; font-weight: 600; white-space: nowrap; width: 1%; color: var(--muted); }
+.mc-raw td { word-break: break-word; }
+/* Mais Controle: dado bruto do lançamento e próxima busca automática */
+.mc-raw-src { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: #F6F4EF; font-size: 13.5px; }
+.mc-raw-h { font-size: 14px; margin: 16px 0 6px; }
+.mc-raw th { text-align: left; font-weight: 600; white-space: nowrap; width: 1%; color: var(--muted); }
+.mc-raw td { word-break: break-word; }
+.mc-next { display: flex; align-items: center; gap: 6px; margin-top: 4px; }

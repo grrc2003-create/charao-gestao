@@ -13,8 +13,11 @@ export async function view({ params, state }) {
   const q = n => (n ? qty(n) : '–');
   const minRows = Math.max(0, 6 - m.rows.length);
   const adjs = m.adjustments.length ? m.adjustments : [];
+  // Boletim de outra empresa (ex.: LuS): nada da Charão no documento, no rodapé nem no nome do PDF
+  const own = (c.company || 'charao') === 'charao';
   return {
     title: `Boletim ${m.code}`,
+    docTitle: own ? null : `Boletim ${m.code} - ${c.client} - ${c.company_name}`,
     html: html`${printToolbar({ back: `#/medicoes/${m.id}`, title: `Boletim de medição ${m.code} — ${c.client}` })}
     <div class="doc-stage">
       <article class="doc a4 bm-doc bm-co-${c.company || 'charao'}">
@@ -62,7 +65,7 @@ export async function view({ params, state }) {
     </div>`,
     mount(root) {
       bindPrintToolbar(root);
-      setPageFooter(`Boletim ${m.code} · ${c.client} · emitido pelo Charão Gestão`);
+      setPageFooter(`Boletim ${m.code} · ${c.client} · ${own ? 'emitido pelo Charão Gestão' : c.company_name}`);
     },
   };
 }

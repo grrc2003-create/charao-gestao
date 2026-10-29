@@ -365,7 +365,8 @@ export async function render() {
     const v = await route.view(ctx);
     if (token !== renderToken) return;
     root.innerHTML = v.html.toString();
-    if (v.title) { document.title = `${v.title} · Charão`; setCurrentTitle(v.title); }
+    // docTitle: título completo da aba (vira o nome do PDF), para documentos de outra empresa do grupo
+    if (v.title) { document.title = v.docTitle || `${v.title} · Charão`; setCurrentTitle(v.title); }
     if (!printMode) window.scrollTo(0, same ? keepY : 0);
     v.mount?.(root, ctx);
     if (same) {

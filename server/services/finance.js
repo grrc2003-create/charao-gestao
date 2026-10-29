@@ -119,7 +119,7 @@ export function taskSuggestions(ctx) {
     return all(`SELECT i.id, i.ref_month, i.due_date, i.amount_expected, o.id AS obligation_id, o.title, o.category, u.name AS assignee_name
       FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id LEFT JOIN users u ON u.id = o.assignee_id
       WHERE i.task_id IS NULL AND i.task_skip = 0 AND i.status = 'pendente' AND i.amount_expected > 0 AND o.active = 1 AND i.ref_month BETWEEN ? AND ?
-      ORDER BY i.due_date, o.title`, addMonths(cur, -1), addMonths(cur, 1))
+      ORDER BY i.due_date, o.title`, [addMonths(cur, -1), cutoff()].sort().at(-1), addMonths(cur, 1))
       .map(i => ({ ...i, month_label: monthLabel(i.ref_month) }));
   } catch { return []; } // antes da migração
 }
@@ -207,6 +207,51 @@ export function generateItems(userId = null) {
   return n;
 }
 
+// ---------- Início do controle: pendências de meses anteriores ficam no histórico (sem atraso nem tarefa aberta) ----------
+const CUTOFF_REASON = 'Anterior ao início do controle do Financeiro';
+export const controlStart = () => one(`SELECT value FROM app_settings WHERE key = 'finance_control_start'`)?.value || null;
+const cutoff = () => controlStart() || '0000-00';
+const beforeControl = ym => all(`SELECT i.*, t.status AS task_status, t.cancelled_at AS task_cancelled FROM finance_items i LEFT JOIN tasks t ON t.id = i.task_id
+  WHERE i.status = 'pendente' AND i.amount_expected > 0 AND i.ref_month < ?`, ym);
+const openTask = i => i.task_id && !i.task_cancelled && i.task_status !== 'concluida';
+export function controlStartInfo(ctx, ym) {
+  requireFinance(ctx.user);
+  const current = controlStart();
+  const month = /^\d{4}-\d{2}$/.test(String(ym || '')) ? ym : current || today().slice(0, 7);
+  const rows = beforeControl(month);
+  return { current, current_label: current ? monthLabel(current) : null, month, label: monthLabel(month), max: today().slice(0, 7),
+    count: rows.length, total: r2(rows.reduce((s, i) => s + i.amount_expected, 0)), tasks: rows.filter(openTask).length };
+}
+export function setControlStart(ctx, body, ip) {
+  requireFinance(ctx.user);
+  const clear = body.month === null || body.month === '';
+  const ym = clear ? null : /^\d{4}-\d{2}$/.test(String(body.month || '')) ? body.month : null;
+  if (!clear && !ym) throw badRequest('Mês inválido.');
+  if (ym && ym > today().slice(0, 7)) throw badRequest('O início do controle não pode ser depois do mês atual.');
+  const old = controlStart();
+  const now = new Date().toISOString();
+  let cancelled = 0, restored = 0;
+  tx(() => {
+    if (ym) run(`INSERT INTO app_settings (key, value) VALUES ('finance_control_start', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`, ym);
+    else run(`DELETE FROM app_settings WHERE key = 'finance_control_start'`);
+    // Tarefas canceladas pelo início do controle voltam quando o mês passa a ser controlado
+    for (const it of all(`SELECT i.task_id, i.ref_month FROM finance_items i JOIN tasks t ON t.id = i.task_id WHERE i.status = 'pendente' AND t.cancel_reason = ?`, CUTOFF_REASON)) {
+      if (ym && it.ref_month < ym) continue;
+      run('UPDATE tasks SET cancelled_at = NULL, cancelled_by = NULL, cancel_reason = NULL, updated_at = ? WHERE id = ?', now, it.task_id);
+      taskHistory(it.task_id, ctx.user.id, 'Tarefa reaberta', 'Início do controle do Financeiro alterado');
+      restored++;
+    }
+    if (ym) for (const it of beforeControl(ym).filter(openTask)) {
+      run(`UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ?`, now, ctx.user.id, CUTOFF_REASON, now, it.task_id);
+      taskHistory(it.task_id, ctx.user.id, 'Tarefa cancelada', `${CUTOFF_REASON} (${monthLabel(ym)})`);
+      cancelled++;
+    }
+    audit(ctx.user.id, 'finance', null, ym ? 'Início do controle do Financeiro definido' : 'Início do controle do Financeiro removido',
+      { de: old ? monthLabel(old) : null, para: ym ? monthLabel(ym) : null, tarefas_canceladas: cancelled, tarefas_reabertas: restored }, ip);
+  });
+  return { ...controlStartInfo(ctx, ym), cancelled, restored };
+}
+
 // Parcela pendente fora do período da tarefa (depois do Término ou antes do Início, ex.: término antecipado depois de as
 // parcelas terem sido geradas) não vale, em qualquer mês — passado ou futuro. Parcelas pagas ficam.
 function dropItem(it, userId, reason) {
@@ -271,7 +316,8 @@ export function financeYear(ctx, y) {
   const autoPlans = new Set(all('SELECT obligation_id, ref_month FROM finance_plan WHERE auto = 1 AND ref_month BETWEEN ? AND ?', keys[0], keys[11]).map(p => `${p.obligation_id}|${p.ref_month}`));
   // Mês fechado: anterior ao mês passado e já coberto pela última busca do Mais Controle
   const prevMonth = (() => { const [yy, mm] = ref.slice(0, 7).split('-').map(Number); return mm === 1 ? `${yy - 1}-12` : `${yy}-${String(mm - 1).padStart(2, '0')}`; })();
-  const closed = k => !!cov && k < prevMonth && cov.data_until.slice(0, 7) > k;
+  const cut = cutoff();
+  const closed = k => (!!cov && k < prevMonth && cov.data_until.slice(0, 7) > k) || k < cut; // antes do início do controle: histórico
   const rows = [];
   for (const o of all(`SELECT o.*, u.name AS assignee_name FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.category, o.title`)) {
     const due = new Set(o.active ? monthsOf(o, keys[11]).filter(k => k >= keys[0]) : []);
@@ -391,9 +437,9 @@ export function readObligation(body) {
 export function listObligations(ctx) {
   requireFinance(ctx.user);
   return all(`SELECT o.*, u.name AS assignee_name,
-      (SELECT COUNT(*) FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente' AND i.due_date < ?) AS overdue,
-      (SELECT MIN(i.due_date) FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente') AS next_due
-    FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.active DESC, o.category, o.title`, today())
+      (SELECT COUNT(*) FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente' AND i.due_date < ? AND i.ref_month >= ? AND i.amount_expected > 0) AS overdue,
+      (SELECT MIN(i.due_date) FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente' AND i.ref_month >= ?) AS next_due
+    FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.active DESC, o.category, o.title`, today(), cutoff(), cutoff())
     .map(o => ({ ...o, frequency_label: FREQ_LABEL[o.frequency] }));
 }
 
@@ -690,11 +736,13 @@ export function financeMonth(ctx, ym) {
       (SELECT pm.ref FROM payroll_months pm WHERE pm.finance_item_id = i.id) AS payroll_ref
     FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
     LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN users u ON u.id = t.assignee_id
-    WHERE (i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ?)) AND NOT (i.status = 'pendente' AND i.amount_expected = 0) ORDER BY i.due_date, o.title`, month, ref);
+    WHERE (i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ? AND i.ref_month >= ?)) AND NOT (i.status = 'pendente' AND i.amount_expected = 0) ORDER BY i.due_date, o.title`, month, ref, cutoff());
+  const cut = cutoff();
   const decorate = it => {
-    const late = it.status === 'pendente' && it.due_date < ref && r2(it.amount_expected) > 0;
+    const before = it.status === 'pendente' && it.ref_month < cut; // antes do início do controle: histórico, não é atraso
+    const late = !before && it.status === 'pendente' && it.due_date < ref && r2(it.amount_expected) > 0;
     const days = Math.round((Date.parse(it.due_date) - Date.parse(ref)) / 86400e3);
-    return { ...it, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : late ? 'atrasada' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
+    return { ...it, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : before ? 'antes' : late ? 'atrasada' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
   };
   const items = rows.map(decorate).map(it => ({ ...it, previous_amount: it.variable ? previousAmount(it.obligation_id, it.ref_month) : null }));
   const inMonth = items.filter(i => i.ref_month === month);
@@ -714,9 +762,10 @@ export function financeMonth(ctx, ym) {
       open: sum(inMonth.filter(i => i.status === 'pendente'), i => i.amount_expected),
       count: inMonth.length, paid_count: inMonth.filter(i => i.status === 'paga').length,
       late: sum(items.filter(i => i.late), i => i.amount_expected), late_count: items.filter(i => i.late).length,
-      week: sum(items.filter(i => i.status === 'pendente' && !i.late && i.days_to_due <= 7), i => i.amount_expected),
-      week_count: items.filter(i => i.status === 'pendente' && !i.late && i.days_to_due <= 7).length,
+      week: sum(items.filter(i => i.situation === 'hoje' || i.situation === 'semana'), i => i.amount_expected),
+      week_count: items.filter(i => i.situation === 'hoje' || i.situation === 'semana').length,
     },
+    control_start: controlStart(), control_label: controlStart() ? monthLabel(controlStart()) : null,
     items, // do mês + atrasadas de meses anteriores
     categories: [...cats.values()].sort((a, b) => b.expected - a.expected),
     area_id: financeAreaId(),

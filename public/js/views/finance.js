@@ -19,6 +19,7 @@ export const SIT = {
   semana: { label: 'Próximos 7 dias', ic: 'calendar', cls: 'fs-week' },
   futura: { label: 'A vencer', ic: 'calendar', cls: 'fs-future' },
   paga: { label: 'Paga', ic: 'check', cls: 'fs-paid' },
+  antes: { label: 'Antes do controle', ic: 'history', cls: 'fs-before' },
 };
 const sitBadge = s => html`<span class="fs-badge ${SIT[s].cls}">${icon(SIT[s].ic)}${SIT[s].label}</span>`;
 
@@ -66,6 +67,29 @@ document.addEventListener('click', e => {
   if (input) { input.value = b.dataset.prev; input.focus(); }
 });
 
+// ---------- Início do controle: pendências anteriores ficam no histórico (sem atraso e sem tarefa aberta) ----------
+const csText = c => c.count
+  ? html`<b>${c.count} parcela(s) sem pagamento</b> antes de ${c.label} (${money(c.total)}) deixam de aparecer como atrasadas${c.tasks ? html` e <b>${c.tasks} tarefa(s)</b> aberta(s) são canceladas` : ''}.`
+  : html`Nenhuma parcela pendente antes de ${c.label}.`;
+async function controlFlow(done) {
+  const c = await api('/finance/control-start');
+  const r = await sheet({
+    title: 'Início do controle do Financeiro',
+    submitLabel: 'Salvar',
+    body: html`<p class="muted" style="margin:0 0 10px">Os meses anteriores ficam só como histórico: não aparecem como atrasados e não geram tarefas. Nada é apagado — pagamentos, previstos, planejamento anual e análise continuam iguais.</p>
+      <div class="field" style="max-width:240px"><label class="req" for="fcs-m">Controlar a partir de</label><input type="month" id="fcs-m" name="month" required max="${c.max}" value="${c.month}"></div>
+      <p class="fcs-prev" id="fcs-prev">${csText(c)}</p>
+      ${c.current ? html`<label class="switch"><input type="checkbox" name="clear">Remover o início do controle (volta a mostrar todas as atrasadas)</label>` : ''}`,
+    onSubmit: (d, form) => api('/finance/control-start', { method: 'PUT', body: { month: form.querySelector('[name=clear]')?.checked ? null : d.month } }),
+  });
+  if (r) { toast(r.current ? `Controle a partir de ${r.current_label}.${r.cancelled ? ` ${r.cancelled} tarefa(s) cancelada(s).` : ''}` : 'Início do controle removido.'); done(); }
+}
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'fcs-m' || !e.target.value) return;
+  const p = document.getElementById('fcs-prev');
+  try { const c = await api('/finance/control-start', { query: { mes: e.target.value } }); if (p) p.innerHTML = csText(c).toString(); } catch (err) { if (p) p.textContent = err.message; }
+});
+
 // ---------- Visão do mês ----------
 export async function view({ state, query, setQuery, render }) {
   denied(state);
@@ -106,6 +130,7 @@ export async function view({ state, query, setQuery, render }) {
     ['semana', 'Próximos 7 dias', items.filter(i => i.situation === 'semana')],
     ['futura', 'Mais adiante no mês', inMonth.filter(i => i.situation === 'futura')],
     ['paga', 'Pagas no mês', inMonth.filter(i => i.situation === 'paga')],
+    ['antes', 'Sem pagamento (antes do início do controle)', inMonth.filter(i => i.situation === 'antes')],
   ];
   const row = i => html`<li class="fin-row ${SIT[i.situation].cls}">
     <div class="fin-row-main"><b>${i.title}</b><small>${i.category} · ${i.frequency_label}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></div>
@@ -164,8 +189,9 @@ export async function view({ state, query, setQuery, render }) {
               <small>${c.paid_count} de ${c.count} paga(s)</small></div>`) : html`<p class="muted" style="margin:0">Nenhuma obrigação neste mês.</p>`}</div></section>
         </div>
 
-        <section class="card"><div class="card-head"><h2>${icon('tasks')}Vencimentos</h2><span class="sub">inclui atrasadas de meses anteriores</span></div>
-          ${items.length ? groups.filter(([, , list]) => list.length).map(([k, label, list]) => html`<details class="fin-group" ${k === 'paga' ? '' : 'open'}>
+        <section class="card"><div class="card-head"><h2>${icon('tasks')}Vencimentos</h2><span class="sub">${d.control_start ? `atrasadas a partir de ${d.control_label} (início do controle)` : 'inclui atrasadas de meses anteriores'}</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="fin-cs">${icon('history')}${d.control_start ? `Controle desde ${d.control_label}` : 'Início do controle'}</button></div>
+          ${items.length ? groups.filter(([, , list]) => list.length).map(([k, label, list]) => html`<details class="fin-group" ${k === 'paga' || k === 'antes' ? '' : 'open'}>
             <summary>${sitBadge(k)}<b>${label}</b><span>${list.length} · ${money(list.reduce((s, i) => s + (i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected), 0))}</span></summary>
             <ul class="fin-list">${list.map(row)}</ul></details>`)
             : html`<div class="card-body muted">Nenhuma parcela. Cadastre as obrigações em “Nova obrigação”.</div>`}
@@ -173,6 +199,7 @@ export async function view({ state, query, setQuery, render }) {
       </div>`,
     mount(root) {
       const done = () => render();
+      root.querySelector('#fin-cs')?.addEventListener('click', () => controlFlow(done));
       root.querySelectorAll('[data-mes]').forEach(b => b.addEventListener('click', () => { setQuery({ mes: b.dataset.mes }); render(); }));
       root.querySelectorAll('[data-pay]').forEach(b => b.addEventListener('click', () => payFlow(byId.get(Number(b.dataset.pay)), done)));
       root.querySelectorAll('[data-unpay]').forEach(b => b.addEventListener('click', () => unpayFlow(byId.get(Number(b.dataset.unpay)), done)));

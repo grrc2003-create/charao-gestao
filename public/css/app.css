@@ -3268,3 +3268,12 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
   .fp-list2 .fp-foot .fp-pd { grid-row: 2; }
   .fp-list2 .fp-foot .fp-open { grid-row: 2; }
 }
+/* Financeiro: início do controle (pendências anteriores = histórico) */
+.fs-badge.fs-before { background: #F1EEE8; color: #6B6257; }
+.fin-chip.fs-before { background: #E9E4DB; } .fin-row.fs-before { border-left-color: #D6CFC3; }
+.fcs-prev { margin: 4px 0 12px; padding: 10px 12px; border-radius: 8px; background: #F6F4EF; font-size: 13.5px; }
+#fin-cs { margin-left: auto; }.card-head:has(#fin-cs) { flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .card-head:has(#fin-cs) .sub { order: 5; flex-basis: 100%; }
+  #fin-cs { margin-left: 0; }
+}

@@ -15,7 +15,7 @@ import { insertTask, validateAssignee } from './tasks.js';
 import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { audit, taskHistory } from './audit.js';
 import { today } from './metrics.js';
-import { requireFinance, monthsOf, ensureItemInternal, coverage, markState, syncZero } from './finance.js';
+import { requireFinance, monthsOf, ensureItemInternal, coverage, markState, syncZero, controlStart } from './finance.js';
 
 const SOURCE = 'maiscontrole';
 const API_URL = () => process.env.MAISCONTROLE_URL || 'https://api-clientes.maiscontroleerp.com.br/data-exports/pagamentos';
@@ -817,7 +817,7 @@ export function financeWeek(ctx) {
   const cov = coverage();
   const items = all(`SELECT i.id, i.obligation_id, i.ref_month, i.due_date, i.amount_expected, i.marked_paid_at, i.marked_amount, i.justify_kind, i.justify_reason, o.title, o.category
     FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
-    WHERE i.status = 'pendente' AND i.amount_expected > 0 AND o.active = 1 AND i.due_date BETWEEN ? AND ? ORDER BY i.due_date, o.title`, from, end)
+    WHERE i.status = 'pendente' AND i.amount_expected > 0 AND o.active = 1 AND i.due_date BETWEEN ? AND ? AND i.ref_month >= ? ORDER BY i.due_date, o.title`, from, end, controlStart() || '0000-00')
     .map(i => {
       const days = Math.round((Date.parse(i.due_date) - Date.parse(ref)) / 86400e3);
       const state = i.marked_paid_at ? markState(i, cov) : cov && cov.data_until >= i.due_date ? 'justificar' : days < 0 ? 'atrasada' : days === 0 ? 'hoje' : 'a_pagar';

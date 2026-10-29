@@ -1297,6 +1297,39 @@ async function main() {
   const anMes = (await fAna('GET', '/finance/analysis?por=mes')).data;
   ok(anMes.categories.some(c => c.category === 'Aluguel e condomínio' && c.current === 3000), 'análise por categoria no período atual');
   ok((await ricardo('GET', '/finance/analysis')).status === 403, 'análise financeira exige a liberação');
+  // Início do controle: pendências de meses anteriores viram histórico (sem atraso, tarefa cancelada), nada é apagado
+  {
+    const ymAdd = (ym, k) => { const d = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + k, 1)); return d.toISOString().slice(0, 7); };
+    const csOb = (await fAna('POST', '/finance/obligations', { title: 'Controle teste', category: 'Outros', amount: 100, frequency: 'mensal', due_day: 1, start_month: ymAdd(fRef, -3) })).data.id;
+    let csItems = (await fAna('GET', `/finance/obligations/${csOb}`)).data.items;
+    const old3 = csItems.find(i => i.ref_month === ymAdd(fRef, -3)), old2 = csItems.find(i => i.ref_month === ymAdd(fRef, -2));
+    await fAna('POST', `/finance/items/${old3.id}/pay`, { paid_date: old3.due_date, paid_amount: 90 });
+    await fAna('POST', '/finance/task-suggestions', { ids: [old2.id], create: true });
+    const oldTask = (await fAna('GET', `/finance/items/${old2.id}`)).data.task_id;
+    ok((await fAna('GET', '/finance/month')).data.items.some(i => i.id === old2.id && i.situation === 'atrasada'), 'sem início do controle: parcela antiga aparece atrasada');
+    ok((await ricardo('GET', '/finance/control-start')).status === 403, 'início do controle exige a liberação do Financeiro');
+    ok((await fAna('PUT', '/finance/control-start', { month: ymAdd(fRef, 1) })).status === 400, 'início do controle não pode ser depois do mês atual');
+    const csPrev = (await fAna('GET', `/finance/control-start?mes=${fRef}`)).data;
+    ok(csPrev.count >= 2 && csPrev.tasks >= 1 && !csPrev.current, 'prévia: quantas parcelas pendentes e tarefas abertas ficam antes do controle');
+    const csSet = (await fAna('PUT', '/finance/control-start', { month: fRef })).data;
+    ok(csSet.current === fRef && csSet.cancelled >= 1, 'início do controle definido e tarefas antigas abertas canceladas');
+    const csM = (await fAna('GET', '/finance/month')).data;
+    ok(!csM.items.some(i => i.id === old2.id) && csM.control_start === fRef, 'visão do mês não mostra mais as atrasadas anteriores ao controle');
+    ok(!csM.items.some(i => i.late && i.ref_month < fRef), 'nenhuma atrasada de antes do início do controle');
+    ok((await fAna('GET', `/tasks/${oldTask}`)).data.cancelled_at, 'tarefa da parcela antiga fica cancelada (com histórico)');
+    csItems = (await fAna('GET', `/finance/obligations/${csOb}`)).data.items;
+    ok(csItems.length === 6 && csItems.find(i => i.id === old3.id).status === 'paga' && csItems.find(i => i.id === old2.id).status === 'pendente', 'nada é apagado: pagamento antigo e parcela antiga continuam');
+    ok((await fAna('GET', '/finance/obligations')).data.find(o => o.id === csOb).overdue <= 1, 'obrigação deixa de contar atrasadas anteriores ao controle (só a do mês, se já venceu)');
+    const csYear = (await fAna('GET', `/finance/year?ano=${old2.ref_month.slice(0, 4)}`)).data;
+    const csRow = csYear.groups.flatMap(g => g.rows).find(r => r.id === csOb);
+    ok(csRow && csRow.cells.find(c => c?.ym === old2.ref_month).status === 'sem_pagamento' && csRow.cells.find(c => c?.ym === old3.ref_month).real === 90, 'planejamento anual mantém o histórico (pago e sem pagamento), sem atraso');
+    ok(!(await fAna('GET', `/finance/month?mes=${old2.ref_month}`)).data.items.some(i => i.id === old2.id && i.situation !== 'antes'), 'mês antigo mostra a parcela como "antes do controle"');
+    const csBack = (await fAna('PUT', '/finance/control-start', { month: null })).data;
+    ok(!csBack.current && csBack.restored >= 1 && !(await fAna('GET', `/tasks/${oldTask}`)).data.cancelled_at, 'remover o início do controle reabre as tarefas canceladas por ele');
+    await fAna('PUT', `/finance/obligations/${csOb}`, { active: false });
+    await fAna('POST', `/finance/items/${old2.id}/pay`, { paid_date: old2.due_date, paid_amount: 0 });
+    for (const i of (await fAna('GET', `/finance/obligations/${csOb}`)).data.items.filter(x => x.status === 'pendente')) await fAna('POST', `/finance/items/${i.id}/pay`, { paid_date: fRef + '-01', paid_amount: 0 });
+  }
 
   // Sem responsável indicado: a tarefa/subtarefa fica com quem a criou
   const rpT = (await marcos('POST', '/tasks', { project_id: 1, title: 'Sem responsável indicado', description: 'x', priority: 'media', proof_type: 'nenhuma' })).data.id;

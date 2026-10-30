@@ -706,8 +706,11 @@ function readMeasurement(b, projectId, currentId = 0) {
 }
 function addMeasurementFiles(ctx, id, files) {
   const list = Array.isArray(files) ? files.slice(0, 10) : [];
+  // BM só em PDF (é unido ao PDF do relatório); o tipo é confirmado pelo conteúdo do arquivo
+  if (list.some(f => !String(f?.data || '').startsWith('data:application/pdf;base64,'))) throw badRequest('O BM precisa ser um arquivo PDF.');
   for (const f of list) {
     const saved = saveImageFromDataUrl(f?.data);
+    if (saved.mime !== 'application/pdf') { deleteStored(saved.stored_name); throw badRequest('O BM precisa ser um arquivo PDF.'); }
     run('INSERT INTO field_measurement_files (measurement_id, stored_name, mime, size, original_name, uploaded_by) VALUES (?,?,?,?,?,?)', id, saved.stored_name, saved.mime, saved.size, cleanFileName(f.name), ctx.user.id);
   }
   return list.length;

@@ -1,7 +1,7 @@
 // Folha de Campo: folhas por obra (diárias da mão de obra própria e % das empreitadas), profissionais, empreitadas e consolidado.
 // Valores, documento e PIX aparecem só para quem tem a seção Folha de Campo (que também fecha a folha e gera o pagamento).
 import { html, api, icon, fmtDate, todayISO } from '../core.js';
-import { toast, sheet, confirmSheet, readAttachments, batchBySize } from '../ui.js';
+import { toast, sheet, confirmSheet, readAttachments, batchBySize, isPdfFile } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -104,7 +104,8 @@ function measForm(m, x, obra, done) {
         ${sheets.length ? html`<div class="fw-ob">${sheets.map(s => html`<label><input type="checkbox" data-fm-sheet="${s.id}" data-total="${s.total}" ${sel.has(s.id) ? 'checked' : ''}><span><b>${s.code}</b> ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)} · ${money(s.total)}${s.status === 'aberta' ? ' · aberta' : ''}</span></label>`)}</div>`
           : html`<p class="muted">Todas as folhas desta obra já estão em outra medição.</p>`}</fieldset>
       <div class="fm-live" id="fm-live"></div>
-      <div class="field"><label for="fm-f">Anexar BM (PDF ou foto)</label><input type="file" id="fm-f" accept="application/pdf,image/*" multiple>
+      <div class="field"><label for="fm-f">Anexar BM (PDF)</label><input type="file" id="fm-f" accept="application/pdf,.pdf" multiple>
+        <span class="hint">Somente PDF, até 8 MB por arquivo. No relatório, o BM é unido ao final do PDF.</span>
         ${x?.files.length ? html`<div class="fm-files fm-files-ed">${x.files.map(f => html`<span>${bmLink(f)}<button type="button" class="icon-btn" data-fm-rmf="${f.id}" aria-label="Remover ${f.original_name || 'arquivo'}">${icon('x')}</button></span>`)}</div>` : ''}</div>
       <div class="field"><label for="fm-n">Observações</label><textarea id="fm-n" name="notes" rows="2">${x?.notes || ''}</textarea></div>
       ${x ? html`<button type="button" class="btn btn-ghost btn-sm pf-danger" id="fm-del" data-close>${icon('trash')}Excluir medição</button>` : ''}`,
@@ -112,7 +113,10 @@ function measForm(m, x, obra, done) {
     async onSubmit(f, form) {
       const body = { ...f, project_id: obra, sheet_ids: [...form.querySelectorAll('[data-fm-sheet]:checked')].map(c => Number(c.dataset.fmSheet)) };
       // BM vai junto no mesmo envio; se for grande demais, o restante segue em lotes depois
-      const parts = batchBySize(await readAttachments(form.querySelector('#fm-f').files || []));
+      const picked = [...(form.querySelector('#fm-f').files || [])];
+      const notPdf = picked.find(x => !isPdfFile(x));
+      if (notPdf) throw new Error(`O BM precisa ser PDF ("${notPdf.name}" não é).`);
+      const parts = batchBySize(await readAttachments(picked));
       const r = await api(x ? `/field/measurements/${x.id}` : '/field/measurements', { method: x ? 'PUT' : 'POST', body: { ...body, files: parts[0] || [] } });
       for (const part of parts.slice(1)) await api(`/field/measurements/${r.id}/files`, { method: 'POST', body: { files: part } });
       return r;

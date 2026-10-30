@@ -2472,7 +2472,9 @@ async function main() {
   // Medição do terceiro (BM) x folhas: valor medido, BM anexado e comparação (pago a mais / a menos)
   ok((await fcJul('GET', '/field/measurements?obra=2')).status === 403, 'medição do terceiro: só a seção Folha de Campo vê');
   const fmTot = fcA2.totals.total;
-  const fmC = await fcAna('POST', '/field/measurements', { project_id: 2, supplier: 'Terceiro Exemplo', ref_date: '2026-09-15', amount: fmTot + 500, sheet_ids: [fcS.id], files: [{ data: tinyPng(), name: 'bm-teste.png' }] });
+  const fmPdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4\n% BM ficticio de teste\n%%EOF\n').toString('base64');
+  ok((await fcAna('POST', '/field/measurements', { project_id: 2, ref_date: '2026-09-15', amount: 10, files: [{ data: tinyPng(), name: 'bm.png' }] })).status === 400, 'BM precisa ser PDF (imagem é recusada)');
+  const fmC = await fcAna('POST', '/field/measurements', { project_id: 2, supplier: 'Terceiro Exemplo', ref_date: '2026-09-15', amount: fmTot + 500, sheet_ids: [fcS.id], files: [{ data: fmPdf, name: 'bm-teste.pdf' }] });
   const fmM = fmC.data.measurements?.find(x => x.id === fmC.data.id);
   ok(fmC.status === 201 && fmM.sheets.length === 1 && fmM.sheets_total === fmTot && fmM.diff === 500 && fmM.result === 'pago_menos' && fmM.files.length === 1, 'medição lançada com BM: medido acima da folha = pago a menos');
   ok((await fcAna('GET', `/field-measurement-files/${fmM.files[0].id}`)).status === 200 && (await fcJul('GET', `/field-measurement-files/${fmM.files[0].id}`)).status === 403, 'BM abre só para a seção Folha de Campo');

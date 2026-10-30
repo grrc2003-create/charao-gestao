@@ -1,8 +1,7 @@
 // Relatório detalhado da Folha de Campo (A4): obra, período, profissional e função como filtros; partes escolhidas
 // na barra (presença por dia de cada pessoa, equipe por dia, por pessoa, por serviço/função, empreitadas, medição do
 // terceiro, atividades e pagamentos). Valores só para quem tem a seção Folha de Campo.
-import { html, api, icon, fmtDate, fmtDateTime } from '../core.js';
-import { sheet, toast, isPdfFile } from '../ui.js';
+import { html, api, fmtDate, fmtDateTime } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -19,66 +18,40 @@ const PARTS = [
   ['emp', 'Empreitadas'], ['med', 'Medição do terceiro', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
 ];
 
-// BM: os PDFs originais são unidos ao final do PDF do relatório (sem virar imagem), com o pdf-lib servido pelo site.
-// O navegador gera o PDF do relatório (Imprimir / Salvar PDF); a união junta esse arquivo com os BMs, na ordem das medições.
-const PDF_LIB = '/vendor/pdf-lib/pdf-lib.esm.min.js';
-const fileUrl = f => `/api/field-measurement-files/${f.id}`;
-function download(bytes, name) {
-  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-  const a = document.createElement('a');
-  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
-}
-// Páginas do BM sempre em paisagem (A4 deitado): página já em paisagem entra como está; página em retrato
-// é colocada em pé, centralizada e reduzida numa folha A4 em paisagem (continua vetorial, não vira imagem)
-const A4_LAND = [841.89, 595.28];
-const LAND_MARGIN = 18;
-async function mergePdfs(first, files) {
-  const { PDFDocument } = await import(PDF_LIB);
-  const out = first ? await PDFDocument.load(first, { ignoreEncryption: true }) : await PDFDocument.create();
-  const skipped = [];
-  for (const f of files) {
+// BM em PDF: cada página vira imagem no próprio navegador (pdf.js servido pelo site) para sair na impressão.
+// Alta resolução (~300 dpi numa folha A4, limitada a 14 megapixels por página) para o texto do BM ficar nítido.
+const PDFJS = '/vendor/pdfjs/pdf.min.js';
+const MAX_PAGES = 30;
+const DPI_SCALE = 300 / 72, MAX_PIXELS = 14e6;
+const canvasUrl = canvas => new Promise(res => canvas.toBlob(b => res(b ? URL.createObjectURL(b) : canvas.toDataURL('image/jpeg', 0.93)), 'image/jpeg', 0.93));
+async function renderPdfs(root) {
+  const boxes = [...root.querySelectorAll('[data-pdf]')];
+  if (!boxes.length) return;
+  const lib = await import(PDFJS);
+  lib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
+  for (const box of boxes) {
     try {
-      const r = await fetch(fileUrl(f), { credentials: 'same-origin' });
-      if (!r.ok) throw new Error();
-      const src = await PDFDocument.load(await r.arrayBuffer(), { ignoreEncryption: true });
-      for (const [i, page] of src.getPages().entries()) {
-        const { width, height } = page.getSize();
-        const rot = ((page.getRotation().angle % 360) + 360) % 360;
-        const landscape = rot === 90 || rot === 270 ? height > width : width > height;
-        if (landscape) { const [pg] = await out.copyPages(src, [i]); out.addPage(pg); continue; }
-        const [emb] = await out.embedPages([page]);
-        const sheetPg = out.addPage(A4_LAND);
-        const k = Math.min((A4_LAND[0] - 2 * LAND_MARGIN) / emb.width, (A4_LAND[1] - 2 * LAND_MARGIN) / emb.height);
-        const w = emb.width * k, h = emb.height * k;
-        sheetPg.drawPage(emb, { x: (A4_LAND[0] - w) / 2, y: (A4_LAND[1] - h) / 2, width: w, height: h });
+      const doc = await lib.getDocument({ url: box.dataset.pdf, isEvalSupported: false, withCredentials: true }).promise;
+      const n = Math.min(doc.numPages, MAX_PAGES);
+      const out = [];
+      for (let i = 1; i <= n; i++) {
+        const page = await doc.getPage(i);
+        const base = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: Math.min(DPI_SCALE, Math.sqrt(MAX_PIXELS / (base.width * base.height))) });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const src = await canvasUrl(canvas);
+        canvas.width = canvas.height = 0;
+        out.push(html`<figure class="fr-bmp ${vp.width > vp.height ? 'is-land' : 'is-port'}"><img src="${src}" alt="Página ${i} do BM"><figcaption>${box.dataset.name} · página ${i} de ${doc.numPages}</figcaption></figure>`);
       }
-    } catch { skipped.push(f.original_name || 'BM.pdf'); }
+      box.innerHTML = html`${out}${doc.numPages > n ? html`<p class="small muted">Mostradas ${n} de ${doc.numPages} páginas. O PDF completo está no sistema.</p>` : ''}`.toString();
+    } catch {
+      box.innerHTML = html`<p class="small late">Não foi possível mostrar o PDF "${box.dataset.name}". Abra pelo sistema.</p>`.toString();
+    }
   }
-  return { bytes: await out.save(), pages: out.getPageCount(), skipped };
-}
-function mergeSheet(pdfFiles, baseName) {
-  return sheet({
-    title: 'Relatório + BM em um PDF',
-    wide: true,
-    body: html`<ol class="fr-steps">
-        <li>Clique em <b>Imprimir / Salvar PDF</b> e salve o relatório como PDF (destino "Salvar como PDF").</li>
-        <li>Escolha abaixo o PDF do relatório que você salvou.</li>
-        <li>O sistema junta o relatório com ${pdfFiles.length === 1 ? 'o BM' : `os ${pdfFiles.length} BMs`} no final (páginas em paisagem), na ordem das medições, e baixa um único PDF.</li></ol>
-      <div class="field"><label for="fr-rep">PDF do relatório</label><input type="file" id="fr-rep" accept="application/pdf,.pdf"></div>
-      <p class="small muted">BMs que entram: ${pdfFiles.map(f => f.original_name || 'BM.pdf').join(' · ')}</p>
-      <button type="button" class="btn btn-ghost btn-sm" id="fr-only">${icon('file')}Baixar só os BMs (um PDF)</button>`,
-    submitLabel: 'Unir e baixar',
-    async onSubmit(_, form) {
-      const f = form.querySelector('#fr-rep').files?.[0];
-      if (!f) throw new Error('Escolha o PDF do relatório que você salvou.');
-      if (!isPdfFile(f)) throw new Error('O arquivo do relatório precisa ser PDF.');
-      const r = await mergePdfs(await f.arrayBuffer(), pdfFiles);
-      download(r.bytes, `${baseName} - com BM.pdf`);
-      toast(r.skipped.length ? `PDF gerado (${r.pages} páginas). Não foi possível unir: ${r.skipped.join(', ')}.` : `PDF gerado com o relatório e o BM (${r.pages} páginas).`, r.skipped.length ? 'warn' : undefined);
-      return true;
-    },
-  });
 }
 
 export async function view({ query, setQuery, render }) {
@@ -98,9 +71,8 @@ export async function view({ query, setQuery, render }) {
   const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny ? api('/field/measurements', { query: { obra } }) : null]);
   // BM das medições que cobrem alguma folha do relatório (ou todas, sem filtro de período)
   const inReport = new Set(sheets.map(s => s.id));
-  // Em ordem cronológica das medições (é a ordem dos BMs no PDF unido)
+  // Em ordem cronológica das medições
   const bms = meas && on('bm') ? meas.measurements.filter(m => m.files.length && (!(de || ate) || m.sheets.some(s => inReport.has(s.id)))).reverse() : [];
-  const bmPdfs = bms.flatMap(m => m.files.filter(f => f.mime === 'application/pdf'));
 
   // Filtros de pessoa e função valem para as partes de mão de obra
   const allPeople = new Map();
@@ -150,8 +122,7 @@ export async function view({ query, setQuery, render }) {
     <label class="pt-opt">De <input type="date" id="fr-de" value="${de}"></label><label class="pt-opt">Até <input type="date" id="fr-ate" value="${ate}"></label>
     <label class="pt-opt">Pessoa <select id="fr-pes"><option value="">Todas</option>${[...allPeople.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map(x => html`<option value="${x.id}" ${x.id === pessoa ? 'selected' : ''}>${x.name}</option>`)}</select></label>
     <label class="pt-opt">Função <select id="fr-fun"><option value="">Todas</option>${roles.map(r => html`<option ${r === funcao ? 'selected' : ''}>${r}</option>`)}</select></label>
-    ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}</div></details>
-    ${bmPdfs.length ? html`<button type="button" class="btn btn-ghost btn-sm" id="fr-merge" title="Unir o PDF do relatório com os PDFs dos BMs">${icon('file')}Relatório + BM (PDF único)</button>` : ''}`;
+    ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}</div></details>`;
 
   const kpi = (l, v, sub, c = '#2A3D50') => html`<div class="r-kpi" style="--c:${c}"><div class="r-kpi-l">${l}</div><div class="r-kpi-v">${v}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
   // Presença: uma grade por folha (pessoa × dia), com o total de diárias e de dias presentes
@@ -233,11 +204,12 @@ export async function view({ query, setQuery, render }) {
       ${on('ativ') && sheets.some(s => s.activities) ? html`<section class="r-section"><h3 class="r-h">Atividades desenvolvidas</h3>
         ${sheets.filter(s => s.activities).map(s => html`<div class="fr-act avoid"><b>${s.code} · ${dm(s.start_date)} a ${dm(s.end_date)}</b><p class="r-p pre">${s.activities}</p></div>`)}</section>` : ''}
 
-      ${bms.length ? html`<section class="r-section avoid"><h3 class="r-h">Anexos · BM da medição do terceiro</h3>
-        <table class="r-table"><thead><tr><th>Medição</th><th>Terceiro</th><th>Folhas</th><th class="num">Medido</th><th>Arquivo (BM)</th></tr></thead>
-        <tbody>${bms.flatMap(m => m.files.map(f => html`<tr><td class="small nowrap">${fmtDate(m.ref_date)}</td><td>${m.supplier || '—'}</td><td class="small">${m.sheets.map(s => s.code).join(', ') || '—'}</td>
-          <td class="num">${money(m.amount)}</td><td class="small">${f.original_name || 'BM.pdf'}${f.mime !== 'application/pdf' ? html` <span class="late">(não é PDF — não entra na união)</span>` : ''}</td></tr>`))}</tbody></table>
-        <p class="small muted" style="margin:4px 0 0">Os BMs em PDF seguem anexados ao final deste documento, na ordem acima.</p></section>` : ''}
+      ${bms.length ? html`<section class="r-section fr-bms"><h3 class="r-h">Anexo · BM da medição do terceiro</h3>
+        ${bms.map(m => html`<div class="fr-bm"><div class="fr-bm-h"><b>${m.supplier || 'Terceiro'}</b> · medição de ${fmtDate(m.ref_date)} · ${money(m.amount)}${m.sheets.length ? ` · folhas ${m.sheets.map(s => s.code).join(', ')}` : ''}</div>
+          ${m.files.map(f => (f.mime === 'application/pdf'
+            ? html`<div class="fr-bmpdf" data-pdf="/api/field-measurement-files/${f.id}" data-name="${f.original_name || 'BM.pdf'}"><p class="small muted">Carregando o PDF "${f.original_name || 'BM.pdf'}"…</p></div>`
+            : html`<figure class="fr-bmp"><img src="/api/field-measurement-files/${f.id}" alt="BM"><figcaption>${f.original_name || 'BM (imagem)'}</figcaption></figure>`))}
+        </div>`)}</section>` : ''}
       `}
 
       <footer class="r-footer"><span>Charão Engenharia & Construção · Folha de Campo · ${p.code}</span><span>Documento gerado pelo sistema Charão Gestão de Obras</span></footer>
@@ -245,22 +217,13 @@ export async function view({ query, setQuery, render }) {
     mount(root) {
       bindPrintToolbar(root);
       setPageFooter(`Charão · Folha de Campo · ${p.code} · ${p.name}`);
-      // Relatório + BM: une o PDF salvo do relatório com os PDFs dos BMs; também baixa só os BMs juntos
-      const baseName = `Relatório Folha de Campo ${p.code}`;
-      root.querySelector('#fr-merge')?.addEventListener('click', () => {
-        const done = mergeSheet(bmPdfs, baseName);
-        document.getElementById('fr-only')?.addEventListener('click', async ev => {
-          const b = ev.currentTarget;
-          b.disabled = true;
-          try {
-            const r = await mergePdfs(null, bmPdfs);
-            download(r.bytes, `BM ${p.code}.pdf`);
-            toast(r.skipped.length ? `Não foi possível unir: ${r.skipped.join(', ')}.` : `BMs unidos em um PDF (${r.pages} páginas).`, r.skipped.length ? 'warn' : undefined);
-          } catch (ex) { toast(ex.message, 'error'); }
-          b.disabled = false;
-        });
-        return done;
-      });
+      // Enquanto as páginas do BM em PDF são preparadas, o botão de imprimir espera
+      if (root.querySelector('[data-pdf]')) {
+        const pb = root.querySelector('#do-print');
+        const label = pb.innerHTML;
+        pb.disabled = true; pb.textContent = 'Preparando o BM…';
+        renderPdfs(root).finally(() => { pb.disabled = false; pb.innerHTML = label; });
+      }
       root.querySelector('#fr-obra').addEventListener('change', e => go({ obra: e.target.value, pessoa: '', funcao: '' }));
       root.querySelector('#fr-de').addEventListener('change', e => go({ de: e.target.value }));
       root.querySelector('#fr-ate').addEventListener('change', e => go({ ate: e.target.value }));

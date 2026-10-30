@@ -513,4 +513,17 @@
 .fr-opts > summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--navy); padding: 4px 0; }
 .fr-optl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .fr-optl .pt-opt input[type=date] { min-height: 30px; padding: 2px 6px; font-size: 13px; width: auto; }
-.fr-steps { margin: 0 0 12px; padding-left: 20px; font-size: 14px; display: grid; gap: 4px; }
+/* Anexo: BM da medição do terceiro — páginas A4 em paisagem, uma página do BM por folha */
+.fr-bms { break-before: page; }
+.fr-bm { margin-bottom: 12px; }
+.fr-bm-h { font-size: 9pt; color: #2A3D50; margin-bottom: 6px; }
+.fr-bmp { margin: 0 0 10px; break-inside: avoid; text-align: center; }
+.fr-bmp img { max-width: 100%; height: auto; border: 1px solid #E4E1DA; image-rendering: auto; }
+.fr-bmp figcaption { font-size: 7pt; color: #6E7A86; margin-top: 2px; }
+.fr-bmpdf .fr-bmp + .fr-bmp, .fr-bm + .fr-bm { break-before: page; }
+@media print {
+  .fr-bms { page: paisagem; }
+  /* Folha A4 deitada: 277 x 184 mm úteis; a página do BM ocupa a altura disponível sem cortar */
+  .fr-bmp img { max-height: 165mm; width: auto; max-width: 100%; border: 0; }
+  .fr-bm-h { margin-bottom: 3px; }
+}

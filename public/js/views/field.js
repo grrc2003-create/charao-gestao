@@ -18,29 +18,69 @@ const NEXT = { 0: 1, 1: 0.5, 0.5: 0 };
 const num = v => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
 const fieldTabs = (cur, obra) => html`<nav class="fc-tabs">
   <a href="#/campo${obra ? `?obra=${obra}` : ''}" class="${cur === 'folhas' ? 'on' : ''}">Folhas</a>
-  <a href="#/campo/profissionais" class="${cur === 'prof' ? 'on' : ''}">Profissionais</a>
+  <a href="#/campo/profissionais${obra ? `?obra=${obra}` : ''}" class="${cur === 'prof' ? 'on' : ''}">Profissionais</a>
   <a href="#/campo/empreitadas${obra ? `?obra=${obra}` : ''}" class="${cur === 'emp' ? 'on' : ''}">Empreitadas</a>
   <a href="#/campo/pagamentos${obra ? `?obra=${obra}` : ''}" class="${cur === 'pag' ? 'on' : ''}" data-money-tab>Pagamentos</a>
   <a href="#/campo/resumo${obra ? `?obra=${obra}` : ''}" class="${cur === 'ana' ? 'on' : ''}" data-money-tab>Resumo e análise</a>
   ${cur === 'cons' || obra ? html`<a href="#/campo/consolidado?obra=${obra || ''}" class="${cur === 'cons' ? 'on' : ''}" data-money-tab>Consolidado</a>` : ''}</nav>`;
 
-// ---------- Folhas ----------
-export async function list({ query, navigate, state }) {
-  const obra = Number(query.get('obra')) || 0;
-  const d = await api('/field/sheets', { query: { obra: obra || '' } });
+// ---------- Obras (entrada da Folha de Campo) ----------
+const PST = { planejamento: 'Planejamento', em_andamento: 'Em andamento', pausado: 'Pausada', concluido: 'Concluída', cancelado: 'Cancelada' };
+function obrasView(d) {
   const mny = d.can_money;
-  const projOpts = sel => d.projects.map(p => html`<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`);
+  const card = o => html`<a class="pf-mcard fc-ocard" href="#/campo?obra=${o.id}">
+    <div class="pf-mtop"><b>${o.code}</b>${o.open ? html`<span class="pf-st pf-st-aberta">${o.open} aberta(s)</span>` : html`<span class="fc-ost">${PST[o.status] || ''}</span>`}</div>
+    <div class="fc-oname">${o.name}</div>
+    ${o.client ? html`<div class="pf-mper">${o.client}</div>` : ''}
+    <div class="pf-mper">${o.last ? `Última: ${o.last.code} · ${dm(o.last.start_date)} a ${dm(o.last.end_date)}` : 'Nenhuma folha ainda'}</div>
+    ${mny && o.sheets ? html`<div class="pf-mtotal">${money(o.total)}</div>` : ''}
+    <div class="pf-mfoot"><span>${o.sheets} folha(s)</span><span>${n2(o.diarias)} diária(s)</span>${o.workers ? html`<span>${o.workers} profissional(is)</span>` : ''}${o.contracts ? html`<span>${o.contracts} empreitada(s)</span>` : ''}
+      ${mny && o.pending ? html`<span class="fc-pay">A pagar ${money(o.pending)}</span>` : ''}</div>
+  </a>`;
+  const active = d.overview.filter(o => !['concluido', 'cancelado'].includes(o.status) || o.open);
+  const ended = d.overview.filter(o => !active.includes(o));
   return {
     title: 'Folha de Campo',
     html: html`
+      ${pageHead({ eyebrow: 'Gestão de Obras', title: 'Folha de Campo', sub: 'Escolha a obra para ver o resumo e criar ou abrir as folhas (diárias da mão de obra própria e % das empreitadas).' })}
+      ${fieldTabs('folhas', 0)}
+      ${d.overview.length ? html`<div class="pf-months fc-obras">${active.map(card)}</div>
+        ${ended.length ? html`<details class="section fc-ended"><summary>Obras concluídas ou canceladas (${ended.length})</summary><div class="pf-months fc-obras">${ended.map(card)}</div></details>` : ''}`
+        : html`<div class="empty-state"><h2>Nenhuma obra liberada</h2><p>A Folha de Campo aparece para o responsável e os gestores de cada obra.</p></div>`}`,
+    mount(root) { if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove()); },
+  };
+}
+
+// ---------- Folhas da obra (resumo + folhas) ----------
+export async function list({ query, navigate, state }) {
+  const obra = Number(query.get('obra')) || 0;
+  const d = await api('/field/sheets', { query: { obra: obra || '' } });
+  if (!obra || !d.projects.some(p => p.id === obra)) return obrasView(d);
+  const mny = d.can_money;
+  const o = d.overview.find(x => x.id === obra);
+  const projOpts = sel => d.projects.map(p => html`<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`);
+  const kp = (l, v, sub) => html`<div><span>${l}</span><b>${v}</b>${sub ? html`<small>${sub}</small>` : ''}</div>`;
+  return {
+    title: `${o.code} · Folha de Campo`,
+    html: html`
       ${pageHead({
-        eyebrow: 'Gestão de Obras',
-        title: 'Folha de Campo',
-        sub: 'Medição da mão de obra própria (diárias) e das empreitadas por obra.',
+        back: { href: '#/campo', label: 'Voltar · Obras' },
+        eyebrow: 'Folha de Campo',
+        title: `${o.code} · ${o.name}`,
+        sub: o.client || '',
         actions: html`<button type="button" class="btn btn-primary" data-new>${icon('plus')}Nova folha</button>`,
       })}
       ${fieldTabs('folhas', mny ? obra : 0)}
       <div class="fc-filter section"><label for="fc-obra">Obra</label><select id="fc-obra"><option value="">Todas as obras</option>${projOpts(obra)}</select></div>
+      <section class="card section fc-resumo"><div class="card-head"><h2>${icon('dashboard')}Resumo da obra</h2></div>
+        <div class="pf-kpis">
+          ${kp('Folhas', o.sheets, o.open ? `${o.open} aberta(s)` : o.sheets ? 'todas fechadas' : '')}
+          ${kp('Diárias', n2(o.diarias), o.last ? `última ${o.last.code}` : '')}
+          ${kp('Profissionais', o.workers, html`<a href="#/campo/profissionais?obra=${obra}">ver lista</a>`)}
+          ${kp('Empreitadas', o.contracts, html`<a href="#/campo/empreitadas?obra=${obra}">em andamento</a>`)}
+          ${mny ? html`${kp('Total medido', money(o.total))}${kp('Em folhas abertas', money(o.in_open))}${kp('A pagar', money(o.pending))}${kp('Pago', money(o.paid))}` : ''}
+        </div></section>
+      <h2 class="fc-h2 section">Folhas</h2>
       ${d.sheets.length ? html`<div class="pf-months">${d.sheets.map(s => html`<a class="pf-mcard" href="#/campo/${s.id}">
           <div class="pf-mtop"><b>${s.project_code} · ${s.code}</b>${stTag(s.status)}</div>
           <div class="pf-mper">${s.project_name}</div>
@@ -302,7 +342,7 @@ export async function view({ params, navigate, render }) {
         const v = Number(root.querySelector('#fc-addc').value);
         if (v) saveAnd(x => { x.contracts.push({ contract_id: v, pct: 0 }); });
       });
-      root.querySelector('#fc-neww')?.addEventListener('click', () => workerSheet(null, mny, async w => saveAnd(x => { x.people.push({ worker_id: w.id, days: {} }); }, 'Profissional cadastrado e incluído.')));
+      root.querySelector('#fc-neww')?.addEventListener('click', () => workerSheet(null, mny, async w => saveAnd(x => { x.people.push({ worker_id: w.id, days: {} }); }, 'Profissional cadastrado e incluído.'), { obra: s.project.id }));
       root.querySelector('#fc-save')?.addEventListener('click', async e => {
         e.target.disabled = true;
         try { await save(); render(); } catch (ex) { toast(ex.message, 'error'); e.target.disabled = false; }
@@ -340,18 +380,28 @@ export async function view({ params, navigate, render }) {
 }
 
 // ---------- Profissionais ----------
-async function workerSheet(w, mny, done, pixTypes = ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória'], leaders = null) {
+async function workerSheet(w, mny, done, { pixTypes = ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória'], leaders = null, projects = null, obra = 0 } = {}) {
   const v = w || { kind: 'diarista', active: 1 };
   // Líder: pessoa da equipe interna; no organograma ela mostra a equipe de campo por função
-  const ld = [...(leaders || (await api('/field/workers')).leaders || [])];
-  if (v.leader_id && !ld.some(x => x.id === v.leader_id)) ld.push({ id: v.leader_id, name: v.leader_name || 'Líder atual' });
+  const base = leaders && projects ? null : await api('/field/workers');
+  const ld = [...(leaders || base.leaders || [])];
+  const obras = projects || base.projects || [];
+  if (v.leader_id && !ld.some(x => x.id === v.leader_id)) ld.push({ id: v.leader_id, name: v.leader_name || 'Líder atual', is_external: v.leader_external });
+  const ldOpt = x => html`<option value="${x.id}" ${x.id === v.leader_id ? 'selected' : ''}>${x.name}${x.job_title ? ` · ${x.job_title}` : ''}</option>`;
+  // Obras em que o profissional aparece; no cadastro feito dentro de uma obra, ela já vem marcada
+  const sel = new Set(w ? v.project_ids || [] : obra ? [obra] : []);
   return sheet({
     title: w ? w.name : 'Novo profissional',
     body: html`<div class="field"><label class="req" for="fw-n">Nome</label><input type="text" id="fw-n" name="name" required maxlength="120" value="${v.name || ''}"></div>
       <div class="form-row"><div class="field"><label for="fw-k">Tipo</label><select id="fw-k" name="kind"><option value="diarista" ${v.kind === 'diarista' ? 'selected' : ''}>Diarista (mão de obra própria)</option><option value="empreiteiro" ${v.kind === 'empreiteiro' ? 'selected' : ''}>Empreiteiro</option></select></div>
         <div class="field"><label for="fw-r">Função</label><input type="text" id="fw-r" name="role" maxlength="60" value="${v.role || ''}" placeholder="Pedreiro, Ajudante, Mestre…"></div></div>
-      <div class="field"><label for="fw-l">Líder</label><select id="fw-l" name="leader_id"><option value="">Sem líder</option>${ld.map(x => html`<option value="${x.id}" ${x.id === v.leader_id ? 'selected' : ''}>${x.name}${x.job_title ? ` · ${x.job_title}` : ''}</option>`)}</select>
-        <span class="hint">No organograma, o líder mostra quantas pessoas por função estão ligadas a ele.</span></div>
+      <div class="field"><label for="fw-l">Líder</label><select id="fw-l" name="leader_id"><option value="">Sem líder</option>
+          <optgroup label="Equipe">${ld.filter(x => !x.is_external).map(ldOpt)}</optgroup>
+          ${ld.some(x => x.is_external) ? html`<optgroup label="Terceirizados">${ld.filter(x => x.is_external).map(ldOpt)}</optgroup>` : ''}</select>
+        <span class="hint">Qualquer pessoa do organograma, inclusive terceirizados. No organograma, o líder mostra quantas pessoas por função estão ligadas a ele.</span></div>
+      <fieldset class="field fw-obras"><legend>Obras em que aparece</legend>
+        ${obras.length ? html`<div class="fw-ob">${obras.map(p => html`<label><input type="checkbox" data-obra="${p.id}" ${sel.has(p.id) ? 'checked' : ''}><span><b>${p.code}</b> ${p.name}</span></label>`)}</div>` : html`<p class="muted">Nenhuma obra liberada.</p>`}
+        <span class="hint">O profissional aparece para incluir nas folhas (e nas empreitadas) só das obras marcadas. Sem nenhuma marcada, aparece em todas.</span></fieldset>
       ${mny ? html`<div class="form-row"><div class="field"><label for="fw-d">Valor da diária</label><input type="number" step="0.01" min="0" id="fw-d" name="daily_rate" value="${v.daily_rate ?? ''}"></div>
           <div class="field"><label for="fw-doc">CPF / CNPJ</label><input type="text" id="fw-doc" name="doc" maxlength="30" value="${v.doc || ''}"></div></div>
         <div class="form-row"><div class="field"><label for="fw-pt">Tipo do PIX</label><select id="fw-pt" name="pix_type"><option value="">—</option>${pixTypes.map(t => html`<option ${v.pix_type === t ? 'selected' : ''}>${t}</option>`)}</select></div>
@@ -361,8 +411,9 @@ async function workerSheet(w, mny, done, pixTypes = ['CPF', 'CNPJ', 'Telefone', 
         ${w ? html`<label class="pr-se-check"><input type="checkbox" name="active" value="1" ${v.active ? 'checked' : ''}> Ativo</label>` : ''}`
         : html`<span class="hint">Valor da diária, documento e PIX são preenchidos pelo escritório.</span>`}`,
     submitLabel: w ? 'Salvar' : 'Cadastrar',
-    async onSubmit(f) {
+    async onSubmit(f, form) {
       if (w) f.active = f.active ? 1 : 0;
+      f.project_ids = [...form.querySelectorAll('[data-obra]:checked')].map(x => Number(x.dataset.obra));
       const r = await api(w ? `/field/workers/${w.id}` : '/field/workers', { method: w ? 'PUT' : 'POST', body: f });
       await done?.(r);
       return r;
@@ -373,11 +424,17 @@ async function workerSheet(w, mny, done, pixTypes = ['CPF', 'CNPJ', 'Telefone', 
 export async function workers({ render, query, navigate }) {
   const d = await api('/field/workers');
   const sit = ['inativos', 'todos'].includes(query.get('sit')) ? query.get('sit') : 'ativos';
-  const shown = d.workers.filter(w => sit === 'todos' || (sit === 'ativos' ? w.active : !w.active));
-  const nAt = d.workers.filter(w => w.active).length;
+  const obra = Number(query.get('obra')) || 0;
+  // Filtro por obra: os ligados a ela e os sem obra escolhida (aparecem em todas)
+  const inObra = w => !obra || !w.project_ids.length || w.project_ids.includes(obra);
+  const base = d.workers.filter(inObra);
+  const shown = base.filter(w => sit === 'todos' || (sit === 'ativos' ? w.active : !w.active));
+  const nAt = base.filter(w => w.active).length;
   const mny = d.can_money;
+  const sitHref = k => { const q = new URLSearchParams(); if (obra) q.set('obra', obra); if (k !== 'ativos') q.set('sit', k); const x = q.toString(); return `#/campo/profissionais${x ? `?${x}` : ''}`; };
   const row = w => html`<li class="fc-wrow ${w.active ? '' : 'fc-off'}"><div class="grow"><div class="row-title">${w.name}${w.active ? '' : ' (inativo)'}</div>
-    <div class="row-meta"><span>${w.kind === 'empreiteiro' ? 'Empreiteiro' : 'Diarista'}</span>${w.role ? html`<span>${w.role}</span>` : ''}${w.leader_name ? html`<span>Líder: ${w.leader_name}</span>` : ''}${mny && w.kind === 'diarista' ? html`<span>Diária ${money(w.daily_rate)}</span>` : ''}${mny && w.pix ? html`<span>PIX ${w.pix_type ? `(${w.pix_type}) ` : ''}${w.pix}</span>` : ''}${mny && !w.daily_rate && w.kind === 'diarista' ? html`<span class="fc-warn">sem valor da diária</span>` : ''}</div></div>
+    <div class="row-meta"><span>${w.kind === 'empreiteiro' ? 'Empreiteiro' : 'Diarista'}</span>${w.role ? html`<span>${w.role}</span>` : ''}${w.leader_name ? html`<span>Líder: ${w.leader_name}${w.leader_external ? ' (terceirizado)' : ''}</span>` : ''}
+      <span class="${w.projects.length ? '' : 'muted'}">${w.projects.length ? `Obras: ${w.projects.map(p => p.code).join(', ')}` : 'Todas as obras'}</span>${mny && w.kind === 'diarista' ? html`<span>Diária ${money(w.daily_rate)}</span>` : ''}${mny && w.pix ? html`<span>PIX ${w.pix_type ? `(${w.pix_type}) ` : ''}${w.pix}</span>` : ''}${mny && !w.daily_rate && w.kind === 'diarista' ? html`<span class="fc-warn">sem valor da diária</span>` : ''}</div></div>
     ${mny ? html`<button type="button" class="btn btn-ghost btn-sm" data-ed="${w.id}">${icon('edit')}Editar</button>` : ''}</li>`;
   const group = (k, label) => { const l = shown.filter(w => w.kind === k); return html`<section class="card section"><div class="card-head"><h2>${label}</h2><span class="sub">${l.length}</span></div>
     ${l.length ? html`<ul class="rows">${l.map(row)}</ul>` : html`<p class="muted card-body">Nenhum cadastrado.</p>`}</section>`; };
@@ -386,12 +443,15 @@ export async function workers({ render, query, navigate }) {
     html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Profissionais', sub: mny ? 'Diaristas (função e valor da diária) e empreiteiros, com documento e PIX.' : 'Diaristas e empreiteiros da Folha de Campo.',
         actions: html`<button type="button" class="btn btn-primary" data-new>${icon('plus')}Novo profissional</button>` })}
       ${fieldTabs('prof', 0)}
-      <div class="fc-chips section">${[['ativos', 'Ativos', nAt], ['inativos', 'Inativos', d.workers.length - nAt], ['todos', 'Todos', d.workers.length]].map(([k, l, n]) => html`<a href="#/campo/profissionais${k === 'ativos' ? '' : `?sit=${k}`}" class="fc-chip ${sit === k ? 'on' : ''}">${l} <b>${n}</b></a>`)}</div>
+      ${d.projects.length > 1 ? html`<div class="fc-filter section"><label for="fw-obra">Obra</label><select id="fw-obra"><option value="">Todas as obras</option>${d.projects.map(p => html`<option value="${p.id}" ${obra === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></div>` : ''}
+      <div class="fc-chips section">${[['ativos', 'Ativos', nAt], ['inativos', 'Inativos', base.length - nAt], ['todos', 'Todos', base.length]].map(([k, l, n]) => html`<a href="${sitHref(k)}" class="fc-chip ${sit === k ? 'on' : ''}">${l} <b>${n}</b></a>`)}</div>
       ${group('diarista', 'Diaristas (mão de obra própria)')}${group('empreiteiro', 'Empreiteiros')}`,
     mount(root) {
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
-      root.querySelector('[data-new]').addEventListener('click', () => workerSheet(null, mny, () => { toast('Profissional cadastrado.'); render(); }, d.pix_types, d.leaders));
-      root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => workerSheet(d.workers.find(w => w.id === Number(b.dataset.ed)), mny, () => { toast('Cadastro salvo.'); render(); }, d.pix_types, d.leaders)));
+      const opts = { pixTypes: d.pix_types, leaders: d.leaders, projects: d.projects, obra };
+      root.querySelector('[data-new]').addEventListener('click', () => workerSheet(null, mny, () => { toast('Profissional cadastrado.'); render(); }, opts));
+      root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => workerSheet(d.workers.find(w => w.id === Number(b.dataset.ed)), mny, () => { toast('Cadastro salvo.'); render(); }, opts)));
+      root.querySelector('#fw-obra')?.addEventListener('change', e => { const q = new URLSearchParams(); if (e.target.value) q.set('obra', e.target.value); if (sit !== 'ativos') q.set('sit', sit); const x = q.toString(); navigate(`/campo/profissionais${x ? `?${x}` : ''}`); });
     },
   };
 }
@@ -411,7 +471,7 @@ export async function contracts({ query, navigate, render }) {
   const form = c => sheet({
     title: c ? c.service : 'Nova empreitada',
     body: html`<div class="field"><label class="req" for="ec-p">Obra</label><select id="ec-p" name="project_id" required ${c ? 'disabled' : ''}>${!obra && !c ? html`<option value="">Escolha…</option>` : ''}${projects.map(p => html`<option value="${p.id}" ${(c ? c.project_id : obra) === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></div>
-      <div class="field"><label class="req" for="ec-w">Empreiteiro</label><select id="ec-w" name="worker_id" required><option value="">Escolha…</option>${emp.map(w => html`<option value="${w.id}" ${c?.worker_id === w.id ? 'selected' : ''}>${w.name}</option>`)}</select>
+      <div class="field"><label class="req" for="ec-w">Empreiteiro</label><select id="ec-w" name="worker_id" required><option value="">Escolha…</option>${emp.map(w => html`<option value="${w.id}" data-ob="${w.project_ids.join(',')}" ${c?.worker_id === w.id ? 'selected' : ''}>${w.name}</option>`)}</select>
         ${!emp.length ? html`<span class="hint">Cadastre o empreiteiro em Profissionais (tipo Empreiteiro).</span>` : ''}</div>
       <div class="field"><label class="req" for="ec-s">Serviço</label><input type="text" id="ec-s" name="service" required maxlength="200" value="${c?.service || ''}" placeholder="Ex.: Pintura da fachada"></div>
       <div class="form-row"><div class="field"><label class="req" for="ec-t">Valor total</label><input type="number" step="0.01" min="0" id="ec-t" name="total" required value="${c?.total ?? ''}"></div>
@@ -444,8 +504,23 @@ export async function contracts({ query, navigate, render }) {
     mount(root) {
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
       root.querySelector('#ec-obra').addEventListener('change', e => { const q = new URLSearchParams(); if (e.target.value) q.set('obra', e.target.value); if (sit !== 'todas') q.set('sit', sit); const x = q.toString(); navigate(`/campo/empreitadas${x ? `?${x}` : ''}`); });
-      root.querySelector('[data-new]')?.addEventListener('click', () => form(null));
-      root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => form(list.find(c => c.id === Number(b.dataset.ed)))));
+      // Empreiteiros da obra escolhida (ou sem obra definida); o atual da empreitada sempre aparece
+      const open = c => {
+        const done = form(c);
+        const p = document.getElementById('ec-p'), w = document.getElementById('ec-w');
+        const filter = () => w && [...w.options].forEach(o => {
+          if (!o.value) return;
+          const ob = o.dataset.ob ? o.dataset.ob.split(',').map(Number) : [];
+          const ok = !ob.length || !p.value || ob.includes(Number(p.value)) || Number(o.value) === c?.worker_id;
+          o.hidden = !ok; o.disabled = !ok;
+          if (!ok && o.selected) w.value = '';
+        });
+        p?.addEventListener('change', filter);
+        filter();
+        return done;
+      };
+      root.querySelector('[data-new]')?.addEventListener('click', () => open(null));
+      root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => open(list.find(c => c.id === Number(b.dataset.ed)))));
     },
   };
 }

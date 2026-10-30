@@ -54,25 +54,51 @@ function requireProject(ctx, projectId) {
 }
 
 // ---------- Profissionais ----------
-const workerView = (w, money) => {
-  const base = { id: w.id, name: w.name, kind: w.kind, role: w.role, active: w.active, leader_id: w.leader_id, leader_name: w.leader_name || null };
+// Obras do profissional: onde ele aparece para entrar nas folhas e empreitadas (sem obra = todas)
+const workerProjects = () => {
+  const by = new Map();
+  for (const r of all('SELECT wp.worker_id, p.id, p.code FROM field_worker_projects wp JOIN projects p ON p.id = wp.project_id ORDER BY p.code')) {
+    if (!by.has(r.worker_id)) by.set(r.worker_id, []);
+    by.get(r.worker_id).push({ id: r.id, code: r.code });
+  }
+  return by;
+};
+export const workerInProject = (workerId, projectId) => !one('SELECT 1 FROM field_worker_projects WHERE worker_id = ?', workerId)
+  || !!one('SELECT 1 FROM field_worker_projects WHERE worker_id = ? AND project_id = ?', workerId, projectId);
+const workerView = (w, money, wp = workerProjects()) => {
+  const projects = wp.get(w.id) || [];
+  const base = { id: w.id, name: w.name, kind: w.kind, role: w.role, active: w.active, leader_id: w.leader_id, leader_name: w.leader_name || null,
+    leader_external: !!w.leader_external, project_ids: projects.map(p => p.id), projects };
   return money ? { ...base, daily_rate: w.daily_rate, doc: w.doc, pix: w.pix, pix_type: w.pix_type, phone: w.phone, notes: w.notes } : base;
 };
-const WORKER_SQL = 'SELECT w.*, l.name AS leader_name FROM field_workers w LEFT JOIN users l ON l.id = w.leader_id';
-// Líder: pessoa ativa da equipe interna (aparece no organograma com a equipe de campo dela)
-const leaderOptions = () => all('SELECT id, name, job_title FROM users WHERE active = 1 AND is_external = 0 ORDER BY name');
+const WORKER_SQL = 'SELECT w.*, l.name AS leader_name, l.is_external AS leader_external FROM field_workers w LEFT JOIN users l ON l.id = w.leader_id';
+// Líder: pessoa ativa do organograma (equipe interna ou terceirizado); aparece com a equipe de campo dela
+const leaderOptions = () => all('SELECT id, name, job_title, is_external FROM users WHERE active = 1 ORDER BY is_external, name');
 export function listWorkers(ctx) {
   if (!canUseField(ctx)) throw forbidden('A Folha de Campo não está liberada para o seu usuário.');
   const money = canFieldMoney(ctx.user);
-  return { workers: all(`${WORKER_SQL} ORDER BY w.active DESC, w.name`).map(w => workerView(w, money)), kinds: KINDS, pix_types: PIX_TYPES, can_money: money, leaders: leaderOptions() };
+  const wp = workerProjects();
+  return { workers: all(`${WORKER_SQL} ORDER BY w.active DESC, w.name`).map(w => workerView(w, money, wp)), kinds: KINDS, pix_types: PIX_TYPES, can_money: money,
+    leaders: leaderOptions(), projects: fillableProjects(ctx) };
 }
 function readLeader(v, cur) {
   if (v === undefined) return cur ?? null;
   const id = intOrNull(v);
   if (!id) return null;
-  if (id === cur) return id; // mantém o líder atual mesmo que tenha saído da equipe
-  if (!one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', id)) throw badRequest('Líder inválido: escolha uma pessoa ativa da equipe.');
+  if (id === cur) return id; // mantém o líder atual mesmo que tenha saído do organograma
+  if (!one('SELECT id FROM users WHERE id = ? AND active = 1', id)) throw badRequest('Líder inválido: escolha uma pessoa ativa do organograma.');
   return id;
+}
+// Obras escolhidas (só as liberadas para quem cadastra); as demais obras já ligadas ao profissional são mantidas
+function saveWorkerProjects(ctx, workerId, value) {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw badRequest('Obras do profissional inválidas.');
+  const allowed = new Set(fillableProjects(ctx).map(p => p.id));
+  const chosen = new Set(value.map(intOrNull).filter(Boolean));
+  for (const id of chosen) if (!allowed.has(id)) throw badRequest('Obra não liberada para a Folha de Campo do seu usuário.');
+  const keep = all('SELECT project_id FROM field_worker_projects WHERE worker_id = ?', workerId).map(r => r.project_id).filter(id => !allowed.has(id));
+  run('DELETE FROM field_worker_projects WHERE worker_id = ?', workerId);
+  for (const id of new Set([...keep, ...chosen])) run('INSERT INTO field_worker_projects (worker_id, project_id) VALUES (?, ?)', workerId, id);
 }
 function readWorker(b, money, cur = {}) {
   const d = {
@@ -97,8 +123,12 @@ export function createWorker(ctx, body, ip) {
   if (!canUseField(ctx)) throw forbidden('A Folha de Campo não está liberada para o seu usuário.');
   const money = canFieldMoney(ctx.user);
   const d = readWorker(body || {}, money);
-  const id = Number(run(`INSERT INTO field_workers (name, kind, role, leader_id, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
+  const id = tx(() => {
+    const nid = Number(run(`INSERT INTO field_workers (name, kind, role, leader_id, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
+    saveWorkerProjects(ctx, nid, body?.project_ids);
+    return nid;
+  });
   audit(ctx.user.id, 'field', id, 'Profissional de campo cadastrado', { nome: d.name }, ip);
   return workerView(one(`${WORKER_SQL} WHERE w.id = ?`, id), money);
 }
@@ -107,8 +137,11 @@ export function updateWorker(ctx, id, body, ip) {
   const cur = one('SELECT * FROM field_workers WHERE id = ?', id);
   if (!cur) throw notFound('Profissional não encontrado.');
   const d = readWorker(body || {}, true, cur);
-  run(`UPDATE field_workers SET name=?, kind=?, role=?, leader_id=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
-    d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
+  tx(() => {
+    run(`UPDATE field_workers SET name=?, kind=?, role=?, leader_id=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
+    saveWorkerProjects(ctx, id, body?.project_ids);
+  });
   audit(ctx.user.id, 'field', id, 'Profissional de campo atualizado', { nome: d.name }, ip);
   return workerView(one(`${WORKER_SQL} WHERE w.id = ?`, id), true);
 }
@@ -140,12 +173,13 @@ export function listContracts(ctx, projectId) {
   const money = canFieldMoney(ctx.user);
   return all(`${CONTRACT_SQL} ORDER BY CASE c.status WHEN 'andamento' THEN 0 WHEN 'paralisada' THEN 1 WHEN 'concluida' THEN 2 ELSE 3 END, p.code, w.name`).filter(c => allowed.has(c.project_id) && (!projectId || c.project_id === projectId)).map(c => contractView(c, money));
 }
-function readContract(ctx, b) {
+function readContract(ctx, b, curWorker = null) {
   const projectId = intOrNull(b.project_id);
   if (!projectId) throw badRequest('Escolha a obra.');
   requireProject(ctx, projectId);
   const workerId = intOrNull(b.worker_id);
   if (!workerId || !one(`SELECT id FROM field_workers WHERE id = ? AND kind = 'empreiteiro'`, workerId)) throw badRequest('Escolha o empreiteiro (cadastre-o em Profissionais como Empreiteiro).');
+  if (workerId !== curWorker && !workerInProject(workerId, projectId)) throw badRequest('Este empreiteiro não está ligado a esta obra. Inclua a obra no cadastro dele em Profissionais.');
   const total = num(b.total, 'Valor total da empreitada', { max: 1e9 });
   if (!total) throw badRequest('Informe o valor total da empreitada.');
   return {
@@ -168,7 +202,7 @@ export function updateContract(ctx, id, body, ip) {
   requireMoney(ctx);
   const cur = one('SELECT * FROM field_contracts WHERE id = ?', id);
   if (!cur) throw notFound('Empreitada não encontrada.');
-  const d = readContract(ctx, { ...body, project_id: cur.project_id });
+  const d = readContract(ctx, { ...body, project_id: cur.project_id }, cur.worker_id);
   if (d.total < r2(cur.total * measuredPct(id) / 100) - 0.01) throw badRequest('O valor total não pode ser menor que o já medido.');
   run(`UPDATE field_contracts SET worker_id=?, service=?, total=?, start_date=?, notes=?, status=?, updated_at=datetime('now') WHERE id=?`, d.worker_id, d.service, d.total, d.start_date, d.notes, d.status, id);
   audit(ctx.user.id, 'field', id, 'Empreitada atualizada', { servico: d.service, total: d.total }, ip);
@@ -244,7 +278,19 @@ export function listSheets(ctx, projectId) {
         status: s.status, people: c.people.length, contracts: c.contracts.length, diarias: c.totals.diarias };
       return money ? { ...base, totals: c.totals, payment: paymentOf(s) } : base;
     });
-  return { sheets, projects, can_money: money };
+  // Resumo por obra: a Folha de Campo abre pela obra (cartões) e, dentro dela, o resumo e as folhas
+  const wk = new Map(all(`SELECT wp.project_id, COUNT(*) AS n FROM field_worker_projects wp JOIN field_workers w ON w.id = wp.worker_id WHERE w.active = 1 GROUP BY 1`).map(r => [r.project_id, r.n]));
+  const emp = new Map(all(`SELECT project_id, COUNT(*) AS n FROM field_contracts WHERE status = 'andamento' GROUP BY 1`).map(r => [r.project_id, r.n]));
+  const overview = projects.filter(p => !projectId || p.id === projectId).map(p => {
+    const list = sheets.filter(s => s.project_id === p.id);
+    const o = { ...p, sheets: list.length, open: list.filter(s => s.status === 'aberta').length, last: list[0] ? { id: list[0].id, code: list[0].code, start_date: list[0].start_date, end_date: list[0].end_date, status: list[0].status } : null,
+      diarias: r2(list.reduce((a, s) => a + s.diarias, 0)), workers: wk.get(p.id) || 0, contracts: emp.get(p.id) || 0 };
+    if (!money) return o;
+    const pend = list.filter(s => s.payment && s.payment.status !== 'paga');
+    return { ...o, total: r2(list.reduce((a, s) => a + s.totals.total, 0)), in_open: r2(list.filter(s => s.status === 'aberta').reduce((a, s) => a + s.totals.company, 0)),
+      pending: r2(pend.reduce((a, s) => a + (s.payment.amount || 0), 0)), paid: r2(list.filter(s => s.payment?.status === 'paga').reduce((a, s) => a + (s.payment.amount || 0), 0)) };
+  });
+  return { sheets, projects, overview, can_money: money };
 }
 
 export function createSheet(ctx, body, ip) {
@@ -285,7 +331,10 @@ export function getSheet(ctx, id) {
     totals: money ? c.totals : { diarias: c.totals.diarias },
     pay_date: money ? s.pay_date : undefined,
     payment: money ? paymentOf(s) : undefined,
-    available_workers: open ? all(`SELECT id, name, role FROM field_workers WHERE active = 1 AND kind = 'diarista' ORDER BY name`).filter(w => !inSheet.has(w.id)) : [],
+    // Profissionais ligados a esta obra (ou sem obra escolhida)
+    available_workers: open ? all(`SELECT id, name, role FROM field_workers w WHERE active = 1 AND kind = 'diarista'
+      AND (NOT EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id) OR EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id AND x.project_id = ?))
+      ORDER BY name`, p.id).filter(w => !inSheet.has(w.id)) : [],
     available_contracts: open ? listContracts(ctx, p.id).filter(x => x.status === 'andamento' && !inContracts.has(x.id) && x.balance_pct > 0) : [],
     services: [...new Set([...all('SELECT name FROM project_stages WHERE project_id = ? ORDER BY sort_order, name', p.id).map(r => r.name),
       ...all('SELECT DISTINCT e.service FROM field_sheet_people e JOIN field_sheets f ON f.id = e.sheet_id WHERE f.project_id = ? AND e.service IS NOT NULL', p.id).map(r => r.service)])],

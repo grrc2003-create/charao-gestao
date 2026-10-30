@@ -2409,17 +2409,35 @@ async function main() {
   const fcLd = (await fcJul('GET', '/field/workers')).data.leaders;
   const fcOrg0 = (await fcAna('GET', '/team/org')).data;
   const fcExt = fcOrg0.people.find(p => p.is_external);
-  ok(fcLd.some(x => x.id === 3) && !fcLd.some(x => fcExt && x.id === fcExt.id), 'Folha de Campo: líderes possíveis são as pessoas ativas da equipe interna');
+  ok(fcLd.some(x => x.id === 3) && (!fcExt || fcLd.some(x => x.id === fcExt.id && x.is_external)), 'Folha de Campo: líderes possíveis são as pessoas ativas do organograma, inclusive terceirizados');
   const fcHl = (await fcAna('PUT', `/field/workers/${fcH.id}`, { name: 'Ajudante Teste FC', kind: 'diarista', role: 'Ajudante', daily_rate: 110, leader_id: 3, active: 1 })).data;
   const fcJl = (await fcJul('POST', '/field/workers', { name: 'Ajudante 2 Teste FC', role: 'Ajudante', leader_id: 3 })).data;
   const fcPl = (await fcAna('PUT', `/field/workers/${fcP.id}`, { name: 'Pedreiro Teste FC', kind: 'diarista', role: 'Pedreiro', daily_rate: 180, pix: 'pix-ficticio-1', pix_type: 'E-mail', leader_id: 3, active: 1 })).data;
   ok(fcHl.leader_id === 3 && fcHl.leader_name && fcJl.leader_id === 3 && fcPl.leader_id === 3, 'líder definido no cadastro e na edição do profissional');
-  ok((await fcAna('POST', '/field/workers', { name: 'X', leader_id: 99999 })).status === 400 && (!fcExt || (await fcAna('POST', '/field/workers', { name: 'X', leader_id: fcExt.id })).status === 400), 'líder precisa ser pessoa ativa da equipe interna');
+  ok((await fcAna('POST', '/field/workers', { name: 'X', leader_id: 99999 })).status === 400, 'líder precisa ser pessoa ativa do organograma');
+  if (fcExt) {
+    const fcXl = (await fcAna('POST', '/field/workers', { name: 'Servente Terceirizado Teste FC', role: 'Servente', leader_id: fcExt.id })).data;
+    ok(fcXl.leader_id === fcExt.id && fcXl.leader_external && (await fcAna('GET', '/team/org')).data.people.find(p => p.id === fcExt.id).field_team.some(r => r.role === 'Servente'), 'terceirizado pode ser líder e mostra a equipe de campo no organograma');
+    await fcAna('PUT', `/field/workers/${fcXl.id}`, { name: 'Servente Terceirizado Teste FC', role: 'Servente', active: 0 });
+  }
   const fcOrg = (await fcAna('GET', '/team/org')).data;
   const fcTeam = fcOrg.people.find(p => p.id === 3).field_team;
   ok(fcTeam.find(r => r.role === 'Ajudante')?.n === 2 && fcTeam.find(r => r.role === 'Pedreiro')?.n === 1 && fcOrg.summary.field >= 3 && !JSON.stringify(fcTeam).includes('Teste FC'), 'organograma: líder mostra a equipe de campo por função (só contagem, sem nomes)');
   await fcAna('PUT', `/field/workers/${fcJl.id}`, { name: 'Ajudante 2 Teste FC', role: 'Ajudante', active: 0 });
   ok((await fcAna('GET', '/team/org')).data.people.find(p => p.id === 3).field_team.find(r => r.role === 'Ajudante').n === 1, 'profissional inativo sai da contagem da equipe de campo');
+  // Obras do profissional: aparece só nas obras escolhidas (sem obra = todas)
+  const fcObA = (await fcAna('GET', '/field/workers')).data.projects.map(p => p.id);
+  const fcObJ = (await fcJul('GET', '/field/workers')).data.projects.map(p => p.id);
+  const fcOutra = fcObA.find(id => id !== 2);
+  const fcW2 = (await fcJul('POST', '/field/workers', { name: 'Carpinteiro Obra 2 Teste FC', role: 'Carpinteiro', project_ids: [2] })).data;
+  ok(fcW2.project_ids.length === 1 && fcW2.project_ids[0] === 2 && fcW2.projects[0].code, 'profissional cadastrado já ligado à obra escolhida');
+  const fcJnot = fcObA.find(id => !fcObJ.includes(id));
+  ok(!fcJnot || (await fcJul('POST', '/field/workers', { name: 'X', project_ids: [fcJnot] })).status === 400, 'só escolhe obra liberada para quem cadastra');
+  const fcWo = fcOutra ? (await fcAna('POST', '/field/workers', { name: 'Pintor Outra Obra Teste FC', role: 'Pintor', project_ids: [fcOutra] })).data : null;
+  const fcEo = fcOutra ? (await fcAna('POST', '/field/workers', { name: 'Empreiteiro Outra Obra Teste FC', kind: 'empreiteiro', project_ids: [fcOutra] })).data : null;
+  ok(!fcEo || (await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcEo.id, service: 'x', total: 10 })).status === 400, 'empreitada só com empreiteiro ligado à obra (ou sem obra definida)');
+  const fcWu = (await fcAna('PUT', `/field/workers/${fcW2.id}`, { name: 'Carpinteiro Obra 2 Teste FC', role: 'Carpinteiro', active: 1 })).data;
+  ok(fcWu.project_ids.includes(2), 'editar sem mandar as obras mantém as obras do profissional');
   ok((await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcP.id, service: 'x', total: 10 })).status === 400, 'empreitada exige um empreiteiro');
   const fcC = (await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'Pintura teste', total: 5000 })).data;
   ok(fcC.measured_pct === 0 && fcC.balance === 5000, 'empreitada cadastrada com saldo integral');
@@ -2432,6 +2450,12 @@ async function main() {
   const fcS = (await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-07', end_date: '2026-09-13' })).data;
   ok(fcS.code === 'FC-01' && fcS.days.length === 7 && fcS.can.edit && !fcS.can.close, 'responsável cria a folha FC-01 (período livre), sem poder fechar');
   ok(fcS.available_contracts.some(c => c.id === fcC.id) && !fcS.available_contracts.some(c => c.id === fcC2.id), 'só empreitada em andamento aparece para medir');
+  ok(fcS.available_workers.some(w => w.id === fcW2.id) && fcS.available_workers.some(w => w.id === fcP.id) && (!fcWo || !fcS.available_workers.some(w => w.id === fcWo.id)), 'na folha aparecem os profissionais da obra e os sem obra definida, não os de outra obra');
+  const fcOv = (await fcJul('GET', '/field/sheets')).data.overview;
+  const fcOv2 = fcOv.find(o => o.id === 2);
+  ok(fcOv2 && fcOv2.sheets >= 1 && fcOv2.open >= 1 && fcOv2.last?.code && fcOv2.workers >= 1 && fcOv2.total === undefined, 'entrada por obra: resumo de cada obra (sem valores para quem não tem a seção)');
+  const fcOvA = (await fcAna('GET', '/field/sheets?obra=2')).data.overview;
+  ok(fcOvA.length === 1 && fcOvA[0].id === 2 && typeof fcOvA[0].total === 'number' && typeof fcOvA[0].pending === 'number', 'resumo da obra com valores para a seção Folha de Campo');
   const fcDays = { '2026-09-07': 1, '2026-09-08': 1, '2026-09-09': 1, '2026-09-10': 1, '2026-09-11': 1 };
   const fcJs = (await fcJul('PUT', `/field/sheets/${fcS.id}`, { activities: 'Atividade teste', people: [
     { worker_id: fcP.id, days: fcDays, service: 'Alvenaria' },

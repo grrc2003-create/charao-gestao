@@ -11,6 +11,10 @@ const dm = d => (d ? fmtDate(d).slice(0, 5) : '—');
 const WD = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 const wd = d => new Date(`${d}T12:00:00Z`).getUTCDay();
 const qLabel = q => (q === 1 ? '1' : q === 0.5 ? '½' : q ? n2(q) : '');
+// Aproveitamento da página: bloco pequeno fica inteiro; bloco grande continua na mesma página (linhas não se partem
+// e o cabeçalho da tabela se repete), em vez de pular inteiro e deixar espaço em branco
+const KEEP_ROWS = 12;
+const keep = rows => (rows <= KEEP_ROWS ? 'avoid' : 'fr-flow');
 
 // Partes do relatório: [chave, rótulo, só com valores]
 const PARTS = [
@@ -45,9 +49,15 @@ async function renderPdfs(root) {
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         const src = await canvasUrl(canvas);
         canvas.width = canvas.height = 0;
-        out.push(html`<figure class="fr-bmp ${vp.width > vp.height ? 'is-land' : 'is-port'}"><img src="${src}" alt="Página ${i} do BM"><figcaption>${box.dataset.name} · página ${i} de ${doc.numPages}</figcaption></figure>`);
+        out.push({ land: vp.width > vp.height, fig: html`<figure class="fr-bmp"><img src="${src}" alt="Página ${i} do BM"><figcaption>${box.dataset.name} · página ${i} de ${doc.numPages}</figcaption></figure>` });
       }
-      box.innerHTML = html`${out}${doc.numPages > n ? html`<p class="small muted">Mostradas ${n} de ${doc.numPages} páginas. O PDF completo está no sistema.</p>` : ''}`.toString();
+      // Folha deitada bem aproveitada: página deitada ocupa a folha; duas páginas em pé seguidas ficam lado a lado
+      const sheets = [];
+      for (let k = 0; k < out.length; k++) {
+        if (!out[k].land && out[k + 1] && !out[k + 1].land) { sheets.push(html`<div class="fr-bmsheet is-pair">${out[k].fig}${out[k + 1].fig}</div>`); k++; }
+        else sheets.push(html`<div class="fr-bmsheet">${out[k].fig}</div>`);
+      }
+      box.innerHTML = html`${sheets}${doc.numPages > n ? html`<p class="small muted">Mostradas ${n} de ${doc.numPages} páginas. O PDF completo está no sistema.</p>` : ''}`.toString();
     } catch {
       box.innerHTML = html`<p class="small late">Não foi possível mostrar o PDF "${box.dataset.name}". Abra pelo sistema.</p>`.toString();
     }
@@ -126,7 +136,7 @@ export async function view({ query, setQuery, render }) {
 
   const kpi = (l, v, sub, c = '#2A3D50') => html`<div class="r-kpi" style="--c:${c}"><div class="r-kpi-l">${l}</div><div class="r-kpi-v">${v}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
   // Presença: uma grade por folha (pessoa × dia), com o total de diárias e de dias presentes
-  const presence = s => html`<div class="frp avoid"><div class="frp-h"><b>${s.code}</b> · ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)} <span class="muted">· ${s.people.length} pessoa(s) · ${n2(s.people.reduce((a, e) => a + e.diarias, 0))} diária(s)</span></div>
+  const presence = s => html`<div class="frp ${keep(s.people.length)}"><div class="frp-h"><b>${s.code}</b> · ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)} <span class="muted">· ${s.people.length} pessoa(s) · ${n2(s.people.reduce((a, e) => a + e.diarias, 0))} diária(s)</span></div>
     <table class="frp-t"><thead><tr><th class="frp-n">Pessoa</th>${s.days.map(d => html`<th class="${[0, 6].includes(wd(d)) ? 'we' : ''}"><small>${WD[wd(d)]}</small>${d.slice(8, 10)}</th>`)}<th class="frp-s">Dias</th><th class="frp-s">Diárias</th></tr></thead>
     <tbody>${s.people.map(e => html`<tr><td class="frp-n"><b>${e.name}</b><small>${e.role || ''}${e.service ? ` · ${e.service}` : ''}</small></td>
       ${s.days.map(d => { const q = Number(e.days[d]) || 0; return html`<td class="${q === 1 ? 'q1' : q ? 'qh' : ''} ${[0, 6].includes(wd(d)) ? 'we' : ''}">${qLabel(q)}</td>`; })}
@@ -173,29 +183,29 @@ export async function view({ query, setQuery, render }) {
           <em>${x.n || ''}</em><div class="frd-col"><span style="height:${(x.q / maxQ) * 100}%"></span></div><small>${WD[wd(d)]}<br>${d.slice(8, 10)}</small></div>`; })}</div>
         <p class="small muted" style="margin:4px 0 0">Número sobre a coluna: pessoas no dia · altura: diárias do dia.</p></section>` : ''}
 
-      ${on('pes') && people.length ? html`<section class="r-section avoid"><h3 class="r-h">Por pessoa</h3>
+      ${on('pes') && people.length ? html`<section class="r-section ${keep(people.length)}"><h3 class="r-h">Por pessoa</h3>
         <table class="r-table"><thead><tr><th>Pessoa</th><th>Função</th><th class="num">Folhas</th><th class="num">Dias</th><th class="num">Diárias</th>${mny ? html`<th class="num">Valor</th><th class="num">Cliente</th><th class="num">Empresa paga</th>` : ''}</tr></thead>
         <tbody>${people.map(x => html`<tr><td>${x.name}</td><td class="small">${x.role || '—'}</td><td class="num">${x.sheets}</td><td class="num">${x.days}</td><td class="num"><b>${n2(x.diarias)}</b></td>
           ${mny ? html`<td class="num">${money(x.total)}</td><td class="num">${x.client ? money(x.client) : '—'}</td><td class="num">${money(x.company)}</td>` : ''}</tr>`)}
           <tr class="fr-sum"><td colspan="4">Total</td><td class="num">${n2(tot.diarias)}</td>${mny ? html`<td class="num">${money(tot.mo)}</td><td class="num">${money(people.reduce((a, x) => a + x.client, 0))}</td><td class="num">${money(people.reduce((a, x) => a + x.company, 0))}</td>` : ''}</tr></tbody></table></section>` : ''}
 
-      ${on('serv') && people.length ? html`<section class="r-section avoid"><h3 class="r-h">Por serviço e por função</h3><div class="fr-2">
+      ${on('serv') && people.length ? html`<section class="r-section ${keep(Math.max(svcs.length, fns.length) * 2)}"><h3 class="r-h">Por serviço e por função</h3><div class="fr-2">
         <div><h4 class="fr-h4">Serviço (apropriação)</h4><ul class="fr-bars">${svcs.map(x => html`<li><div><span>${x.name}</span><b>${mny ? money(x.value) : `${n2(x.diarias)} diária(s)`}</b></div>${bar(mny ? x.value : x.diarias, mny ? svcs[0].value : svcs[0].diarias)}<small>${n2(x.diarias)} diária(s) · ${x.people.size} pessoa(s)</small></li>`)}</ul></div>
         <div><h4 class="fr-h4">Função</h4><ul class="fr-bars">${fns.map(x => html`<li><div><span>${x.name}</span><b>${n2(x.diarias)} diária(s)</b></div>${bar(x.diarias, fns[0].diarias)}<small>${x.people.size} pessoa(s)${mny ? ` · ${money(x.value)}` : ''}</small></li>`)}</ul></div>
       </div></section>` : ''}
 
-      ${on('emp') && !filtered && blocks.some(s => s.contracts.length) ? html`<section class="r-section avoid"><h3 class="r-h">Empreitadas</h3>
+      ${on('emp') && !filtered && blocks.some(s => s.contracts.length) ? html`<section class="r-section ${keep(blocks.reduce((a, s) => a + s.contracts.length, 0))}"><h3 class="r-h">Empreitadas</h3>
         <table class="r-table"><thead><tr><th>Folha</th><th>Serviço</th><th>Empreiteiro</th><th class="num">Nesta folha</th><th class="num">Acumulado</th>${mny ? html`<th class="num">Medido</th>` : ''}</tr></thead>
         <tbody>${blocks.flatMap(s => s.contracts.map(c => html`<tr><td class="small nowrap">${s.code}</td><td>${c.service}</td><td class="small">${c.worker_name}</td><td class="num">${n2(c.pct)}%</td><td class="num">${n2(c.after_pct)}%</td>${mny ? html`<td class="num">${money(c.amount)}</td>` : ''}</tr>`))}</tbody></table></section>` : ''}
 
-      ${meas && on('med') && meas.measurements.length ? html`<section class="r-section avoid"><h3 class="r-h">Medição do terceiro x folhas</h3>
+      ${meas && on('med') && meas.measurements.length ? html`<section class="r-section ${keep(meas.measurements.length + 4)}"><h3 class="r-h">Medição do terceiro x folhas</h3>
         <table class="r-table"><thead><tr><th>Data</th><th>Terceiro</th><th>Folhas</th><th class="num">Medido</th><th class="num">Folhas</th><th class="num">Diferença</th><th>Resultado</th></tr></thead>
         <tbody>${meas.measurements.map(m => html`<tr><td class="small nowrap">${fmtDate(m.ref_date)}</td><td>${m.supplier || '—'}</td><td class="small">${m.sheets.map(s => s.code).join(', ') || '—'}</td>
           <td class="num">${money(m.amount)}</td><td class="num">${money(m.sheets_total)}</td><td class="num ${m.diff < -0.004 ? 'late' : ''}">${money(m.diff)}</td>
           <td class="small"><b>${{ pago_mais: 'Pago a mais', pago_menos: 'Pago a menos', igual: 'Igual', sem_folhas: 'Sem folhas' }[m.result]}</b></td></tr>`)}
           <tr class="fr-sum"><td colspan="3">Total da obra</td><td class="num">${money(meas.totals.measured)}</td><td class="num">${money(meas.totals.covered)}</td><td class="num">${money(meas.totals.diff)}</td><td class="small">${meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição` : ''}</td></tr></tbody></table></section>` : ''}
 
-      ${on('pag') && mny ? html`<section class="r-section avoid"><h3 class="r-h">Pagamentos por folha</h3>
+      ${on('pag') && mny ? html`<section class="r-section ${keep(sheets.length)}"><h3 class="r-h">Pagamentos por folha</h3>
         <table class="r-table"><thead><tr><th>Folha</th><th>Período</th><th>Situação</th><th class="num">Total</th><th class="num">Cliente</th><th class="num">Empresa paga</th><th>Pagamento</th></tr></thead>
         <tbody>${sheets.map(s => html`<tr><td class="nowrap"><b>${s.code}</b></td><td class="small nowrap">${dm(s.start_date)} a ${dm(s.end_date)}</td><td class="small">${s.status === 'fechada' ? 'Fechada' : 'Aberta'}</td>
           <td class="num">${money(s.totals.total)}</td><td class="num">${s.totals.client ? money(s.totals.client) : '—'}</td><td class="num">${money(s.totals.company)}</td>

@@ -520,10 +520,21 @@
 .fr-bmp { margin: 0 0 10px; break-inside: avoid; text-align: center; }
 .fr-bmp img { max-width: 100%; height: auto; border: 1px solid #E4E1DA; image-rendering: auto; }
 .fr-bmp figcaption { font-size: 7pt; color: #6E7A86; margin-top: 2px; }
-.fr-bmpdf .fr-bmp + .fr-bmp, .fr-bm + .fr-bm { break-before: page; }
+.fr-bmsheet + .fr-bmsheet, .fr-bm + .fr-bm { break-before: page; }
+.fr-bmsheet.is-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; align-items: start; }
 @media print {
   .fr-bms { page: paisagem; }
   /* Folha A4 deitada: 277 x 184 mm úteis; a página do BM ocupa a altura disponível sem cortar */
   .fr-bmp img { max-height: 165mm; width: auto; max-width: 100%; border: 0; }
   .fr-bm-h { margin-bottom: 3px; }
+}/* Aproveitamento das páginas do relatório: títulos presos ao conteúdo, linhas inteiras e cabeçalho repetido */
+@media print {
+  .fr-doc .r-h, .fr-doc .fr-h4, .frp-h { break-after: avoid; }
+  .fr-doc .r-table tr, .frp-t tr, .fr-bars li, .fr-act { break-inside: avoid; }
+  .fr-doc .r-table thead, .frp-t thead { display: table-header-group; }
+  .fr-flow { break-inside: auto; }
+  .fr-bmsheet { break-inside: avoid; text-align: center; }
+  .fr-bmsheet .fr-bmp { margin: 0; }
+  .fr-bmsheet .fr-bmp img { max-height: 165mm; }
+  .fr-bmsheet.is-pair .fr-bmp img { max-height: 165mm; max-width: 100%; }
 }

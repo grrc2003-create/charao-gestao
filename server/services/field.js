@@ -55,19 +55,31 @@ function requireProject(ctx, projectId) {
 
 // ---------- Profissionais ----------
 const workerView = (w, money) => {
-  const base = { id: w.id, name: w.name, kind: w.kind, role: w.role, active: w.active };
+  const base = { id: w.id, name: w.name, kind: w.kind, role: w.role, active: w.active, leader_id: w.leader_id, leader_name: w.leader_name || null };
   return money ? { ...base, daily_rate: w.daily_rate, doc: w.doc, pix: w.pix, pix_type: w.pix_type, phone: w.phone, notes: w.notes } : base;
 };
+const WORKER_SQL = 'SELECT w.*, l.name AS leader_name FROM field_workers w LEFT JOIN users l ON l.id = w.leader_id';
+// Líder: pessoa ativa da equipe interna (aparece no organograma com a equipe de campo dela)
+const leaderOptions = () => all('SELECT id, name, job_title FROM users WHERE active = 1 AND is_external = 0 ORDER BY name');
 export function listWorkers(ctx) {
   if (!canUseField(ctx)) throw forbidden('A Folha de Campo não está liberada para o seu usuário.');
   const money = canFieldMoney(ctx.user);
-  return { workers: all('SELECT * FROM field_workers ORDER BY active DESC, name').map(w => workerView(w, money)), kinds: KINDS, pix_types: PIX_TYPES, can_money: money };
+  return { workers: all(`${WORKER_SQL} ORDER BY w.active DESC, w.name`).map(w => workerView(w, money)), kinds: KINDS, pix_types: PIX_TYPES, can_money: money, leaders: leaderOptions() };
+}
+function readLeader(v, cur) {
+  if (v === undefined) return cur ?? null;
+  const id = intOrNull(v);
+  if (!id) return null;
+  if (id === cur) return id; // mantém o líder atual mesmo que tenha saído da equipe
+  if (!one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', id)) throw badRequest('Líder inválido: escolha uma pessoa ativa da equipe.');
+  return id;
 }
 function readWorker(b, money, cur = {}) {
   const d = {
     name: str(b.name, { max: 120, required: true, label: 'Nome' }),
     kind: KINDS[b.kind] ? b.kind : cur.kind || 'diarista',
     role: str(b.role, { max: 60, label: 'Função' }),
+    leader_id: readLeader(b.leader_id, cur.leader_id),
     active: b.active === false || b.active === 0 || b.active === '0' ? 0 : 1,
   };
   if (!money) return { ...d, daily_rate: cur.daily_rate || 0, doc: cur.doc ?? null, pix: cur.pix ?? null, pix_type: cur.pix_type ?? null, phone: cur.phone ?? null, notes: cur.notes ?? null };
@@ -85,20 +97,31 @@ export function createWorker(ctx, body, ip) {
   if (!canUseField(ctx)) throw forbidden('A Folha de Campo não está liberada para o seu usuário.');
   const money = canFieldMoney(ctx.user);
   const d = readWorker(body || {}, money);
-  const id = Number(run(`INSERT INTO field_workers (name, kind, role, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    d.name, d.kind, d.role, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
+  const id = Number(run(`INSERT INTO field_workers (name, kind, role, leader_id, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
   audit(ctx.user.id, 'field', id, 'Profissional de campo cadastrado', { nome: d.name }, ip);
-  return workerView(one('SELECT * FROM field_workers WHERE id = ?', id), money);
+  return workerView(one(`${WORKER_SQL} WHERE w.id = ?`, id), money);
 }
 export function updateWorker(ctx, id, body, ip) {
   requireMoney(ctx);
   const cur = one('SELECT * FROM field_workers WHERE id = ?', id);
   if (!cur) throw notFound('Profissional não encontrado.');
   const d = readWorker(body || {}, true, cur);
-  run(`UPDATE field_workers SET name=?, kind=?, role=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
-    d.name, d.kind, d.role, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
+  run(`UPDATE field_workers SET name=?, kind=?, role=?, leader_id=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
+    d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
   audit(ctx.user.id, 'field', id, 'Profissional de campo atualizado', { nome: d.name }, ip);
-  return workerView(one('SELECT * FROM field_workers WHERE id = ?', id), true);
+  return workerView(one(`${WORKER_SQL} WHERE w.id = ?`, id), true);
+}
+
+// Organograma: equipe de campo ativa de cada líder, contada por função (sem nomes nem valores)
+export function fieldTeams() {
+  const by = new Map();
+  for (const r of all(`SELECT leader_id, COALESCE(NULLIF(TRIM(role), ''), CASE kind WHEN 'empreiteiro' THEN 'Empreiteiro' ELSE 'Sem função' END) AS role, COUNT(*) AS n
+    FROM field_workers WHERE active = 1 AND leader_id IS NOT NULL GROUP BY 1, 2 ORDER BY 1, n DESC, 2`)) {
+    if (!by.has(r.leader_id)) by.set(r.leader_id, []);
+    by.get(r.leader_id).push({ role: r.role, n: r.n });
+  }
+  return by;
 }
 
 // ---------- Empreitadas ----------

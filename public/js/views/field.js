@@ -340,13 +340,18 @@ export async function view({ params, navigate, render }) {
 }
 
 // ---------- Profissionais ----------
-function workerSheet(w, mny, done, pixTypes = ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória']) {
+async function workerSheet(w, mny, done, pixTypes = ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória'], leaders = null) {
   const v = w || { kind: 'diarista', active: 1 };
+  // Líder: pessoa da equipe interna; no organograma ela mostra a equipe de campo por função
+  const ld = [...(leaders || (await api('/field/workers')).leaders || [])];
+  if (v.leader_id && !ld.some(x => x.id === v.leader_id)) ld.push({ id: v.leader_id, name: v.leader_name || 'Líder atual' });
   return sheet({
     title: w ? w.name : 'Novo profissional',
     body: html`<div class="field"><label class="req" for="fw-n">Nome</label><input type="text" id="fw-n" name="name" required maxlength="120" value="${v.name || ''}"></div>
       <div class="form-row"><div class="field"><label for="fw-k">Tipo</label><select id="fw-k" name="kind"><option value="diarista" ${v.kind === 'diarista' ? 'selected' : ''}>Diarista (mão de obra própria)</option><option value="empreiteiro" ${v.kind === 'empreiteiro' ? 'selected' : ''}>Empreiteiro</option></select></div>
         <div class="field"><label for="fw-r">Função</label><input type="text" id="fw-r" name="role" maxlength="60" value="${v.role || ''}" placeholder="Pedreiro, Ajudante, Mestre…"></div></div>
+      <div class="field"><label for="fw-l">Líder</label><select id="fw-l" name="leader_id"><option value="">Sem líder</option>${ld.map(x => html`<option value="${x.id}" ${x.id === v.leader_id ? 'selected' : ''}>${x.name}${x.job_title ? ` · ${x.job_title}` : ''}</option>`)}</select>
+        <span class="hint">No organograma, o líder mostra quantas pessoas por função estão ligadas a ele.</span></div>
       ${mny ? html`<div class="form-row"><div class="field"><label for="fw-d">Valor da diária</label><input type="number" step="0.01" min="0" id="fw-d" name="daily_rate" value="${v.daily_rate ?? ''}"></div>
           <div class="field"><label for="fw-doc">CPF / CNPJ</label><input type="text" id="fw-doc" name="doc" maxlength="30" value="${v.doc || ''}"></div></div>
         <div class="form-row"><div class="field"><label for="fw-pt">Tipo do PIX</label><select id="fw-pt" name="pix_type"><option value="">—</option>${pixTypes.map(t => html`<option ${v.pix_type === t ? 'selected' : ''}>${t}</option>`)}</select></div>
@@ -372,7 +377,7 @@ export async function workers({ render, query, navigate }) {
   const nAt = d.workers.filter(w => w.active).length;
   const mny = d.can_money;
   const row = w => html`<li class="fc-wrow ${w.active ? '' : 'fc-off'}"><div class="grow"><div class="row-title">${w.name}${w.active ? '' : ' (inativo)'}</div>
-    <div class="row-meta"><span>${w.kind === 'empreiteiro' ? 'Empreiteiro' : 'Diarista'}</span>${w.role ? html`<span>${w.role}</span>` : ''}${mny && w.kind === 'diarista' ? html`<span>Diária ${money(w.daily_rate)}</span>` : ''}${mny && w.pix ? html`<span>PIX ${w.pix_type ? `(${w.pix_type}) ` : ''}${w.pix}</span>` : ''}${mny && !w.daily_rate && w.kind === 'diarista' ? html`<span class="fc-warn">sem valor da diária</span>` : ''}</div></div>
+    <div class="row-meta"><span>${w.kind === 'empreiteiro' ? 'Empreiteiro' : 'Diarista'}</span>${w.role ? html`<span>${w.role}</span>` : ''}${w.leader_name ? html`<span>Líder: ${w.leader_name}</span>` : ''}${mny && w.kind === 'diarista' ? html`<span>Diária ${money(w.daily_rate)}</span>` : ''}${mny && w.pix ? html`<span>PIX ${w.pix_type ? `(${w.pix_type}) ` : ''}${w.pix}</span>` : ''}${mny && !w.daily_rate && w.kind === 'diarista' ? html`<span class="fc-warn">sem valor da diária</span>` : ''}</div></div>
     ${mny ? html`<button type="button" class="btn btn-ghost btn-sm" data-ed="${w.id}">${icon('edit')}Editar</button>` : ''}</li>`;
   const group = (k, label) => { const l = shown.filter(w => w.kind === k); return html`<section class="card section"><div class="card-head"><h2>${label}</h2><span class="sub">${l.length}</span></div>
     ${l.length ? html`<ul class="rows">${l.map(row)}</ul>` : html`<p class="muted card-body">Nenhum cadastrado.</p>`}</section>`; };
@@ -385,8 +390,8 @@ export async function workers({ render, query, navigate }) {
       ${group('diarista', 'Diaristas (mão de obra própria)')}${group('empreiteiro', 'Empreiteiros')}`,
     mount(root) {
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
-      root.querySelector('[data-new]').addEventListener('click', () => workerSheet(null, mny, () => { toast('Profissional cadastrado.'); render(); }, d.pix_types));
-      root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => workerSheet(d.workers.find(w => w.id === Number(b.dataset.ed)), mny, () => { toast('Cadastro salvo.'); render(); }, d.pix_types)));
+      root.querySelector('[data-new]').addEventListener('click', () => workerSheet(null, mny, () => { toast('Profissional cadastrado.'); render(); }, d.pix_types, d.leaders));
+      root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => workerSheet(d.workers.find(w => w.id === Number(b.dataset.ed)), mny, () => { toast('Cadastro salvo.'); render(); }, d.pix_types, d.leaders)));
     },
   };
 }

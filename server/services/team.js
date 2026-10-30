@@ -7,6 +7,7 @@ import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { NO_LOGIN, placeholderEmail, isPlaceholderEmail, assertNoManagerCycle } from './users.js';
 import { vacationSummary } from './vacations.js';
+import { fieldTeams } from './field.js';
 
 export const requireTeam = ctx => requireSection(ctx.user, 'equipe');
 // Cadastro da Equipe: Gestão da Equipe ou Cadastro de usuários
@@ -56,9 +57,11 @@ export function orgChart(ctx, { inactive = false } = {}) {
   const vac = vacationFlags();
   const people = users.map(u => person(u, load, vac, ctx));
   const ids = new Set(people.map(p => p.id));
+  const field = fieldTeams();
   for (const p of people) {
     if (p.manager_id && !ids.has(p.manager_id)) p.manager_id = null; // gestor inativo/oculto: sobe para a raiz
     p.team_size = teamIds(p.id).size;
+    p.field_team = field.get(p.id) || []; // equipe da Folha de Campo liderada pela pessoa, por função
   }
   return {
     people,
@@ -72,6 +75,7 @@ export function orgChart(ctx, { inactive = false } = {}) {
       missing_function: people.filter(p => p.missing_function).length,
       no_manager: people.filter(p => !p.manager_id).length,
       on_vacation: people.filter(p => p.vacation?.now).length,
+      field: people.reduce((n, p) => n + p.field_team.reduce((a, r) => a + r.n, 0), 0),
     },
   };
 }

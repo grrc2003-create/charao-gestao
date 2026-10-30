@@ -44,12 +44,21 @@ function card(p, { childCount = 0, collapsed = false, print = false } = {}) {
   </div>`;
 }
 
-export function treeHtml(people, { collapsed = new Set(), externals = true, print = false, rootId = null } = {}) {
+// Cartão da equipe da Folha de Campo ligada ao líder: quantas pessoas por função
+const fieldTotal = p => (p.field_team || []).reduce((n, r) => n + r.n, 0);
+const fieldCard = p => html`<li><div class="org-card org-field" style="--c:#B7791F" title="Profissionais da Folha de Campo com ${p.name} como líder">
+    <div class="org-top"><span class="org-av">${icon('team')}</span><div class="org-who"><b>Equipe de campo</b><small>${fieldTotal(p)} pessoa(s) · líder ${p.name.split(' ')[0]}</small></div></div>
+    <ul class="org-fl">${p.field_team.map(r => html`<li><span>${r.role}</span><b>${r.n}</b></li>`)}</ul>
+  </div></li>`;
+
+export function treeHtml(people, { collapsed = new Set(), externals = true, field = true, print = false, rootId = null } = {}) {
   const t = buildTree(people, { externals });
   const node = p => {
     const ch = t.childrenOf(p.id);
+    const fc = field && fieldTotal(p) > 0;
+    const n = ch.length + (fc ? 1 : 0);
     const closed = collapsed.has(p.id);
-    return html`<li>${card(p, { childCount: ch.length, collapsed: closed, print })}${ch.length && !closed ? html`<ul>${ch.map(node)}</ul>` : ''}</li>`;
+    return html`<li>${card(p, { childCount: n, collapsed: closed, print })}${n && !closed ? html`<ul>${fc ? fieldCard(p) : ''}${ch.map(node)}</ul>` : ''}</li>`;
   };
   const roots = rootId ? people.filter(p => p.id === rootId) : t.roots;
   return html`<ul class="org-tree">${roots.map(node)}</ul>`;
@@ -72,6 +81,7 @@ function detailBody(p, data, state) {
     <div class="sub-label" style="margin-top:12px">Responsabilidades</div>
     <div class="text-content org-resp">${p.responsibilities || html`<span class="late">Responsabilidades não detalhadas. Complete no Cadastro da Equipe.</span>`}</div>
     ${direct.length ? html`<div class="sub-label" style="margin-top:12px">Equipe direta (${direct.length})</div><div class="org-chips">${direct.map(x => html`<span class="pill pill-sand">${x.name}</span>`)}</div>` : ''}
+    ${fieldTotal(p) ? html`<div class="sub-label" style="margin-top:12px">Equipe de campo (${fieldTotal(p)})</div><div class="org-chips">${p.field_team.map(r => html`<span class="pill pill-sand">${r.n} ${r.role}</span>`)}</div>` : ''}
     <div class="field" style="margin-top:12px"><label for="od-mgr">${p.is_external ? 'Mudar líder' : 'Mudar gestor'}</label>
       <select id="od-mgr" name="manager_id">${p.is_external ? '' : html`<option value="">Sem gestor (topo)</option>`}${options.map(x => html`<option value="${x.id}" ${x.id === p.manager_id ? 'selected' : ''}>${x.name}${x.job_title ? ` · ${x.job_title}` : ''}</option>`)}</select></div>
     <div class="rg-task-acts">
@@ -88,27 +98,30 @@ export async function org({ state, render }) {
   try { collapsed = new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]')); } catch { /* sem armazenamento */ }
   let externals = true;
   try { externals = sessionStorage.getItem(`${KEY}-ext`) !== '0'; } catch { /* sem armazenamento */ }
+  let field = true;
+  try { field = sessionStorage.getItem(`${KEY}-field`) !== '0'; } catch { /* sem armazenamento */ }
   const s = data.summary;
   return {
     title: 'Organograma',
     html: html`
       ${pageHead({
         eyebrow: 'Gestão da Equipe', title: 'Organograma',
-        sub: `${s.internal} pessoa(s) na equipe${s.external ? ` · ${s.external} terceirizado(s)` : ''}${s.on_vacation ? ` · ${s.on_vacation} de férias` : ''}`,
+        sub: `${s.internal} pessoa(s) na equipe${s.external ? ` · ${s.external} terceirizado(s)` : ''}${s.field ? ` · ${s.field} na equipe de campo` : ''}${s.on_vacation ? ` · ${s.on_vacation} de férias` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/imprimir/organograma">${icon('print')}Imprimir / PDF</a><a class="btn btn-primary" href="#/equipe/cadastro/novo">${icon('plus')}Nova pessoa</a>`,
       })}
       ${s.missing_function ? html`<div class="notice section" style="margin-top:0">${icon('alert')}<span><b>${s.missing_function}</b> pessoa(s) sem função ou responsabilidades detalhadas (cartões com aviso). <a href="#/equipe/cadastro?f=pendentes">Completar no Cadastro da Equipe</a>.</span></div>` : ''}
       <div class="org-bar">
         <input type="search" id="org-q" placeholder="Buscar pessoa…" aria-label="Buscar pessoa no organograma">
         <label class="switch"><input type="checkbox" id="org-ext" ${externals ? 'checked' : ''}>Terceirizados</label>
+        ${s.field ? html`<label class="switch"><input type="checkbox" id="org-field" ${field ? 'checked' : ''}>Equipe de campo</label>` : ''}
         <div class="org-zoom only-desktop"><button type="button" class="btn btn-ghost btn-sm" data-z="-1" aria-label="Diminuir">−</button><span id="org-zl">100%</span>
           <button type="button" class="btn btn-ghost btn-sm" data-z="1" aria-label="Aumentar">+</button><button type="button" class="btn btn-ghost btn-sm" data-z="0">Ajustar</button></div>
         <button type="button" class="btn btn-ghost btn-sm" id="org-expand">Expandir tudo</button>
       </div>
       <p class="hint only-desktop" style="margin:0 0 8px">Arraste um cartão sobre outro para mudar o gestor. Clique no cartão para ver função, responsabilidades e equipe.</p>
-      <div class="org-legend">${['admin', 'gestor', 'coordenador', 'colaborador'].map(r => html`<span><i style="--c:${ROLE_COLOR[r]}"></i>${ROLE[r]}</span>`)}<span><i class="is-ext" style="--c:#8E44AD"></i>Terceirizado</span></div>
+      <div class="org-legend">${['admin', 'gestor', 'coordenador', 'colaborador'].map(r => html`<span><i style="--c:${ROLE_COLOR[r]}"></i>${ROLE[r]}</span>`)}<span><i class="is-ext" style="--c:#8E44AD"></i>Terceirizado</span>${s.field ? html`<span><i style="--c:#B7791F"></i>Equipe de campo (Folha de Campo)</span>` : ''}</div>
       <div class="org-wrap card"><div class="org-top-drop" data-drop-root>Solte aqui para deixar sem gestor (topo)</div>
-        <div class="org" id="org">${treeHtml(data.people, { collapsed, externals })}</div></div>`,
+        <div class="org" id="org">${treeHtml(data.people, { collapsed, externals, field })}</div></div>`,
     mount(root) {
       const orgEl = root.querySelector('#org');
       let zoom = 1;
@@ -118,9 +131,10 @@ export async function org({ state, render }) {
         if (d) setZoom(zoom + d * 0.1);
         else { const w = orgEl.querySelector('.org-tree').scrollWidth; setZoom(Math.min(1, (orgEl.parentElement.clientWidth - 24) / w)); }
       }));
-      const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify([...collapsed])); sessionStorage.setItem(`${KEY}-ext`, externals ? '1' : '0'); } catch { /* sem armazenamento */ } };
-      const redraw = () => { orgEl.innerHTML = treeHtml(data.people, { collapsed, externals }).toString(); save(); bindCards(); };
+      const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify([...collapsed])); sessionStorage.setItem(`${KEY}-ext`, externals ? '1' : '0'); sessionStorage.setItem(`${KEY}-field`, field ? '1' : '0'); } catch { /* sem armazenamento */ } };
+      const redraw = () => { orgEl.innerHTML = treeHtml(data.people, { collapsed, externals, field }).toString(); save(); bindCards(); };
       root.querySelector('#org-ext').addEventListener('change', e => { externals = e.target.checked; redraw(); });
+      root.querySelector('#org-field')?.addEventListener('change', e => { field = e.target.checked; redraw(); });
       root.querySelector('#org-expand').addEventListener('click', () => { collapsed.clear(); redraw(); });
       // Busca: abre o caminho até a pessoa e destaca
       root.querySelector('#org-q').addEventListener('input', e => {
@@ -154,7 +168,7 @@ export async function org({ state, render }) {
           if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
           redraw();
         }));
-        orgEl.querySelectorAll('.org-card').forEach(c => {
+        orgEl.querySelectorAll('.org-card[data-pid]').forEach(c => {
           const id = Number(c.dataset.pid);
           c.addEventListener('click', () => open(id));
           c.addEventListener('keydown', e => { if (e.key === 'Enter') open(id); });

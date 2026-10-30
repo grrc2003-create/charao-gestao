@@ -1569,7 +1569,8 @@ async function main() {
   const eqRicMe = (await eqRic('GET', '/vacations/me')).data;
   ok(eqRicMe.approvals.some(v => v.id === eqReq.data.id), 'gestor direto vê a solicitação para aprovar no Meu painel');
   ok((await eqRic('POST', `/vacations/${eqReq.data.id}/approve`)).status === 200 && (await eqMar('GET', '/vacations/me')).data.summary.available === 20, 'gestor aprova e o saldo cai para 20 dias');
-  const eqOv = (await eqAna('GET', '/vacations/overview')).data;
+  // Visão do ano das férias solicitadas (perto do fim do ano, o início "daqui a ~60 dias" cai no ano seguinte)
+  const eqOv = (await eqAna('GET', `/vacations/overview?ano=${eqIso(eqSt).slice(0, 4)}`)).data;
   ok(eqOv.people.some(p => p.id === 4 && p.vacations.length) && 'expiring' in eqOv.kpis, 'férias da empresa: visão geral do ano');
   const eqLaunch = await eqAna('POST', '/vacations', { user_id: eqNew.data.id, start_date: eqIso(new Date(eqSt.getTime() + 35 * 86400e3)), days: 30 });
   ok(eqLaunch.status === 400 && /ainda não completou|período aquisitivo/.test(eqLaunch.data.error), 'sem período aquisitivo completo não há férias');
@@ -2404,6 +2405,21 @@ async function main() {
   ok(fcJw.id && fcJw.daily_rate === undefined && (await fcAna('GET', '/field/workers')).data.workers.find(w => w.id === fcJw.id).daily_rate === 0, 'responsável cadastra profissional sem valor/PIX (o escritório completa)');
   ok((await fcJul('GET', '/field/workers')).data.workers.every(w => w.pix === undefined && w.daily_rate === undefined), 'sem a seção: lista de profissionais sem diária e PIX');
   ok((await fcJul('PUT', `/field/workers/${fcP.id}`, { name: 'x' })).status === 403, 'sem a seção não edita o cadastro do profissional');
+  // Líder do profissional (pessoa da equipe) → cartão da equipe de campo no organograma
+  const fcLd = (await fcJul('GET', '/field/workers')).data.leaders;
+  const fcOrg0 = (await fcAna('GET', '/team/org')).data;
+  const fcExt = fcOrg0.people.find(p => p.is_external);
+  ok(fcLd.some(x => x.id === 3) && !fcLd.some(x => fcExt && x.id === fcExt.id), 'Folha de Campo: líderes possíveis são as pessoas ativas da equipe interna');
+  const fcHl = (await fcAna('PUT', `/field/workers/${fcH.id}`, { name: 'Ajudante Teste FC', kind: 'diarista', role: 'Ajudante', daily_rate: 110, leader_id: 3, active: 1 })).data;
+  const fcJl = (await fcJul('POST', '/field/workers', { name: 'Ajudante 2 Teste FC', role: 'Ajudante', leader_id: 3 })).data;
+  const fcPl = (await fcAna('PUT', `/field/workers/${fcP.id}`, { name: 'Pedreiro Teste FC', kind: 'diarista', role: 'Pedreiro', daily_rate: 180, pix: 'pix-ficticio-1', pix_type: 'E-mail', leader_id: 3, active: 1 })).data;
+  ok(fcHl.leader_id === 3 && fcHl.leader_name && fcJl.leader_id === 3 && fcPl.leader_id === 3, 'líder definido no cadastro e na edição do profissional');
+  ok((await fcAna('POST', '/field/workers', { name: 'X', leader_id: 99999 })).status === 400 && (!fcExt || (await fcAna('POST', '/field/workers', { name: 'X', leader_id: fcExt.id })).status === 400), 'líder precisa ser pessoa ativa da equipe interna');
+  const fcOrg = (await fcAna('GET', '/team/org')).data;
+  const fcTeam = fcOrg.people.find(p => p.id === 3).field_team;
+  ok(fcTeam.find(r => r.role === 'Ajudante')?.n === 2 && fcTeam.find(r => r.role === 'Pedreiro')?.n === 1 && fcOrg.summary.field >= 3 && !JSON.stringify(fcTeam).includes('Teste FC'), 'organograma: líder mostra a equipe de campo por função (só contagem, sem nomes)');
+  await fcAna('PUT', `/field/workers/${fcJl.id}`, { name: 'Ajudante 2 Teste FC', role: 'Ajudante', active: 0 });
+  ok((await fcAna('GET', '/team/org')).data.people.find(p => p.id === 3).field_team.find(r => r.role === 'Ajudante').n === 1, 'profissional inativo sai da contagem da equipe de campo');
   ok((await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcP.id, service: 'x', total: 10 })).status === 400, 'empreitada exige um empreiteiro');
   const fcC = (await fcAna('POST', '/field/contracts', { project_id: 2, worker_id: fcE.id, service: 'Pintura teste', total: 5000 })).data;
   ok(fcC.measured_pct === 0 && fcC.balance === 5000, 'empreitada cadastrada com saldo integral');

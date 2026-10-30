@@ -3372,7 +3372,7 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .mc-raw th { text-align: left; font-weight: 600; white-space: nowrap; width: 1%; color: var(--muted); }
 .mc-raw td { word-break: break-word; }
 .mc-next { display: flex; align-items: center; gap: 6px; margin-top: 4px; }/* Dívidas anteriores: empresa deve (a pagar) · devem à empresa (a descontar) · pago a mais anterior */
-.fd-owed { color: #B04A10 !important; }
+.fd-owed { color: #C0392B !important; } /* dívida da empresa: vermelho */
 .fd-due { color: #1F6B41 !important; }
 .fd-more { color: #A93226 !important; }
 .fd-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

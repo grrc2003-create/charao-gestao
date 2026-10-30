@@ -91,7 +91,9 @@ export async function view({ query, setQuery, render }) {
   // Dívidas anteriores da obra (todas, independentes do período); com filtro de pessoa, só as dela
   const debts = dv ? dv.debts.filter(d => !pessoa || d.worker_id === pessoa) : [];
   const debtOpen = k => debts.filter(d => d.kind === k && d.status === 'aberta').reduce((a, d) => a + d.amount, 0);
-  const prior = dv && on('div') ? debtOpen('pago_mais') : 0;
+  // Pago a mais anterior (da obra inteira, como o saldo da medição — não depende do filtro de pessoa)
+  const priorDebts = dv && on('div') ? dv.debts.filter(d => d.kind === 'pago_mais' && d.status === 'aberta') : [];
+  const prior = priorDebts.reduce((a, d) => a + d.amount, 0);
   const debtFiles = debts.flatMap(d => d.files.filter(f => f.mime === 'application/pdf').map(f => ({ d, f })));
   const bms = meas && on('bm') ? meas.measurements.filter(m => m.files.length && (!(de || ate || pickedOk) || m.sheets.some(s => inReport.has(s.id)))).reverse() : [];
 
@@ -184,15 +186,20 @@ export async function view({ query, setQuery, render }) {
       ${on('med') && meas?.measurements.length ? html`<h4 class="fr-h4" style="margin-top:10px">Saldo das folhas perante a medição do terceiro (obra até hoje)</h4><div class="r-kpis">
         ${kpi('Medido (BM)', money(meas.totals.measured), `${meas.measurements.length} medição(ões)`)}
         ${kpi('Folhas cobertas', money(meas.totals.covered), meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição · ${money(meas.totals.uncovered_total)}` : 'todas as folhas com medição', '#1F6FB2')}
-        ${kpi('Pago a mais', money(meas.totals.paid_more + prior), prior ? `folhas ${money(meas.totals.paid_more)} · dos quais anterior ${money(prior)}` : 'folhas acima do medido', '#C0392B')}
+        ${kpi('Pago a mais', `${money(meas.totals.paid_more + prior)}*`, 'ver composição abaixo', '#C0392B')}
         ${kpi('Sobrando', money(meas.totals.left_over), `saldo ${money(meas.totals.diff - prior)}`, '#1F6B41')}
-      </div>` : ''}
-      ${on('div') && debts.length ? html`<h4 class="fr-h4" style="margin-top:10px">Dívidas anteriores em aberto${pessoa ? ' (da pessoa)' : ' (obra)'}</h4><div class="r-kpis">
-        ${kpi('Empresa deve', money(debtOpen('empresa_deve')), 'a pagar aos profissionais', '#B04A10')}
-        ${kpi('Devem à empresa', money(debtOpen('profissional_deve')), 'a descontar dos profissionais', '#1F6B41')}
-        ${kpi('Pago a mais anterior', money(debtOpen('pago_mais')), 'entra no saldo da medição', '#C0392B')}
-        ${kpi('Quitadas', debts.filter(d => d.status === 'quitada').length, money(debts.filter(d => d.status === 'quitada').reduce((a, d) => a + d.amount, 0)))}
-      </div>` : ''}</section>
+      </div>
+      ${(() => {
+        // * Composição do pago a mais: cada medição em que as folhas passaram do medido + cada pago a mais anterior
+        const over = meas.measurements.filter(m => m.result === 'pago_mais');
+        return html`<div class="fr-comp"><b>* Composição do pago a mais (${money(meas.totals.paid_more + prior)}):</b>
+          <table><tbody>
+            ${over.map(m => html`<tr><td>Folhas acima do medido</td><td>${m.supplier || 'Terceiro'} · medição de ${fmtDate(m.ref_date)} · medido ${money(m.amount)} · folhas ${m.sheets.map(s => s.code).join(', ')} = ${money(m.sheets_total)}</td><td class="num">${money(-m.diff)}</td></tr>`)}
+            ${priorDebts.map(d => html`<tr><td>Pago a mais anterior</td><td>origem ${fmtDate(d.origin_date)} — ${d.reason}</td><td class="num">${money(d.amount)}</td></tr>`)}
+            ${!over.length && !priorDebts.length ? html`<tr><td colspan="3">Nenhum valor pago a mais.</td></tr>` : ''}
+            <tr class="fr-comp-t"><td colspan="2">Total pago a mais</td><td class="num">${money(meas.totals.paid_more + prior)}</td></tr>
+          </tbody></table></div>`;
+      })()}` : ''}</section>
 
       ${on('pres') ? html`<section class="r-section"><h3 class="r-h">Presença por dia</h3>
         <p class="small muted fr-leg"><span class="frl q1">1</span> diária <span class="frl qh">½</span> meia diária <span class="frl we"></span> fim de semana</p>
@@ -229,8 +236,8 @@ export async function view({ query, setQuery, render }) {
         ${Object.entries(dv.kinds).filter(([k]) => debts.some(d => d.kind === k)).map(([k, label]) => { const rows = debts.filter(d => d.kind === k); return html`<h4 class="fr-h4">${label}</h4>
           <table class="r-table fr-debts"><thead><tr><th>Origem</th>${k === 'pago_mais' ? '' : html`<th>Profissional</th>`}<th>Motivo</th><th class="num">Valor</th><th>Situação</th></tr></thead>
           <tbody>${rows.map(d => html`<tr><td class="small nowrap">${fmtDate(d.origin_date)}</td>${k === 'pago_mais' ? '' : html`<td>${d.worker_name || '—'}</td>`}<td class="small">${d.reason}</td>
-            <td class="num">${money(d.amount)}</td><td class="small">${d.status === 'quitada' ? `Quitada ${fmtDate(d.settled_date)}${d.settled_note ? ` · ${d.settled_note}` : ''}` : html`<b>Em aberto</b>`}</td></tr>`)}
-            <tr class="fr-sum"><td colspan="${k === 'pago_mais' ? 2 : 3}">Em aberto</td><td class="num">${money(debtOpen(k))}</td><td></td></tr></tbody></table>`; })}</section>` : ''}
+            <td class="num ${k === 'pago_mais' ? 'fr-neg' : k === 'empresa_deve' ? 'fr-red' : ''}">${k === 'pago_mais' ? money(-d.amount) : money(d.amount)}</td><td class="small">${d.status === 'quitada' ? `Quitada ${fmtDate(d.settled_date)}${d.settled_note ? ` · ${d.settled_note}` : ''}` : html`<b>Em aberto</b>`}</td></tr>`)}
+            <tr class="fr-sum"><td colspan="${k === 'pago_mais' ? 2 : 3}">Em aberto</td><td class="num ${k === 'pago_mais' ? 'fr-neg' : k === 'empresa_deve' ? 'fr-red' : ''}">${k === 'pago_mais' ? money(-debtOpen(k)) : money(debtOpen(k))}</td><td></td></tr></tbody></table>`; })}</section>` : ''}
 
       ${on('pag') && mny ? html`<section class="r-section ${keep(sheets.length)}"><h3 class="r-h">Pagamentos por folha</h3>
         <table class="r-table"><thead><tr><th>Folha</th><th>Período</th><th>Situação</th><th class="num">Total</th><th class="num">Cliente</th><th class="num">Empresa paga</th><th>Pagamento</th></tr></thead>

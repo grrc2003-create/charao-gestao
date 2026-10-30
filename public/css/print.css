@@ -538,4 +538,13 @@
   .fr-bmsheet .fr-bmp img { max-height: 165mm; }
   .fr-bmsheet.is-pair .fr-bmp img { max-height: 165mm; max-width: 100%; }
 }.fr-folhas { display: flex; flex-wrap: wrap; gap: 6px; }
-.fr-folhas .pt-opt small { color: var(--muted); font-size: 11.5px; }
+.fr-folhas .pt-opt small { color: var(--muted); font-size: 11.5px; }/* Composição do pago a mais (nota com asterisco no resumo) */
+.fr-comp { margin: 6px 0 0; font-size: 8.5pt; color: #46535F; }
+.fr-comp table { width: 100%; border-collapse: collapse; margin-top: 3px; }
+.fr-comp td { padding: 2px 4px; border-bottom: 1px solid #EEECE7; vertical-align: top; }
+.fr-comp td:first-child { white-space: nowrap; font-weight: 600; color: #A93226; width: 1%; }
+.fr-comp td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; width: 1%; }
+.fr-comp .fr-comp-t td { font-weight: 700; color: #1C2A38; border-bottom: 0; }
+/* Pago a mais anterior: valor negativo em vermelho */
+.fr-doc .fr-neg { color: #C0392B; font-weight: 700; white-space: nowrap; }
+.fr-doc .fr-red { color: #C0392B; font-weight: 700; white-space: nowrap; } /* dívida da empresa */

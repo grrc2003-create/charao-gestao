@@ -11,6 +11,7 @@ import { hasSection, canAccessProject, canManageProject } from '../lib/permissio
 import { audit } from './audit.js';
 import { createObligationInternal, obligationPaid, removeObligationInternal, payItemInternal, unpayItemInternal } from './finance.js';
 import { today } from './metrics.js';
+import { saveImageFromDataUrl, cleanFileName, deleteStored } from './files.js';
 
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const pad = n => String(n).padStart(2, '0');
@@ -642,4 +643,138 @@ export function markPaid(ctx, body, ip) {
   });
   audit(ctx.user.id, 'field', null, paid ? 'Pagamento marcado (Folha de Campo)' : 'Pagamento desfeito (Folha de Campo)', { lancamentos: refs.length, data: pd }, ip);
   return { ok: true, count: refs.length };
+}
+
+// ---------- Medição do terceiro (BM) x folhas da obra ----------
+// O terceiro mede o serviço (BM) e essa medição deveria cobrir as folhas da obra. Compara o valor medido com o total
+// das folhas cobertas (mão de obra + empreitadas): folhas acima do medido = pago a mais; abaixo = pago a menos.
+const MEAS_DIFF = 0.005;
+function measurementView(m, sheetsById) {
+  const ids = all('SELECT sheet_id FROM field_measurement_sheets WHERE measurement_id = ?', m.id).map(r => r.sheet_id);
+  const list = ids.map(id => sheetsById.get(id)).filter(Boolean).sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const sheetsTotal = r2(list.reduce((a, s) => a + s.total, 0));
+  const diff = r2(m.amount - sheetsTotal);
+  return {
+    id: m.id, project_id: m.project_id, supplier: m.supplier, ref_date: m.ref_date, amount: m.amount, notes: m.notes,
+    sheets: list.map(s => ({ id: s.id, code: s.code, start_date: s.start_date, end_date: s.end_date, total: s.total, status: s.status })),
+    sheets_total: sheetsTotal, diff,
+    result: !list.length ? 'sem_folhas' : Math.abs(diff) < MEAS_DIFF ? 'igual' : diff > 0 ? 'pago_menos' : 'pago_mais',
+    files: all('SELECT id, mime, size, original_name, created_at FROM field_measurement_files WHERE measurement_id = ? ORDER BY id', m.id),
+  };
+}
+export function listMeasurements(ctx, projectId) {
+  requireMoney(ctx);
+  const p = requireProject(ctx, projectId);
+  const link = new Map(all(`SELECT ms.sheet_id, ms.measurement_id FROM field_measurement_sheets ms JOIN field_measurements m ON m.id = ms.measurement_id WHERE m.project_id = ?`, p.id)
+    .map(r => [r.sheet_id, r.measurement_id]));
+  const sheets = all('SELECT * FROM field_sheets WHERE project_id = ? ORDER BY start_date, id', p.id).map(s => {
+    const t = computeSheet(s).totals;
+    return { id: s.id, code: fcCode(s.seq), start_date: s.start_date, end_date: s.end_date, status: s.status, total: t.total, company: t.company, measurement_id: link.get(s.id) || null };
+  });
+  const byId = new Map(sheets.map(s => [s.id, s]));
+  const measurements = all('SELECT * FROM field_measurements WHERE project_id = ? ORDER BY ref_date DESC, id DESC', p.id).map(m => measurementView(m, byId));
+  const measured = r2(measurements.reduce((a, m) => a + m.amount, 0));
+  const covered = r2(measurements.reduce((a, m) => a + m.sheets_total, 0));
+  const open = sheets.filter(s => !s.measurement_id);
+  return {
+    project: { id: p.id, code: p.code, name: p.name },
+    measurements, sheets,
+    suppliers: all(`SELECT DISTINCT supplier FROM field_measurements WHERE supplier IS NOT NULL AND supplier <> '' ORDER BY supplier`).map(r => r.supplier),
+    totals: { measured, covered, diff: r2(measured - covered), uncovered_sheets: open.length, uncovered_total: r2(open.reduce((a, s) => a + s.total, 0)) },
+  };
+}
+function readMeasurement(b, projectId, currentId = 0) {
+  const d = {
+    supplier: str(b.supplier, { max: 120, label: 'Terceiro' }),
+    ref_date: date(b.ref_date, 'Data da medição'),
+    amount: num(b.amount, 'Valor da medição', { max: 1e9 }),
+    notes: str(b.notes, { max: 1000, label: 'Observações' }),
+  };
+  if (!d.ref_date) throw badRequest('Informe a data da medição.');
+  if (!d.amount) throw badRequest('Informe o valor da medição.');
+  const ids = [...new Set((Array.isArray(b.sheet_ids) ? b.sheet_ids : []).map(intOrNull).filter(Boolean))];
+  for (const id of ids) {
+    const s = one('SELECT id, seq FROM field_sheets WHERE id = ? AND project_id = ?', id, projectId);
+    if (!s) throw badRequest('Folha inválida para esta obra.');
+    const other = one('SELECT measurement_id FROM field_measurement_sheets WHERE sheet_id = ? AND measurement_id <> ?', id, currentId);
+    if (other) throw badRequest(`A folha ${fcCode(s.seq)} já está em outra medição.`);
+  }
+  return { ...d, sheet_ids: ids };
+}
+function addMeasurementFiles(ctx, id, files) {
+  const list = Array.isArray(files) ? files.slice(0, 10) : [];
+  for (const f of list) {
+    const saved = saveImageFromDataUrl(f?.data);
+    run('INSERT INTO field_measurement_files (measurement_id, stored_name, mime, size, original_name, uploaded_by) VALUES (?,?,?,?,?,?)', id, saved.stored_name, saved.mime, saved.size, cleanFileName(f.name), ctx.user.id);
+  }
+  return list.length;
+}
+const setMeasurementSheets = (id, ids) => {
+  run('DELETE FROM field_measurement_sheets WHERE measurement_id = ?', id);
+  for (const s of ids) run('INSERT INTO field_measurement_sheets (measurement_id, sheet_id) VALUES (?, ?)', id, s);
+};
+function loadMeasurement(ctx, id) {
+  requireMoney(ctx);
+  const m = one('SELECT * FROM field_measurements WHERE id = ?', id);
+  if (!m) throw notFound('Medição não encontrada.');
+  requireProject(ctx, m.project_id);
+  return m;
+}
+export function createMeasurement(ctx, body, ip) {
+  requireMoney(ctx);
+  const b = body || {};
+  const projectId = intOrNull(b.project_id);
+  if (!projectId) throw badRequest('Escolha a obra.');
+  requireProject(ctx, projectId);
+  const d = readMeasurement(b, projectId);
+  const id = tx(() => {
+    const nid = Number(run('INSERT INTO field_measurements (project_id, supplier, ref_date, amount, notes, created_by) VALUES (?,?,?,?,?,?)',
+      projectId, d.supplier, d.ref_date, d.amount, d.notes, ctx.user.id).lastInsertRowid);
+    setMeasurementSheets(nid, d.sheet_ids);
+    addMeasurementFiles(ctx, nid, b.files);
+    return nid;
+  });
+  audit(ctx.user.id, 'field', id, 'Medição do terceiro lançada', { obra: projectId, valor: d.amount, folhas: d.sheet_ids.length }, ip);
+  return { id, ...listMeasurements(ctx, projectId) };
+}
+export function updateMeasurement(ctx, id, body, ip) {
+  const m = loadMeasurement(ctx, id);
+  const d = readMeasurement(body || {}, m.project_id, m.id);
+  tx(() => {
+    run(`UPDATE field_measurements SET supplier = ?, ref_date = ?, amount = ?, notes = ?, updated_at = datetime('now') WHERE id = ?`, d.supplier, d.ref_date, d.amount, d.notes, m.id);
+    setMeasurementSheets(m.id, d.sheet_ids);
+    addMeasurementFiles(ctx, m.id, body?.files);
+  });
+  audit(ctx.user.id, 'field', m.id, 'Medição do terceiro atualizada', { valor: d.amount, folhas: d.sheet_ids.length }, ip);
+  return { id: m.id, ...listMeasurements(ctx, m.project_id) };
+}
+export function addMeasurementFilesApi(ctx, id, body, ip) {
+  const m = loadMeasurement(ctx, id);
+  const n = tx(() => addMeasurementFiles(ctx, m.id, body?.files));
+  if (!n) throw badRequest('Nenhum arquivo enviado.');
+  audit(ctx.user.id, 'field', m.id, 'BM anexado à medição do terceiro', { arquivos: n }, ip);
+  return { id: m.id, ...listMeasurements(ctx, m.project_id) };
+}
+export function removeMeasurementFile(ctx, id, fileId, ip) {
+  const m = loadMeasurement(ctx, id);
+  const f = one('SELECT * FROM field_measurement_files WHERE id = ? AND measurement_id = ?', fileId, m.id);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  run('DELETE FROM field_measurement_files WHERE id = ?', f.id);
+  deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', m.id, 'BM removido da medição do terceiro', { arquivo: f.original_name }, ip);
+  return { id: m.id, ...listMeasurements(ctx, m.project_id) };
+}
+export function deleteMeasurement(ctx, id, ip) {
+  const m = loadMeasurement(ctx, id);
+  const files = all('SELECT stored_name FROM field_measurement_files WHERE measurement_id = ?', m.id);
+  run('DELETE FROM field_measurements WHERE id = ?', m.id);
+  for (const f of files) deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', m.id, 'Medição do terceiro excluída', { valor: m.amount }, ip);
+  return listMeasurements(ctx, m.project_id);
+}
+export function measurementFileForUser(ctx, fileId) {
+  const f = one('SELECT * FROM field_measurement_files WHERE id = ?', fileId);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  loadMeasurement(ctx, f.measurement_id);
+  return f;
 }

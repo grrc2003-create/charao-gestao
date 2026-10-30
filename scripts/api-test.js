@@ -2469,6 +2469,21 @@ async function main() {
     contracts: [{ contract_id: fcC.id, pct: 40 }] })).data;
   const fcPe = fcA2.people.find(e => e.worker_id === fcP.id), fcHe = fcA2.people.find(e => e.worker_id === fcH.id);
   ok(fcPe.total === 900 && fcHe.gross === 495 && fcHe.total === 475 && fcHe.company === 375, 'valor = diárias × diária + ajuste; empresa paga o valor menos o cliente');
+  // Medição do terceiro (BM) x folhas: valor medido, BM anexado e comparação (pago a mais / a menos)
+  ok((await fcJul('GET', '/field/measurements?obra=2')).status === 403, 'medição do terceiro: só a seção Folha de Campo vê');
+  const fmTot = fcA2.totals.total;
+  const fmC = await fcAna('POST', '/field/measurements', { project_id: 2, supplier: 'Terceiro Exemplo', ref_date: '2026-09-15', amount: fmTot + 500, sheet_ids: [fcS.id], files: [{ data: tinyPng(), name: 'bm-teste.png' }] });
+  const fmM = fmC.data.measurements?.find(x => x.id === fmC.data.id);
+  ok(fmC.status === 201 && fmM.sheets.length === 1 && fmM.sheets_total === fmTot && fmM.diff === 500 && fmM.result === 'pago_menos' && fmM.files.length === 1, 'medição lançada com BM: medido acima da folha = pago a menos');
+  ok((await fcAna('GET', `/field-measurement-files/${fmM.files[0].id}`)).status === 200 && (await fcJul('GET', `/field-measurement-files/${fmM.files[0].id}`)).status === 403, 'BM abre só para a seção Folha de Campo');
+  ok((await fcAna('POST', '/field/measurements', { project_id: 2, ref_date: '2026-09-20', amount: 10, sheet_ids: [fcS.id] })).status === 400, 'a mesma folha não entra em duas medições');
+  ok((await fcAna('POST', '/field/measurements', { project_id: 2, ref_date: '2026-09-20', amount: 0 })).status === 400, 'medição exige o valor');
+  const fmU = (await fcAna('PUT', `/field/measurements/${fmM.id}`, { supplier: 'Terceiro Exemplo', ref_date: '2026-09-15', amount: fmTot - 300, sheet_ids: [fcS.id] })).data.measurements.find(x => x.id === fmM.id);
+  ok(fmU.diff === -300 && fmU.result === 'pago_mais' && fmU.files.length === 1, 'folha acima do medido = pago a mais (e o BM continua anexado)');
+  const fmL = (await fcAna('GET', '/field/measurements?obra=2')).data;
+  ok(fmL.totals.measured === fmTot - 300 && fmL.totals.covered === fmTot && fmL.totals.diff === -300 && fmL.sheets.find(s => s.id === fcS.id).measurement_id === fmM.id, 'resumo da obra: medido x folhas cobertas');
+  ok((await fcAna('DELETE', `/field/measurements/${fmM.id}/files/${fmM.files[0].id}`)).data.measurements.find(x => x.id === fmM.id).files.length === 0, 'BM removido da medição');
+  ok((await fcAna('DELETE', `/field/measurements/${fmM.id}`)).data.measurements.length === 0 && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.totals.total === fmTot, 'excluir a medição não mexe na folha');
   ok(fcA2.contracts[0].amount === 2000 && fcA2.contracts[0].after_pct === 40 && fcA2.totals.total === 3375 && fcA2.totals.company === 3275, 'empreitada medida em % do contrato; totais da folha');
   const fcS2 = (await fcJul('POST', '/field/sheets', { project_id: 2, start_date: '2026-09-14', end_date: '2026-09-20' })).data;
   ok(fcS2.code === 'FC-02' && fcS2.people.length === 2 && fcS2.people.find(e => e.worker_id === fcP.id).service === 'Alvenaria', 'nova folha começa com as pessoas e serviços da anterior');

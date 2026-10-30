@@ -19,7 +19,7 @@ const keep = rows => (rows <= KEEP_ROWS ? 'avoid' : 'fr-flow');
 // Partes do relatório: [chave, rótulo, só com valores]
 const PARTS = [
   ['pres', 'Presença por dia'], ['dia', 'Equipe por dia'], ['pes', 'Por pessoa'], ['serv', 'Por serviço e função'],
-  ['emp', 'Empreitadas'], ['med', 'Medição do terceiro', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
+  ['emp', 'Empreitadas'], ['med', 'Comparação com a medição', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
 ];
 
 // BM em PDF: cada página vira imagem no próprio navegador (pdf.js servido pelo site) para sair na impressão.
@@ -78,7 +78,7 @@ export async function view({ query, setQuery, render }) {
   // Folhas da obra no período (pelo cruzamento das datas) e o detalhe de cada uma
   const list = sh.sheets.filter(s => s.project_id === obra && (!de || s.end_date >= de) && (!ate || s.start_date <= ate))
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
-  const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny ? api('/field/measurements', { query: { obra } }) : null]);
+  const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny && (on('med') || on('bm')) ? api('/field/measurements', { query: { obra } }) : null]);
   // BM das medições que cobrem alguma folha do relatório (ou todas, sem filtro de período)
   const inReport = new Set(sheets.map(s => s.id));
   // Em ordem cronológica das medições
@@ -167,7 +167,7 @@ export async function view({ query, setQuery, render }) {
         ${mny ? kpi('Total', money(tot.mo + (filtered ? 0 : tot.emp)), filtered ? 'mão de obra do filtro' : `mão de obra ${money(tot.mo)} · empreitadas ${money(tot.emp)}`, '#1F6B41')
           : kpi('Média por dia', byDay.size ? n2(tot.diarias / byDay.size) : '0', 'diárias por dia trabalhado', '#1F6B41')}
       </div>${mny && tot.client ? html`<p class="small muted" style="margin:6px 0 0">Pago pelo cliente: ${money(tot.client)} · empresa paga ${money(tot.mo + (filtered ? 0 : tot.emp) - tot.client)}</p>` : ''}
-      ${meas?.measurements.length ? html`<h4 class="fr-h4" style="margin-top:10px">Saldo das folhas perante a medição do terceiro (obra até hoje)</h4><div class="r-kpis">
+      ${on('med') && meas?.measurements.length ? html`<h4 class="fr-h4" style="margin-top:10px">Saldo das folhas perante a medição do terceiro (obra até hoje)</h4><div class="r-kpis">
         ${kpi('Medido (BM)', money(meas.totals.measured), `${meas.measurements.length} medição(ões)`)}
         ${kpi('Folhas cobertas', money(meas.totals.covered), meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição · ${money(meas.totals.uncovered_total)}` : 'todas as folhas com medição', '#1F6FB2')}
         ${kpi('Pago a mais', money(meas.totals.paid_more), 'folhas acima do medido', '#C0392B')}

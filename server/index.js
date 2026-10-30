@@ -311,7 +311,7 @@ api.post('/api/vacations/:id/:action', (req, res, { ctx, params, body }) => send
 const recSec = ctx => requireSection(ctx.user, 'projetos');
 api.get('/api/projects/:id/records', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.listRecords(ctx, intOrNull(params.id))); });
 api.post('/api/projects/:id/records', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 201, { id: Records.createRecord(ctx, intOrNull(params.id), body, clientIp(req)) }); });
-api.get('/api/projects/:id/history', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, projectHistory(ctx, intOrNull(params.id))); });
+api.get('/api/projects/:id/history', (req, res, { ctx, params, query }) => { recSec(ctx); send(res, 200, projectHistory(ctx, intOrNull(params.id), { photos: query.get('fotos') === '1' })); });
 api.get('/api/records/:id', (req, res, { ctx, params }) => { recSec(ctx); send(res, 200, Records.getRecord(ctx, intOrNull(params.id))); });
 api.put('/api/records/:id', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.updateRecord(ctx, intOrNull(params.id), body, clientIp(req))); });
 api.post('/api/records/:id/actions/:action', (req, res, { ctx, params, body }) => { recSec(ctx); send(res, 200, Records.recordAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))); });

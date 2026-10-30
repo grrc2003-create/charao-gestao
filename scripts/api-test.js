@@ -1483,6 +1483,16 @@ async function main() {
   const rgH = (await rgRic('GET', '/projects/1/history')).data;
   ok(rgH.chapters.length > 0 && rgH.chapters.some(c => c.paragraphs.some(x => x.includes('ATA-PRJ-001-001'))) && rgH.intro[0].includes('PRJ-001'), 'história do projeto narra a reunião no capítulo do mês');
   ok(rgH.vigentes.some(v => v.code === 'DEF-PRJ-001-001') && rgH.timeline.some(e => e.kind === 'registro'), 'história traz definições vigentes e a linha do tempo');
+  // Fotos na história: só com ?fotos=1; cada item uma vez, com o link do arquivo
+  ok(rgH.chapters.every(c => c.photos === null), 'história sem a opção Fotos não carrega fotos');
+  ok((await rgRic('POST', `/records/${rgAv.id}/files`, { files: [{ data: tinyPng(), caption: 'Quadro da reunião' }] })).status === 200, 'foto anexada à ata');
+  const rgHF = (await rgRic('GET', '/projects/1/history?fotos=1')).data;
+  const rgPh = rgHF.chapters.flatMap(c => c.photos);
+  const rgPhAta = rgPh.find(x => x.kind === 'registro' && x.code === 'ATA-PRJ-001-001');
+  ok(rgPhAta && rgPhAta.photos.length === 1 && rgPhAta.photos[0].url.startsWith('/api/record-files/') && rgPhAta.photos[0].caption === 'Quadro da reunião', 'história com Fotos traz a foto do registro');
+  ok((await rgRic('GET', rgPhAta.photos[0].url.replace('/api', ''))).status === 200, 'link da foto da história abre para quem vê o projeto');
+  const rgPhT = rgPh.filter(x => x.kind === 'tarefa');
+  ok(rgPhT.length > 0 && new Set(rgPhT.map(x => x.code)).size === rgPhT.length && rgPhT.every(x => x.photos.every(f => /^\/api\/(files|checklist-files)\//.test(f.url))), 'história com Fotos traz as fotos das tarefas, cada tarefa uma vez');
   // Vínculo de registro com tarefas existentes (pelo registro e pela tarefa)
   const rgLinkT = (await rgRic('GET', '/projects/1/record-tasks')).data;
   const rgT1 = rgLinkT.find(t => !t.parent_code).id;

@@ -18,7 +18,30 @@ const endDot = t => `${String(t).trim().replace(/[.!?…:;,]+$/, '')}.`;
 const lowerFirst = t => t.charAt(0).toLowerCase() + t.slice(1);
 const STATUS_PROJ = { planejamento: 'em planejamento', em_andamento: 'em andamento', pausado: 'pausado', concluido: 'concluído', cancelado: 'cancelado' };
 
-export function projectHistory(ctx, id) {
+// Fotos anexadas (somente imagens) às tarefas, aos itens de check-list e aos registros do projeto
+const IMG = `mime LIKE 'image/%'`;
+const qs = list => list.map(() => '?').join(',');
+function photosOf(taskIds, recordIds) {
+  const by = new Map();
+  const add = (key, f) => { if (!by.has(key)) by.set(key, []); by.get(key).push(f); };
+  if (taskIds.length) {
+    for (const f of all(`SELECT id, task_id, kind, caption, created_at FROM task_files WHERE task_id IN (${qs(taskIds)}) AND ${IMG} ORDER BY created_at, id`, ...taskIds)) {
+      add(`t${f.task_id}`, { url: `/api/files/${f.id}`, label: f.kind === 'execucao' ? 'Execução' : 'Referência', caption: f.caption || '', date: localDate(f.created_at) });
+    }
+    for (const f of all(`SELECT f.id, f.kind, f.created_at, ci.task_id, ci.seq, ci.text FROM checklist_files f JOIN checklist_items ci ON ci.id = f.item_id
+      WHERE ci.task_id IN (${qs(taskIds)}) AND f.${IMG} ORDER BY ci.seq, f.created_at, f.id`, ...taskIds)) {
+      add(`t${f.task_id}`, { url: `/api/checklist-files/${f.id}`, label: `Item ${f.seq}${f.kind === 'referencia' ? ' · antes' : ''}`, caption: f.text, date: localDate(f.created_at) });
+    }
+  }
+  if (recordIds.length) {
+    for (const f of all(`SELECT id, record_id, caption, created_at FROM record_files WHERE record_id IN (${qs(recordIds)}) AND ${IMG} ORDER BY created_at, id`, ...recordIds)) {
+      add(`r${f.record_id}`, { url: `/api/record-files/${f.id}`, label: 'Registro', caption: f.caption || '', date: localDate(f.created_at) });
+    }
+  }
+  return by;
+}
+
+export function projectHistory(ctx, id, { photos: withPhotos = false } = {}) {
   const p = one(`SELECT p.*, l.name AS lead_name, pt.name AS type_name FROM projects p LEFT JOIN users l ON l.id = p.lead_id
     LEFT JOIN project_types pt ON pt.id = p.type_id WHERE p.id = ?`, id);
   if (!p || !canAccessProject(ctx.user, p.id, ctx.projects)) throw notFound('Projeto não encontrado.');
@@ -33,6 +56,8 @@ export function projectHistory(ctx, id) {
     WHERE r.task_id IN (${ids.map(() => '?').join(',')}) ORDER BY r.id`, ...ids) : [];
   const measurements = ctx.user.can_contracts ? all(`SELECT m.code, m.ref_month, m.status, m.issued_at, m.nf_date, m.paid_date, c.code AS contract_code
     FROM measurements m JOIN contracts c ON c.id = m.contract_id WHERE c.project_id = ? AND m.status != 'rascunho' ORDER BY m.issued_at`, id) : [];
+
+  const pics = withPhotos ? photosOf(ids, records.map(r => r.id)) : null;
 
   // ---------- Eventos (linha do tempo) ----------
   const events = [];
@@ -124,7 +149,15 @@ export function projectHistory(ctx, id) {
         days: r.old_due && r.new_due ? daysBetween(r.old_due, r.new_due) : null, reason: r.reason_name })),
       records: recs.map(r => ({ id: r.id, date: r.record_date, code: r.code, title: r.title, type_name: r.type_name, color: r.color, icon: r.type_icon, status: r.eff_status })),
     };
-    return { ym, label: monthLabel(ym), paragraphs: par, detail, counts: { created: created.length, done: done.length, on_time: onTime, reschedules: rs.length, records: recs.length }, events: evs.map(({ record, ...e }) => e) };
+    // Fotos do mês: cada item aparece uma vez — registro no mês da data dele; tarefa no mês da conclusão
+    // (ou, se ainda aberta, no mês em que foi criada)
+    const photos = !pics ? null : [
+      ...recs.filter(r => pics.has(`r${r.id}`)).map(r => ({ kind: 'registro', code: r.code, title: r.title, type_name: r.type_name, color: r.color, icon: r.type_icon, date: r.record_date, photos: pics.get(`r${r.id}`) })),
+      ...tasks.filter(t => pics.has(`t${t.id}`) && inM(t.status === 'concluida' && t.delivered_date ? t.delivered_date : localDate(t.created_at)))
+        .map(t => ({ kind: 'tarefa', code: t.code, title: t.title, sub: !!t.parent_id, checklist: t.task_type === 'checklist', done: t.status === 'concluida',
+          date: t.status === 'concluida' && t.delivered_date ? t.delivered_date : localDate(t.created_at), photos: pics.get(`t${t.id}`) })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    return { ym, label: monthLabel(ym), paragraphs: par, detail, photos, counts: { created: created.length, done: done.length, on_time: onTime, reschedules: rs.length, records: recs.length }, events: evs.map(({ record, ...e }) => e) };
   });
 
   // ---------- Abertura e situação atual ----------

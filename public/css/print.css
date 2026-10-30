@@ -344,6 +344,9 @@
 .hist-det { margin: 4px 0 8px; }
 .hist-dh { margin: 8px 0 3px; font-size: 7.8pt; font-weight: 700; color: #46535F; text-transform: uppercase; letter-spacing: .05em; break-after: avoid; }
 .hist-t { font-size: 7.8pt; }
+.hist-ph { margin: 4px 0 8px; break-inside: avoid; }
+.hist-ph-h { font-size: 8pt; color: #2A3D50; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; }
+@media (max-width: 640px) { .hist-ph .r-photos { grid-template-columns: repeat(2, 1fr); } }
 .hist-t td, .hist-t th { padding-top: 2px; padding-bottom: 2px; }
 .hist-ch { margin: 10px 0 6px; padding-left: 10px; border-left: 2.5px solid #E4DCCB; }
 .hist-month { margin: 0 0 4px; font-size: 10pt; color: #2A3D50; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; break-after: avoid; }

@@ -12,7 +12,8 @@ export async function view({ params, query, setQuery, render }) {
   const gSubs = query.get('gsub') !== '0';
   const withTimeline = query.get('linha') === '1';
   const withDetail = query.get('detalhe') !== '0';
-  const q = over => ({ gantt: withGantt ? '' : '0', gsub: gSubs ? '' : '0', linha: withTimeline ? '1' : '', detalhe: withDetail ? '' : '0', ...over });
+  const withPhotos = query.get('fotos') === '1';
+  const q = over => ({ gantt: withGantt ? '' : '0', gsub: gSubs ? '' : '0', linha: withTimeline ? '1' : '', detalhe: withDetail ? '' : '0', fotos: withPhotos ? '1' : '', ...over });
   const dd = d => (d ? fmtDate(d).slice(0, 5) : '—');
   // Detalhe do mês: tarefas abertas, concluídas, reagendamentos e registros
   const monthDetail = c => {
@@ -39,7 +40,17 @@ export async function view({ params, query, setQuery, render }) {
           <td class="small nowrap">${dd(r.old_due)} → ${dd(r.new_due)}</td><td class="num small">${r.days === null ? '—' : `${r.days > 0 ? '+' : ''}${r.days}`}</td><td class="small">${r.reason}</td></tr>`)}</tbody></table>` : ''}
     </div>`;
   };
-  const [h, g] = await Promise.all([api(`/projects/${params.id}/history`), withGantt ? api('/gantt', { query: { project: params.id } }) : null]);
+  // Fotos do mês: agrupadas pelo item (registro ou tarefa) em que foram anexadas
+  const monthPhotos = c => (c.photos?.length ? html`<div class="hist-det">
+    <h5 class="hist-dh">Fotos do mês (${c.photos.reduce((n, it) => n + it.photos.length, 0)})</h5>
+    ${c.photos.map(it => html`<div class="hist-ph avoid">
+      <div class="hist-ph-h">${it.kind === 'registro' ? html`${recBadge(it.icon, it.color, 'rg-ic-xs')} ${it.type_name}` : it.checklist ? 'Check-list' : it.sub ? 'Subtarefa' : 'Tarefa'}
+        · <span class="mono">${it.code || '—'}</span> · <b>${it.title}</b>
+        <span class="muted">· ${it.kind === 'registro' ? dd(it.date) : `${it.done ? 'concluída' : 'aberta'} em ${dd(it.date)}`}</span></div>
+      <div class="r-photos">${it.photos.map(f => html`<figure><img src="${f.url}" alt="" loading="lazy"><figcaption>${f.label} · ${dd(f.date)}${f.caption ? ` · ${f.caption}` : ''}</figcaption></figure>`)}</div>
+    </div>`)}
+  </div>` : '');
+  const [h, g] = await Promise.all([api(`/projects/${params.id}/history`, withPhotos ? { query: { fotos: '1' } } : undefined), withGantt ? api('/gantt', { query: { project: params.id } }) : null]);
   const p = h.project;
   const s = h.summary;
   const kpi = (l, v, sub, c = '#2A3D50') => html`<div class="r-kpi" style="--c:${c}"><div class="r-kpi-l">${l}</div><div class="r-kpi-v">${v}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
@@ -51,6 +62,7 @@ export async function view({ params, query, setQuery, render }) {
       extra: html`<label class="pt-opt"><input type="checkbox" id="h-gantt" ${withGantt ? 'checked' : ''}>Cronograma</label>
         ${withGantt ? html`<label class="pt-opt"><input type="checkbox" id="h-gsub" ${gSubs ? 'checked' : ''}>Subtarefas no Gantt</label>` : ''}
         <label class="pt-opt"><input type="checkbox" id="h-det" ${withDetail ? 'checked' : ''}>Detalhar tarefas por mês</label>
+        <label class="pt-opt"><input type="checkbox" id="h-fotos" ${withPhotos ? 'checked' : ''}>Fotos</label>
         <label class="pt-opt"><input type="checkbox" id="h-line" ${withTimeline ? 'checked' : ''}>Linha do tempo detalhada</label>`,
     })}
     <div class="doc-stage"><article class="doc a4 hist-doc" id="doc">
@@ -89,7 +101,7 @@ export async function view({ params, query, setQuery, render }) {
         ${chapters.length ? chapters.map(c => html`<div class="hist-ch">
           <h4 class="hist-month">${c.label[0].toUpperCase()}${c.label.slice(1)}
             <span class="hist-mc">${c.counts.created} aberta(s) · ${c.counts.done} concluída(s)${c.counts.records ? ` · ${c.counts.records} registro(s)` : ''}${c.counts.reschedules ? ` · ${c.counts.reschedules} reagendamento(s)` : ''}</span></h4>
-          ${c.paragraphs.map(t => html`<p class="r-p">${t}</p>`)}${withDetail ? monthDetail(c) : ''}</div>`) : html`<p class="muted">Ainda não há acontecimentos registrados.</p>`}
+          ${c.paragraphs.map(t => html`<p class="r-p">${t}</p>`)}${withDetail ? monthDetail(c) : ''}${withPhotos ? monthPhotos(c) : ''}</div>`) : html`<p class="muted">Ainda não há acontecimentos registrados.</p>`}
       </section>
 
       <section class="r-section avoid"><h3 class="r-h">Onde estamos</h3>${h.current.map(t => html`<p class="r-p">${t}</p>`)}
@@ -127,6 +139,7 @@ export async function view({ params, query, setQuery, render }) {
       root.querySelector('#h-gantt').addEventListener('change', e => { setQuery(q({ gantt: e.target.checked ? '' : '0' })); render(); });
       root.querySelector('#h-gsub')?.addEventListener('change', e => { setQuery(q({ gsub: e.target.checked ? '' : '0' })); render(); });
       root.querySelector('#h-det').addEventListener('change', e => { setQuery(q({ detalhe: e.target.checked ? '' : '0' })); render(); });
+      root.querySelector('#h-fotos').addEventListener('change', e => { setQuery(q({ fotos: e.target.checked ? '1' : '' })); render(); });
       root.querySelector('#h-line').addEventListener('change', e => { setQuery(q({ linha: e.target.checked ? '1' : '' })); render(); });
     },
   };

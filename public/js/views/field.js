@@ -134,28 +134,19 @@ export async function view({ params, navigate, render }) {
   };
   const cCalc = c => { const amount = (c.contract_total || 0) * num(c.pct) / 100; return { amount, company: amount - num(c.client_paid), after: (c.before_pct || 0) + num(c.pct) }; };
   const dis = edit ? '' : 'disabled';
-  const dayChips = e => html`<div class="fc-days">${s.days.map(d => {
-    const q = Number(e.days[d]) || 0;
-    return html`<button type="button" class="fc-day ${q === 1 ? 'q1' : q ? 'qh' : ''} ${[0, 6].includes(wd(d)) ? 'we' : ''}" data-day="${d}" data-w="${e.worker_id}" ${dis} aria-label="${WD[wd(d)]} ${dm(d)}: ${q || 0} diária">
+  const chip = (d, q) => html`<button type="button" class="fc-day ${q === 1 ? 'q1' : q ? 'qh' : ''} ${[0, 6].includes(wd(d)) ? 'we' : ''}" data-day="${d}" ${dis} aria-label="${WD[wd(d)]} ${dm(d)}: ${q || 0} diária">
       <small>${WD[wd(d)]}</small><span>${d.slice(8, 10)}</span><b>${qLabel(q)}</b></button>`;
-  })}</div>`;
+  const dayChips = e => html`<div class="fc-days">${s.days.map(d => chip(d, Number(e.days[d]) || 0))}</div>`;
   const personCalc = e => {
     const c = pCalc(e);
     return mny ? html`${n2(c.diarias)} diária(s) × ${money(e.rate)} = <b>${money(c.gross)}</b>${num(e.adjust) ? html` · ajuste ${money(e.adjust)}` : ''}${num(e.client_paid) ? html` · cliente ${money(e.client_paid)}` : ''} · <b>empresa paga ${money(c.company)}</b>`
       : html`<b>${n2(c.diarias)} diária(s)</b>`;
   };
-  const personCard = e => html`<li class="fc-person" data-p="${e.worker_id}">
-    <div class="fc-ph"><div><b>${e.name}</b><small>${e.role || ''}${mny && e.pix ? ` · PIX ${e.pix_type ? `(${e.pix_type}) ` : ''}${e.pix}` : ''}</small></div>
-      ${edit ? html`<span class="fc-pa"><button type="button" class="btn btn-ghost btn-sm" data-wk="${e.worker_id}" title="Marcar seg a sex">Seg–Sex</button><button type="button" class="icon-btn" data-rm="${e.worker_id}" aria-label="Retirar ${e.name} da folha">${icon('x')}</button></span>` : ''}</div>
-    ${dayChips(e)}
-    <div class="fc-pf">
-      <label>Apropriar (serviço)<input type="text" list="fc-services" data-f="service" value="${e.service || ''}" ${dis} placeholder="Ex.: Demolição"></label>
-      ${mny ? html`<label>Pago pelo cliente<input type="number" step="0.01" min="0" data-f="client_paid" value="${e.client_paid || ''}" ${dis}></label>
-        <label>Ajuste (±)<input type="number" step="0.01" data-f="adjust" value="${e.adjust || ''}" ${dis} placeholder="desconto / adiantamento"></label>
-        <label>Motivo do ajuste<input type="text" data-f="adjust_note" value="${e.adjust_note || ''}" ${dis}></label>` : ''}
-    </div>
-    <div class="fc-calc" data-calc="${e.worker_id}">${personCalc(e)}</div>
-  </li>`;
+  // Linha compacta da pessoa (abre a janela das diárias)
+  const dots = e => html`<span class="fc-dots" aria-hidden="true">${s.days.map(d => { const q = Number(e.days[d]) || 0; return html`<i class="${q === 1 ? 'q1' : q ? 'qh' : ''} ${[0, 6].includes(wd(d)) ? 'we' : ''}"></i>`; })}</span>`;
+  const personRow = e => html`<li><button type="button" class="fc-prow" data-open-p="${e.worker_id}">
+    <span class="fc-pw"><b>${e.name}</b><small>${e.role || 'Diarista'}${e.service ? ` · ${e.service}` : ''}</small></span>
+    ${dots(e)}<span class="fc-pn">${n2(pCalc(e).diarias)} diária(s)</span>${icon('chevron')}</button></li>`;
   const contractCalc = c => {
     const x = cCalc(c);
     return html`Antes ${n2(c.before_pct)}% · nesta folha ${n2(num(c.pct))}% · acumulado <b>${n2(x.after)}%</b> · saldo ${n2(100 - x.after)}%${mny ? html` · medido <b>${money(x.amount)}</b>${num(c.client_paid) ? html` · cliente ${money(c.client_paid)}` : ''} · empresa paga <b>${money(x.company)}</b>` : ''}`;
@@ -180,6 +171,10 @@ export async function view({ params, navigate, render }) {
     return html`<div><span>Diárias</span><b>${n2(diarias)}</b></div><div><span>Mão de obra</span><b>${money(mo)}</b></div><div><span>Empreitadas</span><b>${money(emp)}</b></div>
       <div><span>Pago pelo cliente</span><b>${money(cli)}</b></div><div class="pf-kt"><span>Empresa paga</span><b>${money(mo + emp - cli)}</b></div>`;
   };
+  // Incluir pessoa: abre a janela para marcar os dias em que compareceu
+  const addBar = edit ? html`<div class="card-body pf-add fc-add"><select id="fc-addp" aria-label="Profissional"><option value="">Incluir profissional…</option>${s.available_workers.map(w => html`<option value="${w.id}">${w.name}${w.role ? ` · ${w.role}` : ''}</option>`)}</select>
+    <button type="button" class="btn btn-ghost btn-sm" id="fc-addb">${icon('plus')}Incluir</button>
+    <button type="button" class="btn btn-ghost btn-sm" id="fc-neww">${icon('user')}Novo profissional</button></div>` : '';
   return {
     title: `${s.project.code} · ${s.code}`,
     html: html`
@@ -192,21 +187,18 @@ export async function view({ params, navigate, render }) {
           ${s.can.close ? html`<button type="button" class="btn btn-primary" data-close>${icon('check')}Fechar folha</button>` : ''}
           ${s.can.reopen ? html`<button type="button" class="btn btn-ghost" data-reopen>${icon('edit')}Reabrir</button>` : ''}`,
       })}
-      ${!mny ? html`<div class="notice section">${icon('info')}<span>Marque as diárias de cada pessoa por dia (toque: 1 → ½ → vazio) e o % executado das empreitadas. Valores e fechamento ficam com o escritório.</span></div>` : ''}
+      ${!mny ? html`<div class="notice section">${icon('info')}<span>Inclua a pessoa e marque os dias em que ela compareceu (toque: 1 → ½ → vazio). Para corrigir, toque no nome dela na lista. Valores e fechamento ficam com o escritório.</span></div>` : ''}
       <div class="pf-kpis section" id="fc-tot">${totals()}</div>
       <section class="card section"><div class="card-head"><h2>${icon('reports')}Resumo da folha</h2></div><div class="card-body fr-grid" id="fc-sum"></div></section>
       ${mny ? html`<section class="card section fp-card"><div class="card-head"><h2>${icon('wallet')}${edit ? 'A pagar nesta folha' : 'Pagamentos desta folha'}</h2><span id="fc-paytot" class="fp-tot"></span>
           <button type="button" class="btn btn-ghost btn-sm" id="fc-paycopy" data-copy="" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista</button></div>
         ${s.payment ? html`<p class="card-body fp-state">${icon('wallet')}No Financeiro: <b>${money(s.payment.amount)}</b> · vence ${fmtDate(s.payment.due_date)} · ${s.payment.status === 'paga' ? html`<span class="fc-pay fc-pay-ok">Pago</span>` : html`<span class="fc-pay">A pagar</span>`}</p>` : ''}
-        <ul class="fp-list" id="fc-pay"></ul></section>` : ''}
+        <ul class="fp-list" id="fc-pay"></ul>${addBar}</section>` : ''}
       <datalist id="fc-services">${s.services.map(x => html`<option value="${x}">`)}</datalist>
-      <section class="card section">
-        <div class="card-head"><h2>${icon('users')}Mão de obra própria (diárias)</h2><span class="sub">${st.people.length}</span></div>
-        ${st.people.length ? html`<ul class="fc-list">${st.people.map(personCard)}</ul>` : html`<p class="muted card-body">Nenhuma pessoa nesta folha.</p>`}
-        ${edit ? html`<div class="card-body pf-add fc-add"><select id="fc-addp"><option value="">Incluir profissional…</option>${s.available_workers.map(w => html`<option value="${w.id}">${w.name}${w.role ? ` · ${w.role}` : ''}</option>`)}</select>
-          <button type="button" class="btn btn-ghost btn-sm" id="fc-addb">${icon('plus')}Incluir</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="fc-neww">${icon('user')}Novo profissional</button></div>` : ''}
-      </section>
+      ${!mny ? html`<section class="card section">
+        <div class="card-head"><h2>${icon('users')}Mão de obra própria</h2><span class="sub">${st.people.length}</span></div>
+        ${st.people.length ? html`<ul class="fc-plist">${st.people.map(personRow)}</ul>` : html`<p class="muted card-body">Nenhuma pessoa nesta folha.</p>`}
+        ${addBar}</section>` : ''}
       <section class="card section">
         <div class="card-head"><h2>${icon('contract')}Empreitadas</h2><span class="sub">${st.contracts.length}</span></div>
         ${st.contracts.length ? html`<ul class="fc-list">${st.contracts.map(contractCard)}</ul>` : html`<p class="muted card-body">Nenhuma empreitada medida nesta folha.</p>`}
@@ -228,13 +220,18 @@ export async function view({ params, navigate, render }) {
         const list = sheetPayList(st.people, st.contracts, pCalc, cCalc);
         const sum = list.reduce((a, p) => a + p.amount, 0);
         const closed = s.status === 'fechada', finPaid = s.payment?.status === 'paga';
-        const act = p => (!closed ? {} : p.paid_at || finPaid ? { paidAt: p.paid_at || s.payment?.paid_date || '', lines: p.line } : { canPay: true, lines: p.line });
+        const open = p => (p.worker_id ? { open: p.worker_id } : {});
+        const act = p => (!closed ? open(p) : p.paid_at || finPaid ? { ...open(p), paidAt: p.paid_at || s.payment?.paid_date || '', lines: p.line } : { ...open(p), canPay: true, lines: p.line });
         const pend = closed ? list.filter(p => !p.paid_at && !finPaid) : [];
         const paidSum = closed ? list.filter(p => p.paid_at || finPaid).reduce((a, p) => a + p.amount, 0) : 0;
-        box.innerHTML = list.length ? html`${!closed ? html`<li class="fp-hint">${icon('info')}Feche a folha para marcar os pagamentos (os valores ainda podem mudar).</li>` : ''}${payHead}${list.map(p => payRow(p, act(p)))}
+        // Pessoas incluídas sem dia marcado (ou sem valor) também aparecem, com R$ 0,00 — tocam para lançar
+        const zero = st.people.filter(e => pCalc(e).company <= 0.004).map(e => ({ worker_id: e.worker_id, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: 0,
+          what: `${e.role || 'Diarista'} · ${pCalc(e).diarias ? `${n2(pCalc(e).diarias)} diária(s)` : 'nenhum dia marcado'}` }));
+        const rows = [...list.map(p => payRow(p, act(p))), ...zero.map(p => payRow(p, open(p)))];
+        box.innerHTML = rows.length ? html`${!closed ? html`<li class="fp-hint">${icon('info')}Toque no nome para ver ou editar as diárias. Feche a folha para marcar os pagamentos (os valores ainda podem mudar).</li>` : ''}${payHead}${rows}
           <li class="fp-row fp-foot"><span><b>Total</b>${closed ? html`<small>Pago ${money(paidSum)} · falta ${money(sum - paidSum)}</small>` : ''}</span><span></span><strong class="fp-num fp-val">${money(sum)}</strong>
           <span class="fp-copy">${pend.length > 1 ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${pend.map(p => p.line).join(',')}" data-who="Todos que faltam (${pend.length})" data-amt="${pend.reduce((a, p) => a + p.amount, 0)}">${icon('check')}Marcar todos pagos</button>` : ''}</span></li>`.toString()
-          : html`<li class="muted fp-none">Nada a pagar pela empresa nesta folha.</li>`.toString();
+          : html`<li class="muted fp-none">Nenhuma pessoa nesta folha. Inclua abaixo e marque os dias em que ela compareceu.</li>`.toString();
         root.querySelector('#fc-paytot').textContent = list.length ? `${list.length} · ${money(list.reduce((a, p) => a + p.amount, 0))}` : '';
         root.querySelector('#fc-paycopy').dataset.copy = payText(list);
       };
@@ -301,48 +298,87 @@ export async function view({ params, navigate, render }) {
         if (!quiet) toast('Folha salva.');
         return r;
       };
-      root.addEventListener('click', e => {
-        const chip = e.target.closest('.fc-day');
-        if (chip && edit) {
-          const p = st.people.find(x => x.worker_id === Number(chip.dataset.w));
-          const q = NEXT[Number(p.days[chip.dataset.day]) || 0] ?? 0;
-          if (q) p.days[chip.dataset.day] = q; else delete p.days[chip.dataset.day];
-          chip.classList.toggle('q1', q === 1); chip.classList.toggle('qh', q === 0.5);
-          chip.querySelector('b').textContent = qLabel(q);
-          markDirty(); refresh();
-          return;
-        }
-        const wk = e.target.closest('[data-wk]');
-        if (wk) {
-          const p = st.people.find(x => x.worker_id === Number(wk.dataset.wk));
-          for (const d of s.days) if (wd(d) >= 1 && wd(d) <= 5) p.days[d] = 1;
-          root.querySelectorAll(`.fc-day[data-w="${p.worker_id}"]`).forEach(c => { const q = Number(p.days[c.dataset.day]) || 0; c.classList.toggle('q1', q === 1); c.classList.toggle('qh', q === 0.5); c.querySelector('b').textContent = qLabel(q); });
-          markDirty(); refresh();
-        }
-      });
       root.addEventListener('input', e => {
-        const f = e.target.dataset.f, cf = e.target.dataset.cf;
-        if (f) { st.people.find(x => x.worker_id === Number(e.target.closest('[data-p]').dataset.p))[f] = e.target.value; markDirty(); refresh(); }
+        const cf = e.target.dataset.cf;
         if (cf) { st.contracts.find(x => x.contract_id === Number(e.target.closest('[data-c]').dataset.c))[cf] = e.target.value; markDirty(); refresh(); }
         if (e.target.id === 'fc-act' || e.target.id === 'fc-payd') markDirty();
       });
       // Incluir/retirar salva o que já foi lançado e recarrega
       const saveAnd = async (fn, msg) => { try { const b = body(); fn(b); await api(`/field/sheets/${s.id}`, { method: 'PUT', body: b }); dirty = false; if (msg) toast(msg); render(); } catch (ex) { toast(ex.message, 'error'); } };
-      root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', async () => {
-        const p = st.people.find(x => x.worker_id === Number(b.dataset.rm));
-        if (!(await confirmSheet('Retirar da folha', `Retirar ${p.name} desta folha? As diárias marcadas serão perdidas.`, 'Retirar', true))) return;
-        saveAnd(x => { x.people = x.people.filter(y => y.worker_id !== p.worker_id); });
-      }));
+
+      // Janela das diárias da pessoa: abre ao incluir e ao tocar no nome dela; salva a folha ao confirmar
+      const openPerson = async (workerId, base = {}) => {
+        const cur = st.people.find(x => x.worker_id === workerId);
+        const isNew = !cur;
+        const e = cur ? { ...cur, days: { ...cur.days } } : { worker_id: workerId, name: base.name, role: base.role, rate: base.rate ?? base.daily_rate ?? 0, days: {}, service: '' };
+        let remove = false;
+        const done = sheet({
+          title: e.name,
+          wide: true,
+          body: html`<p class="muted fc-pd-sub">${e.role || 'Diarista'} · ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}${edit ? ' · toque no dia: 1 → ½ → vazio' : ''}</p>
+            <div id="pd-days">${dayChips(e)}</div>
+            ${edit ? html`<div class="fc-pd-acts"><button type="button" class="btn btn-ghost btn-sm" id="pd-wk">Marcar seg a sex</button><button type="button" class="btn btn-ghost btn-sm" id="pd-clr">Limpar dias</button></div>` : ''}
+            <div class="fc-pf">
+              <label>Apropriar (serviço)<input type="text" list="fc-services" name="service" value="${e.service || ''}" ${dis} placeholder="Ex.: Demolição"></label>
+              ${mny ? html`<label>Pago pelo cliente<input type="number" step="0.01" min="0" name="client_paid" value="${e.client_paid || ''}" ${dis}></label>
+                <label>Ajuste (±)<input type="number" step="0.01" name="adjust" value="${e.adjust || ''}" ${dis} placeholder="desconto / adiantamento"></label>
+                <label>Motivo do ajuste<input type="text" name="adjust_note" value="${e.adjust_note || ''}" ${dis}></label>` : ''}
+            </div>
+            <div class="fc-calc" id="pd-calc">${personCalc(e)}</div>
+            ${edit && !isNew ? html`<button type="button" class="btn btn-ghost btn-sm pf-danger fc-pd-rm" id="pd-rm" data-close>${icon('x')}Retirar da folha</button>` : ''}`,
+          submitLabel: !edit ? 'Fechar' : isNew ? 'Incluir na folha' : 'Salvar',
+          async onSubmit(f) {
+            if (!edit) return true;
+            Object.assign(e, { service: f.service }, mny ? { client_paid: f.client_paid, adjust: f.adjust, adjust_note: f.adjust_note } : {});
+            const b = body();
+            const row = { worker_id: e.worker_id, days: e.days, service: e.service, client_paid: e.client_paid, adjust: e.adjust, adjust_note: e.adjust_note };
+            b.people = isNew ? [...b.people, row] : b.people.map(x => (x.worker_id === e.worker_id ? row : x));
+            await api(`/field/sheets/${s.id}`, { method: 'PUT', body: b });
+            return true;
+          },
+        });
+        const box = document.getElementById('pd-days');
+        const form = box?.closest('form');
+        const paint = () => {
+          box.querySelectorAll('.fc-day').forEach(c => { const q = Number(e.days[c.dataset.day]) || 0; c.classList.toggle('q1', q === 1); c.classList.toggle('qh', q === 0.5); c.querySelector('b').textContent = qLabel(q); });
+          document.getElementById('pd-calc').innerHTML = personCalc(e).toString();
+        };
+        if (edit && box) {
+          box.addEventListener('click', ev => {
+            const c = ev.target.closest('.fc-day');
+            if (!c) return;
+            const q = NEXT[Number(e.days[c.dataset.day]) || 0] ?? 0;
+            if (q) e.days[c.dataset.day] = q; else delete e.days[c.dataset.day];
+            paint();
+          });
+          document.getElementById('pd-wk').addEventListener('click', () => { for (const d of s.days) if (wd(d) >= 1 && wd(d) <= 5) e.days[d] = 1; paint(); });
+          document.getElementById('pd-clr').addEventListener('click', () => { e.days = {}; paint(); });
+          form.addEventListener('input', ev => { if (['client_paid', 'adjust'].includes(ev.target.name)) { e[ev.target.name] = ev.target.value; paint(); } });
+          document.getElementById('pd-rm')?.addEventListener('click', () => { remove = true; });
+        }
+        const r = await done;
+        if (remove) {
+          if (!(await confirmSheet('Retirar da folha', `Retirar ${e.name} desta folha? As diárias marcadas serão perdidas.`, 'Retirar', true))) return;
+          return saveAnd(x => { x.people = x.people.filter(y => y.worker_id !== e.worker_id); }, `${e.name} retirado(a) da folha.`);
+        }
+        if (r && edit) { dirty = false; toast(isNew ? `${e.name} incluído(a) na folha.` : 'Diárias salvas.'); render(); }
+      };
+      root.addEventListener('click', ev => {
+        const b = ev.target.closest('[data-open-p]');
+        if (b) openPerson(Number(b.dataset.openP));
+      });
       root.querySelectorAll('[data-rmc]').forEach(b => b.addEventListener('click', () => saveAnd(x => { x.contracts = x.contracts.filter(y => y.contract_id !== Number(b.dataset.rmc)); })));
       root.querySelector('#fc-addb')?.addEventListener('click', () => {
         const v = Number(root.querySelector('#fc-addp').value);
-        if (v) saveAnd(x => { x.people.push({ worker_id: v, days: {} }); });
+        if (!v) return toast('Escolha o profissional.', 'error');
+        openPerson(v, s.available_workers.find(w => w.id === v));
       });
+      root.querySelector('#fc-addp')?.addEventListener('change', ev => { const v = Number(ev.target.value); if (v) openPerson(v, s.available_workers.find(w => w.id === v)); });
       root.querySelector('#fc-addcb')?.addEventListener('click', () => {
         const v = Number(root.querySelector('#fc-addc').value);
         if (v) saveAnd(x => { x.contracts.push({ contract_id: v, pct: 0 }); });
       });
-      root.querySelector('#fc-neww')?.addEventListener('click', () => workerSheet(null, mny, async w => saveAnd(x => { x.people.push({ worker_id: w.id, days: {} }); }, 'Profissional cadastrado e incluído.'), { obra: s.project.id }));
+      root.querySelector('#fc-neww')?.addEventListener('click', () => workerSheet(null, mny, async w => { setTimeout(() => openPerson(w.id, w), 220); }, { obra: s.project.id }));
       root.querySelector('#fc-save')?.addEventListener('click', async e => {
         e.target.disabled = true;
         try { await save(); render(); } catch (ex) { toast(ex.message, 'error'); e.target.disabled = false; }
@@ -707,7 +743,10 @@ const copyBtn = p => actCell(p);
 const payText = list => list.map(p => `${p.name} — ${money(p.amount)}${p.pix ? ` — PIX ${p.pix_type ? `(${p.pix_type}) ` : ''}${p.pix}` : ' — SEM PIX'}`).join('\n');
 // Lista da folha: Quem recebe · PIX · Valor · Copiar
 const payHead = html`<li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Valor</span><span></span></li>`;
-const payRow = (p, act = {}) => html`<li class="fp-row ${act.paidAt ? 'fp-isPaid' : ''}"><span class="fp-who"><b>${p.name}</b><small>${p.what || p.role || ''}</small></span>${pixCell(p)}<strong class="fp-num fp-val">${money(p.amount)}</strong>${actCell(p, act)}</li>`;
+// open: id do profissional — o nome vira botão que abre a janela das diárias
+const payRow = (p, act = {}) => html`<li class="fp-row ${act.paidAt ? 'fp-isPaid' : ''}">${act.open
+  ? html`<button type="button" class="fp-who fp-edit" data-open-p="${act.open}" title="Ver ou editar as diárias"><b>${p.name}</b><small>${p.what || p.role || ''}</small></button>`
+  : html`<span class="fp-who"><b>${p.name}</b><small>${p.what || p.role || ''}</small></span>`}${pixCell(p)}<strong class="fp-num fp-val">${money(p.amount)}</strong>${actCell(p, act)}</li>`;
 
 // Marcar pago (pergunta a data) / desfazer
 async function askPaid(lines, who, amount, done) {
@@ -735,7 +774,7 @@ function bindPaid(root, done) {
 
 // Lista da própria folha (valores ao vivo enquanto aberta)
 function sheetPayList(people, contracts, calcP, calcC) {
-  return [...people.map(e => ({ line: `p${e.id}`, paid_at: e.paid_at, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: calcP(e).company, what: `${e.role || 'Diarista'} · ${n2(calcP(e).diarias)} diária(s)` })),
+  return [...people.map(e => ({ line: `p${e.id}`, worker_id: e.worker_id, paid_at: e.paid_at, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: calcP(e).company, what: `${e.role || 'Diarista'} · ${n2(calcP(e).diarias)} diária(s)` })),
     ...contracts.map(c => ({ line: `c${c.id}`, paid_at: c.paid_at, name: c.worker_name, role: 'Empreiteiro', pix: c.pix, pix_type: c.pix_type, amount: calcC(c).company, what: `Empreitada ${c.service} · ${n2(num(c.pct))}%` }))]
     .filter(p => p.amount > 0.004).sort((a, b) => b.amount - a.amount);
 }

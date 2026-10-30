@@ -332,9 +332,9 @@ export function getSheet(ctx, id) {
     pay_date: money ? s.pay_date : undefined,
     payment: money ? paymentOf(s) : undefined,
     // Profissionais ligados a esta obra (ou sem obra escolhida)
-    available_workers: open ? all(`SELECT id, name, role FROM field_workers w WHERE active = 1 AND kind = 'diarista'
+    available_workers: open ? all(`SELECT id, name, role, daily_rate AS rate FROM field_workers w WHERE active = 1 AND kind = 'diarista'
       AND (NOT EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id) OR EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id AND x.project_id = ?))
-      ORDER BY name`, p.id).filter(w => !inSheet.has(w.id)) : [],
+      ORDER BY name`, p.id).filter(w => !inSheet.has(w.id)).map(w => (money ? w : strip(w, ['rate']))) : [],
     available_contracts: open ? listContracts(ctx, p.id).filter(x => x.status === 'andamento' && !inContracts.has(x.id) && x.balance_pct > 0) : [],
     services: [...new Set([...all('SELECT name FROM project_stages WHERE project_id = ? ORDER BY sort_order, name', p.id).map(r => r.name),
       ...all('SELECT DISTINCT e.service FROM field_sheet_people e JOIN field_sheets f ON f.id = e.sheet_id WHERE f.project_id = ? AND e.service IS NOT NULL', p.id).map(r => r.service)])],

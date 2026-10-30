@@ -128,7 +128,8 @@ export async function view({ query, setQuery, render }) {
   const filtered = !!(pessoa || funcao);
   const allDays = blocks.flatMap(s => s.days);
   const maxQ = Math.max(1, ...[...byDay.values()].map(x => x.q));
-  const periodo = sheets.length ? `${fmtDate(sheets[0].start_date)} a ${fmtDate(sheets.at(-1).end_date)}` : '—';
+  // Início da primeira folha e fim da última (das folhas que entram no relatório)
+  const periodo = sheets.length ? `${fmtDate(sheets.map(s => s.start_date).sort()[0])} a ${fmtDate(sheets.map(s => s.end_date).sort().at(-1))}` : '—';
 
   // Filtros e partes (barra, fora da impressão)
   const go = over => { const q = { obra, por: porFolhas ? 'folhas' : '', de, ate, folhas: pickedOk ? [...picked].join(',') : '', pessoa: pessoa || '', funcao, sem: [...off].join(','), ...over }; setQuery(q); render(); };
@@ -160,8 +161,8 @@ export async function view({ query, setQuery, render }) {
       <div class="r-rule"></div>
       <section class="r-scope">
         <div><div class="r-lbl">Obra</div><h1>${p.code} · ${p.name}</h1><div class="muted">${p.client || ''}</div></div>
-        <dl class="r-meta"><dt>${pickedOk ? 'Folhas escolhidas' : 'Período'}</dt><dd>${pickedOk ? list.map(s => s.code).join(', ') : de || ate ? `${de ? fmtDate(de) : 'início'} a ${ate ? fmtDate(ate) : 'hoje'}` : 'todas as folhas'}</dd>
-          <dt>Folhas</dt><dd>${sheets.length ? `${sheets.length} (${periodo})` : 'nenhuma'}</dd>
+        <dl class="r-meta"><dt>Período</dt><dd>${de || ate ? `${de ? fmtDate(de) : 'início'} a ${ate ? fmtDate(ate) : 'hoje'}` : periodo}</dd>
+          <dt>${pickedOk ? 'Folhas escolhidas' : 'Folhas'}</dt><dd>${sheets.length ? `${sheets.map(s => s.code).join(', ')} (${sheets.length})` : 'nenhuma'}</dd>
           ${filtered ? html`<dt>Filtro</dt><dd>${[pessoa ? allPeople.get(pessoa)?.name : '', funcao].filter(Boolean).join(' · ')}</dd>` : ''}
           <dt>Emissão</dt><dd>${fmtDateTime(new Date().toISOString())}</dd></dl>
       </section>

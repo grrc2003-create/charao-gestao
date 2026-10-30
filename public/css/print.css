@@ -548,3 +548,12 @@
 /* Pago a mais anterior: valor negativo em vermelho */
 .fr-doc .fr-neg { color: #C0392B; font-weight: 700; white-space: nowrap; }
 .fr-doc .fr-red { color: #C0392B; font-weight: 700; white-space: nowrap; } /* dívida da empresa */
+/* Carta de apresentação (PDF escolhido na hora): primeiras páginas da impressão */
+.fr-cover-page { margin: 0 0 14px; text-align: center; }
+.fr-cover-page img { max-width: 100%; height: auto; border: 1px solid #E4E1DA; }
+.fr-cover-btn { cursor: pointer; }
+.fr-cover-on { gap: 6px; }
+@media print {
+  .fr-cover-page { margin: 0; break-after: page; }
+  .fr-cover-page img { max-height: 268mm; width: auto; border: 0; }
+}

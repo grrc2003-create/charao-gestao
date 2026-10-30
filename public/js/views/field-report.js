@@ -1,7 +1,8 @@
 // Relatório detalhado da Folha de Campo (A4): obra, período, profissional e função como filtros; partes escolhidas
 // na barra (presença por dia de cada pessoa, equipe por dia, por pessoa, por serviço/função, empreitadas, medição do
 // terceiro, atividades e pagamentos). Valores só para quem tem a seção Folha de Campo.
-import { html, api, fmtDate, fmtDateTime } from '../core.js';
+import { html, api, icon, fmtDate, fmtDateTime } from '../core.js';
+import { toast, isPdfFile } from '../ui.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -14,12 +15,12 @@ const qLabel = q => (q === 1 ? '1' : q === 0.5 ? '½' : q ? n2(q) : '');
 // Aproveitamento da página: bloco pequeno fica inteiro; bloco grande continua na mesma página (linhas não se partem
 // e o cabeçalho da tabela se repete), em vez de pular inteiro e deixar espaço em branco
 const KEEP_ROWS = 12;
-const keep = rows => (rows <= KEEP_ROWS ? 'avoid' : 'fr-flow');
+const keepCls = rows => (rows <= KEEP_ROWS ? 'avoid' : 'fr-flow');
 
 // Partes do relatório: [chave, rótulo, só com valores]
 const PARTS = [
   ['pres', 'Presença por dia'], ['dia', 'Equipe por dia'], ['pes', 'Por pessoa'], ['serv', 'Por serviço e função'],
-  ['emp', 'Empreitadas'], ['med', 'Comparação com a medição', true], ['div', 'Dívidas anteriores', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
+  ['emp', 'Empreitadas'], ['med', 'Comparação com a medição', true], ['div', 'Dívidas anteriores', true], ['bm', 'BM anexado', true], ['comp', 'Comprovantes de pagamento', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
 ];
 
 // BM em PDF: cada página vira imagem no próprio navegador (pdf.js servido pelo site) para sair na impressão.
@@ -28,29 +29,39 @@ const PDFJS = '/vendor/pdfjs/pdf.min.js';
 const MAX_PAGES = 30;
 const DPI_SCALE = 300 / 72, MAX_PIXELS = 14e6;
 const canvasUrl = canvas => new Promise(res => canvas.toBlob(b => res(b ? URL.createObjectURL(b) : canvas.toDataURL('image/jpeg', 0.93)), 'image/jpeg', 0.93));
+// Páginas de um PDF (endereço no sistema ou arquivo escolhido no computador) como imagens em alta resolução
+async function pdfPages(source) {
+  const lib = await import(PDFJS);
+  lib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
+  const doc = await lib.getDocument(typeof source === 'string' ? { url: source, isEvalSupported: false, withCredentials: true } : { data: source, isEvalSupported: false }).promise;
+  const n = Math.min(doc.numPages, MAX_PAGES);
+  const pages = [];
+  for (let i = 1; i <= n; i++) {
+    const page = await doc.getPage(i);
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(DPI_SCALE, Math.sqrt(MAX_PIXELS / (base.width * base.height))) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    pages.push({ src: await canvasUrl(canvas), land: vp.width > vp.height, i });
+    canvas.width = canvas.height = 0;
+  }
+  return { pages, total: doc.numPages };
+}
+// Carta de apresentação: PDF escolhido na hora (não fica no sistema); vale enquanto a tela do relatório estiver aberta
+let cover = null; // { name, pages: [{ src, land }] }
+const coverHtml = () => (cover ? html`<section class="fr-cover">${cover.pages.map(pg => html`<figure class="fr-cover-page"><img src="${pg.src}" alt="Carta de apresentação, página ${pg.i}"></figure>`)}</section>` : '');
 async function renderPdfs(root) {
   const boxes = [...root.querySelectorAll('[data-pdf]')];
   if (!boxes.length) return;
-  const lib = await import(PDFJS);
-  lib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
   for (const box of boxes) {
     try {
-      const doc = await lib.getDocument({ url: box.dataset.pdf, isEvalSupported: false, withCredentials: true }).promise;
-      const n = Math.min(doc.numPages, MAX_PAGES);
-      const out = [];
-      for (let i = 1; i <= n; i++) {
-        const page = await doc.getPage(i);
-        const base = page.getViewport({ scale: 1 });
-        const vp = page.getViewport({ scale: Math.min(DPI_SCALE, Math.sqrt(MAX_PIXELS / (base.width * base.height))) });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp }).promise;
-        const src = await canvasUrl(canvas);
-        canvas.width = canvas.height = 0;
-        out.push({ land: vp.width > vp.height, fig: html`<figure class="fr-bmp"><img src="${src}" alt="Página ${i} do BM"><figcaption>${box.dataset.name} · página ${i} de ${doc.numPages}</figcaption></figure>` });
-      }
+      const { pages, total } = await pdfPages(box.dataset.pdf);
+      const doc = { numPages: total };
+      const n = pages.length;
+      const out = pages.map(pg => ({ land: pg.land, fig: html`<figure class="fr-bmp"><img src="${pg.src}" alt="Página ${pg.i} do anexo"><figcaption>${box.dataset.name} · página ${pg.i} de ${total}</figcaption></figure>` }));
       // Folha deitada bem aproveitada: página deitada ocupa a folha; duas páginas em pé seguidas ficam lado a lado
       const sheets = [];
       for (let k = 0; k < out.length; k++) {
@@ -103,6 +114,24 @@ export async function view({ query, setQuery, render }) {
   const roles = [...new Set([...allPeople.values()].map(x => x.role).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const keep = e => (!pessoa || e.worker_id === pessoa) && (!funcao || (e.role || '') === funcao);
   const blocks = sheets.map(s => ({ ...s, people: s.people.filter(keep) }));
+  // Comprovantes de pagamento das folhas do relatório (respeita o filtro de pessoa); um arquivo de vários pagamentos
+  // ("Marcar todos pagos") aparece uma vez, com quem recebeu e o total
+  const comps = [];
+  if (mny && on('comp')) {
+    const seen = new Map();
+    for (const s of blocks) {
+      const lines = [...s.people.map(e => ({ who: e.name, pays: e.payments })), ...(pessoa || funcao ? [] : s.contracts.map(c => ({ who: c.worker_name, pays: c.payments })))];
+      for (const x of lines) for (const pay of x.pays || []) for (const f of pay.files || []) {
+        const c = seen.get(f.id) || { f, date: pay.paid_date, notes: pay.notes, who: new Set(), sheets: new Set(), amount: 0 };
+        c.who.add(x.who); c.sheets.add(s.code); c.amount += pay.amount;
+        seen.set(f.id, c);
+      }
+    }
+    comps.push(...[...seen.values()].sort((a, b) => a.date.localeCompare(b.date)));
+  }
+  const fileBox = (url, f, label) => (f.mime === 'application/pdf'
+    ? html`<div class="fr-bmpdf" data-pdf="${url}" data-name="${f.original_name || label}"><p class="small muted">Carregando o PDF "${f.original_name || label}"…</p></div>`
+    : html`<div class="fr-bmsheet"><figure class="fr-bmp"><img src="${url}" alt="${label}"><figcaption>${f.original_name || label}</figcaption></figure></div>`);
 
   // Agregados
   const byPerson = new Map(), bySvc = new Map(), byRole = new Map(), byDay = new Map();
@@ -148,11 +177,13 @@ export async function view({ query, setQuery, render }) {
       : html`<label class="pt-opt">De <input type="date" id="fr-de" value="${de}"></label><label class="pt-opt">Até <input type="date" id="fr-ate" value="${ate}"></label>`}
     <label class="pt-opt">Pessoa <select id="fr-pes"><option value="">Todas</option>${[...allPeople.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map(x => html`<option value="${x.id}" ${x.id === pessoa ? 'selected' : ''}>${x.name}</option>`)}</select></label>
     <label class="pt-opt">Função <select id="fr-fun"><option value="">Todas</option>${roles.map(r => html`<option ${r === funcao ? 'selected' : ''}>${r}</option>`)}</select></label>
-    ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}</div></details>`;
+    ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}</div></details>
+    ${cover ? html`<span class="pt-opt fr-cover-on">${icon('file')}Carta: ${cover.name} <button type="button" class="fp-undo" id="fr-cover-rm">remover</button></span>`
+      : html`<label class="btn btn-ghost btn-sm fr-cover-btn">${icon('file')}Carta de apresentação (PDF)<input type="file" id="fr-cover" accept="application/pdf,.pdf" hidden></label>`}`;
 
   const kpi = (l, v, sub, c = '#2A3D50') => html`<div class="r-kpi" style="--c:${c}"><div class="r-kpi-l">${l}</div><div class="r-kpi-v">${v}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
   // Presença: uma grade por folha (pessoa × dia), com o total de diárias e de dias presentes
-  const presence = s => html`<div class="frp ${keep(s.people.length)}"><div class="frp-h"><b>${s.code}</b> · ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)} <span class="muted">· ${s.people.length} pessoa(s) · ${n2(s.people.reduce((a, e) => a + e.diarias, 0))} diária(s)</span></div>
+  const presence = s => html`<div class="frp ${keepCls(s.people.length)}"><div class="frp-h"><b>${s.code}</b> · ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)} <span class="muted">· ${s.people.length} pessoa(s) · ${n2(s.people.reduce((a, e) => a + e.diarias, 0))} diária(s)</span></div>
     <table class="frp-t"><thead><tr><th class="frp-n">Pessoa</th>${s.days.map(d => html`<th class="${[0, 6].includes(wd(d)) ? 'we' : ''}"><small>${WD[wd(d)]}</small>${d.slice(8, 10)}</th>`)}<th class="frp-s">Dias</th><th class="frp-s">Diárias</th></tr></thead>
     <tbody>${s.people.map(e => html`<tr><td class="frp-n"><b>${e.name}</b><small>${e.role || ''}${e.service ? ` · ${e.service}` : ''}</small></td>
       ${s.days.map(d => { const q = Number(e.days[d]) || 0; return html`<td class="${q === 1 ? 'q1' : q ? 'qh' : ''} ${[0, 6].includes(wd(d)) ? 'we' : ''}">${qLabel(q)}</td>`; })}
@@ -164,6 +195,7 @@ export async function view({ query, setQuery, render }) {
     title: `Relatório da Folha de Campo · ${p.code}`,
     html: html`${printToolbar({ back: `#/campo?obra=${obra}`, title: `Relatório da Folha de Campo — ${p.code} · ${p.name}`, extra })}
     <div class="doc-stage"><article class="doc a4 fr-doc">
+      ${coverHtml()}
       <header class="r-header"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="r-logo">
         <div class="r-doctype"><div class="r-kicker">Folha de Campo</div><div class="r-level">Relatório detalhado</div></div></header>
       <div class="r-rule"></div>
@@ -210,36 +242,36 @@ export async function view({ query, setQuery, render }) {
           <em>${x.n || ''}</em><div class="frd-col"><span style="height:${(x.q / maxQ) * 100}%"></span></div><small>${WD[wd(d)]}<br>${d.slice(8, 10)}</small></div>`; })}</div>
         <p class="small muted" style="margin:4px 0 0">Número sobre a coluna: pessoas no dia · altura: diárias do dia.</p></section>` : ''}
 
-      ${on('pes') && people.length ? html`<section class="r-section ${keep(people.length)}"><h3 class="r-h">Por pessoa</h3>
+      ${on('pes') && people.length ? html`<section class="r-section ${keepCls(people.length)}"><h3 class="r-h">Por pessoa</h3>
         <table class="r-table"><thead><tr><th>Pessoa</th><th>Função</th><th class="num">Folhas</th><th class="num">Dias</th><th class="num">Diárias</th>${mny ? html`<th class="num">Valor</th><th class="num">Cliente</th><th class="num">Empresa paga</th>` : ''}</tr></thead>
         <tbody>${people.map(x => html`<tr><td>${x.name}</td><td class="small">${x.role || '—'}</td><td class="num">${x.sheets}</td><td class="num">${x.days}</td><td class="num"><b>${n2(x.diarias)}</b></td>
           ${mny ? html`<td class="num">${money(x.total)}</td><td class="num">${x.client ? money(x.client) : '—'}</td><td class="num">${money(x.company)}</td>` : ''}</tr>`)}
           <tr class="fr-sum"><td colspan="4">Total</td><td class="num">${n2(tot.diarias)}</td>${mny ? html`<td class="num">${money(tot.mo)}</td><td class="num">${money(people.reduce((a, x) => a + x.client, 0))}</td><td class="num">${money(people.reduce((a, x) => a + x.company, 0))}</td>` : ''}</tr></tbody></table></section>` : ''}
 
-      ${on('serv') && people.length ? html`<section class="r-section ${keep(Math.max(svcs.length, fns.length) * 2)}"><h3 class="r-h">Por serviço e por função</h3><div class="fr-2">
+      ${on('serv') && people.length ? html`<section class="r-section ${keepCls(Math.max(svcs.length, fns.length) * 2)}"><h3 class="r-h">Por serviço e por função</h3><div class="fr-2">
         <div><h4 class="fr-h4">Serviço (apropriação)</h4><ul class="fr-bars">${svcs.map(x => html`<li><div><span>${x.name}</span><b>${mny ? money(x.value) : `${n2(x.diarias)} diária(s)`}</b></div>${bar(mny ? x.value : x.diarias, mny ? svcs[0].value : svcs[0].diarias)}<small>${n2(x.diarias)} diária(s) · ${x.people.size} pessoa(s)</small></li>`)}</ul></div>
         <div><h4 class="fr-h4">Função</h4><ul class="fr-bars">${fns.map(x => html`<li><div><span>${x.name}</span><b>${n2(x.diarias)} diária(s)</b></div>${bar(x.diarias, fns[0].diarias)}<small>${x.people.size} pessoa(s)${mny ? ` · ${money(x.value)}` : ''}</small></li>`)}</ul></div>
       </div></section>` : ''}
 
-      ${on('emp') && !filtered && blocks.some(s => s.contracts.length) ? html`<section class="r-section ${keep(blocks.reduce((a, s) => a + s.contracts.length, 0))}"><h3 class="r-h">Empreitadas</h3>
+      ${on('emp') && !filtered && blocks.some(s => s.contracts.length) ? html`<section class="r-section ${keepCls(blocks.reduce((a, s) => a + s.contracts.length, 0))}"><h3 class="r-h">Empreitadas</h3>
         <table class="r-table"><thead><tr><th>Folha</th><th>Serviço</th><th>Empreiteiro</th><th class="num">Nesta folha</th><th class="num">Acumulado</th>${mny ? html`<th class="num">Medido</th>` : ''}</tr></thead>
         <tbody>${blocks.flatMap(s => s.contracts.map(c => html`<tr><td class="small nowrap">${s.code}</td><td>${c.service}</td><td class="small">${c.worker_name}</td><td class="num">${n2(c.pct)}%</td><td class="num">${n2(c.after_pct)}%</td>${mny ? html`<td class="num">${money(c.amount)}</td>` : ''}</tr>`))}</tbody></table></section>` : ''}
 
-      ${meas && on('med') && meas.measurements.length ? html`<section class="r-section ${keep(meas.measurements.length + 4)}"><h3 class="r-h">Medição do terceiro x folhas</h3>
+      ${meas && on('med') && meas.measurements.length ? html`<section class="r-section ${keepCls(meas.measurements.length + 4)}"><h3 class="r-h">Medição do terceiro x folhas</h3>
         <table class="r-table"><thead><tr><th>Data</th><th>Terceiro</th><th>Folhas</th><th class="num">Medido</th><th class="num">Folhas</th><th class="num">Diferença</th><th>Resultado</th></tr></thead>
         <tbody>${meas.measurements.map(m => html`<tr><td class="small nowrap">${fmtDate(m.ref_date)}</td><td>${m.supplier || '—'}</td><td class="small">${m.sheets.map(s => s.code).join(', ') || '—'}</td>
           <td class="num">${money(m.amount)}</td><td class="num">${money(m.sheets_total)}</td><td class="num ${m.diff < -0.004 ? 'late' : ''}">${money(m.diff)}</td>
           <td class="small"><b>${{ pago_mais: 'Pago a mais', pago_menos: 'Pago a menos', igual: 'Igual', sem_folhas: 'Sem folhas' }[m.result]}</b></td></tr>`)}
           <tr class="fr-sum"><td colspan="3">Total da obra</td><td class="num">${money(meas.totals.measured)}</td><td class="num">${money(meas.totals.covered)}</td><td class="num">${money(meas.totals.diff)}</td><td class="small">${meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição` : ''}</td></tr></tbody></table></section>` : ''}
 
-      ${on('div') && debts.length ? html`<section class="r-section ${keep(debts.length + 3)}"><h3 class="r-h">Dívidas anteriores</h3>
+      ${on('div') && debts.length ? html`<section class="r-section ${keepCls(debts.length + 3)}"><h3 class="r-h">Dívidas anteriores</h3>
         ${Object.entries(dv.kinds).filter(([k]) => debts.some(d => d.kind === k)).map(([k, label]) => { const rows = debts.filter(d => d.kind === k); return html`<h4 class="fr-h4">${label}</h4>
           <table class="r-table fr-debts"><thead><tr><th>Origem</th>${k === 'pago_mais' ? '' : html`<th>Profissional</th>`}<th>Motivo</th><th class="num">Valor</th><th>Situação</th></tr></thead>
           <tbody>${rows.map(d => html`<tr><td class="small nowrap">${fmtDate(d.origin_date)}</td>${k === 'pago_mais' ? '' : html`<td>${d.worker_name || '—'}</td>`}<td class="small">${d.reason}</td>
             <td class="num ${k === 'pago_mais' ? 'fr-neg' : k === 'empresa_deve' ? 'fr-red' : ''}">${k === 'pago_mais' ? money(-d.amount) : money(d.amount)}</td><td class="small">${d.status === 'quitada' ? `Quitada ${fmtDate(d.settled_date)}${d.settled_note ? ` · ${d.settled_note}` : ''}` : html`<b>Em aberto</b>`}</td></tr>`)}
             <tr class="fr-sum"><td colspan="${k === 'pago_mais' ? 2 : 3}">Em aberto</td><td class="num ${k === 'pago_mais' ? 'fr-neg' : k === 'empresa_deve' ? 'fr-red' : ''}">${k === 'pago_mais' ? money(-debtOpen(k)) : money(debtOpen(k))}</td><td></td></tr></tbody></table>`; })}</section>` : ''}
 
-      ${on('pag') && mny ? html`<section class="r-section ${keep(sheets.length)}"><h3 class="r-h">Pagamentos por folha</h3>
+      ${on('pag') && mny ? html`<section class="r-section ${keepCls(sheets.length)}"><h3 class="r-h">Pagamentos por folha</h3>
         <table class="r-table"><thead><tr><th>Folha</th><th>Período</th><th>Situação</th><th class="num">Total</th><th class="num">Cliente</th><th class="num">Empresa paga</th><th>Pagamento</th></tr></thead>
         <tbody>${sheets.map(s => html`<tr><td class="nowrap"><b>${s.code}</b></td><td class="small nowrap">${dm(s.start_date)} a ${dm(s.end_date)}</td><td class="small">${s.status === 'fechada' ? 'Fechada' : 'Aberta'}</td>
           <td class="num">${money(s.totals.total)}</td><td class="num">${s.totals.client ? money(s.totals.client) : '—'}</td><td class="num">${money(s.totals.company)}</td>
@@ -248,12 +280,14 @@ export async function view({ query, setQuery, render }) {
       ${on('ativ') && sheets.some(s => s.activities) ? html`<section class="r-section"><h3 class="r-h">Atividades desenvolvidas</h3>
         ${sheets.filter(s => s.activities).map(s => html`<div class="fr-act avoid"><b>${s.code} · ${dm(s.start_date)} a ${dm(s.end_date)}</b><p class="r-p pre">${s.activities}</p></div>`)}</section>` : ''}
 
-      ${bms.length || debtFiles.length ? html`<section class="r-section fr-bms"><h3 class="r-h">Anexos${bms.length && debtFiles.length ? ' · BM e comprovantes' : bms.length ? ' · BM da medição do terceiro' : ' · comprovantes das dívidas anteriores'}</h3>
+      ${bms.length || debtFiles.length || comps.length ? html`<section class="r-section fr-bms"><h3 class="r-h">Anexos · ${[bms.length ? 'BM da medição' : '', comps.length ? 'comprovantes de pagamento' : '', debtFiles.length ? 'comprovantes das dívidas anteriores' : ''].filter(Boolean).join(' · ')}</h3>
         ${bms.map(m => html`<div class="fr-bm"><div class="fr-bm-h"><b>${m.supplier || 'Terceiro'}</b> · medição de ${fmtDate(m.ref_date)} · ${money(m.amount)}${m.sheets.length ? ` · folhas ${m.sheets.map(s => s.code).join(', ')}` : ''}</div>
           ${m.files.map(f => (f.mime === 'application/pdf'
             ? html`<div class="fr-bmpdf" data-pdf="/api/field-measurement-files/${f.id}" data-name="${f.original_name || 'BM.pdf'}"><p class="small muted">Carregando o PDF "${f.original_name || 'BM.pdf'}"…</p></div>`
             : html`<figure class="fr-bmp"><img src="/api/field-measurement-files/${f.id}" alt="BM"><figcaption>${f.original_name || 'BM (imagem)'}</figcaption></figure>`))}
         </div>`)}
+        ${comps.map(c => html`<div class="fr-bm"><div class="fr-bm-h"><b>Comprovante de pagamento</b> · ${[...c.who].join(', ')} · ${[...c.sheets].join(', ')} · ${fmtDate(c.date)} · ${money(c.amount)}${c.notes ? ` · ${c.notes}` : ''}</div>
+          ${fileBox(`/api/field-pay-files/${c.f.id}`, c.f, 'comprovante')}</div>`)}
         ${debtFiles.map(({ d, f }) => html`<div class="fr-bm"><div class="fr-bm-h"><b>Comprovante · dívida anterior</b> · ${d.worker_name || 'obra'} · ${d.kind_label} · ${money(d.amount)} · origem ${fmtDate(d.origin_date)}</div>
           <div class="fr-bmpdf" data-pdf="/api/field-debt-files/${f.id}" data-name="${f.original_name || 'comprovante.pdf'}"><p class="small muted">Carregando o PDF "${f.original_name || 'comprovante.pdf'}"…</p></div></div>`)}</section>` : ''}
       `}
@@ -262,6 +296,22 @@ export async function view({ query, setQuery, render }) {
     </article></div>`,
     mount(root) {
       bindPrintToolbar(root);
+      // Carta de apresentação: lê o PDF escolhido no computador e põe as páginas antes do relatório
+      root.querySelector('#fr-cover')?.addEventListener('change', async e => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!isPdfFile(file)) return toast('A carta precisa ser um arquivo PDF.', 'error');
+        toast('Preparando a carta de apresentação…', 'warn');
+        try { const { pages } = await pdfPages(new Uint8Array(await file.arrayBuffer())); cover = { name: file.name, pages }; render(); }
+        catch { toast('Não foi possível ler o PDF da carta.', 'error'); }
+      });
+      // Saiu do relatório: a carta escolhida é descartada (não fica guardada)
+      window.addEventListener('hashchange', function off() {
+        if (location.hash.startsWith('#/campo/relatorio')) return;
+        window.removeEventListener('hashchange', off);
+        cover?.pages.forEach(pg => pg.src.startsWith('blob:') && URL.revokeObjectURL(pg.src)); cover = null;
+      });
+      root.querySelector('#fr-cover-rm')?.addEventListener('click', () => { cover?.pages.forEach(pg => pg.src.startsWith('blob:') && URL.revokeObjectURL(pg.src)); cover = null; render(); });
       setPageFooter(`Charão · Folha de Campo · ${p.code} · ${p.name}`);
       // Enquanto as páginas do BM em PDF são preparadas, o botão de imprimir espera
       if (root.querySelector('[data-pdf]')) {

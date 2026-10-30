@@ -274,6 +274,7 @@ api.post('/api/field/sheets/:id/reopen', (req, res, { ctx, params }) => send(res
 api.get('/api/field/analysis', (req, res, { ctx, query }) => send(res, 200, Field.analysis(ctx, { from: query.get('de'), to: query.get('ate'), obra: intOrNull(query.get('obra')) })));
 api.get('/api/field/payments', (req, res, { ctx, query }) => send(res, 200, Field.payments(ctx, intOrNull(query.get('obra')), query.get('pagos') === '1')));
 api.post('/api/field/paid', (req, res, { ctx, body }) => send(res, 200, Field.markPaid(ctx, body, clientIp(req))));
+api.get('/api/field-pay-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Field.payFileForUser(ctx, intOrNull(params.id))));
 api.get('/api/field/summary', (req, res, { ctx, query }) => send(res, 200, Field.summary(ctx, intOrNull(query.get('obra')))));
 // Medição do terceiro (BM) x folhas da obra
 api.get('/api/field/measurements', (req, res, { ctx, query }) => send(res, 200, Field.listMeasurements(ctx, intOrNull(query.get('obra')))));

@@ -420,16 +420,18 @@ export async function view({ params, navigate, render }) {
         const sum = list.reduce((a, p) => a + p.amount, 0);
         const closed = s.status === 'fechada', finPaid = s.payment?.status === 'paga';
         const open = p => (p.worker_id ? { open: p.worker_id } : {});
-        const act = p => (!closed ? open(p) : p.paid_at || finPaid ? { ...open(p), paidAt: p.paid_at || s.payment?.paid_date || '', lines: p.line } : { ...open(p), canPay: true, lines: p.line });
+        // Pago em parte: mostra o já pago e o que falta; "Pagar restante" abre a janela com o valor que falta
+        const act = p => (!closed ? open(p) : p.paid_at || finPaid ? { ...open(p), paidAt: p.paid_at || s.payment?.paid_date || '', lines: p.line, pays: p.payments }
+          : { ...open(p), canPay: true, lines: p.line, due: Math.max(0, p.amount - (p.paid_amount || 0)), paidSoFar: p.paid_amount || 0, pays: p.payments });
         const pend = closed ? list.filter(p => !p.paid_at && !finPaid) : [];
-        const paidSum = closed ? list.filter(p => p.paid_at || finPaid).reduce((a, p) => a + p.amount, 0) : 0;
+        const paidSum = closed ? list.reduce((a, p) => a + (p.paid_at || finPaid ? p.amount : Math.min(p.amount, p.paid_amount || 0)), 0) : 0;
         // Pessoas incluídas sem dia marcado (ou sem valor) também aparecem, com R$ 0,00 — tocam para lançar
         const zero = st.people.filter(e => pCalc(e).company <= 0.004).map(e => ({ worker_id: e.worker_id, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: 0,
           what: `${e.role || 'Diarista'} · ${pCalc(e).diarias ? `${n2(pCalc(e).diarias)} diária(s)` : 'nenhum dia marcado'}` }));
         const rows = [...list.map(p => payRow(p, act(p))), ...zero.map(p => payRow(p, open(p)))];
         box.innerHTML = rows.length ? html`${!closed ? html`<li class="fp-hint">${icon('info')}Toque no nome para ver ou editar as diárias. Feche a folha para marcar os pagamentos (os valores ainda podem mudar).</li>` : ''}${payHead}${rows}
           <li class="fp-row fp-foot"><span><b>Total</b>${closed ? html`<small>Pago ${money(paidSum)} · falta ${money(sum - paidSum)}</small>` : ''}</span><span></span><strong class="fp-num fp-val">${money(sum)}</strong>
-          <span class="fp-copy">${pend.length > 1 ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${pend.map(p => p.line).join(',')}" data-who="Todos que faltam (${pend.length})" data-amt="${pend.reduce((a, p) => a + p.amount, 0)}">${icon('check')}Marcar todos pagos</button>` : ''}</span></li>`.toString()
+          <span class="fp-copy">${pend.length > 1 ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${pend.map(p => p.line).join(',')}" data-who="Todos que faltam (${pend.length})" data-amt="${pend.reduce((a, p) => a + Math.max(0, p.amount - (p.paid_amount || 0)), 0)}">${icon('check')}Marcar todos pagos</button>` : ''}</span></li>`.toString()
           : html`<li class="muted fp-none">Nenhuma pessoa nesta folha. Inclua abaixo e marque os dias em que ela compareceu.</li>`.toString();
         root.querySelector('#fc-paytot').textContent = list.length ? `${list.length} · ${money(list.reduce((a, p) => a + p.amount, 0))}` : '';
         root.querySelector('#fc-paycopy').dataset.copy = payText(list);
@@ -944,9 +946,16 @@ const pixCell = p => (p.pix
   ? html`<span class="fp-pix"><span class="fp-pt">${p.pix_type || 'PIX'}</span><code>${p.pix}</code></span>`
   : html`<span class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX — <a href="#/campo/profissionais">completar</a></span></span>`);
 const copyOnly = p => (p.pix ? html`<button type="button" class="btn btn-ghost btn-sm" data-copy="${p.pix}" data-copy-msg="PIX de ${p.name} copiado.">Copiar PIX</button>` : '');
-const paidTag = (d, lines) => html`<span class="fp-paid">${icon('check')}Pago${d ? ` ${dm(d)}` : ''}${lines ? html` <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>` : ''}</span>`;
-// paid: undefined = sem ação (folha aberta); lines = lançamentos a marcar
-const actCell = (p, { lines, paidAt, canPay } = {}) => html`<span class="fp-copy">${paidAt !== undefined && paidAt !== null ? paidTag(paidAt, lines) : html`${copyOnly(p)}${canPay ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${lines}" data-who="${p.name}" data-amt="${p.amount}">${icon('check')}Marcar pago</button>` : ''}`}</span>`;
+// Comprovantes dos pagamentos registrados (links pequenos)
+const payFiles = (pays = []) => {
+  const files = pays.flatMap(x => x.files || []);
+  return files.length ? html`<span class="fp-files">${files.map((f, i) => html`<a href="/api/field-pay-files/${f.id}" target="_blank" rel="noopener" title="${f.original_name || 'comprovante'}">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${files.length > 1 ? i + 1 : 'comprovante'}</a>`)}</span>` : '';
+};
+const paidTag = (d, lines, pays) => html`<span class="fp-paid">${icon('check')}Pago${d ? ` ${dm(d)}` : ''}${lines ? html` <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>` : ''}${payFiles(pays)}</span>`;
+// paid: undefined = sem ação (folha aberta); lines = lançamentos a marcar; due/paidSoFar = pagamento parcial
+const actCell = (p, { lines, paidAt, canPay, due, paidSoFar = 0, pays } = {}) => html`<span class="fp-copy">${paidAt !== undefined && paidAt !== null ? paidTag(paidAt, lines, pays) : html`${copyOnly(p)}
+  ${paidSoFar > 0.004 ? html`<span class="fp-part">Pago ${money(paidSoFar)} · falta ${money(due)} <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>${payFiles(pays)}</span>` : ''}
+  ${canPay ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${lines}" data-who="${p.name}" data-amt="${due ?? p.amount}" data-paid="${paidSoFar}">${icon('check')}${paidSoFar > 0.004 ? 'Pagar restante' : 'Marcar pago'}</button>` : ''}`}</span>`;
 const copyBtn = p => actCell(p);
 const payText = list => list.map(p => `${p.name} — ${money(p.amount)}${p.pix ? ` — PIX ${p.pix_type ? `(${p.pix_type}) ` : ''}${p.pix}` : ' — SEM PIX'}`).join('\n');
 // Lista da folha: Quem recebe · PIX · Valor · Copiar
@@ -956,22 +965,47 @@ const payRow = (p, act = {}) => html`<li class="fp-row ${act.paidAt ? 'fp-isPaid
   ? html`<button type="button" class="fp-who fp-edit" data-open-p="${act.open}" title="Ver ou editar as diárias"><b>${p.name}</b><small>${p.what || p.role || ''}</small></button>`
   : html`<span class="fp-who"><b>${p.name}</b><small>${p.what || p.role || ''}</small></span>`}${pixCell(p)}<strong class="fp-num fp-val">${money(p.amount)}</strong>${actCell(p, act)}</li>`;
 
-// Marcar pago (pergunta a data) / desfazer
-async function askPaid(lines, who, amount, done) {
-  const r = await sheet({
-    title: 'Marcar como pago',
-    body: html`<p class="muted" style="margin-top:0">${who}${amount ? html` · <b>${money(amount)}</b>` : ''}</p>
+// Pagar: janela com quanto pagou (um lançamento: pode ser parcial), data, observação e comprovante (foto ou PDF)
+async function askPaid(lines, who, due, done, paidSoFar = 0) {
+  const single = lines.length === 1;
+  const p = sheet({
+    title: paidSoFar > 0.004 ? 'Pagar o restante' : 'Registrar pagamento',
+    body: html`<p class="muted" style="margin-top:0">${who}${single ? html` · a pagar <b>${money(due)}</b>${paidSoFar > 0.004 ? html` (já pago ${money(paidSoFar)})` : ''}` : html` · total <b>${money(due)}</b>`}</p>
+      ${single ? html`<div class="field"><label class="req" for="mp-v">Quanto pagou</label><input type="number" step="0.01" min="0.01" id="mp-v" name="amount" required value="${(Math.round(due * 100) / 100).toFixed(2)}"></div>
+        <div class="fm-live" id="mp-live"></div>`
+        : html`<p class="hint">Cada um recebe o valor que falta. Para pagar parte de alguém, use o botão da própria pessoa.</p>`}
       <div class="field"><label class="req" for="mp-d">Data do pagamento</label><input type="date" id="mp-d" name="paid_date" required value="${todayISO()}" max="${todayISO()}"></div>
+      <div class="field"><label for="mp-n">Observação</label><input type="text" id="mp-n" name="notes" maxlength="500" placeholder="Ex.: PIX enviado pelo celular da obra; adiantamento…"></div>
+      <div class="field"><label for="mp-f">Comprovante (foto ou PDF, opcional)</label><input type="file" id="mp-f" accept="image/*,application/pdf,.pdf" multiple></div>
       <span class="hint">Quando todos da folha estiverem pagos, o pagamento da folha é baixado no Financeiro automaticamente.</span>`,
-    submitLabel: 'Marcar pago',
-    onSubmit: f => api('/field/paid', { method: 'POST', body: { lines, paid: true, paid_date: f.paid_date } }),
+    submitLabel: 'Registrar pagamento',
+    async onSubmit(f, form) {
+      const files = await readAttachments(form.querySelector('#mp-f').files || []);
+      const body = { lines, paid: true, paid_date: f.paid_date, notes: f.notes, files };
+      if (single) {
+        const v = num(f.amount);
+        if (!(v > 0)) throw new Error('Informe quanto pagou.');
+        body.amount = v;
+      }
+      return api('/field/paid', { method: 'POST', body });
+    },
   });
-  if (r) { toast('Pagamento marcado.'); done(); }
+  // Mostra na hora se o pagamento é parcial (o restante segue a pagar) ou se passou do valor
+  const v = document.getElementById('mp-v'), live = document.getElementById('mp-live');
+  const upd = () => {
+    if (!live) return;
+    const x = num(v.value), rest = Math.round((due - x) * 100) / 100;
+    live.innerHTML = (rest > 0.004 ? html`<span>Pagamento <b>parcial</b>: continua a pagar <b>${money(rest)}</b></span>`
+      : rest < -0.004 ? html`<span class="fc-warn">Pagou <b>${money(-rest)}</b> a mais do que o valor a pagar</span>` : html`<span>Quita o valor a pagar</span>`).toString();
+  };
+  v?.addEventListener('input', upd); upd();
+  const r = await p;
+  if (r) { toast(r.partial ? 'Pagamento parcial registrado. O restante continua a pagar.' : 'Pagamento registrado.'); done(); }
 }
 function bindPaid(root, done, signal) {
   root.addEventListener('click', async e => {
     const p = e.target.closest('[data-pay]');
-    if (p) return askPaid(p.dataset.pay.split(','), p.dataset.who, Number(p.dataset.amt) || 0, done);
+    if (p) return askPaid(p.dataset.pay.split(','), p.dataset.who, Number(p.dataset.amt) || 0, done, Number(p.dataset.paid) || 0);
     const u = e.target.closest('[data-unpay]');
     if (u) {
       if (!(await confirmSheet('Desfazer pagamento', 'Volta a ficar a pagar. Se o pagamento da folha já estava baixado no Financeiro, ele volta a pendente.', 'Desfazer', true))) return;
@@ -982,8 +1016,8 @@ function bindPaid(root, done, signal) {
 
 // Lista da própria folha (valores ao vivo enquanto aberta)
 function sheetPayList(people, contracts, calcP, calcC) {
-  return [...people.map(e => ({ line: `p${e.id}`, worker_id: e.worker_id, paid_at: e.paid_at, name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: calcP(e).company, what: `${e.role || 'Diarista'} · ${n2(calcP(e).diarias)} diária(s)` })),
-    ...contracts.map(c => ({ line: `c${c.id}`, paid_at: c.paid_at, name: c.worker_name, role: 'Empreiteiro', pix: c.pix, pix_type: c.pix_type, amount: calcC(c).company, what: `Empreitada ${c.service} · ${n2(num(c.pct))}%` }))]
+  return [...people.map(e => ({ line: `p${e.id}`, worker_id: e.worker_id, paid_at: e.paid_at, paid_amount: e.paid_amount || 0, payments: e.payments || [], name: e.name, role: e.role, pix: e.pix, pix_type: e.pix_type, amount: calcP(e).company, what: `${e.role || 'Diarista'} · ${n2(calcP(e).diarias)} diária(s)` })),
+    ...contracts.map(c => ({ line: `c${c.id}`, paid_at: c.paid_at, paid_amount: c.paid_amount || 0, payments: c.payments || [], name: c.worker_name, role: 'Empreiteiro', pix: c.pix, pix_type: c.pix_type, amount: calcC(c).company, what: `Empreitada ${c.service} · ${n2(num(c.pct))}%` }))]
     .filter(p => p.amount > 0.004).sort((a, b) => b.amount - a.amount);
 }
 
@@ -1002,8 +1036,10 @@ export async function paymentsView({ query, navigate, render }) {
   const debtLi = x => html`<li class="fd-li"><a href="#/campo?obra=${x.project_id}"><b>Dívida anterior</b> · ${fmtDate(x.origin_date)}</a><small>${x.project_code} · ${x.kind_label} · ${x.reason}</small>
     <span class="${x.signed > 0 ? 'fd-owed' : 'fd-due'}">${x.signed > 0 ? '+' : '−'}${money(x.amount)} ${x.status === 'quitada' ? html`<span class="fp-paid">Quitada ${dm(x.settled_date)}</span>` : html`<span class="fc-pay">Em aberto</span>`}</span></li>`;
   const pendList = d.people.filter(p => p.pending > 0).map(p => ({ ...p, amount: p.pending }));
-  const stTxt = i => (i.state === 'pending' ? html`<span class="fc-pay">A pagar${i.due_date ? ` ${fmtDate(i.due_date)}` : ''}</span><button type="button" class="btn btn-ghost btn-sm" data-pay="${i.line}" data-who="${i.code}" data-amt="${i.amount}">Marcar pago</button>`
-    : i.state === 'paid' ? paidTag(i.paid_at, i.line) : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
+  // Lançamento: a pagar (com o já pago, se parcial), pago (com comprovante) ou previsto; abaixo, o histórico dos pagamentos
+  const payHist = i => (i.payments?.length ? html`<small class="fp-hist">${i.payments.map(x => html`<span>${dm(x.paid_date)} · ${money(x.amount)}${x.notes ? ` · ${x.notes}` : ''}${payFiles([x])}</span>`)}</small>` : '');
+  const stTxt = i => (i.state === 'pending' ? html`<span class="fc-pay">A pagar${i.due_date ? ` ${fmtDate(i.due_date)}` : ''}</span>${i.paid_amount ? html`<span class="fp-part">pago ${money(i.paid_amount)} de ${money(i.total)} <button type="button" class="fp-undo" data-unpay="${i.line}">desfazer</button></span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-pay="${i.line}" data-who="${i.code}" data-amt="${i.amount}" data-paid="${i.paid_amount || 0}">${i.paid_amount ? 'Pagar restante' : 'Marcar pago'}</button>${payHist(i)}`
+    : i.state === 'paid' ? html`${paidTag(i.paid_at, i.line, i.payments)}${payHist(i)}` : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
   return {
     title: 'Pagamentos · Folha de Campo',
     html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Pagamentos', sub: 'Quem recebe, quanto e o PIX: o que já foi pago, o que está a pagar e o previsto de cada pessoa, em todas as folhas.',
@@ -1024,7 +1060,8 @@ export async function paymentsView({ query, navigate, render }) {
           ${people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small>${debtTag(p)}</span>${pixCell(p)}
             <span class="fp-num fp-pd" data-l="Já pago">${p.paid ? money(p.paid) : '—'}</span>
             <strong class="fp-num fp-val" data-l="A pagar">${p.pending ? money(p.pending) : '—'}</strong><span class="fp-num fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span>
-            ${actCell({ ...p, amount: p.pending }, { canPay: p.pending > 0, lines: p.items.filter(i => i.state === 'pending').map(i => i.line).join(',') })}
+            ${(() => { const pend = p.items.filter(i => i.state === 'pending'); const one = pend.length === 1 ? pend[0] : null;
+              return actCell({ ...p, amount: p.pending }, { canPay: p.pending > 0, lines: pend.map(i => i.line).join(','), due: p.pending, paidSoFar: one ? one.paid_amount || 0 : 0, pays: one ? one.payments : [] }); })()}
             <details class="fp-det"><summary>${p.items.length} lançamento(s) · total ${money(p.paid + p.pending + p.open)}${p.debts.length ? ` · ${p.debts.length} dívida(s) anterior(es)` : ''}</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}${p.debts.map(debtLi)}</ul></details></li>`)}
           <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><span class="fp-num fp-pd" data-l="Já pago">${money(people.reduce((a, p) => a + p.paid, 0))}</span><strong class="fp-num fp-val" data-l="A pagar">${money(people.reduce((a, p) => a + p.pending, 0))}</strong><span class="fp-num fp-open" data-l="Previsto">${money(people.reduce((a, p) => a + p.open, 0))}</span><span></span></li></ul></section>`
         : html`<div class="empty-state"><h2>${onlyDue ? 'Ninguém com valor a receber' : 'Nenhum pagamento ainda'}</h2><p>${onlyDue ? 'Todas as folhas fechadas estão pagas.' : 'Os valores aparecem aqui quando houver folhas com diárias ou empreitadas.'}</p></div>`}

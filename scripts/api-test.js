@@ -2555,6 +2555,24 @@ async function main() {
   ok((await fcAna('GET', `/field/sheets/${fcS.id}`)).data.payment.status === 'pendente', 'desfazer um pagamento volta a folha a pendente no Financeiro');
   await fcAna('POST', '/field/paid', { lines: [lP, lC], paid: false });
   ok((await fcAna('GET', '/field/payments?obra=2')).data.totals.pending === fcCl2.payment.amount, 'desfeitos: tudo volta a pagar');
+  // Pagamento parcial: valor pago, observação e comprovante; o restante segue a pagar até completar
+  const fcDueP = fcLines.people.find(e => e.worker_id === fcP.id).company;
+  ok((await fcAna('POST', '/field/paid', { lines: [lP], amount: 0, paid_date: '2026-09-20' })).status === 400, 'pagamento exige o valor pago');
+  const fcPart = (await fcAna('POST', '/field/paid', { lines: [lP], amount: 100, paid_date: '2026-09-20', notes: 'Parcial (teste)', files: [{ data: tinyPng(), name: 'pix.png' }] })).data;
+  const fcPartS = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcP.id);
+  ok(fcPart.partial === 1 && fcPartS.paid_amount === 100 && !fcPartS.paid_at && fcPartS.payments[0].notes === 'Parcial (teste)' && fcPartS.payments[0].files.length === 1, 'pagamento parcial: registra o valor e o comprovante; a pessoa ainda não fica paga');
+  const fcPartPay = (await fcAna('GET', '/field/payments?obra=2&pagos=1')).data.people.find(p => p.worker_id === fcP.id);
+  const fcPartIt = fcPartPay.items.find(i => i.line === lP);
+  ok(fcPartIt.state === 'pending' && fcPartIt.amount === fcDueP - 100 && fcPartIt.paid_amount === 100 && fcPartPay.paid >= 100, 'Pagamentos: o já pago conta como pago e só o restante fica a pagar');
+  ok((await fcAna('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 200 && (await fcJul('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 403, 'comprovante do pagamento abre só para a seção');
+  ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com pagamento parcial registrado, a folha não reabre');
+  const fcRest = (await fcAna('POST', '/field/paid', { lines: [lP], paid_date: '2026-09-21' })).data;
+  const fcRestS = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcP.id);
+  ok(fcRest.partial === 0 && fcRest.total === fcDueP - 100 && fcRestS.paid_at === '2026-09-21' && fcRestS.paid_amount === fcDueP && fcRestS.payments.length === 2, 'pagar o restante completa e marca a pessoa como paga');
+  ok((await fcAna('POST', '/field/paid', { lines: [lP], paid_date: '2026-09-21' })).status === 400, 'quem já está pago não recebe outro pagamento');
+  await fcAna('POST', '/field/paid', { lines: [lP], paid: false });
+  const fcUndoS = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcP.id);
+  ok(!fcUndoS.paid_at && fcUndoS.paid_amount === 0 && !fcUndoS.payments.length && (await fcAna('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 404, 'desfazer apaga os pagamentos registrados e o comprovante');
   const fcAn = (await fcAna('GET', '/field/analysis')).data;
   const fcAnO = fcAn.obras.find(o => o.project_id === 2);
   ok(fcAnO && fcAnO.sheets === 2 && fcAnO.people === 1975 && fcAnO.contracts === 5000 && fcAnO.pending === fcCl2.payment.amount && fcAnO.diarias === 9.5, 'resumo por obra: folhas, mão de obra, empreitadas e a pagar');

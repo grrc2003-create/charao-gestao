@@ -282,6 +282,14 @@ api.put('/api/field/measurements/:id', (req, res, { ctx, params, body }) => send
 api.delete('/api/field/measurements/:id', (req, res, { ctx, params }) => send(res, 200, Field.deleteMeasurement(ctx, intOrNull(params.id), clientIp(req))));
 api.post('/api/field/measurements/:id/files', (req, res, { ctx, params, body }) => send(res, 200, Field.addMeasurementFilesApi(ctx, intOrNull(params.id), body, clientIp(req))));
 api.delete('/api/field/measurements/:id/files/:fid', (req, res, { ctx, params }) => send(res, 200, Field.removeMeasurementFile(ctx, intOrNull(params.id), intOrNull(params.fid), clientIp(req))));
+// Dívidas anteriores da obra
+api.get('/api/field/debts', (req, res, { ctx, query }) => send(res, 200, Field.listDebts(ctx, intOrNull(query.get('obra')))));
+api.post('/api/field/debts', (req, res, { ctx, body }) => send(res, 201, Field.createDebt(ctx, body, clientIp(req))));
+api.put('/api/field/debts/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.updateDebt(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/field/debts/:id/settle', (req, res, { ctx, params, body }) => send(res, 200, Field.settleDebt(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/field/debts/:id', (req, res, { ctx, params }) => send(res, 200, Field.deleteDebt(ctx, intOrNull(params.id), clientIp(req))));
+api.delete('/api/field/debts/:id/files/:fid', (req, res, { ctx, params }) => send(res, 200, Field.removeDebtFile(ctx, intOrNull(params.id), intOrNull(params.fid), clientIp(req))));
+api.get('/api/field-debt-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Field.debtFileForUser(ctx, intOrNull(params.id))));
 api.get('/api/field-measurement-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Field.measurementFileForUser(ctx, intOrNull(params.id))));
 
 // ---------- Folha (Administrativa): seção folha ----------

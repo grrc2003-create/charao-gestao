@@ -2484,6 +2484,27 @@ async function main() {
   ok(fmU.diff === -300 && fmU.result === 'pago_mais' && fmU.files.length === 1, 'folha acima do medido = pago a mais (e o BM continua anexado)');
   const fmL = (await fcAna('GET', '/field/measurements?obra=2')).data;
   ok(fmL.totals.measured === fmTot - 300 && fmL.totals.covered === fmTot && fmL.totals.diff === -300 && fmL.sheets.find(s => s.id === fcS.id).measurement_id === fmM.id && fmL.totals.paid_more === 300 && fmL.totals.left_over === 0, 'resumo da obra: medido x folhas cobertas, pago a mais e sobrando');
+  // Dívidas anteriores: com motivo, separadas por tipo; entram nos resumos, na medição e em Pagamentos
+  ok((await fcJul('GET', '/field/debts?obra=2')).status === 403, 'dívidas anteriores: só a seção Folha de Campo vê');
+  ok((await fcAna('POST', '/field/debts', { project_id: 2, kind: 'empresa_deve', worker_id: fcP.id, origin_date: '2026-08-10', amount: 300 })).status === 400, 'dívida exige o motivo');
+  ok((await fcAna('POST', '/field/debts', { project_id: 2, kind: 'empresa_deve', origin_date: '2026-08-10', amount: 300, reason: 'x' })).status === 400, 'dívida da empresa/profissional exige o profissional');
+  ok((await fcAna('POST', '/field/debts', { project_id: 2, kind: 'pago_mais', origin_date: '2026-08-10', amount: 10, reason: 'x', files: [{ data: tinyPng(), name: 'c.png' }] })).status === 400, 'comprovante da dívida precisa ser PDF');
+  const fdA = (await fcAna('POST', '/field/debts', { project_id: 2, kind: 'empresa_deve', worker_id: fcP.id, origin_date: '2026-08-10', amount: 300, reason: 'Diárias de agosto pagas em parte (teste)', files: [{ data: fmPdf, name: 'comprovante.pdf' }] })).data;
+  const fdB = (await fcAna('POST', '/field/debts', { project_id: 2, kind: 'profissional_deve', worker_id: fcH.id, origin_date: '2026-08-12', amount: 50, reason: 'Adiantamento (teste)' })).data;
+  const fdC = (await fcAna('POST', '/field/debts', { project_id: 2, kind: 'pago_mais', worker_id: fcP.id, origin_date: '2026-08-15', amount: 120, reason: 'Pago a mais antes do sistema (teste)' })).data;
+  ok(fdA.totals.empresa_deve === 300 && fdC.totals.profissional_deve === 50 && fdC.totals.pago_mais === 120 && fdC.debts.find(d => d.id === fdC.id).worker_id === null && fdA.debts.find(d => d.id === fdA.id).files.length === 1, 'dívidas lançadas por tipo (pago a mais anterior sem profissional) e com comprovante');
+  ok((await fcAna('GET', `/field-debt-files/${fdA.debts.find(d => d.id === fdA.id).files[0].id}`)).status === 200, 'comprovante da dívida abre para a seção');
+  ok((await fcAna('GET', '/field/measurements?obra=2')).data.totals.paid_more_prior === 120, 'pago a mais anterior entra no saldo da medição (discriminado)');
+  const fdPay = (await fcAna('GET', '/field/payments?obra=2&pagos=1')).data;
+  const fdPP = fdPay.people.find(p => p.worker_id === fcP.id), fdPH = fdPay.people.find(p => p.worker_id === fcH.id);
+  ok(fdPP.debt === 300 && fdPP.debts.length === 1 && fdPH.debt === -50 && fdPay.totals.debt_owed === 300 && fdPay.totals.debt_due === 50 && !fdPP.items.some(i => String(i.line).startsWith('d')), 'Pagamentos: dívida anterior separada por pessoa (+ empresa deve, − deve à empresa), fora do Marcar pago');
+  ok((await fcAna('GET', '/field/sheets?obra=2')).data.overview[0].debts.empresa_deve === 300, 'resumo da obra traz as dívidas anteriores em aberto');
+  const fdS = (await fcAna('POST', `/field/debts/${fdA.id}/settle`, { settled_date: '2026-09-01', settled_note: 'Pago em dinheiro (teste)' })).data;
+  ok(fdS.debts.find(d => d.id === fdA.id).status === 'quitada' && fdS.totals.empresa_deve === 0 && fdS.totals.settled === 300, 'quitar a dívida tira dos totais em aberto');
+  ok((await fcAna('GET', '/field/payments?obra=2')).data.people.find(p => p.worker_id === fcP.id)?.debt !== 300, 'dívida quitada sai do a receber em Pagamentos');
+  ok((await fcAna('POST', `/field/debts/${fdA.id}/settle`, { settled: false })).data.totals.empresa_deve === 300, 'reabrir a dívida volta para em aberto');
+  for (const id of [fdA.id, fdB.id, fdC.id]) await fcAna('DELETE', `/field/debts/${id}`);
+  ok((await fcAna('GET', '/field/debts?obra=2')).data.debts.length === 0, 'dívidas excluídas');
   ok((await fcAna('DELETE', `/field/measurements/${fmM.id}/files/${fmM.files[0].id}`)).data.measurements.find(x => x.id === fmM.id).files.length === 0, 'BM removido da medição');
   ok((await fcAna('DELETE', `/field/measurements/${fmM.id}`)).data.measurements.length === 0 && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.totals.total === fmTot, 'excluir a medição não mexe na folha');
   ok(fcA2.contracts[0].amount === 2000 && fcA2.contracts[0].after_pct === 40 && fcA2.totals.total === 3375 && fcA2.totals.company === 3275, 'empreitada medida em % do contrato; totais da folha');

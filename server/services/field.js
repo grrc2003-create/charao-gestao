@@ -287,6 +287,7 @@ export function listSheets(ctx, projectId) {
     const o = { ...p, sheets: list.length, open: list.filter(s => s.status === 'aberta').length, last: list[0] ? { id: list[0].id, code: list[0].code, start_date: list[0].start_date, end_date: list[0].end_date, status: list[0].status } : null,
       diarias: r2(list.reduce((a, s) => a + s.diarias, 0)), workers: wk.get(p.id) || 0, contracts: emp.get(p.id) || 0 };
     if (!money) return o;
+    o.debts = debtTotals(p.id);
     const pend = list.filter(s => s.payment && s.payment.status !== 'paga');
     return { ...o, total: r2(list.reduce((a, s) => a + s.totals.total, 0)), in_open: r2(list.filter(s => s.status === 'aberta').reduce((a, s) => a + s.totals.company, 0)),
       pending: r2(pend.reduce((a, s) => a + (s.payment.amount || 0), 0)), paid: r2(list.filter(s => s.payment?.status === 'paga').reduce((a, s) => a + (s.payment.amount || 0), 0)) };
@@ -584,10 +585,29 @@ export function payments(ctx, projectId, showPaid = false) {
       totals[state] = r2(totals[state] + l.amount);
     }
   }
+  // Dívidas anteriores da pessoa: separadas das folhas (não entram no "Marcar pago"); a empresa deve = a receber (+),
+  // o profissional deve = desconto (−). Quitadas só com "Mostrar pagos".
+  totals.debt_owed = 0; totals.debt_due = 0;
+  for (const d of all(`${DEBT_SQL} WHERE d.kind IN ('empresa_deve', 'profissional_deve') ORDER BY d.origin_date, d.id`)) {
+    if (!ids.has(d.project_id) || (projectId && d.project_id !== projectId) || (d.status === 'quitada' && !showPaid)) continue;
+    const w = one('SELECT id, name, role, pix, pix_type, doc FROM field_workers WHERE id = ?', d.worker_id);
+    if (!w) continue;
+    const g = groups.get(w.id) || { worker_id: w.id, name: w.name, role: w.role, pix: w.pix, pix_type: w.pix_type, doc: w.doc, pending: 0, open: 0, paid: 0, items: [] };
+    const signed = d.kind === 'empresa_deve' ? d.amount : -d.amount;
+    if (!g.debts) { g.debts = []; g.debt = 0; }
+    if (d.status === 'aberta') {
+      g.debt = r2(g.debt + signed);
+      if (signed > 0) totals.debt_owed = r2(totals.debt_owed + signed); else totals.debt_due = r2(totals.debt_due - signed);
+    }
+    const p = one('SELECT code, name FROM projects WHERE id = ?', d.project_id);
+    g.debts.push({ id: d.id, kind: d.kind, kind_label: DEBT_KINDS[d.kind], amount: d.amount, signed, reason: d.reason, origin_date: d.origin_date, status: d.status,
+      settled_date: d.settled_date, project_code: p?.code, project_name: p?.name, project_id: d.project_id });
+    groups.set(w.id, g);
+  }
   // PIX atual do cadastro quando a folha não tinha
   for (const g of groups.values()) if (!g.pix) { const w = one('SELECT pix, pix_type FROM field_workers WHERE id = ?', g.worker_id); if (w?.pix) { g.pix = w.pix; g.pix_type = w.pix_type; } }
   return {
-    people: [...groups.values()].map(g => ({ ...g, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total || b.paid - a.paid),
+    people: [...groups.values()].map(g => ({ ...g, debts: g.debts || [], debt: g.debt || 0, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total || b.paid - a.paid || Math.abs(b.debt || 0) - Math.abs(a.debt || 0)),
     totals: { ...totals, total: r2(totals.pending + totals.open) },
     projects: fillableProjects(ctx),
   };
@@ -683,7 +703,9 @@ export function listMeasurements(ctx, projectId) {
     // Saldo perante as medições: soma do que foi pago a mais (folhas acima do medido) e do que sobra (medido acima das folhas)
     totals: { measured, covered, diff: r2(measured - covered), uncovered_sheets: open.length, uncovered_total: r2(open.reduce((a, s) => a + s.total, 0)),
       paid_more: r2(measurements.filter(m => m.sheets.length && m.diff < 0).reduce((a, m) => a - m.diff, 0)),
-      left_over: r2(measurements.filter(m => m.sheets.length && m.diff > 0).reduce((a, m) => a + m.diff, 0)) },
+      left_over: r2(measurements.filter(m => m.sheets.length && m.diff > 0).reduce((a, m) => a + m.diff, 0)),
+      // Pago a mais anterior (dívidas em aberto do tipo pago_mais): somado ao pago a mais, discriminado
+      paid_more_prior: debtTotals(p.id).pago_mais },
   };
 }
 function readMeasurement(b, projectId, currentId = 0) {
@@ -782,5 +804,136 @@ export function measurementFileForUser(ctx, fileId) {
   const f = one('SELECT * FROM field_measurement_files WHERE id = ?', fileId);
   if (!f) throw notFound('Arquivo não encontrado.');
   loadMeasurement(ctx, f.measurement_id);
+  return f;
+}
+// ---------- Dívidas anteriores da obra ----------
+// Dívidas de antes do sistema (ou fora das folhas), com o motivo e comprovante em PDF opcional. Baixa só marcando "quitada".
+// empresa_deve / profissional_deve: ligadas a um profissional (aparecem em Pagamentos, separadas das folhas);
+// pago_mais: entra no saldo perante a medição do terceiro ("dos quais anterior").
+export const DEBT_KINDS = { empresa_deve: 'A empresa deve ao profissional', profissional_deve: 'O profissional deve à empresa', pago_mais: 'Pago a mais anterior (medição)' };
+const DEBT_SQL = `SELECT d.*, w.name AS worker_name, w.role AS worker_role, u.name AS settled_by_name FROM field_debts d
+  LEFT JOIN field_workers w ON w.id = d.worker_id LEFT JOIN users u ON u.id = d.settled_by`;
+const debtView = d => ({
+  id: d.id, project_id: d.project_id, kind: d.kind, kind_label: DEBT_KINDS[d.kind], worker_id: d.worker_id, worker_name: d.worker_name, worker_role: d.worker_role,
+  origin_date: d.origin_date, amount: d.amount, reason: d.reason, status: d.status, settled_date: d.settled_date, settled_note: d.settled_note, settled_by_name: d.settled_by_name,
+  files: all('SELECT id, mime, size, original_name, created_at FROM field_debt_files WHERE debt_id = ? ORDER BY id', d.id),
+});
+// Totais em aberto por tipo (usados no resumo, na medição e no relatório)
+export function debtTotals(projectId) {
+  const t = { empresa_deve: 0, profissional_deve: 0, pago_mais: 0, settled: 0, count_open: 0 };
+  for (const d of all('SELECT kind, amount, status FROM field_debts WHERE project_id = ?', projectId)) {
+    if (d.status === 'aberta') { t[d.kind] = r2(t[d.kind] + d.amount); t.count_open++; } else t.settled = r2(t.settled + d.amount);
+  }
+  return t;
+}
+export function listDebts(ctx, projectId) {
+  requireMoney(ctx);
+  const p = requireProject(ctx, projectId);
+  const debts = all(`${DEBT_SQL} WHERE d.project_id = ? ORDER BY d.status = 'quitada', d.origin_date DESC, d.id DESC`, p.id).map(debtView);
+  // Profissionais que podem ter dívida nesta obra: os ligados a ela (ou sem obra definida) e os já usados em dívidas
+  const workers = all(`SELECT id, name, role, kind, active FROM field_workers w WHERE (NOT EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id)
+    OR EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id AND x.project_id = ?) OR EXISTS (SELECT 1 FROM field_debts d WHERE d.worker_id = w.id AND d.project_id = ?))
+    ORDER BY active DESC, name`, p.id, p.id);
+  return { project: { id: p.id, code: p.code, name: p.name }, debts, workers, kinds: DEBT_KINDS, totals: debtTotals(p.id) };
+}
+function readDebt(b, projectId) {
+  const kind = DEBT_KINDS[b.kind] ? b.kind : null;
+  if (!kind) throw badRequest('Escolha o tipo da dívida.');
+  const d = {
+    kind,
+    origin_date: date(b.origin_date, 'Data de origem'),
+    amount: num(b.amount, 'Valor da dívida', { max: 1e9 }),
+    reason: str(b.reason, { max: 1000, required: true, label: 'Motivo' }),
+    worker_id: kind === 'pago_mais' ? null : intOrNull(b.worker_id),
+  };
+  if (!d.origin_date) throw badRequest('Informe a data de origem da dívida.');
+  if (!d.amount) throw badRequest('Informe o valor da dívida.');
+  if (kind !== 'pago_mais' && (!d.worker_id || !one('SELECT id FROM field_workers WHERE id = ?', d.worker_id))) throw badRequest('Escolha o profissional da dívida.');
+  if (d.worker_id && !workerInProject(d.worker_id, projectId) && !one('SELECT 1 FROM field_debts WHERE worker_id = ? AND project_id = ?', d.worker_id, projectId)) {
+    throw badRequest('Este profissional não está ligado a esta obra. Inclua a obra no cadastro dele em Profissionais.');
+  }
+  return d;
+}
+function addDebtFiles(ctx, id, files) {
+  const list = Array.isArray(files) ? files.slice(0, 10) : [];
+  if (list.some(f => !String(f?.data || '').startsWith('data:application/pdf;base64,'))) throw badRequest('O comprovante precisa ser um arquivo PDF.');
+  for (const f of list) {
+    const saved = saveImageFromDataUrl(f?.data);
+    if (saved.mime !== 'application/pdf') { deleteStored(saved.stored_name); throw badRequest('O comprovante precisa ser um arquivo PDF.'); }
+    run('INSERT INTO field_debt_files (debt_id, stored_name, mime, size, original_name, uploaded_by) VALUES (?,?,?,?,?,?)', id, saved.stored_name, saved.mime, saved.size, cleanFileName(f.name), ctx.user.id);
+  }
+  return list.length;
+}
+function loadDebt(ctx, id) {
+  requireMoney(ctx);
+  const d = one('SELECT * FROM field_debts WHERE id = ?', id);
+  if (!d) throw notFound('Dívida não encontrada.');
+  requireProject(ctx, d.project_id);
+  return d;
+}
+export function createDebt(ctx, body, ip) {
+  requireMoney(ctx);
+  const b = body || {};
+  const projectId = intOrNull(b.project_id);
+  if (!projectId) throw badRequest('Escolha a obra.');
+  requireProject(ctx, projectId);
+  const d = readDebt(b, projectId);
+  const id = tx(() => {
+    const nid = Number(run('INSERT INTO field_debts (project_id, kind, worker_id, origin_date, amount, reason, created_by) VALUES (?,?,?,?,?,?,?)',
+      projectId, d.kind, d.worker_id, d.origin_date, d.amount, d.reason, ctx.user.id).lastInsertRowid);
+    addDebtFiles(ctx, nid, b.files);
+    return nid;
+  });
+  audit(ctx.user.id, 'field', id, 'Dívida anterior lançada', { obra: projectId, tipo: d.kind, valor: d.amount }, ip);
+  return { id, ...listDebts(ctx, projectId) };
+}
+export function updateDebt(ctx, id, body, ip) {
+  const cur = loadDebt(ctx, id);
+  const b = body || {};
+  const d = readDebt(b, cur.project_id);
+  tx(() => {
+    run(`UPDATE field_debts SET kind = ?, worker_id = ?, origin_date = ?, amount = ?, reason = ?, updated_at = datetime('now') WHERE id = ?`, d.kind, d.worker_id, d.origin_date, d.amount, d.reason, cur.id);
+    addDebtFiles(ctx, cur.id, b.files);
+  });
+  audit(ctx.user.id, 'field', cur.id, 'Dívida anterior atualizada', { tipo: d.kind, valor: d.amount }, ip);
+  return { id: cur.id, ...listDebts(ctx, cur.project_id) };
+}
+// Quitar (data e observação) ou reabrir
+export function settleDebt(ctx, id, body, ip) {
+  const cur = loadDebt(ctx, id);
+  const b = body || {};
+  if (b.settled === false) {
+    run(`UPDATE field_debts SET status = 'aberta', settled_date = NULL, settled_note = NULL, settled_by = NULL, updated_at = datetime('now') WHERE id = ?`, cur.id);
+    audit(ctx.user.id, 'field', cur.id, 'Dívida anterior reaberta', { valor: cur.amount }, ip);
+  } else {
+    const sd = date(b.settled_date, 'Data da quitação') || today();
+    if (sd > today()) throw badRequest('A data da quitação não pode ser no futuro.');
+    run(`UPDATE field_debts SET status = 'quitada', settled_date = ?, settled_note = ?, settled_by = ?, updated_at = datetime('now') WHERE id = ?`,
+      sd, str(b.settled_note, { max: 500, label: 'Observação da quitação' }), ctx.user.id, cur.id);
+    audit(ctx.user.id, 'field', cur.id, 'Dívida anterior quitada', { valor: cur.amount, data: sd }, ip);
+  }
+  return { id: cur.id, ...listDebts(ctx, cur.project_id) };
+}
+export function deleteDebt(ctx, id, ip) {
+  const cur = loadDebt(ctx, id);
+  const files = all('SELECT stored_name FROM field_debt_files WHERE debt_id = ?', cur.id);
+  run('DELETE FROM field_debts WHERE id = ?', cur.id);
+  for (const f of files) deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', cur.id, 'Dívida anterior excluída', { tipo: cur.kind, valor: cur.amount }, ip);
+  return listDebts(ctx, cur.project_id);
+}
+export function removeDebtFile(ctx, id, fileId, ip) {
+  const cur = loadDebt(ctx, id);
+  const f = one('SELECT * FROM field_debt_files WHERE id = ? AND debt_id = ?', fileId, cur.id);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  run('DELETE FROM field_debt_files WHERE id = ?', f.id);
+  deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', cur.id, 'Comprovante removido da dívida anterior', { arquivo: f.original_name }, ip);
+  return { id: cur.id, ...listDebts(ctx, cur.project_id) };
+}
+export function debtFileForUser(ctx, fileId) {
+  const f = one('SELECT * FROM field_debt_files WHERE id = ?', fileId);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  loadDebt(ctx, f.debt_id);
   return f;
 }

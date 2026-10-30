@@ -62,19 +62,30 @@ const MEAS_RES = {
 const diffBadge = (result, diff) => { const r = MEAS_RES[result] || MEAS_RES.sem_folhas; return html`<span class="fm-badge ${r.cls}">${r.label}${['pago_mais', 'pago_menos'].includes(result) ? ` ${money(Math.abs(diff))}` : ''}</span>`; };
 const resultOf = (amount, total, n) => (!n ? 'sem_folhas' : Math.abs(amount - total) < 0.005 ? 'igual' : amount > total ? 'pago_menos' : 'pago_mais');
 const bmLink = f => html`<a class="fm-file" href="/api/field-measurement-files/${f.id}" target="_blank" rel="noopener">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${f.original_name || (f.mime === 'application/pdf' ? 'BM.pdf' : 'BM (imagem)')}</a>`;
-function measSection(m) {
-  const t = m.totals;
-  return html`<section class="card section fm-card"><div class="card-head"><h2>${icon('contract')}Medição do terceiro</h2>
-      <button type="button" class="btn btn-ghost btn-sm" data-meas-new>${icon('plus')}Nova medição</button></div>
-    ${m.measurements.length ? html`<div class="pf-kpis fm-kpis">
+// Um card só: medição do terceiro + dívidas anteriores — totais juntos, o detalhe do "anterior" e as duas listas
+function measSection(m, dv) {
+  const t = m.totals, dt = dv?.totals || { empresa_deve: 0, profissional_deve: 0, pago_mais: 0 };
+  const debts = dv?.debts || [];
+  const priorOpen = debts.filter(d => d.kind === 'pago_mais' && d.status === 'aberta');
+  const any = m.measurements.length || debts.length;
+  const saldo = t.diff - t.paid_more_prior;
+  return html`<section class="card section fm-card"><div class="card-head"><h2>${icon('contract')}Medição do terceiro e dívidas anteriores</h2>
+      <button type="button" class="btn btn-ghost btn-sm" data-meas-new>${icon('plus')}Nova medição</button>
+      ${dv ? html`<button type="button" class="btn btn-ghost btn-sm" data-debt-new>${icon('plus')}Dívida anterior</button>` : ''}</div>
+    ${any ? html`<div class="pf-kpis fm-kpis">
         <div><span>Medido (BM)</span><b>${money(t.measured)}</b><small>${m.measurements.length} medição(ões)</small></div>
         <div><span>Folhas cobertas</span><b>${money(t.covered)}</b><small>mão de obra + empreitadas</small></div>
-        <div><span>Pago a mais até agora</span><b class="${t.paid_more > 0.004 ? 'fm-neg' : ''}">${money(t.paid_more)}</b><small>folhas acima do medido</small></div>
+        <div><span>Pago a mais até agora</span><b class="${t.paid_more + t.paid_more_prior > 0.004 ? 'fm-neg' : ''}">${money(t.paid_more + t.paid_more_prior)}</b><small>${t.paid_more_prior ? `folhas ${money(t.paid_more)} + anterior ${money(t.paid_more_prior)}` : 'folhas acima do medido'}</small></div>
         <div><span>Sobrando da medição</span><b class="${t.left_over > 0.004 ? 'fm-pos' : ''}">${money(t.left_over)}</b><small>medido acima das folhas</small></div>
-        <div><span>Saldo (medido − folhas)</span><b class="${t.diff < -0.004 ? 'fm-neg' : t.diff > 0.004 ? 'fm-pos' : ''}">${money(t.diff)}</b>${diffBadge(resultOf(t.measured, t.covered, m.sheets.length - t.uncovered_sheets), t.diff)}</div>
+        <div><span>Saldo (medido − folhas${t.paid_more_prior ? ' − anterior' : ''})</span><b class="${saldo < -0.004 ? 'fm-neg' : saldo > 0.004 ? 'fm-pos' : ''}">${money(saldo)}</b>${m.measurements.length ? diffBadge(resultOf(t.measured, t.covered + t.paid_more_prior, m.sheets.length - t.uncovered_sheets), saldo) : ''}</div>
         <div><span>Folhas sem medição</span><b>${t.uncovered_sheets}</b><small>${money(t.uncovered_total)}</small></div>
+        ${dv && (dt.empresa_deve || dt.profissional_deve) ? html`<div><span>Empresa deve (anterior)</span><b class="fd-owed">${money(dt.empresa_deve)}</b><small>a pagar aos profissionais</small></div>
+          <div><span>Devem à empresa (anterior)</span><b class="fd-due">${money(dt.profissional_deve)}</b><small>a descontar dos profissionais</small></div>` : ''}
       </div>
-      <ul class="fm-list">${m.measurements.map(x => html`<li class="fm-item">
+      ${priorOpen.length ? html`<div class="fd-prior"><b>O que é o "anterior" (${money(t.paid_more_prior)}):</b>
+        <ul>${priorOpen.map(d => html`<li><b class="fd-more">${money(d.amount)}</b> · origem ${fmtDate(d.origin_date)} — ${d.reason}</li>`)}</ul></div>` : ''}` : ''}
+    <div class="fm-sub"><h3 class="fm-subh">Medições do terceiro ${m.measurements.length ? html`<small>(${m.measurements.length})</small>` : ''}</h3>
+    ${m.measurements.length ? html`<ul class="fm-list">${m.measurements.map(x => html`<li class="fm-item">
         <div class="fm-top"><div><b>${x.supplier || 'Terceiro'}</b><small>Medição de ${fmtDate(x.ref_date)}</small></div>
           <button type="button" class="btn btn-ghost btn-sm" data-meas-ed="${x.id}">${icon('edit')}Editar</button></div>
         <div class="fm-cmp">
@@ -87,7 +98,8 @@ function measSection(m) {
         ${x.files.length ? html`<div class="fm-files">${x.files.map(bmLink)}</div>` : html`<p class="fc-warn fm-nofile">${icon('alert')}BM não anexado</p>`}
         ${x.notes ? html`<p class="muted fm-notes">${x.notes}</p>` : ''}
       </li>`)}</ul>`
-    : html`<p class="muted card-body">Quando o terceiro medir o serviço desta obra, lance aqui o valor da medição, anexe o BM e escolha as folhas que ela deveria cobrir. O sistema mostra se a folha ficou acima (pago a mais) ou abaixo (pago a menos) do medido.</p>`}
+    : html`<p class="muted card-body">Quando o terceiro medir o serviço desta obra, lance o valor da medição, anexe o BM e escolha as folhas que ela deveria cobrir. O sistema mostra se a folha ficou acima (pago a mais) ou abaixo (pago a menos) do medido.</p>`}</div>
+    ${dv ? html`<div class="fm-sub"><h3 class="fm-subh">Dívidas anteriores ${debts.length ? html`<small>(${debts.length})</small>` : ''}</h3>${debtList(debts)}</div>` : ''}
   </section>`;
 }
 function measForm(m, x, obra, done) {
@@ -146,6 +158,85 @@ function measForm(m, x, obra, done) {
     return done(!!r || !!x);
   });
 }
+// ---------- Dívidas anteriores da obra ----------
+const DEBT_CLS = { empresa_deve: 'fd-owed', profissional_deve: 'fd-due', pago_mais: 'fd-more' };
+const debtFile = f => html`<a class="fm-file" href="/api/field-debt-files/${f.id}" target="_blank" rel="noopener">${icon('file')}${f.original_name || 'comprovante.pdf'}</a>`;
+// Lista detalhada das dívidas: tipo, pessoa, origem, valor, situação, motivo, quitação e comprovante
+function debtList(debts) {
+  return debts.length ? html`<ul class="fm-list">${debts.map(d => html`<li class="fm-item fd-item ${d.status === 'quitada' ? 'fd-done' : ''}">
+        <div class="fm-top"><div><b>${d.worker_name || 'Obra (medição do terceiro)'}</b><small>${d.kind_label} · origem ${fmtDate(d.origin_date)}</small></div>
+          <span class="fd-acts">${d.status === 'aberta' ? html`<button type="button" class="btn btn-ghost btn-sm" data-debt-settle="${d.id}">${icon('check')}Quitar</button>` : html`<button type="button" class="btn btn-ghost btn-sm" data-debt-reopen="${d.id}">Reabrir</button>`}
+            <button type="button" class="btn btn-ghost btn-sm" data-debt-ed="${d.id}">${icon('edit')}Editar</button></span></div>
+        <div class="fm-cmp"><div><span>Valor</span><b class="${DEBT_CLS[d.kind]}">${money(d.amount)}</b></div>
+          <span class="fm-badge ${d.status === 'quitada' ? 'fm-menos' : 'fm-igual'}">${d.status === 'quitada' ? `Quitada ${fmtDate(d.settled_date)}` : 'Em aberto'}</span></div>
+        <p class="fd-reason"><b>Motivo:</b> ${d.reason}</p>
+        ${d.status === 'quitada' && d.settled_note ? html`<p class="muted fm-notes">Quitação: ${d.settled_note}${d.settled_by_name ? ` · ${d.settled_by_name}` : ''}</p>` : ''}
+        ${d.files.length ? html`<div class="fm-files">${d.files.map(debtFile)}</div>` : ''}
+      </li>`)}</ul>`
+    : html`<p class="muted card-body">Lance o que já se devia antes das folhas do sistema, com o motivo: quanto a empresa deve a um profissional, quanto um profissional deve à empresa (ex.: adiantamento) ou quanto a obra já tinha pago a mais do que o terceiro mediu.</p>`;
+}
+function debtForm(dv, x, obra, done) {
+  const kindOpts = Object.entries(dv.kinds).map(([k, l]) => html`<option value="${k}" ${(x?.kind || 'empresa_deve') === k ? 'selected' : ''}>${l}</option>`);
+  const p = sheet({
+    title: x ? 'Editar dívida anterior' : 'Lançar dívida anterior',
+    wide: true,
+    body: html`<div class="field"><label class="req" for="fd-k">Tipo</label><select id="fd-k" name="kind">${kindOpts}</select></div>
+      <div class="field" id="fd-wf"><label class="req" for="fd-w">Profissional</label><select id="fd-w" name="worker_id"><option value="">Escolha…</option>${dv.workers.map(w => html`<option value="${w.id}" ${x?.worker_id === w.id ? 'selected' : ''}>${w.name}${w.role ? ` · ${w.role}` : ''}${w.active ? '' : ' (inativo)'}</option>`)}</select></div>
+      <div class="form-row"><div class="field"><label class="req" for="fd-d">Data de origem</label><input type="date" id="fd-d" name="origin_date" required value="${x?.origin_date || ''}"></div>
+        <div class="field"><label class="req" for="fd-v">Valor</label><input type="number" step="0.01" min="0" id="fd-v" name="amount" required value="${x?.amount ?? ''}"></div></div>
+      <div class="field"><label class="req" for="fd-r">Motivo (por que existe essa dívida)</label><textarea id="fd-r" name="reason" rows="3" maxlength="1000" required placeholder="Ex.: diárias de agosto pagas só em parte; adiantamento para compra de ferramenta…">${x?.reason || ''}</textarea></div>
+      <div class="field"><label for="fd-f">Comprovante (PDF, opcional)</label><input type="file" id="fd-f" accept="application/pdf,.pdf" multiple>
+        ${x?.files.length ? html`<div class="fm-files fm-files-ed">${x.files.map(f => html`<span>${debtFile(f)}<button type="button" class="icon-btn" data-fd-rmf="${f.id}" aria-label="Remover ${f.original_name || 'arquivo'}">${icon('x')}</button></span>`)}</div>` : ''}</div>
+      ${x ? html`<button type="button" class="btn btn-ghost btn-sm pf-danger" id="fd-del" data-close>${icon('trash')}Excluir dívida</button>` : ''}`,
+    submitLabel: x ? 'Salvar' : 'Lançar dívida',
+    async onSubmit(f, form) {
+      const picked = [...(form.querySelector('#fd-f').files || [])];
+      const notPdf = picked.find(y => !isPdfFile(y));
+      if (notPdf) throw new Error(`O comprovante precisa ser PDF ("${notPdf.name}" não é).`);
+      const files = await readAttachments(picked);
+      return api(x ? `/field/debts/${x.id}` : '/field/debts', { method: x ? 'PUT' : 'POST', body: { ...f, project_id: obra, files } });
+    },
+  });
+  // O profissional só vale para "a empresa deve" e "o profissional deve"
+  const k = document.getElementById('fd-k'), wf = document.getElementById('fd-wf');
+  const sync = () => { wf.hidden = k.value === 'pago_mais'; };
+  k.addEventListener('change', sync); sync();
+  let del = false;
+  wf.closest('form').querySelectorAll('[data-fd-rmf]').forEach(b => b.addEventListener('click', async () => {
+    try { await api(`/field/debts/${x.id}/files/${b.dataset.fdRmf}`, { method: 'DELETE' }); b.parentElement.remove(); toast('Arquivo removido.'); } catch (ex) { toast(ex.message, 'error'); }
+  }));
+  document.getElementById('fd-del')?.addEventListener('click', () => { del = true; });
+  return p.then(async r => {
+    if (del) {
+      if (!(await confirmSheet('Excluir dívida', `Excluir a dívida de ${money(x.amount)}${x.worker_name ? ` (${x.worker_name})` : ''}? O comprovante também é apagado.`, 'Excluir', true))) return done(false);
+      try { await api(`/field/debts/${x.id}`, { method: 'DELETE' }); toast('Dívida excluída.'); } catch (ex) { toast(ex.message, 'error'); }
+      return done(true);
+    }
+    if (r) toast(x ? 'Dívida salva.' : 'Dívida lançada.');
+    return done(!!r || !!x);
+  });
+}
+async function settleForm(d, done) {
+  const r = await sheet({
+    title: 'Quitar dívida anterior',
+    body: html`<p class="muted" style="margin-top:0">${d.worker_name || 'Obra'} · ${d.kind_label} · <b>${money(d.amount)}</b></p>
+      <div class="field"><label class="req" for="fq-d">Data da quitação</label><input type="date" id="fq-d" name="settled_date" required value="${todayISO()}" max="${todayISO()}"></div>
+      <div class="field"><label for="fq-n">Observação</label><input type="text" id="fq-n" name="settled_note" maxlength="500" placeholder="Ex.: pago em dinheiro; descontado na FC-05…"></div>`,
+    submitLabel: 'Marcar quitada',
+    onSubmit: f => api(`/field/debts/${d.id}/settle`, { method: 'POST', body: f }),
+  });
+  if (r) { toast('Dívida quitada.'); done(true); }
+}
+function bindDebts(root, dv, obra, render) {
+  const find = id => dv.debts.find(d => d.id === Number(id));
+  root.querySelector('[data-debt-new]')?.addEventListener('click', () => debtForm(dv, null, obra, ch => ch && render()));
+  root.querySelectorAll('[data-debt-ed]').forEach(b => b.addEventListener('click', () => debtForm(dv, find(b.dataset.debtEd), obra, ch => ch && render())));
+  root.querySelectorAll('[data-debt-settle]').forEach(b => b.addEventListener('click', () => settleForm(find(b.dataset.debtSettle), ch => ch && render())));
+  root.querySelectorAll('[data-debt-reopen]').forEach(b => b.addEventListener('click', async () => {
+    if (!(await confirmSheet('Reabrir dívida', 'A dívida volta a ficar em aberto (a quitação é apagada).', 'Reabrir'))) return;
+    try { await api(`/field/debts/${b.dataset.debtReopen}/settle`, { method: 'POST', body: { settled: false } }); toast('Dívida reaberta.'); render(); } catch (ex) { toast(ex.message, 'error'); }
+  }));
+}
 function bindMeasurements(root, m, obra, render) {
   root.querySelector('[data-meas-new]')?.addEventListener('click', () => measForm(m, null, obra, ch => ch && render()));
   root.querySelectorAll('[data-meas-ed]').forEach(b => b.addEventListener('click', () => measForm(m, m.measurements.find(x => x.id === Number(b.dataset.measEd)), obra, ch => ch && render())));
@@ -157,7 +248,7 @@ export async function list({ query, navigate, state, render }) {
   const d = await api('/field/sheets', { query: { obra: obra || '' } });
   if (!obra || !d.projects.some(p => p.id === obra)) return obrasView(d);
   const mny = d.can_money;
-  const meas = mny ? await api('/field/measurements', { query: { obra } }) : null;
+  const [meas, debts] = mny ? await Promise.all([api('/field/measurements', { query: { obra } }), api('/field/debts', { query: { obra } })]) : [null, null];
   const measOf = new Map((meas?.sheets || []).filter(x => x.measurement_id).map(x => [x.id, x.measurement_id]));
   const o = d.overview.find(x => x.id === obra);
   const projOpts = sel => d.projects.map(p => html`<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`);
@@ -181,8 +272,9 @@ export async function list({ query, navigate, state, render }) {
           ${kp('Profissionais', o.workers, html`<a href="#/campo/profissionais?obra=${obra}">ver lista</a>`)}
           ${kp('Empreitadas', o.contracts, html`<a href="#/campo/empreitadas?obra=${obra}">em andamento</a>`)}
           ${mny ? html`${kp('Total das folhas', money(o.total))}${kp('Em folhas abertas', money(o.in_open))}${kp('A pagar', money(o.pending))}${kp('Pago', money(o.paid))}` : ''}
+          ${mny && (o.debts.empresa_deve || o.debts.profissional_deve) ? html`${kp('Empresa deve (anterior)', money(o.debts.empresa_deve), 'dívida anterior em aberto')}${kp('Devem à empresa (anterior)', money(o.debts.profissional_deve), 'dívida anterior em aberto')}` : ''}
         </div></section>
-      ${meas ? measSection(meas) : ''}
+      ${meas ? measSection(meas, debts) : ''}
       <h2 class="fc-h2 section">Folhas</h2>
       ${d.sheets.length ? html`<div class="pf-months">${d.sheets.map(s => html`<a class="pf-mcard" href="#/campo/${s.id}">
           <div class="pf-mtop"><b>${s.project_code} · ${s.code}</b>${stTag(s.status)}</div>
@@ -198,6 +290,7 @@ export async function list({ query, navigate, state, render }) {
       root.querySelector('#fc-obra').addEventListener('change', e => navigate(`/campo${e.target.value ? `?obra=${e.target.value}` : ''}`));
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
       if (meas) bindMeasurements(root, meas, obra, render);
+      if (debts) bindDebts(root, debts, obra, render);
       root.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
         if (!d.projects.length) return toast('Nenhuma obra liberada para a Folha de Campo.', 'error');
         const last = obra && d.sheets.find(s => s.project_id === obra);
@@ -901,9 +994,13 @@ export async function paymentsView({ query, navigate, render }) {
   const d = await api('/field/payments', { query: { obra: obra || '', pagos: '1' } });
   const qsOf = (o, due) => { const q = new URLSearchParams(); if (o) q.set('obra', o); if (due) q.set('ver', 'areceber'); const x = q.toString(); return `/campo/pagamentos${x ? `?${x}` : ''}`; };
   const t = d.totals;
-  const people = d.people.filter(p => !onlyDue || p.pending > 0 || p.open > 0)
+  const people = d.people.filter(p => !onlyDue || p.pending > 0 || p.open > 0 || p.debt > 0)
     .map(p => ({ ...p, items: [...p.items].sort((a, b) => ({ pending: 0, open: 1, paid: 2 }[a.state] - { pending: 0, open: 1, paid: 2 }[b.state]) || String(b.paid_at || b.period).localeCompare(String(a.paid_at || a.period))) }));
-  const nDue = d.people.filter(p => p.pending > 0 || p.open > 0).length;
+  const nDue = d.people.filter(p => p.pending > 0 || p.open > 0 || p.debt > 0).length;
+  // Dívida anterior da pessoa (separada das folhas): + a empresa deve · − a pessoa deve à empresa
+  const debtTag = p => (p.debt ? html`<small class="fd-tag ${p.debt > 0 ? 'fd-owed' : 'fd-due'}">Dívida anterior: ${p.debt > 0 ? 'empresa deve' : 'deve à empresa'} ${money(Math.abs(p.debt))}</small>` : '');
+  const debtLi = x => html`<li class="fd-li"><a href="#/campo?obra=${x.project_id}"><b>Dívida anterior</b> · ${fmtDate(x.origin_date)}</a><small>${x.project_code} · ${x.kind_label} · ${x.reason}</small>
+    <span class="${x.signed > 0 ? 'fd-owed' : 'fd-due'}">${x.signed > 0 ? '+' : '−'}${money(x.amount)} ${x.status === 'quitada' ? html`<span class="fp-paid">Quitada ${dm(x.settled_date)}</span>` : html`<span class="fc-pay">Em aberto</span>`}</span></li>`;
   const pendList = d.people.filter(p => p.pending > 0).map(p => ({ ...p, amount: p.pending }));
   const stTxt = i => (i.state === 'pending' ? html`<span class="fc-pay">A pagar${i.due_date ? ` ${fmtDate(i.due_date)}` : ''}</span><button type="button" class="btn btn-ghost btn-sm" data-pay="${i.line}" data-who="${i.code}" data-amt="${i.amount}">Marcar pago</button>`
     : i.state === 'paid' ? paidTag(i.paid_at, i.line) : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
@@ -919,14 +1016,16 @@ export async function paymentsView({ query, navigate, render }) {
         <div class="pf-kt"><span>A pagar (folhas fechadas)</span><b>${money(t.pending)}</b></div>
         <div><span>Previsto (folhas abertas)</span><b>${money(t.open)}</b></div>
         <div><span>Já pago</span><b class="fr-ok">${money(t.paid)}</b></div>
+        ${t.debt_owed ? html`<div><span>Dívida anterior (empresa deve)</span><b class="fd-owed">${money(t.debt_owed)}</b></div>` : ''}
+        ${t.debt_due ? html`<div><span>Dívida anterior (devem à empresa)</span><b class="fd-due">${money(t.debt_due)}</b></div>` : ''}
       </div>
       ${people.length ? html`<section class="card section"><ul class="fp-list fp-list2">
           <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Já pago</span><span class="fp-num">A pagar</span><span class="fp-num">Previsto</span><span></span></li>
-          ${people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small></span>${pixCell(p)}
+          ${people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small>${debtTag(p)}</span>${pixCell(p)}
             <span class="fp-num fp-pd" data-l="Já pago">${p.paid ? money(p.paid) : '—'}</span>
             <strong class="fp-num fp-val" data-l="A pagar">${p.pending ? money(p.pending) : '—'}</strong><span class="fp-num fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span>
             ${actCell({ ...p, amount: p.pending }, { canPay: p.pending > 0, lines: p.items.filter(i => i.state === 'pending').map(i => i.line).join(',') })}
-            <details class="fp-det"><summary>${p.items.length} lançamento(s) · total ${money(p.paid + p.pending + p.open)}</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}</ul></details></li>`)}
+            <details class="fp-det"><summary>${p.items.length} lançamento(s) · total ${money(p.paid + p.pending + p.open)}${p.debts.length ? ` · ${p.debts.length} dívida(s) anterior(es)` : ''}</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}${p.debts.map(debtLi)}</ul></details></li>`)}
           <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><span class="fp-num fp-pd" data-l="Já pago">${money(people.reduce((a, p) => a + p.paid, 0))}</span><strong class="fp-num fp-val" data-l="A pagar">${money(people.reduce((a, p) => a + p.pending, 0))}</strong><span class="fp-num fp-open" data-l="Previsto">${money(people.reduce((a, p) => a + p.open, 0))}</span><span></span></li></ul></section>`
         : html`<div class="empty-state"><h2>${onlyDue ? 'Ninguém com valor a receber' : 'Nenhum pagamento ainda'}</h2><p>${onlyDue ? 'Todas as folhas fechadas estão pagas.' : 'Os valores aparecem aqui quando houver folhas com diárias ou empreitadas.'}</p></div>`}
       <p class="muted pf-foot">O pagamento é registrado no Financeiro (uma tarefa por folha fechada, com esta mesma lista). Folhas abertas aparecem como previsto até serem fechadas.</p>`,

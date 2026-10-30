@@ -19,7 +19,7 @@ const keep = rows => (rows <= KEEP_ROWS ? 'avoid' : 'fr-flow');
 // Partes do relatório: [chave, rótulo, só com valores]
 const PARTS = [
   ['pres', 'Presença por dia'], ['dia', 'Equipe por dia'], ['pes', 'Por pessoa'], ['serv', 'Por serviço e função'],
-  ['emp', 'Empreitadas'], ['med', 'Comparação com a medição', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
+  ['emp', 'Empreitadas'], ['med', 'Comparação com a medição', true], ['div', 'Dívidas anteriores', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
 ];
 
 // BM em PDF: cada página vira imagem no próprio navegador (pdf.js servido pelo site) para sair na impressão.
@@ -83,10 +83,16 @@ export async function view({ query, setQuery, render }) {
   // Folhas da obra no período (pelo cruzamento das datas) e o detalhe de cada uma
   const list = obraSheets.filter(s => (pickedOk ? picked.has(s.id) : (!de || s.end_date >= de) && (!ate || s.start_date <= ate)))
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
-  const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny && (on('med') || on('bm')) ? api('/field/measurements', { query: { obra } }) : null]);
+  const [sheets, meas, dv] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny && (on('med') || on('bm')) ? api('/field/measurements', { query: { obra } }) : null,
+    mny && on('div') ? api('/field/debts', { query: { obra } }) : null]);
   // BM das medições que cobrem alguma folha do relatório (ou todas, sem filtro de período)
   const inReport = new Set(sheets.map(s => s.id));
   // Em ordem cronológica das medições
+  // Dívidas anteriores da obra (todas, independentes do período); com filtro de pessoa, só as dela
+  const debts = dv ? dv.debts.filter(d => !pessoa || d.worker_id === pessoa) : [];
+  const debtOpen = k => debts.filter(d => d.kind === k && d.status === 'aberta').reduce((a, d) => a + d.amount, 0);
+  const prior = dv && on('div') ? debtOpen('pago_mais') : 0;
+  const debtFiles = debts.flatMap(d => d.files.filter(f => f.mime === 'application/pdf').map(f => ({ d, f })));
   const bms = meas && on('bm') ? meas.measurements.filter(m => m.files.length && (!(de || ate || pickedOk) || m.sheets.some(s => inReport.has(s.id)))).reverse() : [];
 
   // Filtros de pessoa e função valem para as partes de mão de obra
@@ -178,8 +184,14 @@ export async function view({ query, setQuery, render }) {
       ${on('med') && meas?.measurements.length ? html`<h4 class="fr-h4" style="margin-top:10px">Saldo das folhas perante a medição do terceiro (obra até hoje)</h4><div class="r-kpis">
         ${kpi('Medido (BM)', money(meas.totals.measured), `${meas.measurements.length} medição(ões)`)}
         ${kpi('Folhas cobertas', money(meas.totals.covered), meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição · ${money(meas.totals.uncovered_total)}` : 'todas as folhas com medição', '#1F6FB2')}
-        ${kpi('Pago a mais', money(meas.totals.paid_more), 'folhas acima do medido', '#C0392B')}
-        ${kpi('Sobrando', money(meas.totals.left_over), `saldo ${money(meas.totals.diff)}`, '#1F6B41')}
+        ${kpi('Pago a mais', money(meas.totals.paid_more + prior), prior ? `folhas ${money(meas.totals.paid_more)} · dos quais anterior ${money(prior)}` : 'folhas acima do medido', '#C0392B')}
+        ${kpi('Sobrando', money(meas.totals.left_over), `saldo ${money(meas.totals.diff - prior)}`, '#1F6B41')}
+      </div>` : ''}
+      ${on('div') && debts.length ? html`<h4 class="fr-h4" style="margin-top:10px">Dívidas anteriores em aberto${pessoa ? ' (da pessoa)' : ' (obra)'}</h4><div class="r-kpis">
+        ${kpi('Empresa deve', money(debtOpen('empresa_deve')), 'a pagar aos profissionais', '#B04A10')}
+        ${kpi('Devem à empresa', money(debtOpen('profissional_deve')), 'a descontar dos profissionais', '#1F6B41')}
+        ${kpi('Pago a mais anterior', money(debtOpen('pago_mais')), 'entra no saldo da medição', '#C0392B')}
+        ${kpi('Quitadas', debts.filter(d => d.status === 'quitada').length, money(debts.filter(d => d.status === 'quitada').reduce((a, d) => a + d.amount, 0)))}
       </div>` : ''}</section>
 
       ${on('pres') ? html`<section class="r-section"><h3 class="r-h">Presença por dia</h3>
@@ -213,6 +225,13 @@ export async function view({ query, setQuery, render }) {
           <td class="small"><b>${{ pago_mais: 'Pago a mais', pago_menos: 'Pago a menos', igual: 'Igual', sem_folhas: 'Sem folhas' }[m.result]}</b></td></tr>`)}
           <tr class="fr-sum"><td colspan="3">Total da obra</td><td class="num">${money(meas.totals.measured)}</td><td class="num">${money(meas.totals.covered)}</td><td class="num">${money(meas.totals.diff)}</td><td class="small">${meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição` : ''}</td></tr></tbody></table></section>` : ''}
 
+      ${on('div') && debts.length ? html`<section class="r-section ${keep(debts.length + 3)}"><h3 class="r-h">Dívidas anteriores</h3>
+        ${Object.entries(dv.kinds).filter(([k]) => debts.some(d => d.kind === k)).map(([k, label]) => { const rows = debts.filter(d => d.kind === k); return html`<h4 class="fr-h4">${label}</h4>
+          <table class="r-table fr-debts"><thead><tr><th>Origem</th>${k === 'pago_mais' ? '' : html`<th>Profissional</th>`}<th>Motivo</th><th class="num">Valor</th><th>Situação</th></tr></thead>
+          <tbody>${rows.map(d => html`<tr><td class="small nowrap">${fmtDate(d.origin_date)}</td>${k === 'pago_mais' ? '' : html`<td>${d.worker_name || '—'}</td>`}<td class="small">${d.reason}</td>
+            <td class="num">${money(d.amount)}</td><td class="small">${d.status === 'quitada' ? `Quitada ${fmtDate(d.settled_date)}${d.settled_note ? ` · ${d.settled_note}` : ''}` : html`<b>Em aberto</b>`}</td></tr>`)}
+            <tr class="fr-sum"><td colspan="${k === 'pago_mais' ? 2 : 3}">Em aberto</td><td class="num">${money(debtOpen(k))}</td><td></td></tr></tbody></table>`; })}</section>` : ''}
+
       ${on('pag') && mny ? html`<section class="r-section ${keep(sheets.length)}"><h3 class="r-h">Pagamentos por folha</h3>
         <table class="r-table"><thead><tr><th>Folha</th><th>Período</th><th>Situação</th><th class="num">Total</th><th class="num">Cliente</th><th class="num">Empresa paga</th><th>Pagamento</th></tr></thead>
         <tbody>${sheets.map(s => html`<tr><td class="nowrap"><b>${s.code}</b></td><td class="small nowrap">${dm(s.start_date)} a ${dm(s.end_date)}</td><td class="small">${s.status === 'fechada' ? 'Fechada' : 'Aberta'}</td>
@@ -222,12 +241,14 @@ export async function view({ query, setQuery, render }) {
       ${on('ativ') && sheets.some(s => s.activities) ? html`<section class="r-section"><h3 class="r-h">Atividades desenvolvidas</h3>
         ${sheets.filter(s => s.activities).map(s => html`<div class="fr-act avoid"><b>${s.code} · ${dm(s.start_date)} a ${dm(s.end_date)}</b><p class="r-p pre">${s.activities}</p></div>`)}</section>` : ''}
 
-      ${bms.length ? html`<section class="r-section fr-bms"><h3 class="r-h">Anexo · BM da medição do terceiro</h3>
+      ${bms.length || debtFiles.length ? html`<section class="r-section fr-bms"><h3 class="r-h">Anexos${bms.length && debtFiles.length ? ' · BM e comprovantes' : bms.length ? ' · BM da medição do terceiro' : ' · comprovantes das dívidas anteriores'}</h3>
         ${bms.map(m => html`<div class="fr-bm"><div class="fr-bm-h"><b>${m.supplier || 'Terceiro'}</b> · medição de ${fmtDate(m.ref_date)} · ${money(m.amount)}${m.sheets.length ? ` · folhas ${m.sheets.map(s => s.code).join(', ')}` : ''}</div>
           ${m.files.map(f => (f.mime === 'application/pdf'
             ? html`<div class="fr-bmpdf" data-pdf="/api/field-measurement-files/${f.id}" data-name="${f.original_name || 'BM.pdf'}"><p class="small muted">Carregando o PDF "${f.original_name || 'BM.pdf'}"…</p></div>`
             : html`<figure class="fr-bmp"><img src="/api/field-measurement-files/${f.id}" alt="BM"><figcaption>${f.original_name || 'BM (imagem)'}</figcaption></figure>`))}
-        </div>`)}</section>` : ''}
+        </div>`)}
+        ${debtFiles.map(({ d, f }) => html`<div class="fr-bm"><div class="fr-bm-h"><b>Comprovante · dívida anterior</b> · ${d.worker_name || 'obra'} · ${d.kind_label} · ${money(d.amount)} · origem ${fmtDate(d.origin_date)}</div>
+          <div class="fr-bmpdf" data-pdf="/api/field-debt-files/${f.id}" data-name="${f.original_name || 'comprovante.pdf'}"><p class="small muted">Carregando o PDF "${f.original_name || 'comprovante.pdf'}"…</p></div></div>`)}</section>` : ''}
       `}
 
       <footer class="r-footer"><span>Charão Engenharia & Construção · Folha de Campo · ${p.code}</span><span>Documento gerado pelo sistema Charão Gestão de Obras</span></footer>

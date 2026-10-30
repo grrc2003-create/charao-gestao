@@ -316,8 +316,9 @@ export async function view({ params, navigate, render }) {
         ${mny && edit ? html`<label class="fc-payd">Pagamento previsto<input type="date" id="fc-payd" value="${s.pay_date || ''}"></label>` : ''}</div></section>
       ${edit ? html`<div class="fc-save"><span id="fc-dirty" hidden>Alterações não salvas</span><button type="button" class="btn btn-primary" id="fc-save">${icon('check')}Salvar folha</button></div>` : ''}`,
     mount(root) {
-      bindCopy(root);
-      bindPaid(root, render);
+      const signal = scoped(root);
+      bindCopy(root, signal);
+      bindPaid(root, render, signal);
       const markDirty = () => { dirty = true; const el = root.querySelector('#fc-dirty'); if (el) el.hidden = false; };
       const payBox = () => {
         const box = root.querySelector('#fc-pay');
@@ -407,7 +408,7 @@ export async function view({ params, navigate, render }) {
         const cf = e.target.dataset.cf;
         if (cf) { st.contracts.find(x => x.contract_id === Number(e.target.closest('[data-c]').dataset.c))[cf] = e.target.value; markDirty(); refresh(); }
         if (e.target.id === 'fc-act' || e.target.id === 'fc-payd') markDirty();
-      });
+      }, { signal });
       // Incluir/retirar salva o que já foi lançado e recarrega
       const saveAnd = async (fn, msg) => { try { const b = body(); fn(b); await api(`/field/sheets/${s.id}`, { method: 'PUT', body: b }); dirty = false; if (msg) toast(msg); render(); } catch (ex) { toast(ex.message, 'error'); } };
 
@@ -471,7 +472,7 @@ export async function view({ params, navigate, render }) {
       root.addEventListener('click', ev => {
         const b = ev.target.closest('[data-open-p]');
         if (b) openPerson(Number(b.dataset.openP));
-      });
+      }, { signal });
       root.querySelectorAll('[data-rmc]').forEach(b => b.addEventListener('click', () => saveAnd(x => { x.contracts = x.contracts.filter(y => y.contract_id !== Number(b.dataset.rmc)); })));
       root.querySelector('#fc-addb')?.addEventListener('click', () => {
         const v = Number(root.querySelector('#fc-addp').value);
@@ -828,14 +829,23 @@ async function copyText(text) {
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
   }
 }
+// O container da tela é reaproveitado (entre telas e ao redesenhar a mesma): os cliques ligados nele valem só
+// até o próximo desenho ou a saída da tela — senão cada "Reabrir"/"Salvar" somava outra cópia (janelas em dobro)
+function scoped(root) {
+  root.__fcOff?.abort();
+  const c = new AbortController();
+  root.__fcOff = c;
+  window.addEventListener('hashchange', () => c.abort(), { once: true, signal: c.signal });
+  return c.signal;
+}
 // Botões "Copiar" (PIX ou lista) em qualquer tela da Folha de Campo
-function bindCopy(root) {
+function bindCopy(root, signal) {
   root.addEventListener('click', async e => {
     const b = e.target.closest('[data-copy]');
     if (!b) return;
     await copyText(b.dataset.copy);
     toast(b.dataset.copyMsg || 'Copiado.');
-  });
+  }, { signal });
 }
 const pixCell = p => (p.pix
   ? html`<span class="fp-pix"><span class="fp-pt">${p.pix_type || 'PIX'}</span><code>${p.pix}</code></span>`
@@ -865,7 +875,7 @@ async function askPaid(lines, who, amount, done) {
   });
   if (r) { toast('Pagamento marcado.'); done(); }
 }
-function bindPaid(root, done) {
+function bindPaid(root, done, signal) {
   root.addEventListener('click', async e => {
     const p = e.target.closest('[data-pay]');
     if (p) return askPaid(p.dataset.pay.split(','), p.dataset.who, Number(p.dataset.amt) || 0, done);
@@ -874,7 +884,7 @@ function bindPaid(root, done) {
       if (!(await confirmSheet('Desfazer pagamento', 'Volta a ficar a pagar. Se o pagamento da folha já estava baixado no Financeiro, ele volta a pendente.', 'Desfazer', true))) return;
       try { await api('/field/paid', { method: 'POST', body: { lines: u.dataset.unpay.split(','), paid: false } }); toast('Pagamento desfeito.'); done(); } catch (ex) { toast(ex.message, 'error'); }
     }
-  });
+  }, { signal });
 }
 
 // Lista da própria folha (valores ao vivo enquanto aberta)
@@ -921,8 +931,9 @@ export async function paymentsView({ query, navigate, render }) {
         : html`<div class="empty-state"><h2>${onlyDue ? 'Ninguém com valor a receber' : 'Nenhum pagamento ainda'}</h2><p>${onlyDue ? 'Todas as folhas fechadas estão pagas.' : 'Os valores aparecem aqui quando houver folhas com diárias ou empreitadas.'}</p></div>`}
       <p class="muted pf-foot">O pagamento é registrado no Financeiro (uma tarefa por folha fechada, com esta mesma lista). Folhas abertas aparecem como previsto até serem fechadas.</p>`,
     mount(root) {
-      bindCopy(root);
-      bindPaid(root, render);
+      const signal = scoped(root);
+      bindCopy(root, signal);
+      bindPaid(root, render, signal);
       root.querySelector('#fp-obra').addEventListener('change', e => navigate(qsOf(e.target.value, onlyDue)));
     },
   };

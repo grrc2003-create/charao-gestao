@@ -1,7 +1,7 @@
 // Folha de Campo: folhas por obra (diárias da mão de obra própria e % das empreitadas), profissionais, empreitadas e consolidado.
 // Valores, documento e PIX aparecem só para quem tem a seção Folha de Campo (que também fecha a folha e gera o pagamento).
 import { html, api, icon, fmtDate, todayISO } from '../core.js';
-import { toast, sheet, confirmSheet } from '../ui.js';
+import { toast, sheet, confirmSheet, readAttachments, batchBySize } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -51,12 +51,108 @@ function obrasView(d) {
   };
 }
 
+// ---------- Medição do terceiro (BM) x folhas ----------
+// Medido acima das folhas = pago a menos (sobra); folhas acima do medido = pago a mais
+const MEAS_RES = {
+  pago_mais: { label: 'Pago a mais', cls: 'fm-mais' },
+  pago_menos: { label: 'Pago a menos', cls: 'fm-menos' },
+  igual: { label: 'Igual ao medido', cls: 'fm-igual' },
+  sem_folhas: { label: 'Sem folhas ligadas', cls: 'fm-sem' },
+};
+const diffBadge = (result, diff) => { const r = MEAS_RES[result] || MEAS_RES.sem_folhas; return html`<span class="fm-badge ${r.cls}">${r.label}${['pago_mais', 'pago_menos'].includes(result) ? ` ${money(Math.abs(diff))}` : ''}</span>`; };
+const resultOf = (amount, total, n) => (!n ? 'sem_folhas' : Math.abs(amount - total) < 0.005 ? 'igual' : amount > total ? 'pago_menos' : 'pago_mais');
+const bmLink = f => html`<a class="fm-file" href="/api/field-measurement-files/${f.id}" target="_blank" rel="noopener">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${f.original_name || (f.mime === 'application/pdf' ? 'BM.pdf' : 'BM (imagem)')}</a>`;
+function measSection(m) {
+  const t = m.totals;
+  return html`<section class="card section fm-card"><div class="card-head"><h2>${icon('contract')}Medição do terceiro</h2>
+      <button type="button" class="btn btn-ghost btn-sm" data-meas-new>${icon('plus')}Nova medição</button></div>
+    ${m.measurements.length ? html`<div class="pf-kpis fm-kpis">
+        <div><span>Medido (BM)</span><b>${money(t.measured)}</b><small>${m.measurements.length} medição(ões)</small></div>
+        <div><span>Folhas cobertas</span><b>${money(t.covered)}</b><small>mão de obra + empreitadas</small></div>
+        <div><span>Diferença</span><b class="${t.diff < -0.004 ? 'fm-neg' : t.diff > 0.004 ? 'fm-pos' : ''}">${money(t.diff)}</b>${diffBadge(resultOf(t.measured, t.covered, m.sheets.length - t.uncovered_sheets), t.diff)}</div>
+        <div><span>Folhas sem medição</span><b>${t.uncovered_sheets}</b><small>${money(t.uncovered_total)}</small></div>
+      </div>
+      <ul class="fm-list">${m.measurements.map(x => html`<li class="fm-item">
+        <div class="fm-top"><div><b>${x.supplier || 'Terceiro'}</b><small>Medição de ${fmtDate(x.ref_date)}</small></div>
+          <button type="button" class="btn btn-ghost btn-sm" data-meas-ed="${x.id}">${icon('edit')}Editar</button></div>
+        <div class="fm-cmp">
+          <div><span>Medido</span><b>${money(x.amount)}</b></div>
+          <div><span>Folhas (${x.sheets.length})</span><b>${money(x.sheets_total)}</b></div>
+          <div><span>Diferença</span><b class="${x.diff < -0.004 ? 'fm-neg' : x.diff > 0.004 ? 'fm-pos' : ''}">${money(x.diff)}</b></div>
+          ${diffBadge(x.result, x.diff)}
+        </div>
+        ${x.sheets.length ? html`<div class="fm-sheets">${x.sheets.map(s => html`<a href="#/campo/${s.id}">${s.code} <small>${dm(s.start_date)}–${dm(s.end_date)} · ${money(s.total)}</small></a>`)}</div>` : ''}
+        ${x.files.length ? html`<div class="fm-files">${x.files.map(bmLink)}</div>` : html`<p class="fc-warn fm-nofile">${icon('alert')}BM não anexado</p>`}
+        ${x.notes ? html`<p class="muted fm-notes">${x.notes}</p>` : ''}
+      </li>`)}</ul>`
+    : html`<p class="muted card-body">Quando o terceiro medir o serviço desta obra, lance aqui o valor da medição, anexe o BM e escolha as folhas que ela deveria cobrir. O sistema mostra se a folha ficou acima (pago a mais) ou abaixo (pago a menos) do medido.</p>`}
+  </section>`;
+}
+function measForm(m, x, obra, done) {
+  const sheets = m.sheets.filter(s => !s.measurement_id || s.measurement_id === x?.id);
+  const sel = new Set((x?.sheets || []).map(s => s.id));
+  const p = sheet({
+    title: x ? 'Editar medição do terceiro' : 'Nova medição do terceiro',
+    wide: true,
+    body: html`<div class="form-row"><div class="field"><label for="fm-s">Terceiro</label><input type="text" id="fm-s" name="supplier" maxlength="120" list="fm-sup" value="${x?.supplier || ''}" placeholder="Empresa ou pessoa que mediu">
+        <datalist id="fm-sup">${m.suppliers.map(s => html`<option value="${s}">`)}</datalist></div>
+      <div class="field"><label class="req" for="fm-d">Data da medição</label><input type="date" id="fm-d" name="ref_date" required value="${x?.ref_date || todayISO()}"></div></div>
+      <div class="field"><label class="req" for="fm-v">Valor da medição (BM)</label><input type="number" step="0.01" min="0" id="fm-v" name="amount" required value="${x?.amount ?? ''}"></div>
+      <fieldset class="field fw-obras"><legend>Folhas que a medição deveria cobrir</legend>
+        ${sheets.length ? html`<div class="fw-ob">${sheets.map(s => html`<label><input type="checkbox" data-fm-sheet="${s.id}" data-total="${s.total}" ${sel.has(s.id) ? 'checked' : ''}><span><b>${s.code}</b> ${fmtDate(s.start_date)} a ${fmtDate(s.end_date)} · ${money(s.total)}${s.status === 'aberta' ? ' · aberta' : ''}</span></label>`)}</div>`
+          : html`<p class="muted">Todas as folhas desta obra já estão em outra medição.</p>`}</fieldset>
+      <div class="fm-live" id="fm-live"></div>
+      <div class="field"><label for="fm-f">Anexar BM (PDF ou foto)</label><input type="file" id="fm-f" accept="application/pdf,image/*" multiple>
+        ${x?.files.length ? html`<div class="fm-files fm-files-ed">${x.files.map(f => html`<span>${bmLink(f)}<button type="button" class="icon-btn" data-fm-rmf="${f.id}" aria-label="Remover ${f.original_name || 'arquivo'}">${icon('x')}</button></span>`)}</div>` : ''}</div>
+      <div class="field"><label for="fm-n">Observações</label><textarea id="fm-n" name="notes" rows="2">${x?.notes || ''}</textarea></div>
+      ${x ? html`<button type="button" class="btn btn-ghost btn-sm pf-danger" id="fm-del" data-close>${icon('trash')}Excluir medição</button>` : ''}`,
+    submitLabel: x ? 'Salvar' : 'Lançar medição',
+    async onSubmit(f, form) {
+      const body = { ...f, project_id: obra, sheet_ids: [...form.querySelectorAll('[data-fm-sheet]:checked')].map(c => Number(c.dataset.fmSheet)) };
+      // BM vai junto no mesmo envio; se for grande demais, o restante segue em lotes depois
+      const parts = batchBySize(await readAttachments(form.querySelector('#fm-f').files || []));
+      const r = await api(x ? `/field/measurements/${x.id}` : '/field/measurements', { method: x ? 'PUT' : 'POST', body: { ...body, files: parts[0] || [] } });
+      for (const part of parts.slice(1)) await api(`/field/measurements/${r.id}/files`, { method: 'POST', body: { files: part } });
+      return r;
+    },
+  });
+  // Comparação ao vivo: valor da medição x folhas marcadas
+  const live = document.getElementById('fm-live'), form = live.closest('form');
+  let del = false;
+  const upd = () => {
+    const marked = [...form.querySelectorAll('[data-fm-sheet]:checked')];
+    const total = marked.reduce((a, c) => a + Number(c.dataset.total), 0), amount = num(form.querySelector('#fm-v').value);
+    live.innerHTML = html`<span>Folhas marcadas: <b>${money(total)}</b> (${marked.length})</span><span>Diferença: <b>${money(amount - total)}</b></span>${diffBadge(resultOf(amount, total, marked.length), amount - total)}`.toString();
+  };
+  form.addEventListener('input', upd); form.addEventListener('change', upd); upd();
+  form.querySelectorAll('[data-fm-rmf]').forEach(b => b.addEventListener('click', async () => {
+    try { await api(`/field/measurements/${x.id}/files/${b.dataset.fmRmf}`, { method: 'DELETE' }); b.parentElement.remove(); toast('Arquivo removido.'); x.files = x.files.filter(f => f.id !== Number(b.dataset.fmRmf)); }
+    catch (ex) { toast(ex.message, 'error'); }
+  }));
+  document.getElementById('fm-del')?.addEventListener('click', () => { del = true; });
+  return p.then(async r => {
+    if (del) {
+      if (!(await confirmSheet('Excluir medição', `Excluir a medição de ${money(x.amount)}${x.supplier ? ` (${x.supplier})` : ''}? O BM anexado também é apagado. As folhas não mudam.`, 'Excluir', true))) return done(false);
+      try { await api(`/field/measurements/${x.id}`, { method: 'DELETE' }); toast('Medição excluída.'); } catch (ex) { toast(ex.message, 'error'); }
+      return done(true);
+    }
+    if (r) toast(x ? 'Medição salva.' : 'Medição lançada.');
+    return done(!!r || !!x);
+  });
+}
+function bindMeasurements(root, m, obra, render) {
+  root.querySelector('[data-meas-new]')?.addEventListener('click', () => measForm(m, null, obra, ch => ch && render()));
+  root.querySelectorAll('[data-meas-ed]').forEach(b => b.addEventListener('click', () => measForm(m, m.measurements.find(x => x.id === Number(b.dataset.measEd)), obra, ch => ch && render())));
+}
+
 // ---------- Folhas da obra (resumo + folhas) ----------
-export async function list({ query, navigate, state }) {
+export async function list({ query, navigate, state, render }) {
   const obra = Number(query.get('obra')) || 0;
   const d = await api('/field/sheets', { query: { obra: obra || '' } });
   if (!obra || !d.projects.some(p => p.id === obra)) return obrasView(d);
   const mny = d.can_money;
+  const meas = mny ? await api('/field/measurements', { query: { obra } }) : null;
+  const measOf = new Map((meas?.sheets || []).filter(x => x.measurement_id).map(x => [x.id, x.measurement_id]));
   const o = d.overview.find(x => x.id === obra);
   const projOpts = sel => d.projects.map(p => html`<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`);
   const kp = (l, v, sub) => html`<div><span>${l}</span><b>${v}</b>${sub ? html`<small>${sub}</small>` : ''}</div>`;
@@ -68,7 +164,7 @@ export async function list({ query, navigate, state }) {
         eyebrow: 'Folha de Campo',
         title: `${o.code} · ${o.name}`,
         sub: o.client || '',
-        actions: html`<button type="button" class="btn btn-primary" data-new>${icon('plus')}Nova folha</button>`,
+        actions: html`<a class="btn btn-ghost" href="#/campo/relatorio?obra=${obra}">${icon('print')}Relatório</a><button type="button" class="btn btn-primary" data-new>${icon('plus')}Nova folha</button>`,
       })}
       ${fieldTabs('folhas', mny ? obra : 0)}
       <div class="fc-filter section"><label for="fc-obra">Obra</label><select id="fc-obra"><option value="">Todas as obras</option>${projOpts(obra)}</select></div>
@@ -78,21 +174,24 @@ export async function list({ query, navigate, state }) {
           ${kp('Diárias', n2(o.diarias), o.last ? `última ${o.last.code}` : '')}
           ${kp('Profissionais', o.workers, html`<a href="#/campo/profissionais?obra=${obra}">ver lista</a>`)}
           ${kp('Empreitadas', o.contracts, html`<a href="#/campo/empreitadas?obra=${obra}">em andamento</a>`)}
-          ${mny ? html`${kp('Total medido', money(o.total))}${kp('Em folhas abertas', money(o.in_open))}${kp('A pagar', money(o.pending))}${kp('Pago', money(o.paid))}` : ''}
+          ${mny ? html`${kp('Total das folhas', money(o.total))}${kp('Em folhas abertas', money(o.in_open))}${kp('A pagar', money(o.pending))}${kp('Pago', money(o.paid))}` : ''}
         </div></section>
+      ${meas ? measSection(meas) : ''}
       <h2 class="fc-h2 section">Folhas</h2>
       ${d.sheets.length ? html`<div class="pf-months">${d.sheets.map(s => html`<a class="pf-mcard" href="#/campo/${s.id}">
           <div class="pf-mtop"><b>${s.project_code} · ${s.code}</b>${stTag(s.status)}</div>
           <div class="pf-mper">${s.project_name}</div>
           <div class="pf-mper">${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}</div>
           ${mny ? html`<div class="pf-mtotal">${money(s.totals.total)}</div>` : html`<div class="pf-mtotal">${n2(s.diarias)} diária(s)</div>`}
-          <div class="pf-mfoot"><span>${s.people} pessoa(s)</span>${s.contracts ? html`<span>${s.contracts} empreitada(s)</span>` : ''}${mny ? html`<span>${n2(s.diarias)} diária(s)</span>${s.totals.client ? html`<span>Cliente ${money(s.totals.client)}</span>` : ''}${payTag(s.payment)}` : ''}</div>
+          <div class="pf-mfoot"><span>${s.people} pessoa(s)</span>${s.contracts ? html`<span>${s.contracts} empreitada(s)</span>` : ''}${mny ? html`<span>${n2(s.diarias)} diária(s)</span>${s.totals.client ? html`<span>Cliente ${money(s.totals.client)}</span>` : ''}${payTag(s.payment)}` : ''}
+            ${measOf.has(s.id) ? html`<span class="fc-mtag">${icon('file')}Na medição do terceiro</span>` : ''}</div>
         </a>`)}</div>`
         : html`<div class="empty-state"><h2>Nenhuma folha${obra ? ' nesta obra' : ''}</h2><p>Crie a folha do período: marque as diárias de cada pessoa por dia e o % executado das empreitadas.</p></div>`}
       <button type="button" class="fab" data-new aria-label="Nova folha">${icon('plus')}</button>`,
     mount(root) {
       root.querySelector('#fc-obra').addEventListener('change', e => navigate(`/campo${e.target.value ? `?obra=${e.target.value}` : ''}`));
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
+      if (meas) bindMeasurements(root, meas, obra, render);
       root.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
         if (!d.projects.length) return toast('Nenhuma obra liberada para a Folha de Campo.', 'error');
         const last = obra && d.sheets.find(s => s.project_id === obra);

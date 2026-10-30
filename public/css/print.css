@@ -512,4 +512,11 @@
 @media print { .frp-t td.q1, .frp-t td.qh, .frl, .frd-col span, .frb span { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }.fr-opts { order: -1; flex-basis: 100%; }
 .fr-opts > summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--navy); padding: 4px 0; }
 .fr-optl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.fr-optl .pt-opt input[type=date] { min-height: 30px; padding: 2px 6px; font-size: 13px; width: auto; }
+.fr-optl .pt-opt input[type=date] { min-height: 30px; padding: 2px 6px; font-size: 13px; width: auto; }/* Anexo: BM da medição do terceiro (imagens e páginas do PDF) */
+.fr-bms { break-before: page; }
+.fr-bm { margin-bottom: 12px; }
+.fr-bm-h { font-size: 9pt; color: #2A3D50; margin-bottom: 6px; }
+.fr-bmp { margin: 0 0 10px; break-inside: avoid; text-align: center; }
+.fr-bmp img { max-width: 100%; max-height: 245mm; border: 1px solid #E4E1DA; }
+.fr-bmp figcaption { font-size: 7pt; color: #6E7A86; margin-top: 2px; }
+.fr-bmpdf .fr-bmp + .fr-bmp { break-before: page; }

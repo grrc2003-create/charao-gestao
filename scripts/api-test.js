@@ -2481,7 +2481,7 @@ async function main() {
   const fmU = (await fcAna('PUT', `/field/measurements/${fmM.id}`, { supplier: 'Terceiro Exemplo', ref_date: '2026-09-15', amount: fmTot - 300, sheet_ids: [fcS.id] })).data.measurements.find(x => x.id === fmM.id);
   ok(fmU.diff === -300 && fmU.result === 'pago_mais' && fmU.files.length === 1, 'folha acima do medido = pago a mais (e o BM continua anexado)');
   const fmL = (await fcAna('GET', '/field/measurements?obra=2')).data;
-  ok(fmL.totals.measured === fmTot - 300 && fmL.totals.covered === fmTot && fmL.totals.diff === -300 && fmL.sheets.find(s => s.id === fcS.id).measurement_id === fmM.id, 'resumo da obra: medido x folhas cobertas');
+  ok(fmL.totals.measured === fmTot - 300 && fmL.totals.covered === fmTot && fmL.totals.diff === -300 && fmL.sheets.find(s => s.id === fcS.id).measurement_id === fmM.id && fmL.totals.paid_more === 300 && fmL.totals.left_over === 0, 'resumo da obra: medido x folhas cobertas, pago a mais e sobrando');
   ok((await fcAna('DELETE', `/field/measurements/${fmM.id}/files/${fmM.files[0].id}`)).data.measurements.find(x => x.id === fmM.id).files.length === 0, 'BM removido da medição');
   ok((await fcAna('DELETE', `/field/measurements/${fmM.id}`)).data.measurements.length === 0 && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.totals.total === fmTot, 'excluir a medição não mexe na folha');
   ok(fcA2.contracts[0].amount === 2000 && fcA2.contracts[0].after_pct === 40 && fcA2.totals.total === 3375 && fcA2.totals.company === 3275, 'empreitada medida em % do contrato; totais da folha');

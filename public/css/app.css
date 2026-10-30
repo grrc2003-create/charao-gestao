@@ -3074,7 +3074,7 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 /* Medição do terceiro (BM) x folhas */
 .fm-card .card-head { gap: 8px; }
 .fm-card .card-head > h2 { margin-right: auto; }
-.fm-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 12px 16px 4px; }
+.fm-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 12px 16px 4px; }
 .fm-kpis small { font-size: 11.5px; color: var(--muted); }
 .fm-pos { color: #1F6B41 !important; }
 .fm-neg { color: #A93226 !important; }

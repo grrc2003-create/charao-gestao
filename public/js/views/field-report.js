@@ -15,8 +15,37 @@ const qLabel = q => (q === 1 ? '1' : q === 0.5 ? '½' : q ? n2(q) : '');
 // Partes do relatório: [chave, rótulo, só com valores]
 const PARTS = [
   ['pres', 'Presença por dia'], ['dia', 'Equipe por dia'], ['pes', 'Por pessoa'], ['serv', 'Por serviço e função'],
-  ['emp', 'Empreitadas'], ['med', 'Medição do terceiro', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
+  ['emp', 'Empreitadas'], ['med', 'Medição do terceiro', true], ['bm', 'BM anexado', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
 ];
+
+// BM em PDF: cada página vira imagem no próprio navegador (pdf.js servido pelo site) para sair na impressão
+const PDFJS = '/vendor/pdfjs/pdf.min.js';
+const MAX_PAGES = 12;
+async function renderPdfs(root) {
+  const boxes = [...root.querySelectorAll('[data-pdf]')];
+  if (!boxes.length) return;
+  const lib = await import(PDFJS);
+  lib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
+  for (const box of boxes) {
+    try {
+      const doc = await lib.getDocument({ url: box.dataset.pdf, isEvalSupported: false, withCredentials: true }).promise;
+      const n = Math.min(doc.numPages, MAX_PAGES);
+      const out = [];
+      for (let i = 1; i <= n; i++) {
+        const page = await doc.getPage(i);
+        const base = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: Math.min(2.2, 1400 / base.width) });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        out.push(html`<figure class="fr-bmp"><img src="${canvas.toDataURL('image/jpeg', 0.88)}" alt="Página ${i} do BM"><figcaption>${box.dataset.name} · página ${i} de ${doc.numPages}</figcaption></figure>`);
+      }
+      box.innerHTML = html`${out}${doc.numPages > n ? html`<p class="small muted">Mostradas ${n} de ${doc.numPages} páginas. O PDF completo está no sistema.</p>` : ''}`.toString();
+    } catch {
+      box.innerHTML = html`<p class="small late">Não foi possível mostrar o PDF "${box.dataset.name}". Abra pelo sistema.</p>`.toString();
+    }
+  }
+}
 
 export async function view({ query, setQuery, render }) {
   const sh = await api('/field/sheets');
@@ -32,7 +61,10 @@ export async function view({ query, setQuery, render }) {
   // Folhas da obra no período (pelo cruzamento das datas) e o detalhe de cada uma
   const list = sh.sheets.filter(s => s.project_id === obra && (!de || s.end_date >= de) && (!ate || s.start_date <= ate))
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
-  const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny && on('med') ? api('/field/measurements', { query: { obra } }) : null]);
+  const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny ? api('/field/measurements', { query: { obra } }) : null]);
+  // BM das medições que cobrem alguma folha do relatório (ou todas, sem filtro de período)
+  const inReport = new Set(sheets.map(s => s.id));
+  const bms = meas && on('bm') ? meas.measurements.filter(m => m.files.length && (!(de || ate) || m.sheets.some(s => inReport.has(s.id)))) : [];
 
   // Filtros de pessoa e função valem para as partes de mão de obra
   const allPeople = new Map();
@@ -116,7 +148,13 @@ export async function view({ query, setQuery, render }) {
         ${kpi('Diárias', n2(tot.diarias), `${byDay.size} dia(s) com equipe`, '#F26B21')}
         ${mny ? kpi('Total', money(tot.mo + (filtered ? 0 : tot.emp)), filtered ? 'mão de obra do filtro' : `mão de obra ${money(tot.mo)} · empreitadas ${money(tot.emp)}`, '#1F6B41')
           : kpi('Média por dia', byDay.size ? n2(tot.diarias / byDay.size) : '0', 'diárias por dia trabalhado', '#1F6B41')}
-      </div>${mny && tot.client ? html`<p class="small muted" style="margin:6px 0 0">Pago pelo cliente: ${money(tot.client)} · empresa paga ${money(tot.mo + (filtered ? 0 : tot.emp) - tot.client)}</p>` : ''}</section>
+      </div>${mny && tot.client ? html`<p class="small muted" style="margin:6px 0 0">Pago pelo cliente: ${money(tot.client)} · empresa paga ${money(tot.mo + (filtered ? 0 : tot.emp) - tot.client)}</p>` : ''}
+      ${meas?.measurements.length ? html`<h4 class="fr-h4" style="margin-top:10px">Saldo das folhas perante a medição do terceiro (obra até hoje)</h4><div class="r-kpis">
+        ${kpi('Medido (BM)', money(meas.totals.measured), `${meas.measurements.length} medição(ões)`)}
+        ${kpi('Folhas cobertas', money(meas.totals.covered), meas.totals.uncovered_sheets ? `${meas.totals.uncovered_sheets} folha(s) sem medição · ${money(meas.totals.uncovered_total)}` : 'todas as folhas com medição', '#1F6FB2')}
+        ${kpi('Pago a mais', money(meas.totals.paid_more), 'folhas acima do medido', '#C0392B')}
+        ${kpi('Sobrando', money(meas.totals.left_over), `saldo ${money(meas.totals.diff)}`, '#1F6B41')}
+      </div>` : ''}</section>
 
       ${on('pres') ? html`<section class="r-section"><h3 class="r-h">Presença por dia</h3>
         <p class="small muted fr-leg"><span class="frl q1">1</span> diária <span class="frl qh">½</span> meia diária <span class="frl we"></span> fim de semana</p>
@@ -142,7 +180,7 @@ export async function view({ query, setQuery, render }) {
         <table class="r-table"><thead><tr><th>Folha</th><th>Serviço</th><th>Empreiteiro</th><th class="num">Nesta folha</th><th class="num">Acumulado</th>${mny ? html`<th class="num">Medido</th>` : ''}</tr></thead>
         <tbody>${blocks.flatMap(s => s.contracts.map(c => html`<tr><td class="small nowrap">${s.code}</td><td>${c.service}</td><td class="small">${c.worker_name}</td><td class="num">${n2(c.pct)}%</td><td class="num">${n2(c.after_pct)}%</td>${mny ? html`<td class="num">${money(c.amount)}</td>` : ''}</tr>`))}</tbody></table></section>` : ''}
 
-      ${meas && meas.measurements.length ? html`<section class="r-section avoid"><h3 class="r-h">Medição do terceiro x folhas</h3>
+      ${meas && on('med') && meas.measurements.length ? html`<section class="r-section avoid"><h3 class="r-h">Medição do terceiro x folhas</h3>
         <table class="r-table"><thead><tr><th>Data</th><th>Terceiro</th><th>Folhas</th><th class="num">Medido</th><th class="num">Folhas</th><th class="num">Diferença</th><th>Resultado</th></tr></thead>
         <tbody>${meas.measurements.map(m => html`<tr><td class="small nowrap">${fmtDate(m.ref_date)}</td><td>${m.supplier || '—'}</td><td class="small">${m.sheets.map(s => s.code).join(', ') || '—'}</td>
           <td class="num">${money(m.amount)}</td><td class="num">${money(m.sheets_total)}</td><td class="num ${m.diff < -0.004 ? 'late' : ''}">${money(m.diff)}</td>
@@ -157,6 +195,13 @@ export async function view({ query, setQuery, render }) {
 
       ${on('ativ') && sheets.some(s => s.activities) ? html`<section class="r-section"><h3 class="r-h">Atividades desenvolvidas</h3>
         ${sheets.filter(s => s.activities).map(s => html`<div class="fr-act avoid"><b>${s.code} · ${dm(s.start_date)} a ${dm(s.end_date)}</b><p class="r-p pre">${s.activities}</p></div>`)}</section>` : ''}
+
+      ${bms.length ? html`<section class="r-section fr-bms"><h3 class="r-h">Anexo · BM da medição do terceiro</h3>
+        ${bms.map(m => html`<div class="fr-bm"><div class="fr-bm-h"><b>${m.supplier || 'Terceiro'}</b> · medição de ${fmtDate(m.ref_date)} · ${money(m.amount)}${m.sheets.length ? ` · folhas ${m.sheets.map(s => s.code).join(', ')}` : ''}</div>
+          ${m.files.map(f => (f.mime === 'application/pdf'
+            ? html`<div class="fr-bmpdf" data-pdf="/api/field-measurement-files/${f.id}" data-name="${f.original_name || 'BM.pdf'}"><p class="small muted">Carregando o PDF "${f.original_name || 'BM.pdf'}"…</p></div>`
+            : html`<figure class="fr-bmp"><img src="/api/field-measurement-files/${f.id}" alt="BM"><figcaption>${f.original_name || 'BM (imagem)'}</figcaption></figure>`))}
+        </div>`)}</section>` : ''}
       `}
 
       <footer class="r-footer"><span>Charão Engenharia & Construção · Folha de Campo · ${p.code}</span><span>Documento gerado pelo sistema Charão Gestão de Obras</span></footer>
@@ -164,6 +209,13 @@ export async function view({ query, setQuery, render }) {
     mount(root) {
       bindPrintToolbar(root);
       setPageFooter(`Charão · Folha de Campo · ${p.code} · ${p.name}`);
+      // Enquanto as páginas do BM em PDF são preparadas, o botão de imprimir espera
+      if (root.querySelector('[data-pdf]')) {
+        const pb = root.querySelector('#do-print');
+        const label = pb.innerHTML;
+        pb.disabled = true; pb.textContent = 'Preparando o BM…';
+        renderPdfs(root).finally(() => { pb.disabled = false; pb.innerHTML = label; });
+      }
       root.querySelector('#fr-obra').addEventListener('change', e => go({ obra: e.target.value, pessoa: '', funcao: '' }));
       root.querySelector('#fr-de').addEventListener('change', e => go({ de: e.target.value }));
       root.querySelector('#fr-ate').addEventListener('change', e => go({ ate: e.target.value }));

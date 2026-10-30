@@ -69,7 +69,9 @@ function measSection(m) {
     ${m.measurements.length ? html`<div class="pf-kpis fm-kpis">
         <div><span>Medido (BM)</span><b>${money(t.measured)}</b><small>${m.measurements.length} medição(ões)</small></div>
         <div><span>Folhas cobertas</span><b>${money(t.covered)}</b><small>mão de obra + empreitadas</small></div>
-        <div><span>Diferença</span><b class="${t.diff < -0.004 ? 'fm-neg' : t.diff > 0.004 ? 'fm-pos' : ''}">${money(t.diff)}</b>${diffBadge(resultOf(t.measured, t.covered, m.sheets.length - t.uncovered_sheets), t.diff)}</div>
+        <div><span>Pago a mais até agora</span><b class="${t.paid_more > 0.004 ? 'fm-neg' : ''}">${money(t.paid_more)}</b><small>folhas acima do medido</small></div>
+        <div><span>Sobrando da medição</span><b class="${t.left_over > 0.004 ? 'fm-pos' : ''}">${money(t.left_over)}</b><small>medido acima das folhas</small></div>
+        <div><span>Saldo (medido − folhas)</span><b class="${t.diff < -0.004 ? 'fm-neg' : t.diff > 0.004 ? 'fm-pos' : ''}">${money(t.diff)}</b>${diffBadge(resultOf(t.measured, t.covered, m.sheets.length - t.uncovered_sheets), t.diff)}</div>
         <div><span>Folhas sem medição</span><b>${t.uncovered_sheets}</b><small>${money(t.uncovered_total)}</small></div>
       </div>
       <ul class="fm-list">${m.measurements.map(x => html`<li class="fm-item">

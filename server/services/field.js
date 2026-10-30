@@ -680,7 +680,10 @@ export function listMeasurements(ctx, projectId) {
     project: { id: p.id, code: p.code, name: p.name },
     measurements, sheets,
     suppliers: all(`SELECT DISTINCT supplier FROM field_measurements WHERE supplier IS NOT NULL AND supplier <> '' ORDER BY supplier`).map(r => r.supplier),
-    totals: { measured, covered, diff: r2(measured - covered), uncovered_sheets: open.length, uncovered_total: r2(open.reduce((a, s) => a + s.total, 0)) },
+    // Saldo perante as medições: soma do que foi pago a mais (folhas acima do medido) e do que sobra (medido acima das folhas)
+    totals: { measured, covered, diff: r2(measured - covered), uncovered_sheets: open.length, uncovered_total: r2(open.reduce((a, s) => a + s.total, 0)),
+      paid_more: r2(measurements.filter(m => m.sheets.length && m.diff < 0).reduce((a, m) => a - m.diff, 0)),
+      left_over: r2(measurements.filter(m => m.sheets.length && m.diff > 0).reduce((a, m) => a + m.diff, 0)) },
   };
 }
 function readMeasurement(b, projectId, currentId = 0) {

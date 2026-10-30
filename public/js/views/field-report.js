@@ -70,19 +70,24 @@ export async function view({ query, setQuery, render }) {
   const obra = Number(query.get('obra')) || sh.projects[0]?.id || 0;
   const p = sh.projects.find(x => x.id === obra);
   if (!p) throw new Error('Nenhuma obra liberada para a Folha de Campo.');
-  const de = query.get('de') || '', ate = query.get('ate') || '';
+  // Filtro por período (de/até) ou pela escolha das folhas da obra
+  const porFolhas = query.get('por') === 'folhas';
+  const de = porFolhas ? '' : query.get('de') || '', ate = porFolhas ? '' : query.get('ate') || '';
+  const obraSheets = sh.sheets.filter(s => s.project_id === obra).sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
+  const picked = new Set(porFolhas ? (query.get('folhas') || '').split(',').map(Number).filter(id => obraSheets.some(s => s.id === id)) : []);
+  const pickedOk = porFolhas && picked.size > 0 && picked.size < obraSheets.length;
   const pessoa = Number(query.get('pessoa')) || 0, funcao = query.get('funcao') || '';
   const off = new Set((query.get('sem') || '').split(',').filter(Boolean));
   const on = k => !off.has(k) && (mny || !PARTS.find(x => x[0] === k)?.[2]);
 
   // Folhas da obra no período (pelo cruzamento das datas) e o detalhe de cada uma
-  const list = sh.sheets.filter(s => s.project_id === obra && (!de || s.end_date >= de) && (!ate || s.start_date <= ate))
+  const list = obraSheets.filter(s => (pickedOk ? picked.has(s.id) : (!de || s.end_date >= de) && (!ate || s.start_date <= ate)))
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
   const [sheets, meas] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny && (on('med') || on('bm')) ? api('/field/measurements', { query: { obra } }) : null]);
   // BM das medições que cobrem alguma folha do relatório (ou todas, sem filtro de período)
   const inReport = new Set(sheets.map(s => s.id));
   // Em ordem cronológica das medições
-  const bms = meas && on('bm') ? meas.measurements.filter(m => m.files.length && (!(de || ate) || m.sheets.some(s => inReport.has(s.id)))).reverse() : [];
+  const bms = meas && on('bm') ? meas.measurements.filter(m => m.files.length && (!(de || ate || pickedOk) || m.sheets.some(s => inReport.has(s.id)))).reverse() : [];
 
   // Filtros de pessoa e função valem para as partes de mão de obra
   const allPeople = new Map();
@@ -126,10 +131,12 @@ export async function view({ query, setQuery, render }) {
   const periodo = sheets.length ? `${fmtDate(sheets[0].start_date)} a ${fmtDate(sheets.at(-1).end_date)}` : '—';
 
   // Filtros e partes (barra, fora da impressão)
-  const go = over => { const q = { obra, de, ate, pessoa: pessoa || '', funcao, sem: [...off].join(','), ...over }; setQuery(q); render(); };
+  const go = over => { const q = { obra, por: porFolhas ? 'folhas' : '', de, ate, folhas: pickedOk ? [...picked].join(',') : '', pessoa: pessoa || '', funcao, sem: [...off].join(','), ...over }; setQuery(q); render(); };
   const wide = window.matchMedia('(min-width: 721px)').matches;
   const extra = html`<details class="fr-opts" ${wide ? 'open' : ''}><summary>Filtros e partes do relatório</summary><div class="fr-optl"><label class="pt-opt">Obra <select id="fr-obra">${sh.projects.map(x => html`<option value="${x.id}" ${x.id === obra ? 'selected' : ''}>${x.code}</option>`)}</select></label>
-    <label class="pt-opt">De <input type="date" id="fr-de" value="${de}"></label><label class="pt-opt">Até <input type="date" id="fr-ate" value="${ate}"></label>
+    <label class="pt-opt">Filtrar por <select id="fr-por"><option value="">Período</option><option value="folhas" ${porFolhas ? 'selected' : ''}>Folhas</option></select></label>
+    ${porFolhas ? html`<div class="fr-folhas">${obraSheets.map(s => html`<label class="pt-opt"><input type="checkbox" data-folha="${s.id}" ${!pickedOk || picked.has(s.id) ? 'checked' : ''}>${s.code} <small>${dm(s.start_date)}–${dm(s.end_date)}</small></label>`)}</div>`
+      : html`<label class="pt-opt">De <input type="date" id="fr-de" value="${de}"></label><label class="pt-opt">Até <input type="date" id="fr-ate" value="${ate}"></label>`}
     <label class="pt-opt">Pessoa <select id="fr-pes"><option value="">Todas</option>${[...allPeople.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map(x => html`<option value="${x.id}" ${x.id === pessoa ? 'selected' : ''}>${x.name}</option>`)}</select></label>
     <label class="pt-opt">Função <select id="fr-fun"><option value="">Todas</option>${roles.map(r => html`<option ${r === funcao ? 'selected' : ''}>${r}</option>`)}</select></label>
     ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}</div></details>`;
@@ -153,7 +160,7 @@ export async function view({ query, setQuery, render }) {
       <div class="r-rule"></div>
       <section class="r-scope">
         <div><div class="r-lbl">Obra</div><h1>${p.code} · ${p.name}</h1><div class="muted">${p.client || ''}</div></div>
-        <dl class="r-meta"><dt>Período</dt><dd>${de || ate ? `${de ? fmtDate(de) : 'início'} a ${ate ? fmtDate(ate) : 'hoje'}` : 'todas as folhas'}</dd>
+        <dl class="r-meta"><dt>${pickedOk ? 'Folhas escolhidas' : 'Período'}</dt><dd>${pickedOk ? list.map(s => s.code).join(', ') : de || ate ? `${de ? fmtDate(de) : 'início'} a ${ate ? fmtDate(ate) : 'hoje'}` : 'todas as folhas'}</dd>
           <dt>Folhas</dt><dd>${sheets.length ? `${sheets.length} (${periodo})` : 'nenhuma'}</dd>
           ${filtered ? html`<dt>Filtro</dt><dd>${[pessoa ? allPeople.get(pessoa)?.name : '', funcao].filter(Boolean).join(' · ')}</dd>` : ''}
           <dt>Emissão</dt><dd>${fmtDateTime(new Date().toISOString())}</dd></dl>
@@ -235,8 +242,15 @@ export async function view({ query, setQuery, render }) {
         renderPdfs(root).finally(() => { pb.disabled = false; pb.innerHTML = label; });
       }
       root.querySelector('#fr-obra').addEventListener('change', e => go({ obra: e.target.value, pessoa: '', funcao: '' }));
-      root.querySelector('#fr-de').addEventListener('change', e => go({ de: e.target.value }));
-      root.querySelector('#fr-ate').addEventListener('change', e => go({ ate: e.target.value }));
+      root.querySelector('#fr-de')?.addEventListener('change', e => go({ de: e.target.value }));
+      root.querySelector('#fr-ate')?.addEventListener('change', e => go({ ate: e.target.value }));
+      root.querySelector('#fr-por').addEventListener('change', e => go({ por: e.target.value, de: '', ate: '', folhas: '' }));
+      // Folhas: todas marcadas = todas as folhas; ao menos uma precisa ficar marcada
+      root.querySelectorAll('[data-folha]').forEach(c => c.addEventListener('change', () => {
+        const ids = [...root.querySelectorAll('[data-folha]:checked')].map(x => Number(x.dataset.folha));
+        if (!ids.length) { c.checked = true; return; }
+        go({ folhas: ids.length === obraSheets.length ? '' : ids.join(',') });
+      }));
       root.querySelector('#fr-pes').addEventListener('change', e => go({ pessoa: e.target.value }));
       root.querySelector('#fr-fun').addEventListener('change', e => go({ funcao: e.target.value }));
       root.querySelectorAll('[data-part]').forEach(c => c.addEventListener('change', () => {

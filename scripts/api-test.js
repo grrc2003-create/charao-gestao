@@ -2395,6 +2395,16 @@ async function main() {
   // ---------- Folha de Campo (dados fictícios) ----------
   { const g = await login('ana@charao.eng.br'); const u = (await g('GET', '/users/1')).data.user; await g('PUT', '/users/1', { ...u, sections: [...u.section_list, 'folha_campo'] }); }
   const fcAna = await login('ana@charao.eng.br'), fcJul = await login('juliana@charao.eng.br'), fcCam = await login('camila@charao.eng.br');
+  // Controle de folha de campo no cadastro do projeto: só as obras marcadas entram na Folha de Campo
+  const fcObras = (await fcAna('GET', '/projects')).data.filter(p => p.kind !== 'interno').map(p => p.id);
+  ok((await fcAna('GET', '/field/sheets')).data.projects.length === 0, 'Folha de Campo: sem obra marcada no cadastro, nenhuma obra aparece');
+  for (const id of fcObras) await fcAna('PUT', `/projects/${id}`, { field_control: 1 });
+  const fcSemFolha = fcObras.find(id => id !== 2 && id !== 1 && id !== 3);
+  if (fcSemFolha) await fcAna('PUT', `/projects/${fcSemFolha}`, { field_control: 0 });
+  ok((await fcAna('GET', '/projects/2')).data.project?.field_control === 1 || (await fcAna('GET', '/projects/2')).data.field_control === 1, 'cadastro do projeto guarda o controle de folha de campo');
+  ok(!fcSemFolha || (!(await fcAna('GET', '/field/sheets')).data.projects.some(p => p.id === fcSemFolha)
+    && (await fcAna('POST', '/field/sheets', { project_id: fcSemFolha, start_date: '2026-09-01', end_date: '2026-09-05' })).status === 403), 'obra desmarcada não aparece nem aceita folha');
+  ok((await fcAna('PUT', `/projects/2`, { name: (await fcAna('GET', '/projects/2')).data.project?.name || undefined })).status === 200 && (await fcAna('GET', '/field/sheets')).data.projects.some(p => p.id === 2), 'editar o projeto sem mexer na opção mantém o controle de folha');
   const fcMetaA = (await fcAna('GET', '/meta')).data.can, fcMetaJ = (await fcJul('GET', '/meta')).data.can, fcMetaC = (await fcCam('GET', '/meta')).data.can;
   ok(fcMetaA.field && fcMetaA.field_money && fcMetaJ.field && !fcMetaJ.field_money && !fcMetaC.field, 'Folha de Campo: admin vê valores; responsável do projeto só lança; colaborador sem obra não acessa');
   ok((await fcCam('GET', '/field/sheets')).status === 403, 'colaborador que não é responsável não acessa a Folha de Campo');

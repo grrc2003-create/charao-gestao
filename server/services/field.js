@@ -38,12 +38,13 @@ const num = (v, label, { min = 0, max = Infinity } = {}) => {
 
 // ---------- Acesso por obra ----------
 function canFill(ctx, p) {
-  if (!p || p.kind !== 'obra') return false;
+  // Só obras com "Controle de folha de campo" marcado no cadastro do projeto
+  if (!p || p.kind !== 'obra' || !p.field_control) return false;
   if (!canAccessProject(ctx.user, p.id, ctx.projects)) return false;
   return canFieldMoney(ctx.user) || p.lead_id === ctx.user.id || canManageProject(ctx, p.id);
 }
 export function fillableProjects(ctx) {
-  return all(`SELECT id, code, name, client, status, lead_id, kind FROM projects WHERE kind = 'obra' ORDER BY status = 'concluido', code`).filter(p => canFill(ctx, p))
+  return all(`SELECT id, code, name, client, status, lead_id, kind, field_control FROM projects WHERE kind = 'obra' AND field_control = 1 ORDER BY status = 'concluido', code`).filter(p => canFill(ctx, p))
     .map(({ id, code, name, client, status }) => ({ id, code, name, client, status }));
 }
 export const canUseField = ctx => canFieldMoney(ctx.user) || fillableProjects(ctx).length > 0;

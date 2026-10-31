@@ -103,6 +103,8 @@ function readProjectBody(body, currentType = null) {
     uf: body.uf ? oneOf(String(body.uf).toUpperCase(), UFS, 'Estado') : null,
     municipio: str(body.municipio, { max: 120, label: 'Município' }) || null,
     ibge_code: intOrNull(body.ibge_code),
+    // Controle de folha de campo: só obras marcadas aparecem na Folha de Campo
+    field_control: kind === 'obra' && (body.field_control === true || body.field_control === 1 || body.field_control === '1' || body.field_control === 'on') ? 1 : 0,
   };
   if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('A previsão de término deve ser posterior ao início.');
   if (d.lead_id && !one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', d.lead_id)) throw badRequest('Responsável técnico deve ser um usuário interno ativo.');
@@ -147,9 +149,9 @@ export function createProject(ctx, body, ip) {
     const code = nextCode(kind);
     const now = new Date().toISOString();
     const r = run(`INSERT INTO projects (code, name, client, location, description, status, start_date, end_date, actual_end_date,
-      lead_id, specialty_template_id, uf, municipio, ibge_code, kind, type_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      lead_id, specialty_template_id, uf, municipio, ibge_code, kind, type_id, field_control, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
-      d.uf, d.municipio, d.ibge_code, kind, d.type_id, ctx.user.id, now, now);
+      d.uf, d.municipio, d.ibge_code, kind, d.type_id, d.field_control, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
     const teamLog = syncTeam(id, memberIds);
     defaultStageId(id);
@@ -170,9 +172,9 @@ export function updateProject(ctx, id, body, ip) {
   const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) }, p.type_id);
   tx(() => {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
-      lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, updated_at=? WHERE id=?`,
+      lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, field_control=?, updated_at=? WHERE id=?`,
       d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
-      d.uf, d.municipio, d.ibge_code, d.type_id, new Date().toISOString(), id);
+      d.uf, d.municipio, d.ibge_code, d.type_id, d.field_control, new Date().toISOString(), id);
     const teamLog = body.member_ids !== undefined ? syncTeam(id, memberIds, members(id).map(m => m.id)) : null;
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));
     const stagesLog = syncStages(id, body.stages);

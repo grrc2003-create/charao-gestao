@@ -825,6 +825,11 @@ function insights(d) {
   if (t.open) out.push(`${money(t.open)} em folhas ainda abertas (não fechadas).`);
   const ct = d.contracts.filter(c => c.status === 'andamento');
   if (ct.length) { const tot = ct.reduce((a, c) => a + c.total, 0), med = ct.reduce((a, c) => a + c.measured, 0); out.push(`Empreitadas em andamento: ${pct(med, tot)}% medido, saldo de ${money(tot - med)} a medir.`); }
+  // Medição do terceiro e dívidas anteriores (situação das obras até hoje)
+  const m = t.meas, db = t.debts;
+  if (m?.count) out.push(`Medição do terceiro: medido ${money(m.measured)} contra ${money(m.covered)} de folhas cobertas — ${m.paid_more > 0.004 ? `pago a mais ${money(m.paid_more)}${m.prior ? ` (dos quais ${money(m.prior)} anterior)` : ''}` : 'sem valor pago a mais'}${m.left_over > 0.004 ? `, sobrando ${money(m.left_over)}` : ''}.`);
+  if (db?.empresa_deve) out.push(`A empresa ainda deve ${money(db.empresa_deve)} de dívidas anteriores aos profissionais.`);
+  if (db?.profissional_deve) out.push(`Os profissionais devem ${money(db.profissional_deve)} à empresa (adiantamentos/dívidas anteriores em aberto).`);
   return out;
 }
 
@@ -861,6 +866,15 @@ export async function analysisView({ query, navigate }) {
         <div><span>Empresa: a pagar</span><b>${money(t.pending)}</b></div>
         <div><span>Em folhas abertas</span><b>${money(t.open)}</b></div>
       </div>
+      ${t.meas.count || t.debts.empresa_deve || t.debts.profissional_deve || t.debts.pago_mais ? html`<h3 class="fa-subh">Medição do terceiro e dívidas anteriores <small>(obras do filtro, situação até hoje)</small></h3>
+      <div class="pf-kpis fa-kpis fa-kpis2 section">
+        <div><span>Medido (BM)</span><b>${money(t.meas.measured)}</b><small>${t.meas.count} medição(ões)</small></div>
+        <div><span>Folhas cobertas</span><b>${money(t.meas.covered)}</b></div>
+        <div><span>Pago a mais</span><b class="${t.meas.paid_more > 0.004 ? 'fm-neg' : ''}">${money(t.meas.paid_more)}</b><small>${t.meas.prior ? `dos quais anterior ${money(t.meas.prior)}` : 'folhas acima do medido'}</small></div>
+        <div><span>Sobrando da medição</span><b class="${t.meas.left_over > 0.004 ? 'fm-pos' : ''}">${money(t.meas.left_over)}</b></div>
+        <div><span>Empresa deve (anterior)</span><b class="fd-owed">${money(t.debts.empresa_deve)}</b><small>a pagar aos profissionais</small></div>
+        <div><span>Devem à empresa</span><b class="fd-due">${money(t.debts.profissional_deve)}</b><small>adiantamentos / dívidas</small></div>
+      </div>` : ''}
       ${ins.length ? html`<section class="card section"><div class="card-head"><h2>${icon('info')}Destaques</h2></div><ul class="fa-ins">${ins.map(x => html`<li>${x}</li>`)}</ul></section>` : ''}
       <section class="card section"><div class="card-head"><h2>${icon('projects')}Resumo por obra</h2><span class="sub">${d.obras.length}</span></div>
         <div class="fc-table-wrap"><table class="fc-table fa-obras"><thead><tr><th>Obra</th><th>Folhas</th><th>Diárias</th><th>Equipe/dia</th><th>Mão de obra</th><th>Empreitadas</th><th>Total</th><th class="fa-barcol"></th><th>Cliente</th><th>Empresa paga</th><th>A pagar</th><th>Em aberto</th></tr></thead>
@@ -870,6 +884,14 @@ export async function analysisView({ query, navigate }) {
             <td>${money(o.client)}</td><td>${money(o.paid)}</td><td class="${o.pending ? 'fc-warn' : ''}">${money(o.pending)}</td><td>${money(o.open)}</td></tr>`)}</tbody>
           ${d.obras.length > 1 ? html`<tfoot><tr><td><b>Total</b></td><td>${t.sheets}</td><td>${n2(t.diarias)}</td><td>${n2(t.avg_team)}</td><td>${money(t.people)}</td><td>${money(t.contracts)}</td><td><b>${money(t.total)}</b></td><td class="fa-barcol"></td><td>${money(t.client)}</td><td>${money(t.paid)}</td><td>${money(t.pending)}</td><td>${money(t.open)}</td></tr></tfoot>` : ''}</table></div>
         <p class="hint card-body">Toque na obra para ver o consolidado por profissional.</p></section>
+      ${d.obras.some(o => o.meas.count || o.debts.empresa_deve || o.debts.profissional_deve || o.debts.pago_mais) ? html`<section class="card section"><div class="card-head"><h2>${icon('contract')}Medição do terceiro e dívidas por obra</h2><span class="sub">até hoje</span></div>
+        <div class="fc-table-wrap"><table class="fc-table"><thead><tr><th>Obra</th><th>Medido (BM)</th><th>Folhas cobertas</th><th>Pago a mais</th><th>Sobrando</th><th>Saldo</th><th>Empresa deve</th><th>Devem à empresa</th></tr></thead>
+          <tbody>${d.obras.filter(o => o.meas.count || o.debts.empresa_deve || o.debts.profissional_deve || o.debts.pago_mais).map(o => html`<tr data-href="#/campo?obra=${o.project_id}">
+            <td><b>${o.code}</b><small>${o.name}</small></td><td>${money(o.meas.measured)}</td><td>${money(o.meas.covered)}</td>
+            <td class="${o.meas.paid_more > 0.004 ? 'fm-neg' : ''}">${money(o.meas.paid_more)}${o.meas.prior ? html`<small>anterior ${money(o.meas.prior)}</small>` : ''}</td>
+            <td class="${o.meas.left_over > 0.004 ? 'fm-pos' : ''}">${money(o.meas.left_over)}</td><td class="${o.meas.saldo < -0.004 ? 'fm-neg' : o.meas.saldo > 0.004 ? 'fm-pos' : ''}">${money(o.meas.saldo)}</td>
+            <td class="fd-owed">${money(o.debts.empresa_deve)}</td><td class="fd-due">${money(o.debts.profissional_deve)}</td></tr>`)}</tbody></table></div>
+        <p class="hint card-body">Toque na obra para ver a medição e as dívidas com o detalhe.</p></section>` : ''}
       <div class="fa-grid">
         <section class="card section"><div class="card-head"><h2>${icon('calendar')}Custo por mês</h2></div><div class="card-body">${legend}
           <div class="fa-cols">${d.months.map(m => html`<div class="fa-col" data-tip="${tip(monLabel(m.month), [`Mão de obra: ${money(m.people)}`, `Empreitadas: ${money(m.contracts)}`, `Total: ${money(m.total)}`, `${n2(m.diarias)} diárias`])}">
@@ -1032,7 +1054,6 @@ export async function paymentsView({ query, navigate, render }) {
     .map(p => ({ ...p, items: [...p.items].sort((a, b) => ({ pending: 0, open: 1, paid: 2 }[a.state] - { pending: 0, open: 1, paid: 2 }[b.state]) || String(b.paid_at || b.period).localeCompare(String(a.paid_at || a.period))) }));
   const nDue = d.people.filter(p => p.pending > 0 || p.open > 0 || p.debt > 0).length;
   // Dívida anterior da pessoa (separada das folhas): + a empresa deve · − a pessoa deve à empresa
-  const debtTag = p => (p.debt ? html`<small class="fd-tag ${p.debt > 0 ? 'fd-owed' : 'fd-due'}">Dívida anterior: ${p.debt > 0 ? 'empresa deve' : 'deve à empresa'} ${money(Math.abs(p.debt))}</small>` : '');
   const debtLi = x => html`<li class="fd-li"><a href="#/campo?obra=${x.project_id}"><b>Dívida anterior</b> · ${fmtDate(x.origin_date)}</a><small>${x.project_code} · ${x.kind_label} · ${x.reason}</small>
     <span class="${x.signed > 0 ? 'fd-owed' : 'fd-due'}">${x.signed > 0 ? '+' : '−'}${money(x.amount)} ${x.status === 'quitada' ? html`<span class="fp-paid">Quitada ${dm(x.settled_date)}</span>` : html`<span class="fc-pay">Em aberto</span>`}</span></li>`;
   const pendList = d.people.filter(p => p.pending > 0).map(p => ({ ...p, amount: p.pending }));
@@ -1055,15 +1076,17 @@ export async function paymentsView({ query, navigate, render }) {
         ${t.debt_owed ? html`<div><span>Dívida anterior (empresa deve)</span><b class="fd-owed">${money(t.debt_owed)}</b></div>` : ''}
         ${t.debt_due ? html`<div><span>Dívida anterior (devem à empresa)</span><b class="fd-due">${money(t.debt_due)}</b></div>` : ''}
       </div>
-      ${people.length ? html`<section class="card section"><ul class="fp-list fp-list2">
-          <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Já pago</span><span class="fp-num">A pagar</span><span class="fp-num">Previsto</span><span></span></li>
-          ${people.map(p => html`<li class="fp-row"><span class="fp-who"><b>${p.name}</b><small>${p.role || ''}</small>${debtTag(p)}</span>${pixCell(p)}
-            <span class="fp-num fp-pd" data-l="Já pago">${p.paid ? money(p.paid) : '—'}</span>
-            <strong class="fp-num fp-val" data-l="A pagar">${p.pending ? money(p.pending) : '—'}</strong><span class="fp-num fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span>
-            ${(() => { const pend = p.items.filter(i => i.state === 'pending'); const one = pend.length === 1 ? pend[0] : null;
-              return actCell({ ...p, amount: p.pending }, { canPay: p.pending > 0, lines: pend.map(i => i.line).join(','), due: p.pending, paidSoFar: one ? one.paid_amount || 0 : 0, pays: one ? one.payments : [] }); })()}
-            <details class="fp-det"><summary>${p.items.length} lançamento(s) · total ${money(p.paid + p.pending + p.open)}${p.debts.length ? ` · ${p.debts.length} dívida(s) anterior(es)` : ''}</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}${p.debts.map(debtLi)}</ul></details></li>`)}
-          <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><span class="fp-num fp-pd" data-l="Já pago">${money(people.reduce((a, p) => a + p.paid, 0))}</span><strong class="fp-num fp-val" data-l="A pagar">${money(people.reduce((a, p) => a + p.pending, 0))}</strong><span class="fp-num fp-open" data-l="Previsto">${money(people.reduce((a, p) => a + p.open, 0))}</span><span></span></li></ul></section>`
+      ${people.length ? html`<section class="card section"><ul class="fpp-list">
+          <li class="fpp-row fpp-head"><span>Quem recebe</span><span>PIX</span><span class="fpp-nums"><span>Já pago</span><span>A pagar</span><span>Previsto</span><span>Adiantamento / deve à empresa</span></span><span></span></li>
+          ${people.map(p => html`<li class="fpp-row"><span class="fp-who fpp-who"><b>${p.name}</b><small>${p.role || ''}</small>${p.debt_owed ? html`<small class="fd-tag fd-owed">Dívida anterior: empresa deve ${money(p.debt_owed)}</small>` : ''}</span>
+            <span class="fpp-pix">${pixCell(p)}</span>
+            <span class="fpp-nums"><span class="fp-pd" data-l="Já pago">${p.paid ? money(p.paid) : '—'}</span><strong class="fp-val" data-l="A pagar">${p.pending ? money(p.pending) : '—'}</strong>
+              <span class="fp-open" data-l="Previsto">${p.open ? money(p.open) : '—'}</span><span class="fd-due" data-l="Adiantamento / deve à empresa">${p.debt_due ? money(p.debt_due) : '—'}</span></span>
+            <span class="fpp-act">${(() => { const pend = p.items.filter(i => i.state === 'pending'); const one = pend.length === 1 ? pend[0] : null;
+              return actCell({ ...p, amount: p.pending }, { canPay: p.pending > 0, lines: pend.map(i => i.line).join(','), due: p.pending, paidSoFar: one ? one.paid_amount || 0 : 0, pays: one ? one.payments : [] }); })()}</span>
+            <details class="fp-det fpp-det"><summary>${p.items.length} lançamento(s) · total ${money(p.paid + p.pending + p.open)}${p.debts.length ? ` · ${p.debts.length} dívida(s) anterior(es)` : ''}</summary><ul>${p.items.map(i => html`<li><a href="#/campo/${i.sheet_id}"><b>${i.code}</b> · ${i.period}</a><small>${i.project_name} · ${i.what}</small><span>${money(i.amount)} ${stTxt(i)}</span></li>`)}${p.debts.map(debtLi)}</ul></details></li>`)}
+          <li class="fpp-row fpp-foot"><span class="fpp-who"><b>Total</b></span><span class="fpp-pix"></span><span class="fpp-nums"><span class="fp-pd" data-l="Já pago">${money(people.reduce((a, p) => a + p.paid, 0))}</span><strong class="fp-val" data-l="A pagar">${money(people.reduce((a, p) => a + p.pending, 0))}</strong>
+            <span class="fp-open" data-l="Previsto">${money(people.reduce((a, p) => a + p.open, 0))}</span><span class="fd-due" data-l="Adiantamento / deve à empresa">${money(people.reduce((a, p) => a + p.debt_due, 0))}</span></span><span></span></li></ul></section>`
         : html`<div class="empty-state"><h2>${onlyDue ? 'Ninguém com valor a receber' : 'Nenhum pagamento ainda'}</h2><p>${onlyDue ? 'Todas as folhas fechadas estão pagas.' : 'Os valores aparecem aqui quando houver folhas com diárias ou empreitadas.'}</p></div>`}
       <p class="muted pf-foot">O pagamento é registrado no Financeiro (uma tarefa por folha fechada, com esta mesma lista). Folhas abertas aparecem como previsto até serem fechadas.</p>`,
     mount(root) {

@@ -546,7 +546,8 @@ export function analysis(ctx, { from, to, obra } = {}) {
     const state = s.status === 'aberta' ? 'open' : pay?.status === 'paga' || !pay ? 'paid' : 'pending';
     const p = projects.find(x => x.id === s.project_id);
     const o = add(byObra, s.project_id, () => ({ project_id: p.id, code: p.code, name: p.name, status: p.status, sheets: 0, diarias: 0, people: 0, contracts: 0, client: 0, company: 0, paid: 0, pending: 0, open: 0, workdays: 0, last_end: null, open_sheets: 0 }));
-    const paidLines = state === 'pending' ? r2([...c.people, ...c.contracts].filter(x => x.paid_at && x.company > 0).reduce((t, x) => t + x.company, 0)) : 0;
+    // Já pago da folha pendente: pagamentos registrados (inclusive parciais) e quem foi marcado como pago
+    const paidLines = state === 'pending' ? r2([...c.people, ...c.contracts].filter(x => x.company > 0).reduce((t, x) => t + Math.min(x.company, x.paid_amount || 0), 0)) : 0;
     const workdays = new Set(c.people.flatMap(e => Object.keys(e.days).filter(d => Number(e.days[d]) > 0))).size;
     const company = Math.max(0, c.totals.company);
     for (const x of [o, tot]) {
@@ -574,11 +575,24 @@ export function analysis(ctx, { from, to, obra } = {}) {
   }
   const fin = o => ({ ...o, total: r2(o.people + o.contracts), avg_daily: o.diarias ? r2(o.people / o.diarias) : 0, avg_team: o.workdays ? r2(o.diarias / o.workdays) : 0 });
   const months = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)).map(m => ({ ...m, total: r2(m.people + m.contracts) }));
+  // Medição do terceiro e dívidas anteriores de cada obra (situação até hoje, não depende do período)
+  const zeroMeas = () => ({ count: 0, measured: 0, covered: 0, paid_more: 0, prior: 0, left_over: 0, saldo: 0 });
+  const zeroDebt = () => ({ empresa_deve: 0, profissional_deve: 0, pago_mais: 0 });
+  const tm = zeroMeas(), td = zeroDebt();
+  const obras = [...byObra.values()].map(fin).map(o => {
+    const m = listMeasurements(ctx, o.project_id);
+    const d = debtTotals(o.project_id);
+    const meas = { count: m.measurements.length, measured: m.totals.measured, covered: m.totals.covered, paid_more: r2(m.totals.paid_more + m.totals.paid_more_prior),
+      prior: m.totals.paid_more_prior, left_over: m.totals.left_over, saldo: r2(m.totals.diff - m.totals.paid_more_prior) };
+    for (const k of Object.keys(tm)) tm[k] = r2(tm[k] + meas[k]);
+    for (const k of Object.keys(td)) td[k] = r2(td[k] + d[k]);
+    return { ...o, meas, debts: { empresa_deve: d.empresa_deve, profissional_deve: d.profissional_deve, pago_mais: d.pago_mais } };
+  });
   return {
     filters: { from: f, to: t, obra: obra || null },
     projects,
-    totals: fin(tot),
-    obras: [...byObra.values()].map(fin).sort((a, b) => b.total - a.total),
+    totals: { ...fin(tot), meas: tm, debts: td },
+    obras: obras.sort((a, b) => b.total - a.total),
     months,
     services: [...byService.values()].map(x => ({ ...x, total: r2(x.people + x.contracts) })).sort((a, b) => b.total - a.total),
     roles: [...byRole.values()].map(x => ({ name: x.name, diarias: x.diarias, total: x.total, workers: x.workers.size, avg_daily: x.diarias ? r2(x.total / x.diarias) : 0 })).sort((a, b) => b.total - a.total),
@@ -629,9 +643,11 @@ export function payments(ctx, projectId, showPaid = false) {
     if (!w) continue;
     const g = groups.get(w.id) || { worker_id: w.id, name: w.name, role: w.role, pix: w.pix, pix_type: w.pix_type, doc: w.doc, pending: 0, open: 0, paid: 0, items: [] };
     const signed = d.kind === 'empresa_deve' ? d.amount : -d.amount;
-    if (!g.debts) { g.debts = []; g.debt = 0; }
+    if (!g.debts) { g.debts = []; g.debt = 0; g.debt_owed = 0; g.debt_due = 0; }
     if (d.status === 'aberta') {
       g.debt = r2(g.debt + signed);
+      // Separado: a empresa deve à pessoa (+) · a pessoa deve à empresa (adiantamento pendente)
+      if (signed > 0) g.debt_owed = r2(g.debt_owed + signed); else g.debt_due = r2(g.debt_due - signed);
       if (signed > 0) totals.debt_owed = r2(totals.debt_owed + signed); else totals.debt_due = r2(totals.debt_due - signed);
     }
     const p = one('SELECT code, name FROM projects WHERE id = ?', d.project_id);
@@ -642,7 +658,7 @@ export function payments(ctx, projectId, showPaid = false) {
   // PIX atual do cadastro quando a folha não tinha
   for (const g of groups.values()) if (!g.pix) { const w = one('SELECT pix, pix_type FROM field_workers WHERE id = ?', g.worker_id); if (w?.pix) { g.pix = w.pix; g.pix_type = w.pix_type; } }
   return {
-    people: [...groups.values()].map(g => ({ ...g, debts: g.debts || [], debt: g.debt || 0, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total || b.paid - a.paid || Math.abs(b.debt || 0) - Math.abs(a.debt || 0)),
+    people: [...groups.values()].map(g => ({ ...g, debts: g.debts || [], debt: g.debt || 0, debt_owed: g.debt_owed || 0, debt_due: g.debt_due || 0, total: r2(g.pending + g.open) })).sort((a, b) => b.pending - a.pending || b.total - a.total || b.paid - a.paid || Math.abs(b.debt || 0) - Math.abs(a.debt || 0)),
     totals: { ...totals, total: r2(totals.pending + totals.open) },
     projects: fillableProjects(ctx),
   };

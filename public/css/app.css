@@ -3391,4 +3391,31 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fp-files { display: inline-flex; gap: 6px; margin-left: 6px; }
 .fp-files a { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--navy); }
 .fp-files svg { width: 13px; height: 13px; }
-.fp-hist { display: grid; gap: 1px; width: 100%; color: var(--muted); font-size: 11.5px; }
+.fp-hist { display: grid; gap: 1px; width: 100%; color: var(--muted); font-size: 11.5px; }/* Pagamentos por pessoa (layout novo, responsivo): no computador em linha; no celular, cartão com os valores em grade */
+.fpp-list { list-style: none; margin: 0; padding: 0; }
+.fpp-row { display: grid; grid-template-columns: minmax(160px, 1.1fr) minmax(170px, 1fr) minmax(420px, 2.6fr) minmax(170px, auto); gap: 6px 14px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); }
+.fpp-head { font-size: 12px; color: var(--muted); font-weight: 600; border-top: 0; padding-top: 8px; padding-bottom: 8px; background: var(--navy-50); }
+.fpp-foot { background: var(--navy-50); }
+.fpp-who, .fpp-pix { min-width: 0; }
+.fpp-pix .fp-pix { background: none; padding: 0; }
+.fpp-nums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 10px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fpp-head .fpp-nums { white-space: normal; line-height: 1.2; }
+.fpp-nums .fp-val { font-size: 15px; color: var(--navy); }
+.fpp-act { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 0; }
+.fpp-act .fp-copy { justify-self: auto; justify-content: flex-end; }
+.fpp-det { grid-column: 1 / -1; min-width: 0; }
+@media (max-width: 1100px) {
+  .fpp-row { grid-template-columns: 1fr; gap: 8px; }
+  .fpp-head { display: none; }
+  .fpp-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); text-align: left; white-space: normal; }
+  .fpp-nums > * { display: flex; flex-direction: column; background: var(--navy-50); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+  .fpp-nums > *::before { content: attr(data-l); font-size: 11px; color: var(--muted); font-weight: 600; }
+  .fpp-act, .fpp-act .fp-copy { justify-content: flex-start; }
+  .fpp-foot .fpp-pix { display: none; }
+}
+@media (min-width: 560px) and (max-width: 1100px) { .fpp-nums { grid-template-columns: repeat(4, minmax(0, 1fr)); } }/* Resumo e análise: medição do terceiro e dívidas anteriores */
+.fa-subh { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--navy); }
+.fa-subh small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 500; }
+.fa-kpis2 > div small { font-size: 11.5px; color: var(--muted); }/* Resumo e análise: no celular os cartões da grade não passam da tela (a tabela rola dentro do cartão) */
+.fa-grid > * { min-width: 0; }
+@media (max-width: 900px) { .fa-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -2499,6 +2499,9 @@ async function main() {
   const fdPP = fdPay.people.find(p => p.worker_id === fcP.id), fdPH = fdPay.people.find(p => p.worker_id === fcH.id);
   ok(fdPP.debt === 300 && fdPP.debts.length === 1 && fdPH.debt === -50 && fdPay.totals.debt_owed === 300 && fdPay.totals.debt_due === 50 && !fdPP.items.some(i => String(i.line).startsWith('d')), 'Pagamentos: dívida anterior separada por pessoa (+ empresa deve, − deve à empresa), fora do Marcar pago');
   ok((await fcAna('GET', '/field/sheets?obra=2')).data.overview[0].debts.empresa_deve === 300, 'resumo da obra traz as dívidas anteriores em aberto');
+  ok(fdPH.debt_due === 50 && fdPH.debt_owed === 0 && fdPP.debt_owed === 300, 'Pagamentos: coluna do que o profissional deve à empresa (adiantamento) separada do que a empresa deve');
+  const fdAn = (await fcAna('GET', '/field/analysis?obra=2')).data;
+  ok(fdAn.totals.debts.empresa_deve === 300 && fdAn.totals.debts.profissional_deve === 50 && fdAn.obras[0].meas.prior === 120 && fdAn.obras[0].debts.pago_mais === 120, 'Resumo e análise: medição do terceiro e dívidas anteriores por obra');
   const fdS = (await fcAna('POST', `/field/debts/${fdA.id}/settle`, { settled_date: '2026-09-01', settled_note: 'Pago em dinheiro (teste)' })).data;
   ok(fdS.debts.find(d => d.id === fdA.id).status === 'quitada' && fdS.totals.empresa_deve === 0 && fdS.totals.settled === 300, 'quitar a dívida tira dos totais em aberto');
   ok((await fcAna('GET', '/field/payments?obra=2')).data.people.find(p => p.worker_id === fcP.id)?.debt !== 300, 'dívida quitada sai do a receber em Pagamentos');

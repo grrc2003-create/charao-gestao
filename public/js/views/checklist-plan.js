@@ -40,8 +40,10 @@ export async function view({ params }) {
       const [selW, inS, inE, clear] = ['#pl-w', '#pl-s', '#pl-e', '#pl-clear'].map(x => root.querySelector(x));
 
       const capacity = c => {
-        const again = d.schedule?.can_reschedule && d.can_manage ? html`<div class="pl-again"><span>A sequência não começa em ${fmtDate(d.schedule.first_free)}.</span><button type="button" class="btn btn-ghost btn-sm" data-resched>${icon('calendar')}Reprogramar a partir de ${dm(d.schedule.first_free)}</button></div>` : '';
-        if (!c && !st.start) return html`<div class="pl-cap"><div class="pl-cap-head"><b>Sem dia de início</b><span>sem limite de tempo; os itens vinculados não recebem datas</span></div></div>`;
+        const again = !d.can_manage ? ''
+          : d.schedule?.undated ? html`<div class="pl-again"><span>${d.schedule.undated === 1 ? '1 atividade está sem data.' : `${d.schedule.undated} atividades estão sem data.`}</span><button type="button" class="btn btn-primary btn-sm" data-fill>${icon('calendar')}Definir as datas</button></div>`
+            : d.schedule?.can_reschedule ? html`<div class="pl-again"><span>A sequência não começa em ${fmtDate(d.schedule.first_free)}.</span><button type="button" class="btn btn-ghost btn-sm" data-resched>${icon('calendar')}Reprogramar a partir de ${dm(d.schedule.first_free)}</button></div>` : '';
+        if (!c && !st.start) return html`<div class="pl-cap"><div class="pl-cap-head"><b>Sem dia de início</b><span>escolha o dia em "Profissional inicia em" para as atividades receberem datas</span></div></div>`;
         if (!c) return html`<div class="pl-cap"><div class="pl-cap-head"><b>Inicia em ${fmtDate(st.start)}</b><span>${d.schedule?.ends ? `sequência termina em ${fmtDate(d.schedule.ends)} · ` : ''}sem data limite</span></div>${again}</div>`;
         const pct = n => (c.available ? (n / c.available) * 100 : 0);
         return html`<div class="pl-cap ${c.remaining ? '' : 'is-full'}">
@@ -120,15 +122,33 @@ export async function view({ params }) {
       const load = async () => {
         try { d = await api(url()); draw(); } catch (e) { toast(e.message, 'err'); }
       };
+      // Enquanto o ano é digitado o campo passa por 0002, 0020, 0202: só vale quando a data está completa
+      const typing = v => !!v && v < '2000-01-01';
+      const fillUndated = async () => {
+        try {
+          const n = d.schedule.undated;
+          d = await api(`/tasks/${taskId}/plan/reschedule`, { method: 'POST', body: { worker_id: Number(st.worker), only_undated: true, start: st.start, end: st.end || null } });
+          toast(n === 1 ? 'A atividade sem data recebeu as datas.' : `${n} atividades sem data receberam as datas.`);
+        } catch (er) { toast(er.message, 'err'); }
+        draw();
+      };
       const syncFilters = () => {
+        if (typing(inS.value) || typing(inE.value)) return null;
         st.worker = selW.value; st.start = inS.value; st.end = inE.value;
         clear.hidden = !st.start && !st.end;
         inE.min = st.start;
         if (st.end && !st.start) toast('Informe também o dia em que o profissional inicia.', 'warn');
-        if (st.start && st.end && st.end < st.start) return toast('A data final não pode ser antes do início.', 'err');
-        load();
+        if (st.start && st.end && st.end < st.start) { toast('A data final não pode ser antes do início.', 'err'); return null; }
+        return load();
       };
-      [inS, inE].forEach(el => el.addEventListener('change', syncFilters));
+      inE.addEventListener('change', syncFilters);
+      // Escolheu o dia: quem ainda não tem data já recebe; quem tem data só muda pelo botão Reprogramar
+      inS.addEventListener('change', async () => {
+        const loaded = syncFilters();
+        if (!loaded) return;
+        await loaded;
+        if (st.start && d.schedule?.undated && d.can_manage) fillUndated();
+      });
       // Ao escolher o profissional, o dia de início vem da sequência já programada dele
       selW.addEventListener('change', async () => {
         st.worker = selW.value;
@@ -144,6 +164,7 @@ export async function view({ params }) {
         if (dd) return askDays(Number(dd.dataset.days));
         const gg = e.target.closest('[data-gap]');
         if (gg) return askGap(Number(gg.dataset.gap));
+        if (e.target.closest('[data-fill]')) return fillUndated();
         const a = e.target.closest('[data-link]'), b = e.target.closest('[data-unlink]'), r = e.target.closest('[data-resched]');
         if (!a && !b && !r) return;
         const btn = a || b || r;

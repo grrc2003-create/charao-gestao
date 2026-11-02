@@ -2599,6 +2599,18 @@ async function main() {
   ok((await cplGet(fcAna)).data.sequence[1].gap_days === 2, 'intervalo recusado não altera nada');
   const cplG3 = await cplGap({ item_id: cplG0[1].id, gap_days: 0 });
   ok(cplG3.status === 200 && cplG3.data.sequence[1].start_date === '2099-03-12' && cplG3.data.sequence[1].gap_days === 0, 'intervalo 0 tira o intervalo e o item volta');
+  // Atividade sem data recebe as datas pelo dia de início; quem já tem data não muda
+  const cplF = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL sem data', items: [{ text: 'F1', team: [{ role: 'Pedreiro', days: 2 }] }, { text: 'F2', team: [{ role: 'Pedreiro', days: 1 }] }] })).data.id;
+  const cplFi = (await fcAna('GET', `/tasks/${cplF}/plan?worker=${fcP.id}`)).data.pending.map(i => i.id);
+  const cplFl = (id, per) => fcAna('POST', `/tasks/${cplF}/plan/link`, { worker_id: fcP.id, item_id: id, ...per });
+  await cplFl(cplFi[0], { start: '2099-06-01' });
+  const cplF0 = (await cplFl(cplFi[1], {})).data.sequence;
+  ok(cplF0[0].start_date === '2099-06-01' && !cplF0[1].due_date, 'vinculado sem dia de início fica sem data');
+  ok((await fcAna('GET', `/tasks/${cplF}/plan?worker=${fcP.id}&de=0202-05-04`)).status === 400, 'data com ano incompleto não vira agenda');
+  ok((await fcAna('GET', `/tasks/${cplF}/plan?worker=${fcP.id}&de=2099-06-01`)).data.schedule.undated === 1, 'tela sabe quantas atividades estão sem data');
+  const cplF1 = await fcAna('POST', `/tasks/${cplF}/plan/reschedule`, { worker_id: fcP.id, only_undated: true, start: '2099-06-01' });
+  ok(cplF1.status === 200 && cplF1.data.sequence[0].start_date === '2099-06-01' && cplF1.data.sequence[0].due_date === '2099-06-02' && cplF1.data.sequence[1].start_date === '2099-06-03' && cplF1.data.schedule.undated === 0, 'só a atividade sem data recebe as datas; a outra fica onde está');
+  await fcAna('POST', `/tasks/${cplF}/cancel`, { reason: 'teste da programação' }).catch(() => null);
   // Compromisso em outro check-list da obra consome o período
   const cplOther = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outro', items: [{ text: 'Outro', start_date: '2099-03-02', due_date: '2099-03-03', team: [{ worker_id: fcP.id, days: 2 }] }] })).data.id;
   const cplOut = (await cplGet(fcAna, cplQ)).data;

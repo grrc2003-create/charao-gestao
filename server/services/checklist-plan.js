@@ -26,9 +26,12 @@ function loadWorker(t, workerId) {
   return w;
 }
 
+const MIN_DATE = '2000-01-01';
 function readPeriod(start, end) {
   const s = date(start || null, 'Dia de início'), e = date(end || null, 'Fim do período');
   if (!s) return null;
+  // Ano incompleto (0002, 0202…) aparece enquanto a data é digitada: nunca vira agenda
+  if (s < MIN_DATE || (e && e < MIN_DATE)) throw badRequest('Data inválida: confira o ano.');
   if (e && e < s) throw badRequest('O fim do período não pode ser antes do início.');
   return { start: s, end: e };
 }
@@ -108,7 +111,7 @@ export function planState(ctx, taskId, { worker, start, end }) {
     worker: { id: w.id, name: w.name, role: w.role, ...(money ? { rate: w.daily_rate } : {}) },
     period,
     capacity: limit ? { available: limit.days.length, others: limit.others, here: Math.max(0, limit.days.length - limit.others - limit.remaining), remaining: limit.remaining, gaps: openSeq.slice(1).reduce((n, i) => n + i.gap_days, 0) } : null,
-    schedule: period ? { ends, first_free: fromStart?.free[0] || ag.free[0] || null, can_reschedule: !!fromStart?.free[0] && openSeq[0].start_date !== fromStart.free[0] } : null,
+    schedule: period ? { ends, undated: openSeq.filter(i => !i.due_date).length, first_free: fromStart?.free[0] || ag.free[0] || null, can_reschedule: !!fromStart?.free[0] && openSeq[0].start_date !== fromStart.free[0] } : null,
     pending: pending.map(i => ({ ...view(i), qty: i.qty, fits: !limit || slots(i.days) <= limit.remaining })),
     sequence: seq.map((i, n) => ({ ...view(i), gap_days: i.gap_days, pushed_days: pushedBy(i, n), resolved: isResolved(i.result), outside: !!(period && i.due_date && ((period.end && i.due_date > period.end) || (i.start_date || i.due_date) < period.start)) })),
     others: others.map(o => {
@@ -233,7 +236,8 @@ export function setItemGap(ctx, taskId, body = {}) {
   return planState(ctx, taskId, { worker: w.id, start: body.start, end: body.end });
 }
 
-// Move a sequência em aberto para o dia de início informado, na mesma ordem
+// Move a sequência em aberto para o dia de início informado, na mesma ordem.
+// only_undated: só dá datas às atividades que ainda não têm; as que têm data ficam onde estão.
 export function rescheduleSequence(ctx, taskId, body = {}) {
   const t = loadChecklistTask(ctx, taskId);
   const w = loadWorker(t, intOrNull(body.worker_id));
@@ -242,6 +246,12 @@ export function rescheduleSequence(ctx, taskId, body = {}) {
   const seq = sequenceOf(t, w.id);
   const open = seq.filter(i => !isResolved(i.result));
   if (!open.length) throw badRequest('Nenhum item em aberto na sequência.');
+  if ([true, 'true', '1', 1].includes(body.only_undated)) {
+    const fill = agenda(t, w.id, period, seq, othersOf(t, w.id));
+    if (fill.reserved > fill.free.length) throw badRequest(`As atividades sem data precisam de ${fill.reserved} dia(s) e o período tem ${fill.free.length} livre(s).`);
+    tx(() => place(ctx, t, fill, fill.unplaced));
+    return planState(ctx, taskId, { worker: w.id, start: body.start, end: body.end });
+  }
   const ag = agenda(t, w.id, period, seq, othersOf(t, w.id), new Set(open.map(i => i.id)));
   const need = spanOf(open, ag.hasPrev);
   if (need > ag.free.length) throw badRequest(`A sequência precisa de ${need} dia(s) e o período tem ${ag.free.length} livre(s).`);

@@ -31,12 +31,12 @@ const NO_WORKER = 'sem';
 // Partes por profissional: itens na ordem da sequência; por último, os que ainda têm vaga de função ou não têm equipe
 function workerParts(items, onlyWorker) {
   const by = new Map();
-  const add = (key, name, role, item, days, pos) => {
+  const add = (key, name, role, item, days, pos, gap = 0) => {
     if (!by.has(key)) by.set(key, { key, name, role, rows: [] });
-    by.get(key).rows.push({ item, days, pos });
+    by.get(key).rows.push({ item, days, pos, gap });
   };
   for (const i of items) {
-    for (const e of i.team.filter(x => x.worker_id)) add(String(e.worker_id), e.name, e.role, i, e.days, e.plan_seq ?? 1e6);
+    for (const e of i.team.filter(x => x.worker_id)) add(String(e.worker_id), e.name, e.role, i, e.days, e.plan_seq ?? 1e6, e.plan_gap);
     const open = i.team.filter(x => !x.worker_id);
     if (open.length || !i.team.length) add(NO_WORKER, 'Sem profissional definido', null, i, open.length ? Math.max(...open.map(x => x.days)) : null, i.seq);
   }
@@ -46,7 +46,8 @@ function workerParts(items, onlyWorker) {
   return { options, parts: shown.map((p, index) => {
     const rows = p.rows.sort((a, b) => a.pos - b.pos || (a.item.start_date || a.item.due_date || '9999').localeCompare(b.item.start_date || b.item.due_date || '9999') || a.item.seq - b.item.seq);
     return { items: rows.map(r => r.item), label: `Profissional: ${p.name}${p.role ? ` · ${p.role}` : ''}`, name: p.key === NO_WORKER ? '' : p.name, index, total: shown.length,
-      order: new Map(rows.map((r, n) => [r.item.id, n + 1])), days: new Map(rows.map(r => [r.item.id, r.days])) };
+      order: new Map(rows.map((r, n) => [r.item.id, n + 1])), days: new Map(rows.map(r => [r.item.id, r.days])),
+      gaps: new Map(rows.map((r, n) => [r.item.id, n ? r.gap : 0])) };
   }) };
 }
 
@@ -150,7 +151,8 @@ export async function view({ params, query, state }) {
   const itemBlock = i => {
     const st = situation(i);
     const hist = i.history.length > 1 || i.history.some(h => h.reason || h.registration) ? i.history : [];
-    return html`<article class="r-item avoid">
+    const gapDays = curPart?.gaps?.get(i.id);
+    return html`${gapDays ? html`<div class="r-item-gap">Intervalo de ${gapDays} ${gapDays === 1 ? 'dia útil' : 'dias úteis'}</div>` : ''}<article class="r-item avoid">
       <header><span class="r-item-n">${i.seq}</span><b>${i.text}</b><span class="r-st" style="--c:${st.c}">${st.t}</span></header>
       <div class="r-facts">
         ${curPart?.order ? html`${curPart.name ? html`<span class="r-fact"><small>Profissional</small><b>${curPart.name}</b></span>` : ""}<span class="r-fact"><small>Ordem na sequência</small><b>${curPart.order.get(i.id)}º</b></span>${curPart.days?.get(i.id) ? html`<span class="r-fact"><small>Dias de trabalho</small><b>${String(curPart.days.get(i.id)).replace('.', ',')}</b></span>` : ''}${i.start_date ? html`<span class="r-fact"><small>Início</small><b>${fmtDate(i.start_date)}</b></span>` : ''}` : ''}
@@ -191,7 +193,8 @@ export async function view({ params, query, state }) {
     const row = i => {
       const sit = situation(i);
       const tags = [!levels.includes('grupo') && sep !== 'grupo' ? i.group : '', !levels.includes('especialidade') && sep !== 'especialidade' ? i.specialty : ''].filter(Boolean).join(' · ');
-      return html`<tr><td class="num">${part.order?.get(i.id) ?? i.seq}</td>
+      const gap = part.gaps?.get(i.id);
+      return html`${gap ? html`<tr class="r-l-gap"><td colspan="${span}">Intervalo de ${gap} ${gap === 1 ? 'dia útil' : 'dias úteis'}</td></tr>` : ''}<tr><td class="num">${part.order?.get(i.id) ?? i.seq}</td>
         <td><b>${i.text}</b>${byWorker ? html` <span class="small muted" style="white-space:nowrap">(item ${i.seq})</span>` : ''}${tags ? html`<div class="small muted">${tags}</div>` : ''}${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}</td>
         ${showResp ? html`<td>${i.responsible_name}</td>` : ''}
         ${byWorker ? html`<td class="r-l-due">${i.start_date ? fmtDate(i.start_date) : '—'}</td>` : ''}

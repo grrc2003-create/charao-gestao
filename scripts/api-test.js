@@ -2583,10 +2583,31 @@ async function main() {
   const cplView = (await fcJul('GET', `/tasks/${cplT}`)).data.checklist.items;
   const cplRow = cplView.find(i => i.id === cplI1).team.find(e => e.worker_id === fcP.id);
   ok(cplRow.plan_seq >= 1 && cplRow.name && cplRow.value === undefined, 'equipe do item traz a ordem da sequência para o relatório por profissional, sem valores');
+  // Intervalo entre dois itens: empurra os seguintes, consome o período e aparece na equipe do item
+  const cplGap = body => fcAna('POST', `/tasks/${cplT}/plan/gap`, { worker_id: fcP.id, ...body });
+  const cplG0 = (await cplGet(fcAna)).data.sequence;
+  ok((await cplGap({ item_id: cplG0[0].id, gap_days: 2 })).status === 400, 'o primeiro item não tem intervalo: ele começa no dia de início');
+  ok((await cplGap({ item_id: cplG0[1].id, gap_days: -1 })).status === 400, 'intervalo inválido é recusado');
+  const cplG1 = await cplGap({ item_id: cplG0[1].id, gap_days: 2 });
+  ok(cplG1.status === 200 && cplG1.data.sequence[1].gap_days === 2 && cplG1.data.sequence[1].start_date === '2099-03-16', 'intervalo de 2 dias úteis empurra o item (quarta 11 → segunda 16)');
+  const cplGd = (await fcAna('GET', `/tasks/${cplT}`)).data.checklist;
+  ok(cplGd.items.find(i => i.id === cplG0[1].id).team.find(e => e.worker_id === fcP.id).plan_gap === 2 && cplGd.item_deps[cplG0[1].id].predecessors.some(p => p.lag_days === 2), 'intervalo fica na equipe do item e na folga da dependência');
+  const cplGL = (await cplGet(fcAna, '&de=2099-03-09&ate=2099-03-27')).data;
+  ok(cplGL.capacity.gaps === 2, 'intervalo aparece no consumo do período');
+  const cplGN = await cplGap({ item_id: cplG0[1].id, gap_days: 30, start: '2099-03-09', end: '2099-03-27' });
+  ok(cplGN.status === 400 && /Ultrapassa/.test(cplGN.data.error), 'intervalo que passa da data final é recusado');
+  ok((await cplGet(fcAna)).data.sequence[1].gap_days === 2, 'intervalo recusado não altera nada');
+  const cplG3 = await cplGap({ item_id: cplG0[1].id, gap_days: 0 });
+  ok(cplG3.status === 200 && cplG3.data.sequence[1].start_date === '2099-03-12' && cplG3.data.sequence[1].gap_days === 0, 'intervalo 0 tira o intervalo e o item volta');
   // Compromisso em outro check-list da obra consome o período
   const cplOther = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outro', items: [{ text: 'Outro', start_date: '2099-03-02', due_date: '2099-03-03', team: [{ worker_id: fcP.id, days: 2 }] }] })).data.id;
   const cplOut = (await cplGet(fcAna, cplQ)).data;
   ok(cplOut.capacity.others === 2 && cplOut.others.some(o => o.title === 'Outro'), 'itens em outros check-lists da obra consomem o período');
+  // Compromisso de outro check-list no meio da sequência: o início é adiado e a tela avisa
+  const cplPush = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outro 2', items: [{ text: 'Outro 2', start_date: '2099-03-12', due_date: '2099-03-13', team: [{ worker_id: fcP.id, days: 2 }] }] })).data.id;
+  const cplPr = (await fcAna('POST', `/tasks/${cplT}/plan/reschedule`, { worker_id: fcP.id, start: '2099-03-09' })).data.sequence;
+  ok(cplPr[1].start_date === '2099-03-16' && cplPr[1].pushed_days === 2, 'início adiado por compromisso em outro check-list fica indicado');
+  await fcAna('POST', `/tasks/${cplPush}/cancel`, { reason: 'teste da programação' }).catch(() => null);
   await fcAna('POST', `/tasks/${cplOther}/cancel`, { reason: 'teste da programação' }).catch(() => null);
   // Cartão do check-list: pessoas envolvidas (profissional 1x; função pela maior quantidade) e valor total (só Folha de Campo)
   const ctCard = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL cartão', items: [

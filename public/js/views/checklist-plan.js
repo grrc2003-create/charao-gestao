@@ -47,12 +47,29 @@ export async function view({ params }) {
         return html`<div class="pl-cap ${c.remaining ? '' : 'is-full'}">
           <div class="pl-cap-head"><b>${c.remaining ? `Restam ${daysLabel(c.remaining)}` : 'Tempo esgotado'}</b><span>${fmtDate(st.start)} a ${fmtDate(st.end)} · ${daysLabel(c.available)} úteis</span></div>
           <div class="pl-bar" role="img" aria-label="${c.here} dias nesta sequência, ${c.others} em outros check-lists, ${c.remaining} livres"><span class="is-here" style="width:${pct(c.here)}%"></span><span class="is-other" style="width:${pct(c.others)}%"></span></div>
-          <div class="pl-legend"><span><i class="is-here"></i>Nesta sequência: ${c.here}</span><span><i class="is-other"></i>Outros check-lists: ${c.others}</span><span><i></i>Livres: ${c.remaining}</span></div>
+          <div class="pl-legend"><span><i class="is-here"></i>Nesta sequência: ${c.here}${c.gaps ? ` (${c.gaps} de intervalo)` : ''}</span><span><i class="is-other"></i>Outros check-lists: ${c.others}</span><span><i></i>Livres: ${c.remaining}</span></div>
           ${again}
         </div>`;
       };
       const tags = i => [i.group, i.specialty].filter(Boolean).join(' · ');
       const editDays = i => (d.can_manage ? html`<button type="button" class="pl-edit" data-days="${i.id}" aria-label="Alterar o prazo de ${i.text}">${icon('edit')}Alterar prazo</button>` : '');
+      // Entre dois itens em aberto: mostra o intervalo ou a opção de incluir
+      const gapRow = (i, n) => {
+        const before = d.sequence[n - 1];
+        if (!before || i.resolved || before.resolved) return '';
+        if (!i.gap_days && !d.can_manage) return '';
+        return html`<li class="pl-gap ${i.gap_days ? 'has-gap' : ''}">${i.gap_days ? html`<b>Intervalo de ${i.gap_days} ${i.gap_days === 1 ? 'dia útil' : 'dias úteis'}</b>` : ''}
+          ${d.can_manage ? html`<button type="button" class="pl-edit" data-gap="${i.id}">${i.gap_days ? 'Alterar' : '+ Intervalo'}</button>` : ''}</li>`;
+      };
+      const askGap = async id => {
+        const it = d.sequence.find(i => i.id === id);
+        await sheet({ title: 'Intervalo entre itens', submitLabel: 'Salvar',
+          body: html`<p class="muted" style="margin:0 0 8px">Antes de: ${it.text}</p>
+            <div class="field"><label class="req" for="pl-gp">Intervalo em dias úteis</label><input id="pl-gp" name="gap_days" type="text" inputmode="numeric" required value="${it.gap_days || ''}" placeholder="Ex.: 2"></div>
+            <span class="hint">O profissional fica sem atividade nesses dias. Este item e os seguintes são empurrados, e o intervalo consome o tempo do período. Use 0 para tirar.</span>`,
+          onSubmit: async f => { d = await api(`/tasks/${taskId}/plan/gap`, { method: 'POST', body: { worker_id: Number(st.worker), item_id: id, gap_days: f.gap_days, start: st.start || null, end: st.start && st.end ? st.end : null } }); return f; } });
+        draw();
+      };
       const askDays = async id => {
         const inSeq = d.sequence.find(i => i.id === id);
         const it = inSeq || d.pending.find(i => i.id === id);
@@ -84,10 +101,11 @@ export async function view({ params }) {
               ${d.items_without_team ? html`<p class="hint pl-hint">${d.items_without_team} ${d.items_without_team === 1 ? 'item em aberto está' : 'itens em aberto estão'} sem equipe e não ${d.items_without_team === 1 ? 'aparece' : 'aparecem'} aqui. Informe a função e os dias na edição do item.</p>` : ''}
             </section>
             <section class="card pl-col"><div class="card-head"><h2>Sequência de ${w.name}</h2><span class="sub">${daysLabel(d.totals.days)}${d.totals.value !== undefined ? ` · ${BRL.format(d.totals.value)}` : ''}</span></div>
-              ${d.sequence.length ? html`<ol class="pl-seq">${d.sequence.map((i, n) => html`<li class="pl-step ${i.resolved ? 'is-done' : ''}">
+              ${d.sequence.length ? html`<ol class="pl-seq">${d.sequence.map((i, n) => html`${gapRow(i, n)}<li class="pl-step ${i.resolved ? 'is-done' : ''}">
                 <span class="pl-dot">${n + 1}</span>
                 <div class="pl-main"><b>${i.text}</b>${tags(i) ? html`<small>${tags(i)}</small>` : ''}
                   <span class="pl-days">${daysLabel(i.days)} · ${span(i)}${i.value !== undefined ? ` · ${BRL.format(i.value)}` : ''}${i.resolved ? ' · resolvido' : editDays(i)}</span>
+                  ${i.pushed_days ? html`<em>Início adiado: ${daysLabel(i.pushed_days)} ocupado${i.pushed_days === 1 ? '' : 's'} em outros check-lists</em>` : ''}
                   ${i.outside ? html`<em>Fora das datas escolhidas</em>` : ''}</div>
                 ${edit && !i.resolved ? html`<button type="button" class="icon-btn" data-unlink="${i.id}" aria-label="Tirar ${i.text} da sequência">✕</button>` : ''}
               </li>`)}</ol>` : html`<p class="muted card-body">Nenhum item vinculado ainda.</p>`}
@@ -110,12 +128,22 @@ export async function view({ params }) {
         if (st.start && st.end && st.end < st.start) return toast('A data final não pode ser antes do início.', 'err');
         load();
       };
-      [selW, inS, inE].forEach(el => el.addEventListener('change', syncFilters));
+      [inS, inE].forEach(el => el.addEventListener('change', syncFilters));
+      // Ao escolher o profissional, o dia de início vem da sequência já programada dele
+      selW.addEventListener('change', async () => {
+        st.worker = selW.value;
+        if (st.start) return syncFilters();
+        await load();
+        const first = d.sequence?.filter(i => !i.resolved && i.start_date).map(i => i.start_date).sort()[0];
+        if (first) { inS.value = first; syncFilters(); }
+      });
       clear.addEventListener('click', () => { inS.value = ''; inE.value = ''; syncFilters(); });
 
       box.addEventListener('click', async e => {
         const dd = e.target.closest('[data-days]');
         if (dd) return askDays(Number(dd.dataset.days));
+        const gg = e.target.closest('[data-gap]');
+        if (gg) return askGap(Number(gg.dataset.gap));
         const a = e.target.closest('[data-link]'), b = e.target.closest('[data-unlink]'), r = e.target.closest('[data-resched]');
         if (!a && !b && !r) return;
         const btn = a || b || r;

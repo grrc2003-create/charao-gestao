@@ -3564,3 +3564,7 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .pl-item.is-blocked .pl-main { opacity: 1; }
 .pl-item.is-blocked .pl-main > b, .pl-item.is-blocked .pl-main > small { opacity: .62; }
 .pl-report { padding: 2px 14px 10px; }
+.pl-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0 14px 0 27px; padding: 2px 0 2px 26px; border-left: 2px solid var(--navy); font-size: 12.5px; }
+.pl-gap.has-gap { border-left-style: dashed; color: #B45309; }
+.pl-gap .pl-edit { margin-left: 0; }
+.pl-step:not(:last-child)::before { bottom: 0; }

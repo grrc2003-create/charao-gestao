@@ -604,3 +604,5 @@
 .r-list-table.is-worker .r-l-note { width: 18%; }
 .r-list-table.is-worker th:nth-child(2) { width: 30%; }
 .r-list-table .r-list-who th { background: #fff; color: #1E2C3A; font-size: 8.5pt; text-transform: none; letter-spacing: 0; border-bottom: 1px solid #ECE9E3; }
+.r-list-table .r-l-gap td { padding: 3px 6px; background: #FBF3E6; color: #8A5A0B; font-size: 8.5pt; font-weight: 700; text-align: center; }
+.r-item-gap { margin: 4px 0; padding: 3px 8px; background: #FBF3E6; color: #8A5A0B; font-size: 8.5pt; font-weight: 700; text-align: center; border-radius: 4px; break-after: avoid; }

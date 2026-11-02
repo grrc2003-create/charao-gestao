@@ -31,8 +31,9 @@ function syncTeam(projectId, memberIds, before = []) {
   run('DELETE FROM project_members WHERE project_id = ?', projectId);
   for (const m of want) {
     run('INSERT OR IGNORE INTO project_members (project_id, user_id) VALUES (?,?)', projectId, m);
-    const u = one('SELECT role, access_scope FROM users WHERE id = ?', m);
-    if (u && u.role !== 'admin' && u.access_scope !== 'total') run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', m, projectId);
+    const u = one('SELECT role, access_scope, total_internal FROM users WHERE id = ?', m);
+    // Acesso total sem os internos: marcar na equipe libera este projeto interno
+    if (u && u.role !== 'admin' && (u.access_scope !== 'total' || !u.total_internal)) run('INSERT OR IGNORE INTO user_project_access (user_id, project_id) VALUES (?,?)', m, projectId);
   }
   const removed = [...had].filter(id => !want.has(id));
   for (const m of removed) run('DELETE FROM user_project_access WHERE user_id = ? AND project_id = ?', m, projectId);

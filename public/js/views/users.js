@@ -120,6 +120,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         <fieldset class="fieldset form" id="scope-fs"><legend>Acesso a dados</legend>
           <div class="segmented seg-3" id="scope-seg">${Object.entries(SCOPE).map(([k, l]) => html`<label><input type="radio" name="access_scope" value="${k}" ${u.access_scope === k ? 'checked' : ''}>
             ${k === 'total' ? 'Total' : k === 'projetos' ? 'Por projeto' : 'Somente próprias'}<small>${l}</small></label>`)}</div>
+          <label class="switch" id="total-internal"><input type="checkbox" id="ti" ${u.total_internal === 0 ? '' : 'checked'}><span><b>Acessa os projetos internos da Charão</b><small class="muted" style="display:block">Desmarcado: vê todas as obras, mas nenhum projeto interno. Continua vendo as próprias tarefas, os internos que lidera e aqueles em que for marcado na equipe. Contratos e Financeiro seguem as seções liberadas abaixo.</small></span></label>
           <div class="field" id="proj-access"><span class="label">Projetos liberados</span>
             <div class="checks">${projects.map(p => html`<label><input type="checkbox" name="project" value="${p.id}" ${projectSet.has(p.id) ? 'checked' : ''}><span class="mono muted">${p.code}</span>${p.name}</label>`)}</div>
             <span class="hint" id="proj-hint"></span></div>
@@ -184,6 +185,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         root.querySelector('#scope-fs').style.display = role === 'admin' ? 'none' : '';
         root.querySelector('#scope-seg').style.display = hasLogin ? '' : 'none';
         root.querySelector('#proj-access').style.display = hasLogin && scope === 'total' ? 'none' : '';
+        root.querySelector('#total-internal').style.display = hasLogin && scope === 'total' ? '' : 'none';
       };
       f.addEventListener('change', sync);
       sync();
@@ -204,6 +206,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         if (!f.querySelector('#sec-fs')?.hidden) data.sections = [...f.querySelectorAll('[name=section]:checked')].map(c => c.value);
         delete data.section;
         data.project_ids = [...f.querySelectorAll('[name=project]:checked')].map(c => Number(c.value));
+        data.total_internal = root.querySelector('#ti').checked ? 1 : 0;
         delete data.project;
         if (editing) data.active = f.querySelector('[name=active]').checked;
         if (data.role === 'terceirizado' || (editing && ext)) data.login_enabled = f.querySelector('#login_enabled').checked;

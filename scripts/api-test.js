@@ -494,6 +494,31 @@ async function main() {
   console.log('Áreas internas da empresa');
   const intArea = (await ana('GET', '/projects')).data.find(p => p.kind === 'interno');
   ok(intArea && intArea.code === 'INT-001' && intArea.name === 'Charão — Interno', 'área interna padrão criada (INT-001)');
+  // Acesso total pode ou não incluir os projetos internos
+  const tiNew = await ana('POST', '/users', { name: 'Gestor Total Teste', email: 'gestor.total@teste.com', role: 'gestor', access_scope: 'total', total_internal: 0, password: 'gestor12345' });
+  ok(tiNew.status === 201, 'cria gestor com acesso total sem os projetos internos');
+  const tiG = await login('gestor.total@teste.com', 'gestor12345');
+  const tiList = (await tiG('GET', '/projects')).data;
+  ok(tiList.some(p => p.kind === 'obra') && !tiList.some(p => p.id === intArea.id), 'acesso total sem internos: vê as obras e não vê o projeto interno');
+  ok((await tiG('GET', `/projects/${intArea.id}`)).status >= 400, 'acesso total sem internos: projeto interno bloqueado');
+  ok(!(await ana('GET', `/projects/${intArea.id}/assignees`)).data.some(u => u.id === tiNew.data.id), 'sem internos: não aparece como responsável no projeto interno');
+  ok((await ana('GET', '/projects/1/assignees')).data.some(u => u.id === tiNew.data.id), 'sem internos: continua disponível nas obras');
+  const tiT = (await ana('POST', '/tasks', { project_id: intArea.id, title: 'Tarefa interna criada por quem tem acesso', description: 'teste', due_date: '2099-01-01' }));
+  ok((await tiG('GET', `/tasks/${tiT.data.id}`)).status === 404, 'sem internos: não abre tarefa interna de outra pessoa');
+  // Marcado na equipe do projeto interno: libera só aquele projeto
+  const tiP = (await ana('GET', `/projects/${intArea.id}`)).data;
+  const tiMem = (tiP.members || []).map(x => x.id);
+  const tiPut = ids => ana('PUT', `/projects/${intArea.id}`, { kind: 'interno', name: tiP.name, client: tiP.client, status: tiP.status, member_ids: ids });
+  const tiMark = await tiPut([...tiMem, tiNew.data.id]);
+  ok(tiMark.status === 200 && (await tiG('GET', `/projects/${intArea.id}`)).status === 200, 'marcado na equipe do projeto interno: libera aquele projeto');
+  await tiPut(tiMem);
+  ok((await tiG('GET', `/projects/${intArea.id}`)).status >= 400, 'desmarcado da equipe: volta a ficar sem o projeto interno');
+  const tiU = (await ana('GET', `/users/${tiNew.data.id}`)).data.user;
+  ok(tiU.total_internal === 0, 'cadastro devolve a opção de projetos internos');
+  await ana('PUT', `/users/${tiNew.data.id}`, { name: tiU.name, email: tiU.email, role: 'gestor', access_scope: 'total', total_internal: 1 });
+  const tiG2 = await login('gestor.total@teste.com', 'gestor12345');
+  ok((await tiG2('GET', '/projects')).data.some(p => p.id === intArea.id), 'marcar a opção libera os projetos internos');
+  ok((await ricardo('GET', '/projects')).data.some(p => p.id === intArea.id), 'quem já tinha acesso total continua vendo os internos');
   const intDet = (await ana('GET', `/projects/${intArea.id}`)).data;
   ok(['Administrativo', 'Financeiro', 'Equipamentos e manutenção'].every(n => intDet.stages.some(s => s.name === n)), 'departamentos como classificações');
   ok((await ricardo('GET', '/projects')).data.some(p => p.id === intArea.id), 'gestor tem acesso à área interna');

@@ -15,7 +15,7 @@ import { checklistDashboard } from './checklist.js';
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections, home, department, admission_date, responsibilities';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, total_internal, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, login_enabled, can_contracts, can_finance, sections, home, department, admission_date, responsibilities';
 
 export function publicUser(ctx, u) {
   const out = { ...u, section_list: [...sectionsOf(u)] };
@@ -112,6 +112,9 @@ function readExternalBody(body, current) {
   return { d, projectIds };
 }
 
+// Acesso total: acessa também os projetos internos? (só muda quando o formulário envia)
+const readTotalInternal = (body, cur = 1) => (body.total_internal === undefined ? cur : [true, 1, '1', 'on', 'true'].includes(body.total_internal) ? 1 : 0);
+
 function readUserBody(body, { creating }) {
   const d = {
     name: str(body.name, { max: 120, required: true, label: 'Nome' }),
@@ -172,6 +175,7 @@ export function createUser(ctx, body, ip) {
         d.manager_id, d.job_title, d.phone, d.company, d.login_enabled, d.login_enabled);
       const id = Number(r.lastInsertRowid);
       for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
+      run('UPDATE users SET total_internal = ? WHERE id = ?', readTotalInternal(body), id);
       audit(ctx.user.id, 'user', id, d.login_enabled ? 'Terceirizado cadastrado (com acesso ao sistema)' : 'Terceirizado cadastrado (sem login)',
         { nome: d.name, empresa: d.company || '—', lider: one('SELECT name FROM users WHERE id = ?', d.manager_id).name, projetos: projectIds }, ip);
       return id;
@@ -186,7 +190,8 @@ export function createUser(ctx, body, ip) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`, d.name, d.email, hashPassword(body.password), d.role, d.access_scope, d.manager_id, d.job_title, d.phone, d.can_contracts, d.can_finance, Array.isArray(body.sections) ? d.sections : null, d.home);
     const id = Number(r.lastInsertRowid);
     for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
-    audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, projetos: projectIds, contratos: !!d.can_contracts, financeiro: !!d.can_finance }, ip);
+    run('UPDATE users SET total_internal = ? WHERE id = ?', readTotalInternal(body), id);
+    audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, internos: !!readTotalInternal(body), projetos: projectIds, contratos: !!d.can_contracts, financeiro: !!d.can_finance }, ip);
     return id;
   });
 }
@@ -220,6 +225,8 @@ export function updateUser(ctx, id, body, ip) {
     const newSec = secGiven ? d.sections : u.sections;
     run(`UPDATE users SET name=?, email=?, role=?, access_scope=?, manager_id=?, job_title=?, phone=?, can_contracts=?, can_finance=?, sections=?, home=?, active=?, updated_at=datetime('now') WHERE id=?`,
       d.name, d.email, d.role, d.access_scope, d.manager_id, d.job_title, d.phone, newCt, newFin, newSec, d.home, active, id);
+    const newInt = readTotalInternal(body, u.total_internal);
+    run('UPDATE users SET total_internal = ? WHERE id = ?', newInt, id);
     if (grant) {
       run(`UPDATE users SET login_enabled = 1, password_hash = ?, must_change_password = 1 WHERE id = ?`, hashPassword(body.password), id);
       audit(ctx.user.id, 'user', id, 'Acesso ao sistema liberado', { email: d.email }, ip);
@@ -232,9 +239,10 @@ export function updateUser(ctx, id, body, ip) {
       run('DELETE FROM user_project_access WHERE user_id = ?', id);
       for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
     }
-    const permChanged = ctChanged || u.role !== d.role || u.access_scope !== d.access_scope || (body.project_ids !== undefined && before.join() !== [...projectIds].sort().join());
+    const permChanged = ctChanged || newInt !== u.total_internal || u.role !== d.role || u.access_scope !== d.access_scope || (body.project_ids !== undefined && before.join() !== [...projectIds].sort().join());
     audit(ctx.user.id, 'user', id, permChanged ? 'Permissões alteradas' : 'Usuário atualizado', {
       perfil: `${u.role} → ${d.role}`, escopo: `${u.access_scope} → ${d.access_scope}`, projetos: projectIds, ativo: !!active,
+      ...(newInt !== u.total_internal ? { projetos_internos: newInt ? 'liberado' : 'retirado' } : {}),
       ...(!!u.can_contracts !== !!newCt ? { contratos: newCt ? 'liberado' : 'retirado' } : {}),
       ...(secChanged ? { secoes: JSON.parse(newSec) } : {}),
       ...(finChanged ? { financeiro: newFin ? 'liberado' : 'retirado' } : {}),
@@ -283,6 +291,8 @@ function updateExternal(ctx, u, body, ip) {
   tx(() => {
     run(`UPDATE users SET name=?, email=?, manager_id=?, job_title=?, phone=?, company=?, access_scope=?, login_enabled=?, active=?, updated_at=datetime('now') WHERE id=?`,
       d.name, d.email, d.manager_id, d.job_title, d.phone, d.company, d.access_scope, d.login_enabled, active, u.id);
+    const newInt = readTotalInternal(body, u.total_internal);
+    run('UPDATE users SET total_internal = ? WHERE id = ?', newInt, u.id);
     if (enabling) run('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?', hashPassword(body.password), u.id);
     if (!d.login_enabled && u.login_enabled) run('UPDATE users SET password_hash = ? WHERE id = ?', NO_LOGIN, u.id);
     const before = all('SELECT project_id FROM user_project_access WHERE user_id = ?', u.id).map(r => r.project_id).sort().join();
@@ -290,7 +300,7 @@ function updateExternal(ctx, u, body, ip) {
       run('DELETE FROM user_project_access WHERE user_id = ?', u.id);
       for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', u.id, p);
     }
-    const permChanged = d.login_enabled !== u.login_enabled || d.access_scope !== u.access_scope || (body.project_ids !== undefined && before !== [...projectIds].sort().join());
+    const permChanged = newInt !== u.total_internal || d.login_enabled !== u.login_enabled || d.access_scope !== u.access_scope || (body.project_ids !== undefined && before !== [...projectIds].sort().join());
     if (!active || permChanged) destroyUserSessions(u.id);
     audit(ctx.user.id, 'user', u.id, permChanged ? 'Terceirizado: acesso/permissões alterados' : 'Terceirizado atualizado', {
       nome: d.name, empresa: d.company || '—', lider: one('SELECT name FROM users WHERE id = ?', d.manager_id).name,

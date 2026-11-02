@@ -3,6 +3,7 @@
 // coordenador (igual ao gestor e também confere as próprias tarefas),
 // colaborador (executa e cria tarefas nos projetos acessíveis).
 // Escopo de acesso: total | projetos (lista liberada) | proprias (só tarefas próprias nos projetos liberados).
+// Acesso total sem os internos (total_internal = 0): vê todas as obras; dos projetos internos, só os que lidera ou em que foi marcado.
 import { all, one } from '../db.js';
 import { forbidden } from './http.js';
 
@@ -22,8 +23,14 @@ export function accessibleProjectIds(user) {
   const restricted = restrictedRows();
   const hidden = new Set(restricted.filter(r => !allowed(user, r)).map(r => r.id));
   if (isAdmin(user) || user.access_scope === 'total') {
-    if (!hidden.size) return null;
-    return new Set(all('SELECT id FROM projects').map(r => r.id).filter(id => !hidden.has(id)));
+    const noInternal = !isAdmin(user) && user.total_internal === 0;
+    if (!hidden.size && !noInternal) return null;
+    const out = new Set(all('SELECT id FROM projects').map(r => r.id).filter(id => !hidden.has(id)));
+    if (noInternal) {
+      for (const r of all(`SELECT p.id FROM projects p WHERE p.kind = 'interno' AND p.restricted = 0 AND p.lead_id IS NOT ?
+          AND NOT EXISTS (SELECT 1 FROM user_project_access a WHERE a.user_id = ? AND a.project_id = p.id)`, user.id, user.id)) out.delete(r.id);
+    }
+    return out;
   }
   const ids = new Set(all('SELECT project_id FROM user_project_access WHERE user_id = ?', user.id).map(r => r.project_id));
   for (const r of all('SELECT id FROM projects WHERE lead_id = ?', user.id)) ids.add(r.id);
@@ -183,10 +190,11 @@ export function requireAdmin(user) {
 // Usuários que podem ser responsáveis no projeto (terceirizados: somente se o projeto estiver liberado a eles)
 export function usersWithProjectAccess(projectId) {
   return all(`SELECT u.id, u.name, u.job_title, u.role, u.is_external, u.company FROM users u
-    WHERE u.active = 1 AND (u.role = 'admin' OR u.access_scope = 'total'
+    WHERE u.active = 1 AND (u.role = 'admin'
+      OR (u.access_scope = 'total' AND (u.total_internal = 1 OR NOT EXISTS (SELECT 1 FROM projects ip WHERE ip.id = ? AND ip.kind = 'interno' AND ip.restricted = 0)))
       OR EXISTS (SELECT 1 FROM user_project_access a WHERE a.user_id = u.id AND a.project_id = ?)
       OR EXISTS (SELECT 1 FROM projects p WHERE p.id = ? AND p.lead_id = u.id))
-    ORDER BY u.is_external, u.name`, projectId, projectId);
+    ORDER BY u.is_external, u.name`, projectId, projectId, projectId);
 }
 
 export function userHasProjectAccess(userId, projectId) {

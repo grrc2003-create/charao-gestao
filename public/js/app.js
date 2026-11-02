@@ -24,6 +24,7 @@ import * as Reports from './views/reports.js';
 import * as ReportDoc from './views/report-doc.js';
 import * as FieldList from './views/field-list.js';
 import * as FieldReport from './views/field-report.js';
+import * as FieldReceipts from './views/field-receipts.js';
 import * as ReportChecklist from './views/report-checklist.js';
 import * as Account from './views/account.js';
 import * as Audit from './views/audit.js';
@@ -119,6 +120,7 @@ const routes = [
   ['/campo/resumo', Field.analysisView],
   ['/campo/pagamentos', Field.paymentsView],
   ['/campo/relatorio', FieldReport.view, { print: true }],
+  ['/campo/recibos/:id', FieldReceipts.view, { print: true }],
   ['/campo/:id', Field.view],
   ['/folha', Payroll.list],
   ['/folha/pessoas', Payroll.people],

@@ -557,3 +557,29 @@
   .fr-cover-page { margin: 0; break-after: page; }
   .fr-cover-page img { max-height: 268mm; width: auto; border: 0; }
 }
+/* Recibos da Folha de Campo: dois por folha A4, com linha de corte */
+.rc-doc { display: flex; flex-direction: column; }
+.rc-card { padding: 4mm 2mm; display: flex; flex-direction: column; gap: 3.5mm; min-height: 125mm; font-size: 10.5pt; }
+.rc-head { display: flex; align-items: center; gap: 10px; border-bottom: 2px solid #2A3D50; padding-bottom: 3mm; }
+.rc-logo { width: 44mm; height: auto; }
+.rc-title { flex: 1; display: flex; flex-direction: column; text-align: center; }
+.rc-title b { font-size: 18pt; letter-spacing: .3em; color: #1C2A38; }
+.rc-title span { font-size: 8pt; color: #6E7A86; }
+.rc-val { border: 2px solid #2A3D50; border-radius: 4px; padding: 2mm 4mm; font-size: 14pt; font-weight: 800; color: #1C2A38; white-space: nowrap; }
+.rc-text { margin: 0; line-height: 1.7; text-align: justify; }
+.rc-text i { font-style: italic; }
+.rc-pay { margin: 0; font-size: 9.5pt; color: #46535F; }
+.rc-date { margin: 0; text-align: right; }
+.rc-sign { margin-top: auto; align-self: center; width: 70%; display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 10mm; }
+.rc-sign span { width: 100%; border-top: 1px solid #1C2A38; margin-bottom: 2mm; }
+.rc-sign b { font-size: 10.5pt; }
+.rc-sign small { font-size: 8.5pt; color: #46535F; }
+.rc-cut { border-top: 1.5px dashed #9AA3AC; margin: 6mm 0; position: relative; height: 0; }
+.rc-cut span { position: absolute; left: 50%; top: -8px; transform: translateX(-50%); background: #fff; padding: 0 8px; font-size: 7.5pt; color: #8A949D; }
+.doc-stage .rc-doc + .rc-doc { margin-top: 20px; }
+@media print { .rc-doc { break-after: page; } .rc-doc:last-child { break-after: auto; } }
+@media screen and (max-width: 640px) { .rc-card { min-height: 0; } .rc-head { flex-wrap: wrap; } .rc-logo { width: 34mm; } }
+.rc-who { flex-basis: auto; order: 0; }.rc-obs { margin: 0; font-size: 10pt; font-style: italic; color: #2A3D50; }
+.rc-txt { flex-basis: 100%; order: -1; }
+.rc-obs-in input { min-width: 240px; }
+.rc-nologo .rc-title { text-align: left; }

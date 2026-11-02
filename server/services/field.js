@@ -263,13 +263,13 @@ function computeSheet(s) {
       days, diarias, rate, gross, adjust: e.adjust, adjust_note: e.adjust_note, total, client_paid: e.client_paid, company: r2(total - e.client_paid), service: e.service, paid_at: e.paid_at,
       ...linePaid(pi, `p${e.id}`, r2(total - e.client_paid), e.paid_at) };
   });
-  const contracts = all(`SELECT sc.*, c.service, c.total AS c_total, c.worker_id, w.name AS worker_name, w.pix, w.pix_type FROM field_sheet_contracts sc
+  const contracts = all(`SELECT sc.*, c.service, c.total AS c_total, c.worker_id, w.name AS worker_name, w.pix, w.pix_type, w.doc FROM field_sheet_contracts sc
     JOIN field_contracts c ON c.id = sc.contract_id JOIN field_workers w ON w.id = c.worker_id WHERE sc.sheet_id = ? ORDER BY w.name, c.service`, s.id).map(x => {
     const f = snap?.contracts?.[x.id] || {};
     const cTotal = f.total ?? x.c_total;
     const amount = r2(cTotal * x.pct / 100);
     const before = measuredBefore(x.contract_id, s);
-    return { id: x.id, contract_id: x.contract_id, worker_id: x.worker_id, service: f.service ?? x.service, worker_name: f.worker_name ?? x.worker_name, pix: f.pix ?? x.pix, pix_type: f.pix_type ?? x.pix_type,
+    return { id: x.id, contract_id: x.contract_id, worker_id: x.worker_id, service: f.service ?? x.service, worker_name: f.worker_name ?? x.worker_name, pix: f.pix ?? x.pix, pix_type: f.pix_type ?? x.pix_type, doc: f.doc ?? x.doc,
       contract_total: cTotal, pct: x.pct, before_pct: before, after_pct: r2(before + x.pct), balance_pct: r2(100 - before - x.pct), amount, client_paid: x.client_paid, company: r2(amount - x.client_paid), notes: x.notes, paid_at: x.paid_at,
       ...linePaid(pi, `c${x.id}`, r2(amount - x.client_paid), x.paid_at) };
   });
@@ -288,7 +288,7 @@ const measuredBefore = (contractId, s) => r2(one(`SELECT COALESCE(SUM(sc.pct), 0
   WHERE sc.contract_id = ? AND sc.sheet_id <> ? AND (f.start_date < ? OR (f.start_date = ? AND f.id < ?))`, contractId, s.id, s.start_date, s.start_date, s.id).t);
 
 const MONEY_PEOPLE = ['paid_at', 'rate', 'gross', 'adjust', 'adjust_note', 'total', 'client_paid', 'company', 'pix', 'pix_type', 'doc', 'paid_amount', 'payments'];
-const MONEY_CONTRACT = ['paid_at', 'worker_id', 'contract_total', 'amount', 'client_paid', 'company', 'pix', 'pix_type', 'paid_amount', 'payments'];
+const MONEY_CONTRACT = ['paid_at', 'worker_id', 'contract_total', 'amount', 'client_paid', 'company', 'pix', 'pix_type', 'doc', 'paid_amount', 'payments'];
 const strip = (o, keys) => { const c = { ...o }; for (const k of keys) delete c[k]; return c; };
 
 function paymentOf(s) {
@@ -455,7 +455,7 @@ export function closeSheet(ctx, id, body, ip) {
   if (!c.people.length && !c.contracts.length) throw badRequest('A folha não tem pessoas nem empreitadas.');
   const snap = {
     people: Object.fromEntries(c.people.map(e => [e.id, { name: e.name, role: e.role, rate: e.rate, pix: e.pix, pix_type: e.pix_type, doc: e.doc }])),
-    contracts: Object.fromEntries(c.contracts.map(x => [x.id, { service: x.service, worker_name: x.worker_name, total: x.contract_total, pix: x.pix, pix_type: x.pix_type }])),
+    contracts: Object.fromEntries(c.contracts.map(x => [x.id, { service: x.service, worker_name: x.worker_name, total: x.contract_total, pix: x.pix, pix_type: x.pix_type, doc: x.doc }])),
   };
   const lines = [...c.people.filter(e => e.company > 0).map(e => `· ${e.name} (${e.diarias} diária(s)): ${brl(e.company)}${pixText(e)}`),
     ...c.contracts.filter(x => x.company > 0).map(x => `· ${x.worker_name} — empreitada ${x.service} (${x.pct}%): ${brl(x.company)}${pixText(x)}`)];

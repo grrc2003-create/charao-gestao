@@ -381,7 +381,8 @@ export async function view({ params, navigate, render }) {
         eyebrow: `${s.project.code} · ${s.project.name}`,
         title: html`Folha ${s.code} ${stTag(s.status)}`,
         sub: html`${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}${s.status === 'fechada' ? ` · fechada por ${s.closed_by_name || '—'} em ${fmtDate(s.closed_at?.slice(0, 10))}` : ''}`,
-        actions: html`${s.can.delete ? html`<button type="button" class="btn btn-ghost pf-danger" data-del>${icon('trash')}Excluir</button>` : ''}
+        actions: html`${mny && (s.people.length || s.contracts.length) ? html`<a class="btn btn-ghost" href="#/campo/recibos/${s.id}" title="Recibos para cada profissional assinar">${icon('print')}Recibos</a>` : ''}
+          ${s.can.delete ? html`<button type="button" class="btn btn-ghost pf-danger" data-del>${icon('trash')}Excluir</button>` : ''}
           ${s.can.close ? html`<button type="button" class="btn btn-primary" data-close>${icon('check')}Fechar folha</button>` : ''}
           ${s.can.reopen ? html`<button type="button" class="btn btn-ghost" data-reopen>${icon('edit')}Reabrir</button>` : ''}`,
       })}

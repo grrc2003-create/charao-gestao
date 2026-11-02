@@ -1,6 +1,8 @@
 // Relatório A4 do check-list (termo de vistoria): resumo com as não conformidades por ambiente e lista única de itens
 // (agrupada por grupo, responsável e data em até 3 níveis), com histórico e fotos quando houver, assinaturas e,
 // ao final, o cronograma semanal (Gantt) dos itens.
+// "Separar por" gera uma parte por responsável, grupo etc., cada uma em folha nova, com resumo e assinaturas próprios.
+// Formato: Completo (fotos, histórico e Gantt) ou Lista compacta (tabela com campo para anotar, para levar à obra).
 import { html, api, STATUS, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { RESULT, PHOTO_RULE, matchItem, filterOptions, optLabel } from './checklist-ui.js';
@@ -65,17 +67,23 @@ export async function view({ params, query, state }) {
   const filterText = [fGroup ? `Grupo: ${optLabel(fGroup, 'group')}` : '', fSpec ? `Especialidade: ${optLabel(fSpec, 'spec')}` : '',
     fResp ? `Responsável: ${optLabel(fResp, 'resp')}` : ''].filter(Boolean).join(' · ');
   const hasSpecs = c.items.some(i => i.specialty);
-  const s = (() => {
-    const done = items.filter(i => i.resolved).length;
-    const cnt = r => items.filter(i => i.result === r).length;
-    return { total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0, conforme: cnt('conforme'),
-      nao_conforme: items.filter(i => i.open_nc).length, na: cnt('na'), pending: items.filter(i => !i.result).length,
-      nc_total: items.reduce((n, i) => n + i.nc_count, 0) };
-  })();
+  const statsOf = list => {
+    const done = list.filter(i => i.resolved).length;
+    const cnt = r => list.filter(i => i.result === r).length;
+    return { total: list.length, done, pct: list.length ? Math.round((done / list.length) * 100) : 0, conforme: cnt('conforme'),
+      nao_conforme: list.filter(i => i.open_nc).length, na: cnt('na'), pending: list.filter(i => !i.result).length,
+      nc_total: list.reduce((n, i) => n + i.nc_count, 0) };
+  };
   const withPhotos = query.get('fotos') !== '0';
   const withGantt = query.get('gantt') !== '0';
-  const judged = s.conforme + s.nao_conforme;
-  const levels = readLevels(query);
+  const sep = DIMS[query.get('sep')] ? query.get('sep') : '';
+  const compact = query.get('fmt') === 'lista';
+  // O que já separa as partes não precisa agrupar de novo dentro de cada uma
+  const levels = readLevels(query).filter(d => d !== sep);
+  const parts = sep && items.length
+    ? groupBy(items, sep).map((g, i, all) => ({ items: g.items, label: `${DIMS[sep].label}: ${g.name}`, name: g.name, index: i, total: all.length }))
+    : [{ items, label: '', name: '', index: 0, total: 1 }];
+  const partHead = part => (part.label ? html`<div class="r-part-head"><b>${part.label}</b>${part.total > 1 ? html`<span>Parte ${part.index + 1} de ${part.total}</span>` : ''}</div>` : '');
   // Situação do item no relatório
   const situation = i => i.open_nc ? { t: `Não conforme em aberto${i.nc_count > 1 ? ` · ${i.nc_count}x` : ''}`, c: RES_COLOR.nao_conforme }
     : i.result === 'conforme' ? { t: i.nc_count ? `Corrigido · ${i.nc_count}x NC` : 'Conforme', c: RES_COLOR.conforme }
@@ -143,132 +151,182 @@ export async function view({ params, query, state }) {
         <div style="margin-left:${depth * 14}px">${blocks(g.items, depth + 1)}</div>`;
     })}`;
   };
-  // Resumo: não conformidades por ambiente (grupo) e por especialidade
-  const pctRes = g => (g.nc ? fmtPct(Math.round((g.res / g.nc) * 100)) : '—');
-  const ncRows = dim => groupBy(items, dim).map(g => {
-    const ncs = g.items.filter(i => i.nc_count > 0);
-    const pend = ncs.filter(i => i.open_nc).length;
-    return { name: g.name, items: g.items.length, nc: ncs.length, pend, res: ncs.length - pend };
-  });
-  const ncTable = (heading, first, rows) => {
-    const tot = rows.reduce((a, g) => ({ items: a.items + g.items, nc: a.nc + g.nc, pend: a.pend + g.pend, res: a.res + g.res }), { items: 0, nc: 0, pend: 0, res: 0 });
-    return html`<h3 class="r-h">${heading}</h3>
-      <table class="r-table r-nc-table"><thead><tr><th>${first}</th><th class="num">Itens</th><th class="num">Não conformidades</th><th class="num">Pendentes</th><th class="num">Resolvidas</th><th class="num">% resolvidas</th></tr></thead>
-        <tbody>${rows.map(g => html`<tr><td>${g.name}</td><td class="num">${g.items}</td><td class="num">${g.nc}</td>
-          <td class="num ${g.pend ? 'late' : ''}">${g.pend}</td><td class="num">${g.res}</td><td class="num">${pctRes(g)}</td></tr>`)}
-          <tr class="r-total"><td><b>Total</b></td><td class="num"><b>${tot.items}</b></td><td class="num"><b>${tot.nc}</b></td>
-            <td class="num ${tot.pend ? 'late' : ''}"><b>${tot.pend}</b></td><td class="num"><b>${tot.res}</b></td><td class="num"><b>${pctRes(tot)}</b></td></tr></tbody></table>`;
-  };
-  const title = 'Check-list';
-
-  // Gantt semanal dos itens: barra do início ao término (sem início, começa no término). Itens resolvidos vão até a
-  // data da resposta; pendentes vencidos ganham a extensão hachurada até hoje. Itens sem nenhuma data ficam de fora.
-  const ITEM_COLOR = i => (i.open_nc ? RES_COLOR.nao_conforme : i.result === 'conforme' ? RES_COLOR.conforme : i.result === 'na' ? RES_COLOR.na : '#A86F0E');
-  const dated = items.filter(i => i.start_date || i.due_date);
-  const ganttRows = dated.map(i => ({
-    code: String(i.seq), title: i.text, assignee_name: i.responsible_name, group: i.group || 'Sem grupo', item: i,
-    start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
-    eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento', progress_pct: i.progress_pct,
-    dep_key: `i:${i.id}`, preds: (c.item_deps?.[i.id]?.predecessors || []).filter(p => p.key.startsWith('i:')).map(p => ({ key: p.key, lag: p.lag_days })),
-    days_late: i.overdue ? Math.round((Date.parse(today) - Date.parse(i.due_date)) / 86400e3) : 0,
-  })).sort((a, b) => (levels[0] === 'especialidade' ? specRank(a.item.specialty || '') - specRank(b.item.specialty || '') : 0) || a.item.seq - b.item.seq);
-  // Agrupa como a lista quando o 1º nível é grupo ou responsável; senão, por grupo
-  const ganttBy = levels[0] === 'responsavel' ? r => r.assignee_name || 'Sem responsável'
-    : levels[0] === 'especialidade' ? r => r.item.specialty || 'Sem especialidade' : r => r.group;
-  const ganttLegend = html`<div class="g-legend">
-    <span><i class="g-sw" style="--c:#A86F0E"></i>Pendente (início → término)</span>
-    <span><i class="g-sw" style="--c:${RES_COLOR.nao_conforme}"></i>Não conforme em aberto</span>
-    <span><i class="g-sw is-done" style="--c:${RES_COLOR.conforme}"></i>Conforme / corrigido (até a resposta)</span>
-    <span><i class="g-sw is-done" style="--c:${RES_COLOR.na}"></i>N/A</span>
-    <span><i class="g-sw g-sw-late"></i>Atraso (término → hoje)</span>
-    <span><i class="g-due g-due-legend"></i>Término</span>
-    <span><i class="g-today-legend"></i>Hoje (${fmtDate(today)})</span></div>`;
-
-  const doc = html`
-    <article class="doc a4" id="doc">
+  // Lista compacta: uma tabela por parte, sem fotos, com campo para anotar à mão
+  const listDoc = part => {
+    const st = statsOf(part.items);
+    const showResp = sep !== 'responsavel';
+    const span = showResp ? 6 : 5;
+    const row = i => {
+      const sit = situation(i);
+      const tags = [!levels.includes('grupo') && sep !== 'grupo' ? i.group : '', !levels.includes('especialidade') && sep !== 'especialidade' ? i.specialty : ''].filter(Boolean).join(' · ');
+      return html`<tr><td class="num">${i.seq}</td>
+        <td><b>${i.text}</b>${tags ? html`<div class="small muted">${tags}</div>` : ''}${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}</td>
+        ${showResp ? html`<td>${i.responsible_name}</td>` : ''}
+        <td class="r-l-due">${i.due_date ? fmtDate(i.due_date) : '—'}</td>
+        <td class="r-l-sit" style="color:${sit.c}"><b>${sit.t.replace(' em aberto', '')}</b></td><td class="r-l-note"></td></tr>`;
+    };
+    const rows = (list, depth = 0) => {
+      const sorted = [...list].sort((a, b) => a.seq - b.seq);
+      if (depth >= levels.length) return html`${sorted.map(row)}`;
+      return html`${groupBy(sorted, levels[depth]).map(g => html`<tr class="r-grouprow r-lvl-${depth}"><td colspan="${span}"><b>${DIMS[levels[depth]].label}: ${g.name}</b> <span class="small muted">· ${g.items.filter(i => i.resolved).length}/${g.items.length} concluído(s)</span></td></tr>${rows(g.items, depth + 1)}`)}`;
+    };
+    return html`<article class="doc a4 r-part r-part-list" id="${part.index ? `doc-${part.index}` : 'doc'}">
       <header class="r-header">
         <img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="r-logo">
-        <div class="r-doctype"><div class="r-kicker">Check-list de vistoria${filterText ? ' · filtrado' : ''}</div><div class="r-level">${t.code}</div></div>
+        <div class="r-doctype"><div class="r-kicker">Check-list · lista de itens</div><div class="r-level">${t.code}</div></div>
       </header>
       <div class="r-rule"></div>
-      <section class="r-scope">
-        <div><div class="r-lbl">Check-list</div><h1>${t.title}</h1>
-          <div class="muted">${t.project_code} · ${t.project_name}${t.project_client ? ` · Cliente: ${t.project_client}` : ''}</div>
-          ${t.description ? html`<p class="r-p" style="margin-top:6px">${t.description}</p>` : ''}</div>
-        <dl class="r-meta">
-          <dt>Responsável</dt><dd>${t.assignee_name || '—'}</dd>
-          <dt>Prazo</dt><dd>${fmtDate(t.due_date)}</dd>
-          <dt>Situação</dt><dd>${STATUS[t.eff_status]?.label || t.eff_status}</dd>
-          ${t.delivered_at ? html`<dt>Entregue em</dt><dd>${fmtDateTime(t.delivered_at)}</dd>` : ''}
-          ${t.reviewed_at ? html`<dt>Conferido por</dt><dd>${t.reviewer_name || '—'} · ${fmtDateTime(t.reviewed_at)}</dd>` : ''}
-          <dt>Fotos</dt><dd>${PHOTO_RULE[c.photo_rule]}</dd>
-          ${filterText ? html`<dt>Filtro</dt><dd><b>${filterText}</b> · ${items.length} de ${c.items.length} itens</dd>` : ''}
-          <dt>Agrupamento</dt><dd>${levels.length ? levels.map(l => DIMS[l].label).join(' › ') : 'Sem agrupamento'}</dd>
-          <dt>Emissão</dt><dd>${fmtDateTime(new Date().toISOString())}</dd>
-        </dl>
-      </section>
-
-      <section class="r-section avoid">
-        <h3 class="r-h">Resumo</h3>
-        <div class="r-kpis">
-          ${kpi('Itens', s.total, `${s.done} concluído(s) · ${s.pct}%`, '#2A3D50')}
-          ${kpi('Conforme', s.conforme, judged ? `${fmtPct(Math.round((s.conforme / judged) * 100))} dos avaliados` : '', RES_COLOR.conforme)}
-          ${kpi('Não conforme em aberto', s.nao_conforme, s.nc_total ? `${s.nc_total} registrada(s) no histórico` : 'nenhuma registrada', RES_COLOR.nao_conforme)}
-          ${kpi('N/A', s.na, '', RES_COLOR.na)}
-        </div>
-        ${s.pending ? html`<p class="r-p" style="margin-top:6px"><b>${s.pending} item(ns) ainda sem resposta.</b></p>` : ''}
-      </section>
-
-      <section class="r-section avoid">
-        ${ncTable('Não conformidades por ambiente', 'Ambiente / grupo', ncRows('grupo'))}
-        ${hasSpecs ? html`<div style="height:8px"></div>${ncTable('Não conformidades por especialidade', 'Especialidade', ncRows('especialidade'))}` : ''}
-        <p class="small muted" style="margin-top:4px">Todo item cadastrado conta como não conformidade (com ou sem foto). Pendente = ainda em aberto; resolvida = corrigida (Conforme) ou encerrada (N/A).</p>
-      </section>
-
-      <section class="r-section">
-        <h3 class="r-h">Itens (${items.length})</h3>
-        ${blocks(items)}
-      </section>
-
-      <section class="r-section avoid">
-        <div class="r-sign" style="grid-template-columns:repeat(3,1fr)">
-          <div><span></span>${t.assignee_name || 'Responsável pelo check-list'}<div class="muted">Responsável pelo check-list</div></div>
-          <div><span></span>${t.reviewer_name || ' '}<div class="muted">Conferente</div></div>
-          <div><span></span> <div class="muted">Cliente / Recebedor</div></div>
-        </div>
-      </section>
-      ${withGantt ? html`<section class="r-section r-gantt">
-        <h3 class="r-h">Cronograma semanal dos itens (Gantt) <span class="muted small">(${dated.length} de ${items.length})</span></h3>
-        ${ganttChart(ganttRows, { ref: today, weekly: true, groupLabel: ganttBy, color: r => ITEM_COLOR(r.item), statusOf: r => situation(r.item).t,
-          noun: ['item(ns)', 'concluído(s)'], head: 'Item', legend: ganttLegend,
-          note: `Barra = data de início até a data de término do item (sem início, aparece só a semana do término).${items.length > dated.length ? ` ${items.length - dated.length} item(ns) sem datas não aparecem no cronograma.` : ''}` })}
-      </section>` : ''}
-      <footer class="r-footer">
-        <span>Charão Engenharia & Construção · ${title} ${t.code}</span>
-        <span>Documento gerado pelo sistema Charão Gestão de Obras</span>
-      </footer>
+      <h1 class="r-list-title">${t.title}</h1>
+      <div class="muted small">${t.project_code} · ${t.project_name} · Emissão ${fmtDateTime(new Date().toISOString())}${filterText ? ` · ${filterText}` : ''}</div>
+      ${partHead(part)}
+      <p class="r-list-sum"><b>${st.total}</b> ${st.total === 1 ? 'item' : 'itens'} · <b>${st.done}</b> concluído(s) · <b>${st.nao_conforme}</b> não conforme(s) em aberto · <b>${st.pending}</b> sem resposta</p>
+      <table class="r-table r-list-table"><thead><tr><th class="num">Nº</th><th>Item</th>${showResp ? html`<th>Responsável</th>` : ''}<th>Prazo</th><th>Situação</th><th>Anotações</th></tr></thead>
+        <tbody>${rows(part.items)}</tbody></table>
+      <div class="r-sign r-list-sign" style="grid-template-columns:repeat(2,1fr)">
+        <div><span></span>${sep === 'responsavel' ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">Responsável</div></div>
+        <div><span></span> <div class="muted">Data</div></div>
+      </div>
+      <footer class="r-footer"><span>Charão Engenharia & Construção · Check-list ${t.code}</span><span>Documento gerado pelo sistema Charão Gestão de Obras</span></footer>
     </article>`;
+  };
+  const fullDoc = part => {
+    const items = part.items;
+    const s = statsOf(items);
+    const judged = s.conforme + s.nao_conforme;
+    // Resumo: não conformidades por ambiente (grupo) e por especialidade
+    const pctRes = g => (g.nc ? fmtPct(Math.round((g.res / g.nc) * 100)) : '—');
+    const ncRows = dim => groupBy(items, dim).map(g => {
+      const ncs = g.items.filter(i => i.nc_count > 0);
+      const pend = ncs.filter(i => i.open_nc).length;
+      return { name: g.name, items: g.items.length, nc: ncs.length, pend, res: ncs.length - pend };
+    });
+    const ncTable = (heading, first, rows) => {
+      const tot = rows.reduce((a, g) => ({ items: a.items + g.items, nc: a.nc + g.nc, pend: a.pend + g.pend, res: a.res + g.res }), { items: 0, nc: 0, pend: 0, res: 0 });
+      return html`<h3 class="r-h">${heading}</h3>
+        <table class="r-table r-nc-table"><thead><tr><th>${first}</th><th class="num">Itens</th><th class="num">Não conformidades</th><th class="num">Pendentes</th><th class="num">Resolvidas</th><th class="num">% resolvidas</th></tr></thead>
+          <tbody>${rows.map(g => html`<tr><td>${g.name}</td><td class="num">${g.items}</td><td class="num">${g.nc}</td>
+            <td class="num ${g.pend ? 'late' : ''}">${g.pend}</td><td class="num">${g.res}</td><td class="num">${pctRes(g)}</td></tr>`)}
+            <tr class="r-total"><td><b>Total</b></td><td class="num"><b>${tot.items}</b></td><td class="num"><b>${tot.nc}</b></td>
+              <td class="num ${tot.pend ? 'late' : ''}"><b>${tot.pend}</b></td><td class="num"><b>${tot.res}</b></td><td class="num"><b>${pctRes(tot)}</b></td></tr></tbody></table>`;
+    };
+    const title = 'Check-list';
+
+    // Gantt semanal dos itens: barra do início ao término (sem início, começa no término). Itens resolvidos vão até a
+    // data da resposta; pendentes vencidos ganham a extensão hachurada até hoje. Itens sem nenhuma data ficam de fora.
+    const ITEM_COLOR = i => (i.open_nc ? RES_COLOR.nao_conforme : i.result === 'conforme' ? RES_COLOR.conforme : i.result === 'na' ? RES_COLOR.na : '#A86F0E');
+    const dated = items.filter(i => i.start_date || i.due_date);
+    const ganttRows = dated.map(i => ({
+      code: String(i.seq), title: i.text, assignee_name: i.responsible_name, group: i.group || 'Sem grupo', item: i,
+      start_date: i.start_date || i.due_date, due_date: i.due_date || null, completed_at: i.resolved ? i.answered_at : null,
+      eff_status: i.resolved ? 'concluida' : i.overdue ? 'atrasada' : 'em_andamento', progress_pct: i.progress_pct,
+      dep_key: `i:${i.id}`, preds: (c.item_deps?.[i.id]?.predecessors || []).filter(p => p.key.startsWith('i:')).map(p => ({ key: p.key, lag: p.lag_days })),
+      days_late: i.overdue ? Math.round((Date.parse(today) - Date.parse(i.due_date)) / 86400e3) : 0,
+    })).sort((a, b) => (levels[0] === 'especialidade' ? specRank(a.item.specialty || '') - specRank(b.item.specialty || '') : 0) || a.item.seq - b.item.seq);
+    // Agrupa como a lista quando o 1º nível é grupo ou responsável; senão, por grupo
+    const ganttBy = levels[0] === 'responsavel' ? r => r.assignee_name || 'Sem responsável'
+      : levels[0] === 'especialidade' ? r => r.item.specialty || 'Sem especialidade' : r => r.group;
+    const ganttLegend = html`<div class="g-legend">
+      <span><i class="g-sw" style="--c:#A86F0E"></i>Pendente (início → término)</span>
+      <span><i class="g-sw" style="--c:${RES_COLOR.nao_conforme}"></i>Não conforme em aberto</span>
+      <span><i class="g-sw is-done" style="--c:${RES_COLOR.conforme}"></i>Conforme / corrigido (até a resposta)</span>
+      <span><i class="g-sw is-done" style="--c:${RES_COLOR.na}"></i>N/A</span>
+      <span><i class="g-sw g-sw-late"></i>Atraso (término → hoje)</span>
+      <span><i class="g-due g-due-legend"></i>Término</span>
+      <span><i class="g-today-legend"></i>Hoje (${fmtDate(today)})</span></div>`;
+
+    const doc = html`
+      <article class="doc a4 r-part" id="${part.index ? `doc-${part.index}` : 'doc'}">
+        <header class="r-header">
+          <img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="r-logo">
+          <div class="r-doctype"><div class="r-kicker">Check-list de vistoria${filterText ? ' · filtrado' : ''}</div><div class="r-level">${t.code}</div></div>
+        </header>
+        <div class="r-rule"></div>
+        ${partHead(part)}
+        <section class="r-scope">
+          <div><div class="r-lbl">Check-list</div><h1>${t.title}</h1>
+            <div class="muted">${t.project_code} · ${t.project_name}${t.project_client ? ` · Cliente: ${t.project_client}` : ''}</div>
+            ${t.description ? html`<p class="r-p" style="margin-top:6px">${t.description}</p>` : ''}</div>
+          <dl class="r-meta">
+            <dt>Responsável</dt><dd>${t.assignee_name || '—'}</dd>
+            <dt>Prazo</dt><dd>${fmtDate(t.due_date)}</dd>
+            <dt>Situação</dt><dd>${STATUS[t.eff_status]?.label || t.eff_status}</dd>
+            ${t.delivered_at ? html`<dt>Entregue em</dt><dd>${fmtDateTime(t.delivered_at)}</dd>` : ''}
+            ${t.reviewed_at ? html`<dt>Conferido por</dt><dd>${t.reviewer_name || '—'} · ${fmtDateTime(t.reviewed_at)}</dd>` : ''}
+            <dt>Fotos</dt><dd>${PHOTO_RULE[c.photo_rule]}</dd>
+            ${filterText ? html`<dt>Filtro</dt><dd><b>${filterText}</b> · ${items.length} de ${c.items.length} itens</dd>` : ''}
+            <dt>Agrupamento</dt><dd>${levels.length ? levels.map(l => DIMS[l].label).join(' › ') : 'Sem agrupamento'}</dd>
+            <dt>Emissão</dt><dd>${fmtDateTime(new Date().toISOString())}</dd>
+          </dl>
+        </section>
+
+        <section class="r-section avoid">
+          <h3 class="r-h">Resumo</h3>
+          <div class="r-kpis">
+            ${kpi('Itens', s.total, `${s.done} concluído(s) · ${s.pct}%`, '#2A3D50')}
+            ${kpi('Conforme', s.conforme, judged ? `${fmtPct(Math.round((s.conforme / judged) * 100))} dos avaliados` : '', RES_COLOR.conforme)}
+            ${kpi('Não conforme em aberto', s.nao_conforme, s.nc_total ? `${s.nc_total} registrada(s) no histórico` : 'nenhuma registrada', RES_COLOR.nao_conforme)}
+            ${kpi('N/A', s.na, '', RES_COLOR.na)}
+          </div>
+          ${s.pending ? html`<p class="r-p" style="margin-top:6px"><b>${s.pending} item(ns) ainda sem resposta.</b></p>` : ''}
+        </section>
+
+        ${sep ? '' : html`<section class="r-section avoid">
+          ${ncTable('Não conformidades por ambiente', 'Ambiente / grupo', ncRows('grupo'))}
+          ${hasSpecs ? html`<div style="height:8px"></div>${ncTable('Não conformidades por especialidade', 'Especialidade', ncRows('especialidade'))}` : ''}
+          <p class="small muted" style="margin-top:4px">Todo item cadastrado conta como não conformidade (com ou sem foto). Pendente = ainda em aberto; resolvida = corrigida (Conforme) ou encerrada (N/A).</p>
+        </section>`}
+
+        <section class="r-section">
+          <h3 class="r-h">Itens (${items.length})</h3>
+          ${blocks(items)}
+        </section>
+
+        <section class="r-section avoid">
+          <div class="r-sign" style="grid-template-columns:repeat(3,1fr)">
+            <div><span></span>${sep === 'responsavel' ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${sep === 'responsavel' ? 'Responsável' : 'Responsável pelo check-list'}</div></div>
+            <div><span></span>${t.reviewer_name || ' '}<div class="muted">Conferente</div></div>
+            <div><span></span> <div class="muted">Cliente / Recebedor</div></div>
+          </div>
+        </section>
+        ${withGantt ? html`<section class="r-section r-gantt">
+          <h3 class="r-h">Cronograma semanal dos itens (Gantt) <span class="muted small">(${dated.length} de ${items.length})</span></h3>
+          ${ganttChart(ganttRows, { ref: today, weekly: true, groupLabel: ganttBy, color: r => ITEM_COLOR(r.item), statusOf: r => situation(r.item).t,
+            noun: ['item(ns)', 'concluído(s)'], head: 'Item', legend: ganttLegend,
+            note: `Barra = data de início até a data de término do item (sem início, aparece só a semana do término).${items.length > dated.length ? ` ${items.length - dated.length} item(ns) sem datas não aparecem no cronograma.` : ''}` })}
+        </section>` : ''}
+        <footer class="r-footer">
+          <span>Charão Engenharia & Construção · ${title} ${t.code}</span>
+          <span>Documento gerado pelo sistema Charão Gestão de Obras</span>
+        </footer>
+      </article>`;
+    return doc;
+  };
 
   return {
     title: `Check-list ${t.code}`,
     html: html`${printToolbar({
       back: `#/tarefas/${t.id}`, title: `Check-list — ${t.code} · ${t.title}`,
-      extra: html`${[0, 1, 2].map(n => html`<label class="pt-opt">${n === 0 ? 'Agrupar por' : n === 1 ? 'depois' : 'e'}
+      extra: html`<label class="pt-opt">Separar por <select data-sep><option value="">Não separar</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${sep === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>
+        <label class="pt-opt">Formato <select data-fmt><option value="">Completo</option><option value="lista" ${compact ? 'selected' : ''}>Lista compacta</option></select></label>
+        ${sep ? html`<span class="pt-opt"><span><b>${parts.length} ${parts.length === 1 ? 'parte' : 'partes'}</b>, cada uma em folha nova</span></span>` : ''}
+        ${[0, 1, 2].map(n => html`<label class="pt-opt">${n === 0 ? 'Agrupar por' : n === 1 ? 'depois' : 'e'}
           <select data-level="${n}"><option value="">${n === 0 ? 'Sem agrupamento' : '—'}</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${levels[n] === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>`)}
         ${opts.groups.length > 1 ? html`<label class="pt-opt">Grupo <select data-flt="grupo"><option value="">Todos</option>${opts.groups.map(k => html`<option value="${k}" ${k === fGroup ? 'selected' : ''}>${optLabel(k, 'group')}</option>`)}</select></label>` : ''}
         ${opts.specs.length > 1 ? html`<label class="pt-opt">Especialidade <select data-flt="esp"><option value="">Todas</option>${opts.specs.map(k => html`<option value="${k}" ${k === fSpec ? 'selected' : ''}>${optLabel(k, 'spec')}</option>`)}</select></label>` : ''}
         ${opts.resps.length > 1 ? html`<label class="pt-opt">Responsável <select data-flt="resp"><option value="">Todos</option>${opts.resps.map(k => html`<option value="${k}" ${k === fResp ? 'selected' : ''}>${optLabel(k, 'resp')}</option>`)}</select></label>` : ''}
-        <label class="pt-opt"><input type="checkbox" id="fotos" ${withPhotos ? 'checked' : ''}>Incluir fotos</label>
-        <label class="pt-opt"><input type="checkbox" id="gnt" ${withGantt ? 'checked' : ''}>Gantt semanal</label>`,
-    })}<div class="doc-stage">${doc}</div>`,
+        ${compact ? '' : html`<label class="pt-opt"><input type="checkbox" id="fotos" ${withPhotos ? 'checked' : ''}>Incluir fotos</label>
+        <label class="pt-opt"><input type="checkbox" id="gnt" ${withGantt ? 'checked' : ''}>Gantt semanal</label>`}`,
+    })}<div class="doc-stage">${parts.map(compact ? listDoc : fullDoc)}</div>`,
     mount(root, ctx) {
       drawGanttLinks(root);
       setPageFooter(`Charão · Check-list ${t.code} · ${t.project_code}`);
       bindPrintToolbar(root);
       const q = () => Object.fromEntries(new URLSearchParams(location.hash.split('?')[1] || ''));
-      root.querySelector('#fotos').addEventListener('change', e => { ctx.setQuery({ ...q(), fotos: e.target.checked ? '' : '0' }); ctx.render(); });
+      root.querySelector('[data-sep]').addEventListener('change', e => { ctx.setQuery({ ...q(), sep: e.target.value }); ctx.render(); });
+      root.querySelector('[data-fmt]').addEventListener('change', e => { ctx.setQuery({ ...q(), fmt: e.target.value }); ctx.render(); });
+      root.querySelector('#fotos')?.addEventListener('change', e => { ctx.setQuery({ ...q(), fotos: e.target.checked ? '' : '0' }); ctx.render(); });
       root.querySelectorAll('[data-flt]').forEach(sel => sel.addEventListener('change', () => { ctx.setQuery({ ...q(), [sel.dataset.flt]: sel.value }); ctx.render(); }));
-      root.querySelector('#gnt').addEventListener('change', e => { ctx.setQuery({ ...q(), gantt: e.target.checked ? '' : '0' }); ctx.render(); });
+      root.querySelector('#gnt')?.addEventListener('change', e => { ctx.setQuery({ ...q(), gantt: e.target.checked ? '' : '0' }); ctx.render(); });
       // Agrupamento: até 3 níveis (o nível vazio encerra a sequência)
       root.querySelectorAll('[data-level]').forEach(sel => sel.addEventListener('change', () => {
         const vals = [...root.querySelectorAll('[data-level]')].map(x => x.value);

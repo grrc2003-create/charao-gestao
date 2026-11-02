@@ -4,7 +4,7 @@
 // término atrasado) sem penalizá-las, e o indicador de impacto do atraso (registrado na causa).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, intOrNull } from '../lib/http.js';
-import { canSeeTask, canManageTask } from '../lib/permissions.js';
+import { canSeeTask, canManageTask, canAccessProject } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { loadVisible, checklistMaxDue, syncParentDue, moveSubtasks, hasDatedSubtasks, subtasksMinStart, subtasksMaxDue } from './tasks.js';
 import { addDays, daysBetween, today, localDate } from './metrics.js';
@@ -83,6 +83,50 @@ export function projectNodes(ctx, projectId) {
     ...tasks.map(t => ({ key: `t:${t.id}`, type: t.parent_id ? 'subtarefa' : t.task_type === 'checklist' ? 'checklist' : 'tarefa', code: t.code, title: t.title, due_date: t.due_date })),
     ...items.map(i => ({ key: `i:${i.id}`, type: 'item', code: `${i.code}·${i.seq}`, title: i.text, due_date: i.due_date })),
   ];
+}
+
+// Mapa de vínculos do projeto: atividades com responsável e funções (cargo do responsável e funções da equipe do item) e as ligações.
+// Só entram tarefas visíveis para quem consulta; ligação com tarefa restrita não aparece. Nenhum valor (diária) sai daqui.
+export function projectDepMap(ctx, projectId) {
+  const project = one('SELECT id, code, name FROM projects WHERE id = ?', projectId);
+  if (!project) throw notFound('Projeto não encontrado.');
+  if (!canAccessProject(ctx.user, projectId, ctx.projects)) throw forbidden('Sem acesso a este projeto.');
+  const ref = today();
+  const tasks = all(`SELECT t.*, u.name AS who, u.job_title AS who_title FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
+    WHERE t.project_id = ? AND t.cancelled_at IS NULL ORDER BY t.seq, t.id`, projectId).filter(t => canSeeTask(ctx, t));
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const items = all(`SELECT ci.*, u.name AS who, u.job_title AS who_title FROM checklist_items ci JOIN tasks t ON t.id = ci.task_id LEFT JOIN users u ON u.id = ci.assignee_id
+    WHERE t.project_id = ? AND t.cancelled_at IS NULL ORDER BY t.seq, ci.seq`, projectId).filter(i => byId.has(i.task_id));
+  const roles = new Map();
+  for (const r of all(`SELECT e.item_id, COALESCE(e.role, w.role) AS role FROM checklist_item_team e LEFT JOIN field_workers w ON w.id = e.worker_id
+      JOIN checklist_items ci ON ci.id = e.item_id JOIN tasks t ON t.id = ci.task_id WHERE t.project_id = ?`, projectId)) {
+    if (!r.role) continue;
+    if (!roles.has(r.item_id)) roles.set(r.item_id, []);
+    roles.get(r.item_id).push(r.role);
+  }
+  const clean = list => [...new Set(list.filter(Boolean))];
+  const nodes = [
+    ...tasks.map(t => {
+      const done = t.status === 'concluida';
+      return { key: `t:${t.id}`, type: t.parent_id ? 'subtarefa' : t.task_type === 'checklist' ? 'checklist' : 'tarefa', code: t.code, title: t.title, group: null,
+        start_date: t.start_date, due_date: t.due_date, done, late: !done && !!t.due_date && t.due_date < ref, link: `#/tarefas/${t.id}`,
+        responsible_id: t.assignee_id, responsible_name: t.who || null, functions: clean([t.who_title]), can_manage: canManageTask(ctx, t) };
+    }),
+    ...items.map(i => {
+      const t = byId.get(i.task_id);
+      const done = i.result === 'conforme' || i.result === 'na';
+      const due = i.due_date || t.due_date;
+      return { key: `i:${i.id}`, type: 'item', code: `${t.code}·${i.seq}`, title: i.text, group: i.group_name, start_date: i.start_date, due_date: due, done,
+        late: !done && !!due && due < ref, link: `#/tarefas/${t.id}`,
+        responsible_id: i.assignee_id || t.assignee_id, responsible_name: i.who || t.who || null,
+        functions: clean([i.assignee_id ? i.who_title : t.who_title, ...(roles.get(i.id) || [])]), can_manage: canManageTask(ctx, t) };
+    }),
+  ];
+  const known = new Set(nodes.map(n => n.key));
+  const edges = all('SELECT * FROM dependencies WHERE project_id = ? ORDER BY id', projectId)
+    .map(d => ({ id: d.id, pred: d.pred_task_id ? `t:${d.pred_task_id}` : `i:${d.pred_item_id}`, succ: d.succ_task_id ? `t:${d.succ_task_id}` : `i:${d.succ_item_id}`, lag_days: d.lag_days }))
+    .filter(e => known.has(e.pred) && known.has(e.succ));
+  return { project, nodes, edges, can_edit: nodes.some(n => n.can_manage) };
 }
 
 // Sucessoras diretas de uma ponta (para checar ciclos)

@@ -909,6 +909,14 @@ async function main() {
   await ricardo('POST', '/dependencies', { pred: `t:${dpB}`, succ: `t:${dpC}` });
   ok((await ricardo('POST', '/dependencies', { pred: `t:${dpC}`, succ: `t:${dpA}` })).status === 400, 'ligação circular (A→B→C→A) é recusada');
   ok((await ricardo('POST', '/dependencies', { pred: `t:${dpA}`, succ: `t:${dpA}` })).status === 400, 'tarefa não depende dela mesma');
+  // Mapa de vínculos: atividades, responsáveis, funções e ligações do projeto, sem valores e respeitando o acesso
+  const dpMap = (await ricardo('GET', '/projects/1/dep-map')).data;
+  const dpMapA = dpMap.nodes.find(n => n.key === `t:${dpA}`);
+  ok(dpMap.can_edit && dpMapA?.responsible_name && Array.isArray(dpMapA.functions) && dpMap.nodes.some(n => n.type === 'item'), 'mapa de vínculos traz tarefas e itens com responsável e funções');
+  ok(dpMap.edges.some(e => e.pred === `t:${dpA}` && e.succ === `t:${dpB}` && e.lag_days === 2), 'mapa de vínculos traz as ligações com a folga');
+  ok(!/"(rate|daily_rate|cost)"/.test(JSON.stringify(dpMap)), 'mapa de vínculos não traz valores');
+  const dpMapRm = dpMap.edges.find(e => e.pred === `t:${dpB}`);
+  ok(dpMapRm && dpMap.nodes.some(n => n.key === dpMapRm.succ), 'toda ligação do mapa aponta para atividades do próprio mapa');
   const dpOutro = (await ricardo('GET', '/tasks?project=3')).data.find(t => !t.parent_id);
   ok((await ricardo('POST', '/dependencies', { pred: `t:${dpOutro.id}`, succ: `t:${dpA}` })).status === 400, 'não liga tarefas de projetos diferentes');
   const dpItem = dpNodes.find(n => n.type === 'item');
@@ -2514,6 +2522,47 @@ async function main() {
   await fcAna('PUT', `/field/roles/${ctRole.id}`, { name: 'Pintor Teste 2', daily_rate: 300 });
   ctA = await ctGet(fcAna);
   ok(ctA.items[1].team[0].role === 'Pintor Teste 2', 'renomear a função acompanha a equipe dos itens');
+  // Programação do profissional: pendências da função, tempo do período, sequência e limite
+  await fcAna('POST', '/field/roles', { name: 'Pedreiro', daily_rate: 200 }).catch(() => null);
+  const cplT = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL programação', items: [
+    { text: 'P1', team: [{ role: 'Pedreiro', qty: 2, days: 2 }] },
+    { text: 'P2', team: [{ role: 'Pedreiro', days: 3 }] },
+    { text: 'P3', team: [{ role: 'Pedreiro', days: 4 }] },
+    { text: 'P4 outra função', team: [{ role: 'Pintor Teste 2', days: 1 }] }] })).data.id;
+  // Semana de 5 dias úteis sem feriado (segunda a sexta)
+  const cplPer = { start: '2099-03-02', end: '2099-03-06' };
+  const cplGet = (who, q = '') => who('GET', `/tasks/${cplT}/plan?worker=${fcP.id}${q}`);
+  let cpl = (await cplGet(fcAna)).data;
+  ok(cpl.pending.length === 3 && cpl.pending.every(i => i.fits) && cpl.capacity === null, 'programação: pendências da função do profissional, sem limite sem período');
+  ok(cpl.pending[0].value === 360 && !/"(rate|value)"/.test(JSON.stringify((await cplGet(fcJul)).data)), 'programação: valores só para a seção Folha de Campo');
+  const cplQ = `&de=${cplPer.start}&ate=${cplPer.end}`;
+  cpl = (await cplGet(fcAna, cplQ)).data;
+  const cplDays = cpl.capacity.available;
+  ok(cplDays >= 1 && cpl.capacity.remaining === cplDays, 'programação: período começa com todo o tempo livre');
+  const cplLink = (id, per = cplPer, who = fcAna) => who('POST', `/tasks/${cplT}/plan/link`, { worker_id: fcP.id, item_id: id, ...per });
+  const [cplI1, cplI2, cplI3] = cpl.pending.map(i => i.id);
+  const cplA = await cplLink(cplI1);
+  ok(cplA.status === 200 && cplA.data.capacity.remaining === cplDays - 2 && cplA.data.sequence[0].id === cplI1 && cplA.data.sequence[0].start_date === '2099-03-02', 'vincular consome o tempo e agenda o item no início do período');
+  const cplTask1 = (await fcAna('GET', `/tasks/${cplT}`)).data.checklist.items.find(i => i.id === cplI1);
+  ok(cplTask1.team.some(e => e.worker_id === fcP.id) && cplTask1.team.some(e => !e.worker_id && e.role === 'Pedreiro' && e.qty === 1), 'vincular troca uma vaga da função pelo profissional');
+  const cplB = await cplLink(cplI2);
+  ok(cplB.status === 200 && cplB.data.sequence[1].start_date > cplB.data.sequence[0].due_date, 'o próximo item começa depois do anterior');
+  const cplDeps = (await fcAna('GET', `/tasks/${cplT}`)).data.checklist.item_deps?.[cplI2]?.predecessors || [];
+  ok(cplDeps.some(p => p.key === `i:${cplI1}`), 'vincular liga o item ao anterior da sequência');
+  ok(cplB.data.capacity.remaining === 0 && cplB.data.pending.find(i => i.id === cplI3).fits === false, 'tempo esgotado: o item seguinte fica bloqueado');
+  const cplNo = await cplLink(cplI3);
+  ok(cplNo.status === 400 && /Ultrapassa/.test(cplNo.data.error), 'servidor recusa item que ultrapassa o período');
+  ok((await cplLink(cplI3, {}, fcCam)).status >= 400, 'quem não gerencia o check-list não vincula');
+  const cplSem = await cplLink(cplI3, {});
+  ok(cplSem.status === 200 && cplSem.data.capacity === null && cplSem.data.sequence.length === 3 && !cplSem.data.sequence[2].due_date, 'sem período não há limite e as datas não mudam');
+  const cplU = await fcAna('POST', `/tasks/${cplT}/plan/unlink`, { worker_id: fcP.id, item_id: cplI2, ...cplPer });
+  const cplDepsAfter = (await fcAna('GET', `/tasks/${cplT}`)).data.checklist.item_deps?.[cplI3]?.predecessors || [];
+  ok(cplU.status === 200 && cplU.data.sequence.map(i => i.id).join() === [cplI1, cplI3].join() && cplU.data.pending.some(i => i.id === cplI2) && cplDepsAfter.some(p => p.key === `i:${cplI1}`), 'tirar da sequência devolve a vaga e religa os vizinhos');
+  // Compromisso em outro check-list da obra consome o período
+  const cplOther = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outro', items: [{ text: 'Outro', start_date: '2099-03-02', due_date: '2099-03-03', team: [{ worker_id: fcP.id, days: 2 }] }] })).data.id;
+  const cplOut = (await cplGet(fcAna, cplQ)).data;
+  ok(cplOut.capacity.others === 2 && cplOut.others.some(o => o.title === 'Outro'), 'itens em outros check-lists da obra consomem o período');
+  await fcAna('POST', `/tasks/${cplOther}/cancel`, { reason: 'teste da programação' }).catch(() => null);
   // Cartão do check-list: pessoas envolvidas (profissional 1x; função pela maior quantidade) e valor total (só Folha de Campo)
   const ctCard = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL cartão', items: [
     { text: 'A', team: [{ worker_id: fcP.id, days: 1 }, { role: 'Pintor Teste 2', qty: 2, days: 1 }] },

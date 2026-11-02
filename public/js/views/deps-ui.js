@@ -45,6 +45,7 @@ export function depsBlock(t, canEdit) {
       <span class="right muted" style="font-size:12px">${n ? `${dep.predecessors.length} predecessora(s) · ${dep.successors.length} sucessora(s)` : 'nenhuma · toque para ligar tarefas'}</span>
       <span class="fold-chev" aria-hidden="true">${icon('chevron')}</span></summary>
     <div class="block-body dep-body">${depLists(dep, canEdit, `t:${t.id}`)}
+      <a class="btn btn-ghost btn-sm dep-map-link" href="#/projetos/${t.project_id}/vinculos">${icon('share')}Abrir o mapa de vínculos do projeto</a>
       <p class="hint" style="margin:0">Término → Início: a sucessora só começa depois que a predecessora termina (+ folga). Liga tarefas, subtarefas e itens de check-list do mesmo projeto.</p></div>
   </details>`;
 }

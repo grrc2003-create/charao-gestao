@@ -720,6 +720,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         <div class="cl-tools">
           ${filterMenu}
           <button type="button" class="btn btn-ghost btn-sm cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button>
+          ${c.can_manage_items ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/programacao">${icon('calendar')}Programar profissional</a>` : ''}
           ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
           <span class="cl-ginfo muted">Agrupado: ${groupInfo}<span data-clsel-info2></span></span>
         </div>

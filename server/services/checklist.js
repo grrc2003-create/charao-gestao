@@ -331,7 +331,7 @@ export function checklistView(ctx, t) {
   };
 }
 
-function loadChecklistTask(ctx, taskId) {
+export function loadChecklistTask(ctx, taskId) {
   const t = loadVisible(ctx, taskId);
   if (t.task_type !== 'checklist') throw badRequest('Esta tarefa não é um check-list.');
   return t;

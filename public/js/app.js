@@ -15,6 +15,8 @@ import * as ReportHistory from './views/report-history.js';
 import * as Projects from './views/projects.js';
 import * as PlanningImport from './views/planning-import.js';
 import * as Project from './views/project.js';
+import * as DepMap from './views/dep-map.js';
+import * as ChecklistPlan from './views/checklist-plan.js';
 import * as Tasks from './views/tasks.js';
 import * as Task from './views/task.js';
 import * as TaskForm from './views/task-form.js';
@@ -74,9 +76,11 @@ const routes = [
   ['/projetos/:id', Project.view],
   ['/projetos/:id/editar', Projects.form],
   ['/projetos/:id/importar', PlanningImport.importPage],
+  ['/projetos/:id/vinculos', DepMap.view],
   ['/tarefas', Tasks.view],
   ['/tarefas/nova', TaskForm.view],
   ['/tarefas/:id', Task.view],
+  ['/tarefas/:id/programacao', ChecklistPlan.view],
   ['/tarefas/:id/editar', TaskForm.view],
   ['/usuarios', Users.list],
   ['/usuarios/novo', Users.form],

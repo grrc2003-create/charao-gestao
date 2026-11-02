@@ -583,3 +583,21 @@
 .rc-txt { flex-basis: 100%; order: -1; }
 .rc-obs-in input { min-width: 240px; }
 .rc-nologo .rc-title { text-align: left; }
+
+/* Check-list separado por responsável, grupo etc.: cada parte em folha nova; lista compacta para levar à obra */
+.doc-stage .r-part + .r-part { margin-top: 18px; }
+.r-part-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 8px 0 10px; padding: 7px 10px; border-left: 4px solid #2A3D50; background: #F3EEE5; }
+.r-part-head b { font-size: 12.5pt; color: #1E2C3A; overflow-wrap: anywhere; }
+.r-part-head span { flex: none; font-size: 8.5pt; color: #46535F; }
+.r-list-title { margin: 6px 0 2px; font-size: 13pt; }
+.r-list-sum { margin: 0 0 8px; font-size: 9pt; }
+.r-list-table td { font-size: 9pt; }
+.r-list-table .r-l-due { white-space: nowrap; }
+.r-list-table .r-l-note { width: 22%; height: 30px; border-left: 1px solid #ECE9E3; }
+.r-list-table .r-grouprow td { background: #F7F6F3; }
+.r-list-sign { margin-top: 26px; break-inside: avoid; }
+@media print {
+  .r-part + .r-part { break-before: page; page-break-before: always; margin-top: 0; }
+}
+.r-list-table th:nth-child(2) { width: 34%; }
+.r-list-table .r-l-sit { min-width: 92px; }

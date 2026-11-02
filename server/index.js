@@ -26,6 +26,7 @@ import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
 import * as Checklist from './services/checklist.js';
+import * as ChecklistPlan from './services/checklist-plan.js';
 import * as Records from './services/records.js';
 import { projectHistory } from './services/history.js';
 import * as Team from './services/team.js';
@@ -444,6 +445,7 @@ api.delete('/api/projects/:id/calendar/days/:dayId', (req, res, { ctx, params })
 // Dependências (predecessora → sucessora)
 api.get('/api/projects/:id/plan-dates', (req, res, { ctx, params, query }) => send(res, 200, Calendar.planDates(ctx, intOrNull(params.id), Object.fromEntries(query))));
 api.get('/api/tasks/:id/dep-dates', (req, res, { ctx, params }) => send(res, 200, Deps.suggestedDates(ctx, intOrNull(params.id))));
+api.get('/api/projects/:id/dep-map', (req, res, { ctx, params }) => { requireSection(ctx.user, 'projetos'); send(res, 200, Deps.projectDepMap(ctx, intOrNull(params.id))); });
 api.get('/api/projects/:id/nodes', (req, res, { ctx, params }) => send(res, 200, Deps.projectNodes(ctx, intOrNull(params.id))));
 api.post('/api/tasks/:id/parent-dates', (req, res, { ctx, params }) => { Tasks.useParentDates(ctx, intOrNull(params.id)); send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))); });
 api.post('/api/checklist-items/:id/impact-preview', (req, res, { ctx, params, body }) => send(res, 200, Deps.previewItem(ctx, intOrNull(params.id), body.due_date || null)));
@@ -491,6 +493,9 @@ api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200,
 // ---------- Check-list (itens) ----------
 const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));
 api.get('/api/projects/:id/checklist-team', (req, res, { ctx, params }) => send(res, 200, Checklist.teamOptions(ctx, intOrNull(params.id))));
+api.get('/api/tasks/:id/plan', (req, res, { ctx, params, query }) => send(res, 200, ChecklistPlan.planState(ctx, intOrNull(params.id), { worker: query.get('worker'), start: query.get('de'), end: query.get('ate') })));
+api.post('/api/tasks/:id/plan/link', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.linkItem(ctx, intOrNull(params.id), body)));
+api.post('/api/tasks/:id/plan/unlink', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.unlinkItem(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }) => { Checklist.addReferencePhotos(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { Checklist.assignItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });

@@ -495,6 +495,8 @@ const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));
 api.get('/api/projects/:id/checklist-team', (req, res, { ctx, params }) => send(res, 200, Checklist.teamOptions(ctx, intOrNull(params.id))));
 api.get('/api/tasks/:id/plan', (req, res, { ctx, params, query }) => send(res, 200, ChecklistPlan.planState(ctx, intOrNull(params.id), { worker: query.get('worker'), start: query.get('de'), end: query.get('ate') })));
 api.post('/api/tasks/:id/plan/link', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.linkItem(ctx, intOrNull(params.id), body)));
+api.post('/api/tasks/:id/plan/days', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.setItemDays(ctx, intOrNull(params.id), body)));
+api.post('/api/tasks/:id/plan/reschedule', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.rescheduleSequence(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/plan/unlink', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.unlinkItem(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }) => { Checklist.addReferencePhotos(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });

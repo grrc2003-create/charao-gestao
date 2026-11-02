@@ -3558,3 +3558,8 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 }
 .pl-filters { margin-bottom: 12px; }
 @media (max-width: 760px) { .pl-cap { position: sticky; top: 62px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.08); } }
+.pl-again { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.pl-edit { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 2px 4px; border: 0; background: none; color: var(--navy); font-size: 12px; font-weight: 650; text-decoration: underline; cursor: pointer; vertical-align: middle; min-height: 28px; }
+.pl-edit svg { width: 13px; height: 13px; }
+.pl-item.is-blocked .pl-main { opacity: 1; }
+.pl-item.is-blocked .pl-main > b, .pl-item.is-blocked .pl-main > small { opacity: .62; }

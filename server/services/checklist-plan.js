@@ -1,12 +1,12 @@
 // Programação do profissional no check-list: pelo cargo do profissional aparecem as pendências da função, com os dias.
-// Vincular um item põe o profissional na equipe do item (no lugar de uma vaga da função), liga o item ao anterior da
-// sequência e, com período escolhido, define início e prazo em dias úteis. O período é um limite: o que não cabe é recusado.
-// Sem período não há limite e as datas não mudam. Cada item ocupa dias inteiros (0,5 dia ocupa 1 dia da agenda).
+// Vincular um item põe o profissional na equipe do item (no lugar de uma vaga da função) e liga o item ao anterior da sequência.
+// Com o dia de início, define início e prazo em dias úteis a partir dele; o fim é opcional e é um limite: o que não cabe é recusado.
+// Sem dia de início não há limite e as datas não mudam. Cada item ocupa dias inteiros (0,5 dia ocupa 1 dia da agenda).
 // Equipe e datas passam por updateItem e a ordem por addDependency: histórico, permissões e ajustes são os mesmos da tela do item.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, notFound, date, intOrNull } from '../lib/http.js';
 import { hasSection, canSeeTask } from '../lib/permissions.js';
-import { workingDaysList } from './calendar.js';
+import { workingDaysList, addDaysISO } from './calendar.js';
 import { addDependency, removeDependency, alignToPredecessors } from './dependencies.js';
 import { canManageItems, isResolved, loadChecklistTask, updateItem } from './checklist.js';
 
@@ -25,9 +25,9 @@ function loadWorker(t, workerId) {
 }
 
 function readPeriod(start, end) {
-  const s = date(start || null, 'Início do período'), e = date(end || null, 'Fim do período');
-  if (!s || !e) return null;
-  if (e < s) throw badRequest('O fim do período não pode ser antes do início.');
+  const s = date(start || null, 'Dia de início'), e = date(end || null, 'Fim do período');
+  if (!s) return null;
+  if (e && e < s) throw badRequest('O fim do período não pode ser antes do início.');
   return { start: s, end: e };
 }
 
@@ -47,12 +47,14 @@ const occupied = (projectId, row) => {
   return row.start_date ? workingDaysList(projectId, row.start_date, row.due_date).slice(0, slots(row.days)) : [row.due_date];
 };
 
+// Sem fim, a agenda vai até este horizonte (dias corridos a partir do início), sem limitar nada
+const NO_END_DAYS = 1095;
 // Agenda do período: dias livres depois do último item da sequência; itens sem data da sequência entram primeiro.
 // redo: itens da sequência a recolocar (depois de tirar um item do meio)
 function agenda(t, workerId, period, seq, others, redo = new Set()) {
   if (!period) return null;
   const open = seq.filter(i => !isResolved(i.result));
-  const days = workingDaysList(t.project_id, period.start, period.end);
+  const days = workingDaysList(t.project_id, period.start, period.end || addDaysISO(period.start, NO_END_DAYS));
   const inPeriod = new Set(days);
   const otherBusy = new Set(others.flatMap(o => occupied(t.project_id, o)).filter(d => inPeriod.has(d)));
   const fixed = open.filter(i => i.due_date && !redo.has(i.id));
@@ -76,6 +78,7 @@ export function planState(ctx, taskId, { worker, start, end }) {
   const seq = sequenceOf(t, w.id);
   const others = othersOf(t, w.id);
   const ag = agenda(t, w.id, period, seq, others);
+  const limit = ag && period.end ? ag : null;
   const inSeq = new Set(seq.map(i => i.id));
   const pending = !w.role ? [] : all(`SELECT ci.id, ci.seq, ci.text, ci.group_name, ci.specialty, ci.start_date, ci.due_date, ci.result, e.days, e.qty, e.role
       FROM checklist_item_team e JOIN checklist_items ci ON ci.id = e.item_id WHERE ci.task_id = ? AND e.role = ? COLLATE NOCASE ORDER BY ci.seq`, t.id, w.role.trim())
@@ -85,12 +88,16 @@ export function planState(ctx, taskId, { worker, start, end }) {
   const without = one(`SELECT COUNT(*) AS n FROM checklist_items ci WHERE ci.task_id = ? AND (ci.result IS NULL OR ci.result = 'nao_conforme')
     AND NOT EXISTS (SELECT 1 FROM checklist_item_team e WHERE e.item_id = ci.id)`, t.id).n;
   const openSeq = seq.filter(i => !isResolved(i.result));
+  // Mudou o dia de início: oferece mover a sequência para ele
+  const fromStart = period && openSeq.length ? agenda(t, w.id, period, seq, others, new Set(openSeq.map(i => i.id))) : null;
+  const ends = openSeq.map(i => i.due_date).filter(Boolean).sort().at(-1) || null;
   return { ...base,
     worker: { id: w.id, name: w.name, role: w.role, ...(money ? { rate: w.daily_rate } : {}) },
     period,
-    capacity: ag ? { available: ag.days.length, others: ag.others, here: Math.max(0, ag.days.length - ag.others - ag.remaining), remaining: ag.remaining } : null,
-    pending: pending.map(i => ({ ...view(i), qty: i.qty, fits: !ag || slots(i.days) <= ag.remaining })),
-    sequence: seq.map(i => ({ ...view(i), resolved: isResolved(i.result), outside: !!(period && i.due_date && (i.due_date > period.end || (i.start_date || i.due_date) < period.start)) })),
+    capacity: limit ? { available: limit.days.length, others: limit.others, here: Math.max(0, limit.days.length - limit.others - limit.remaining), remaining: limit.remaining } : null,
+    schedule: period ? { ends, first_free: fromStart?.free[0] || ag.free[0] || null, can_reschedule: !!fromStart?.free[0] && openSeq[0].start_date !== fromStart.free[0] } : null,
+    pending: pending.map(i => ({ ...view(i), qty: i.qty, fits: !limit || slots(i.days) <= limit.remaining })),
+    sequence: seq.map(i => ({ ...view(i), resolved: isResolved(i.result), outside: !!(period && i.due_date && ((period.end && i.due_date > period.end) || (i.start_date || i.due_date) < period.start)) })),
     others: others.map(o => {
       const visible = canSeeTask(ctx, o);
       return { id: o.id, code: `${o.code}·${o.seq}`, title: visible ? o.text : 'Tarefa restrita', link: visible ? `#/tarefas/${o.task_id}` : null, start_date: o.start_date, due_date: o.due_date, days: o.days };
@@ -129,7 +136,7 @@ export function linkItem(ctx, taskId, body = {}) {
   const seq = sequenceOf(t, w.id);
   const ag = agenda(t, w.id, period, seq, othersOf(t, w.id));
   const need = slots(row.days);
-  if (ag && need > ag.remaining) {
+  if (ag && period.end && need > ag.remaining) {
     throw badRequest(`Ultrapassa o período: este item precisa de ${need} dia(s) e restam ${ag.remaining}.`);
   }
   const nextTeam = [...team.filter(e => e !== row), ...(row.qty > 1 ? [{ ...row, qty: row.qty - 1 }] : []), { worker_id: w.id, role: null, qty: 1, days: row.days }];
@@ -141,6 +148,57 @@ export function linkItem(ctx, taskId, body = {}) {
     if (ag) place(ctx, t, ag, [...ag.unplaced, { id: item.id, days: row.days }]);
     if (prev && !depBetween(prev.id, item.id)) addDependency(ctx, { pred: `i:${prev.id}`, succ: `i:${item.id}` });
   });
+  return planState(ctx, taskId, { worker: w.id, start: body.start, end: body.end });
+}
+
+// Altera o prazo em dias da atividade (dias de trabalho da linha da equipe: mudam o tempo consumido, o valor e o término).
+// Na sequência, o item fica no mesmo início e os seguintes que têm data se ajustam; o que passar da data final é recusado.
+// Nas pendências, muda os dias da função (de cada vaga).
+export function setItemDays(ctx, taskId, body = {}) {
+  const t = loadChecklistTask(ctx, taskId);
+  const w = loadWorker(t, intOrNull(body.worker_id));
+  const item = one('SELECT * FROM checklist_items WHERE id = ? AND task_id = ?', intOrNull(body.item_id), t.id);
+  if (!item) throw notFound('Item não encontrado.');
+  if (isResolved(item.result)) throw badRequest('Item resolvido não muda de prazo.');
+  const days = r2(String(body.days ?? '').replace(',', '.'));
+  if (!(days > 0) || days > 3650) throw badRequest('Informe o prazo em dias, maior que zero.');
+  const team = currentTeam(item.id);
+  const mine = team.find(e => e.worker_id === w.id);
+  const row = mine || team.find(e => !e.worker_id && sameRole(e.role, w.role));
+  if (!row) throw badRequest(`Este item não pede a função ${w.role || 'do profissional'}.`);
+  const period = readPeriod(body.start, body.end);
+  tx(() => {
+    updateItem(ctx, t.id, item.id, { team: team.map(e => (e === row ? { ...e, days } : e)) });
+    if (!mine) return;
+    const seq = sequenceOf(t, w.id);
+    const pos = seq.findIndex(i => i.id === item.id);
+    const self = seq[pos];
+    if (!self.due_date && !period) return;
+    // Recoloca a partir do próprio item: quem já tem data continua de onde estava; sem data, usa o dia de início
+    const followers = seq.slice(pos + 1).filter(i => !isResolved(i.result) && (i.due_date || period));
+    const list = [self, ...followers];
+    const from = { start: self.start_date || self.due_date || period.start, end: period?.end || null };
+    const ag = agenda(t, w.id, from, seq, othersOf(t, w.id), new Set(list.map(i => i.id)));
+    const need = list.reduce((n, i) => n + slots(i.days), 0);
+    if (need > ag.free.length) throw badRequest(`Ultrapassa o período: a sequência precisaria de ${need} dia(s) a partir deste item e há ${ag.free.length} livre(s).`);
+    place(ctx, t, ag, list);
+  });
+  return planState(ctx, taskId, { worker: w.id, start: body.start, end: body.end });
+}
+
+// Move a sequência em aberto para o dia de início informado, na mesma ordem
+export function rescheduleSequence(ctx, taskId, body = {}) {
+  const t = loadChecklistTask(ctx, taskId);
+  const w = loadWorker(t, intOrNull(body.worker_id));
+  const period = readPeriod(body.start, body.end);
+  if (!period) throw badRequest('Informe o dia de início.');
+  const seq = sequenceOf(t, w.id);
+  const open = seq.filter(i => !isResolved(i.result));
+  if (!open.length) throw badRequest('Nenhum item em aberto na sequência.');
+  const ag = agenda(t, w.id, period, seq, othersOf(t, w.id), new Set(open.map(i => i.id)));
+  const need = open.reduce((n, i) => n + slots(i.days), 0);
+  if (need > ag.free.length) throw badRequest(`A sequência precisa de ${need} dia(s) e o período tem ${ag.free.length} livre(s).`);
+  tx(() => place(ctx, t, ag, open));
   return planState(ctx, taskId, { worker: w.id, start: body.start, end: body.end });
 }
 

@@ -2558,6 +2558,28 @@ async function main() {
   const cplU = await fcAna('POST', `/tasks/${cplT}/plan/unlink`, { worker_id: fcP.id, item_id: cplI2, ...cplPer });
   const cplDepsAfter = (await fcAna('GET', `/tasks/${cplT}`)).data.checklist.item_deps?.[cplI3]?.predecessors || [];
   ok(cplU.status === 200 && cplU.data.sequence.map(i => i.id).join() === [cplI1, cplI3].join() && cplU.data.pending.some(i => i.id === cplI2) && cplDepsAfter.some(p => p.key === `i:${cplI1}`), 'tirar da sequência devolve a vaga e religa os vizinhos');
+  // Só o dia de início: define as datas a partir dele, sem limite; a sequência pode ser movida para outro dia
+  const cplStart = (await cplGet(fcAna, '&de=2099-04-06')).data;
+  ok(cplStart.capacity === null && cplStart.pending.every(i => i.fits) && cplStart.schedule.first_free === '2099-04-06' && cplStart.schedule.can_reschedule, 'só o dia de início: sem limite e oferece reprogramar');
+  const cplS1 = await cplLink(cplI2, { start: '2099-04-06' });
+  ok(cplS1.status === 200 && cplS1.data.sequence[1].id === cplI3 && cplS1.data.sequence[1].start_date === '2099-04-06' && cplS1.data.sequence.at(-1).id === cplI2 && cplS1.data.sequence.at(-1).start_date === '2099-04-13', 'com o dia de início, itens sem data entram primeiro e a sequência pula o feriado');
+  const cplRe = (body) => fcAna('POST', `/tasks/${cplT}/plan/reschedule`, { worker_id: fcP.id, ...body });
+  ok((await cplRe({ start: '2099-03-09', end: '2099-03-10' })).status === 400, 'reprogramar recusa o que não cabe até a data final');
+  const cplRe2 = await cplRe({ start: '2099-03-09' });
+  ok(cplRe2.status === 200 && cplRe2.data.sequence[0].start_date === '2099-03-09' && cplRe2.data.sequence[1].start_date > cplRe2.data.sequence[0].due_date && !cplRe2.data.schedule.can_reschedule, 'reprogramar move a sequência para o novo dia de início');
+  // Alterar o prazo: muda dias, valor e término; os seguintes se ajustam; o que não cabe é recusado
+  const cplD = body => fcAna('POST', `/tasks/${cplT}/plan/days`, { worker_id: fcP.id, ...body });
+  ok((await cplD({ item_id: cplI1, days: 0 })).status === 400, 'prazo precisa ser maior que zero');
+  const cplD1 = await cplD({ item_id: cplI1, days: '3' });
+  const cplS = cplD1.data.sequence;
+  ok(cplD1.status === 200 && cplS[0].days === 3 && cplS[0].value === 540 && cplS[0].start_date === '2099-03-09' && cplS[0].due_date === '2099-03-11' && cplS[1].start_date === '2099-03-12', 'alterar o prazo muda valor e término, e o item seguinte se ajusta');
+  const cplD2 = await cplD({ item_id: cplI3, days: 30, start: '2099-03-09', end: '2099-03-20' });
+  ok(cplD2.status === 400 && /Ultrapassa/.test(cplD2.data.error), 'prazo que passa da data final é recusado');
+  ok((await cplGet(fcAna)).data.sequence[1].days === 4, 'prazo recusado não altera nada');
+  await fcAna('POST', `/tasks/${cplT}/plan/unlink`, { worker_id: fcP.id, item_id: cplI2 });
+  const cplD3 = await cplD({ item_id: cplI2, days: '1,5' });
+  ok(cplD3.status === 200 && cplD3.data.pending.find(i => i.id === cplI2).days === 1.5, 'prazo também pode ser alterado nas pendências');
+  ok((await fcCam('POST', `/tasks/${cplT}/plan/days`, { worker_id: fcP.id, item_id: cplI2, days: 2 })).status >= 400, 'quem não gerencia o check-list não altera o prazo');
   // Compromisso em outro check-list da obra consome o período
   const cplOther = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outro', items: [{ text: 'Outro', start_date: '2099-03-02', due_date: '2099-03-03', team: [{ worker_id: fcP.id, days: 2 }] }] })).data.id;
   const cplOut = (await cplGet(fcAna, cplQ)).data;

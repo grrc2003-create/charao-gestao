@@ -65,7 +65,7 @@ export function getUser(ctx, id) {
     stats: withExec(userStats(u, tasks, map), tasks, id),
     trend: monthlyTrend(own),
     chronic_min: getSetting('chronic_reschedule_threshold'),
-    checklists: checklistDashboard(tasks, { userId: id }),
+    checklists: checklistDashboard(tasks, { userId: id, ctx }),
     impact: impactOfAssignee(id),
     tasks: own,
     created_tasks: tasks.filter(t => t.creator_id === id && t.assignee_id !== id),

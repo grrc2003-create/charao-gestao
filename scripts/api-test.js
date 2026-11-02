@@ -2471,6 +2471,59 @@ async function main() {
   ok(fcS.code === 'FC-01' && fcS.days.length === 7 && fcS.can.edit && !fcS.can.close, 'responsável cria a folha FC-01 (período livre), sem poder fechar');
   ok(fcS.available_contracts.some(c => c.id === fcC.id) && !fcS.available_contracts.some(c => c.id === fcC2.id), 'só empreitada em andamento aparece para medir');
   ok(fcS.available_workers.some(w => w.id === fcW2.id) && fcS.available_workers.some(w => w.id === fcP.id) && (!fcWo || !fcS.available_workers.some(w => w.id === fcWo.id)), 'na folha aparecem os profissionais da obra e os sem obra definida, não os de outra obra');
+  // Check-list: equipe necessária do item (profissional ou só a função), dias, valor do item e total
+  ok((await fcJul('POST', '/field/roles', { name: 'Pintor Teste', daily_rate: 150 })).status === 403, 'funções e diárias genéricas: só a seção Folha de Campo cadastra');
+  const ctRole = (await fcAna('POST', '/field/roles', { name: 'Pintor Teste', daily_rate: '150' })).data.roles.find(r => r.name === 'Pintor Teste');
+  ok(ctRole?.daily_rate === 150 && (await fcAna('POST', '/field/roles', { name: 'pintor teste' })).status === 400, 'função cadastrada com diária genérica; nome repetido recusado');
+  const ctOptA = (await fcAna('GET', '/projects/2/checklist-team')).data, ctOptJ = (await fcJul('GET', '/projects/2/checklist-team')).data;
+  ok(ctOptA.can_see_cost && ctOptA.workers.find(w => w.id === fcP.id)?.rate === 180 && ctOptA.roles.find(r => r.name === 'Pintor Teste')?.rate === 150, 'opções da equipe trazem as diárias para a seção Folha de Campo');
+  ok(!ctOptJ.can_see_cost && ctOptJ.workers.some(w => w.id === fcP.id) && !JSON.stringify(ctOptJ).includes('"rate"'), 'sem a seção Folha de Campo: vê pessoas e funções, sem diárias');
+  const ctBase = { project_id: 2, task_type: 'checklist', title: 'CL equipe', photo_rule: 'livre', due_date: '2099-06-01' };
+  ok((await fcAna('POST', '/tasks', { ...ctBase, items: [{ text: 'X', team: [{ worker_id: fcE.id, days: 1 }] }] })).status === 400, 'empreiteiro não entra na equipe por diárias');
+  ok((await fcAna('POST', '/tasks', { ...ctBase, items: [{ text: 'X', team: [{ role: 'Inexistente', days: 1 }] }] })).status === 400, 'função não cadastrada é recusada');
+  ok((await fcAna('POST', '/tasks', { ...ctBase, items: [{ text: 'X', team: [{ role: 'Pintor Teste', days: 0 }] }] })).status === 400, 'dias da equipe precisam ser maiores que zero');
+  const ctTask = (await fcAna('POST', '/tasks', { ...ctBase, items: [
+    { text: 'Com profissional e função', start_date: '2099-05-01', duration_days: 5, team: [{ worker_id: fcP.id, days: 3 }, { role: 'Pintor Teste', qty: 2, days: '1,5' }] },
+    { text: 'Só função', team: [{ role: 'Pintor Teste', qty: 1, days: 2 }] },
+    { text: 'Sem equipe' }] })).data;
+  const ctId = ctTask.id;
+  const ctGet = async who => (await who('GET', `/tasks/${ctId}`)).data.checklist;
+  let ctA = await ctGet(fcAna);
+  ok(ctA.items[0].cost === 990 && ctA.items[0].team.length === 2 && ctA.items[1].cost === 300 && ctA.items[2].cost === 0, 'valor do item = quantidade × dias × diária (profissional e função)');
+  ok(ctA.cost.total === 1290 && ctA.cost.items === 2 && ctA.items[0].due_date === '2099-05-06', 'total do check-list soma os itens; prazo do item em dias');
+  const ctJul = await ctGet(fcJul);
+  ok(ctJul.items[0].team.length === 2 && ctJul.items[0].team[0].days === 3 && !ctJul.can_see_cost && !/"(rate|value|cost)"/.test(JSON.stringify(ctJul)), 'sem a seção Folha de Campo: vê equipe e dias, nenhum valor');
+  // Item em aberto acompanha a diária; Conforme guarda o valor; N/A sai do total
+  await fcAna('PUT', `/field/roles/${ctRole.id}`, { name: 'Pintor Teste', daily_rate: 200 });
+  ctA = await ctGet(fcAna);
+  ok(ctA.items[1].cost === 400 && ctA.items[0].cost === 1140, 'item em aberto acompanha a diária atual');
+  await fcAna('POST', `/tasks/${ctId}/items/${ctA.items[1].id}/answer`, { result: 'conforme' });
+  await fcAna('PUT', `/field/roles/${ctRole.id}`, { name: 'Pintor Teste', daily_rate: 300 });
+  ctA = await ctGet(fcAna);
+  ok(ctA.items[1].cost === 400 && ctA.cost.done === 400 && ctA.items[0].cost === 1440, 'item Conforme mantém o valor da época');
+  await fcAna('POST', `/tasks/${ctId}/items/${ctA.items[2].id}/answer`, { result: 'na' });
+  const ctItem0 = ctA.items[0].id;
+  const ctPatch = await fcAna('PATCH', `/tasks/${ctId}/items/${ctItem0}`, { team: [{ role: 'Pintor Teste', qty: 1, days: 1 }] });
+  ctA = ctPatch.data.checklist;
+  ok(ctA.items[0].cost === 300 && ctA.items[0].team.length === 1, 'equipe do item pode ser alterada');
+  ok(!/R$|300/.test(JSON.stringify(ctPatch.data.history?.filter(h => /Item do check-list alterado/.test(h.action || h.title || '')) || [])), 'histórico da equipe não mostra valores');
+  await fcAna('POST', `/tasks/${ctId}/items/${ctA.items[0].id}/answer`, { result: 'na' });
+  ctA = await ctGet(fcAna);
+  ok(ctA.cost.total === 400 && ctA.cost.na === 300, 'item N/A fica fora do total');
+  ok((await fcAna('DELETE', `/field/roles/${ctRole.id}`)).status === 400, 'função em uso na equipe de um item não pode ser excluída');
+  await fcAna('PUT', `/field/roles/${ctRole.id}`, { name: 'Pintor Teste 2', daily_rate: 300 });
+  ctA = await ctGet(fcAna);
+  ok(ctA.items[1].team[0].role === 'Pintor Teste 2', 'renomear a função acompanha a equipe dos itens');
+  // Cartão do check-list: pessoas envolvidas (profissional 1x; função pela maior quantidade) e valor total (só Folha de Campo)
+  const ctCard = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL cartão', items: [
+    { text: 'A', team: [{ worker_id: fcP.id, days: 1 }, { role: 'Pintor Teste 2', qty: 2, days: 1 }] },
+    { text: 'B', team: [{ worker_id: fcP.id, days: 1 }, { role: 'Pintor Teste 2', qty: 3, days: 1 }] }] })).data;
+  const ctCardOf = async who => (await who('GET', '/projects/2')).data.checklists.find(c => c.id === ctCard.id);
+  const ctCA = await ctCardOf(fcAna), ctCJ = await ctCardOf(fcJul);
+  ok(ctCA.people === 4 && ctCA.cost === 1860, 'cartão: pessoas sem contar em dobro e valor total do check-list');
+  ok(ctCJ.people === 4 && ctCJ.cost === undefined && ctCJ.cost_missing === undefined, 'cartão: sem a seção Folha de Campo vê as pessoas, sem o valor');
+  const ctDup = (await fcAna('POST', `/tasks/${ctId}/duplicate`, { title: 'CL equipe cópia' })).data;
+  ok((await fcAna('GET', `/tasks/${ctDup.id}`)).data.checklist.items[1].team[0].role === 'Pintor Teste 2', 'duplicar o check-list leva a equipe por função');
   const fcOv = (await fcJul('GET', '/field/sheets')).data.overview;
   const fcOv2 = fcOv.find(o => o.id === 2);
   ok(fcOv2 && fcOv2.sheets >= 1 && fcOv2.open >= 1 && fcOv2.last?.code && fcOv2.workers >= 1 && fcOv2.total === undefined, 'entrada por obra: resumo de cada obra (sem valores para quem não tem a seção)');

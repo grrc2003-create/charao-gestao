@@ -12,7 +12,7 @@ import { workingDaysBetween, vacationsOverlapping } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, applyPull, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask } from './finance.js';
 import { originOfTask, recordsOfTask } from './records.js';
-import { readItems, insertItems, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
+import { readItems, insertItems, teamForCopy, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
 export const PRIORITIES = ['baixa', 'media', 'alta', 'urgente'];
 export const PROOF_TYPES = ['nenhuma', 'foto', 'descricao', 'foto_descricao'];
@@ -632,7 +632,7 @@ export function duplicateTask(ctx, id, body) {
     const isCl = s.task_type === 'checklist';
     const items = isCl ? all('SELECT * FROM checklist_items WHERE task_id = ? ORDER BY seq', s.id).map(i => ({
       group: i.group_name || null, specialty: i.specialty || null, text: i.text, description: i.description || null, assignee_id: who(i.assignee_id),
-      start_date: keepDates ? i.start_date : null, duration_days: keepDates ? i.duration_days : null, due_date: keepDates ? i.due_date : null, images: [] })) : undefined;
+      start_date: keepDates ? i.start_date : null, duration_days: keepDates ? i.duration_days : null, due_date: keepDates ? i.due_date : null, images: [], team: teamForCopy(i.id, project.id, keepWho) })) : undefined;
     const maxDue = items?.map(i => i.due_date).filter(Boolean).sort().at(-1);
     return {
       task_type: isCl ? 'checklist' : 'tarefa', photo_rule: isCl ? s.photo_rule || 'livre' : null,

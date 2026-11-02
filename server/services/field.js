@@ -81,7 +81,45 @@ export function listWorkers(ctx) {
   const money = canFieldMoney(ctx.user);
   const wp = workerProjects();
   return { workers: all(`${WORKER_SQL} ORDER BY w.active DESC, w.name`).map(w => workerView(w, money, wp)), kinds: KINDS, pix_types: PIX_TYPES, can_money: money,
-    leaders: leaderOptions(), projects: fillableProjects(ctx) };
+    leaders: leaderOptions(), projects: fillableProjects(ctx), ...(money ? { roles: listRoles() } : {}) };
+}
+// ---------- Funções: diária genérica usada na equipe dos itens do check-list quando só a função é indicada ----------
+const listRoles = () => all('SELECT id, name, daily_rate FROM field_roles ORDER BY name');
+const addRoleName = role => { if (role) run('INSERT OR IGNORE INTO field_roles (name) VALUES (?)', role); };
+function readRole(b, cur) {
+  const name = str(b?.name, { max: 80, required: true, label: 'Função' });
+  if (one('SELECT id FROM field_roles WHERE name = ? COLLATE NOCASE AND id <> ?', name, cur?.id || 0)) throw badRequest('Já existe uma função com esse nome.');
+  return { name, daily_rate: num(b?.daily_rate, 'Valor da diária', { max: 100000 }) };
+}
+export function createRole(ctx, body, ip) {
+  requireMoney(ctx);
+  const d = readRole(body);
+  const id = Number(run('INSERT INTO field_roles (name, daily_rate) VALUES (?,?)', d.name, d.daily_rate).lastInsertRowid);
+  audit(ctx.user.id, 'field', id, 'Função de campo cadastrada', { nome: d.name, diaria: d.daily_rate }, ip);
+  return { roles: listRoles() };
+}
+export function updateRole(ctx, id, body, ip) {
+  requireMoney(ctx);
+  const cur = one('SELECT * FROM field_roles WHERE id = ?', id);
+  if (!cur) throw notFound('Função não encontrada.');
+  const d = readRole(body, cur);
+  tx(() => {
+    run(`UPDATE field_roles SET name = ?, daily_rate = ?, updated_at = datetime('now') WHERE id = ?`, d.name, d.daily_rate, id);
+    // A equipe dos itens guarda o nome da função: acompanha a renomeação
+    if (d.name !== cur.name) run('UPDATE checklist_item_team SET role = ? WHERE role = ? COLLATE NOCASE', d.name, cur.name);
+  });
+  audit(ctx.user.id, 'field', id, 'Função de campo atualizada', { nome: d.name, diaria: { de: cur.daily_rate, para: d.daily_rate } }, ip);
+  return { roles: listRoles() };
+}
+export function deleteRole(ctx, id, ip) {
+  requireMoney(ctx);
+  const cur = one('SELECT * FROM field_roles WHERE id = ?', id);
+  if (!cur) throw notFound('Função não encontrada.');
+  const used = one('SELECT COUNT(*) AS n FROM checklist_item_team WHERE role = ? COLLATE NOCASE', cur.name).n;
+  if (used) throw badRequest(`Esta função está na equipe de ${used} item(ns) de check-list e não pode ser excluída.`);
+  run('DELETE FROM field_roles WHERE id = ?', id);
+  audit(ctx.user.id, 'field', id, 'Função de campo excluída', { nome: cur.name }, ip);
+  return { roles: listRoles() };
 }
 function readLeader(v, cur) {
   if (v === undefined) return cur ?? null;
@@ -129,6 +167,7 @@ export function createWorker(ctx, body, ip) {
     const nid = Number(run(`INSERT INTO field_workers (name, kind, role, leader_id, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
     saveWorkerProjects(ctx, nid, body?.project_ids);
+    addRoleName(d.role);
     return nid;
   });
   audit(ctx.user.id, 'field', id, 'Profissional de campo cadastrado', { nome: d.name }, ip);
@@ -143,6 +182,7 @@ export function updateWorker(ctx, id, body, ip) {
     run(`UPDATE field_workers SET name=?, kind=?, role=?, leader_id=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
       d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
     saveWorkerProjects(ctx, id, body?.project_ids);
+    addRoleName(d.role);
   });
   audit(ctx.user.id, 'field', id, 'Profissional de campo atualizado', { nome: d.name }, ip);
   return workerView(one(`${WORKER_SQL} WHERE w.id = ?`, id), true);

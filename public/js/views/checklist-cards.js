@@ -1,6 +1,8 @@
 // Cartões de situação dos check-lists (Dashboard, página do projeto e página do usuário).
 import { html, icon, statusBadge, dueInfo } from '../core.js';
 
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
 function checklistCard(c) {
   const due = dueInfo(c);
   const w = n => (c.total ? `${(n / c.total) * 100}%` : '0');
@@ -19,6 +21,8 @@ function checklistCard(c) {
       <span><b>${c.pending}</b>ainda não verificados</span>
       <span class="${c.overdue ? 'is-late' : ''}"><b>${c.overdue}</b>itens atrasados</span>
     </div>
+    <div class="cl-dash-team ${c.people ? '' : 'is-empty'}">${icon('user')}<span>${c.people ? html`<b>${c.people}</b> ${c.people === 1 ? 'pessoa envolvida' : 'pessoas envolvidas'}` : 'Equipe não informada'}</span>
+      ${c.people && c.cost !== undefined ? html`<span class="cl-dash-cost" title="Valor total da mão de obra do check-list"><small>Valor total</small><b>${BRL.format(c.cost)}</b>${c.cost_missing ? html`<em>falta diária</em>` : ''}</span>` : ''}</div>
     ${c.user_items !== undefined ? html`<div class="cl-dash-user ${c.user_open ? 'has-open' : ''}">${icon('user')}
       ${c.user_global ? 'Responsável global · ' : ''}${c.user_items ? html`<b>${c.user_open}</b> pendente(s) de <b>${c.user_items}</b> ${c.user_items === 1 ? 'item' : 'itens'} da pessoa` : 'sem itens próprios'}</div>` : ''}
     ${c.due_date ? html`<div class="cl-dash-due ${due.cls}">${icon('calendar')} ${due.text}</div>` : ''}

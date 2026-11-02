@@ -4,7 +4,7 @@
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull, date } from '../lib/http.js';
 import { today, addDays, daysBetween, decorate } from './metrics.js';
-import { canExecuteTask, canManageTask } from '../lib/permissions.js';
+import { canExecuteTask, canManageTask, hasSection, canAccessProject } from '../lib/permissions.js';
 import { taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
 import { loadVisible, validateAssignee, autoStart, checklistMaxDue, readProgress } from './tasks.js';
@@ -45,7 +45,87 @@ function readDeadline(it, label) {
   return { start_date: start, duration_days: days, due_date: start && days !== null ? addDays(start, days) : null };
 }
 
-// Itens enviados pelo formulário: [{ group, text, description, assignee_id, start_date, duration_days, images }]
+// ---------- Equipe necessária do item ----------
+// Cada linha é um profissional da Folha de Campo (diária do cadastro dele) ou só a função, com quantidade (diária genérica da função).
+// Valores (diárias e custo) seguem a regra da Folha de Campo: só para a seção folha_campo. Os demais veem pessoas, funções e dias.
+const MAX_TEAM = 30;
+const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+const canSeeCost = ctx => hasSection(ctx.user, 'folha_campo');
+const TEAM_SQL = `SELECT e.*, ci.task_id, w.name AS worker_name, w.role AS worker_role, COALESCE(e.frozen_rate, w.daily_rate, r.daily_rate, 0) AS rate
+  FROM checklist_item_team e LEFT JOIN field_workers w ON w.id = e.worker_id LEFT JOIN field_roles r ON r.name = e.role COLLATE NOCASE`;
+const TEAM_ITEM = 'JOIN checklist_items ci ON ci.id = e.item_id';
+const positive = (v, label, max) => {
+  const n = Number(String(v ?? '').replace(',', '.'));
+  if (!Number.isFinite(n) || n <= 0 || n > max) throw badRequest(`${label} inválido.`);
+  return n;
+};
+// Profissional inativo ou função excluída continuam aceitos se já estavam no item (current)
+function readTeam(list, projectId, label, current = []) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) throw badRequest(`Equipe inválida (${label}).`);
+  if (list.length > MAX_TEAM) throw badRequest(`A equipe aceita no máximo ${MAX_TEAM} linhas (${label}).`);
+  const seen = new Set();
+  return list.map(e => {
+    const days = r2(positive(e?.days, `Dias da equipe (${label})`, 3650));
+    const workerId = intOrNull(e?.worker_id);
+    if (workerId) {
+      if (seen.has(`w${workerId}`)) throw badRequest(`Profissional repetido na equipe (${label}).`);
+      seen.add(`w${workerId}`);
+      const w = one(`SELECT id, active FROM field_workers WHERE id = ? AND kind = 'diarista'`, workerId);
+      if (!w) throw badRequest(`Profissional inválido na equipe (${label}).`);
+      const inProject = !one('SELECT 1 FROM field_worker_projects WHERE worker_id = ?', workerId) || one('SELECT 1 FROM field_worker_projects WHERE worker_id = ? AND project_id = ?', workerId, projectId);
+      if ((!w.active || !inProject) && !current.some(c => c.worker_id === workerId)) throw badRequest(`Profissional não disponível para esta obra (${label}).`);
+      return { worker_id: workerId, role: null, qty: 1, days };
+    }
+    const role = str(e?.role, { max: 80, required: true, label: `Função da equipe (${label})` });
+    const known = one('SELECT name FROM field_roles WHERE name = ? COLLATE NOCASE', role)?.name
+      || current.find(c => String(c.role || '').toLowerCase() === role.toLowerCase())?.role;
+    if (!known) throw badRequest(`Função "${role}" não cadastrada (${label}).`);
+    if (seen.has(`r${known.toLowerCase()}`)) throw badRequest(`Função repetida na equipe (${label}): ajuste a quantidade.`);
+    seen.add(`r${known.toLowerCase()}`);
+    const qty = positive(e?.qty ?? 1, `Quantidade da equipe (${label})`, 999);
+    if (!Number.isInteger(qty)) throw badRequest(`Quantidade da equipe inválida (${label}).`);
+    return { worker_id: null, role: known, qty, days };
+  });
+}
+// Guarda a diária do item Conforme; nos demais casos volta a acompanhar o cadastro
+function syncTeamRates(itemId, result) {
+  run('UPDATE checklist_item_team SET frozen_rate = NULL WHERE item_id = ?', itemId);
+  if (result !== 'conforme') return;
+  for (const e of all(`${TEAM_SQL} ${TEAM_ITEM} WHERE e.item_id = ?`, itemId)) run('UPDATE checklist_item_team SET frozen_rate = ? WHERE id = ?', e.rate, e.id);
+}
+function saveTeam(itemId, team, result = null) {
+  run('DELETE FROM checklist_item_team WHERE item_id = ?', itemId);
+  for (const e of team) run('INSERT INTO checklist_item_team (item_id, worker_id, role, qty, days) VALUES (?,?,?,?,?)', itemId, e.worker_id, e.role, e.qty, e.days);
+  syncTeamRates(itemId, result);
+}
+const teamText = list => list.map(e => {
+  const who = e.worker_id ? one('SELECT name FROM field_workers WHERE id = ?', e.worker_id)?.name : `${e.role}${e.qty > 1 ? ` ×${e.qty}` : ''}`;
+  return `${who} ${String(e.days).replace('.', ',')}d`;
+}).join(', ') || 'sem equipe';
+// Opções do passo Equipe: profissionais ligados à obra (ou sem obra escolhida) e funções cadastradas
+export function teamOptions(ctx, projectId) {
+  if (!one('SELECT id FROM projects WHERE id = ?', projectId)) throw notFound('Projeto não encontrado.');
+  if (!canAccessProject(ctx.user, projectId, ctx.projects)) throw forbidden('Sem acesso a este projeto.');
+  const money = canSeeCost(ctx);
+  const workers = all(`SELECT id, name, role, daily_rate AS rate FROM field_workers w WHERE active = 1 AND kind = 'diarista'
+    AND (NOT EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id) OR EXISTS (SELECT 1 FROM field_worker_projects x WHERE x.worker_id = w.id AND x.project_id = ?))
+    ORDER BY name`, projectId);
+  const roles = all('SELECT name, daily_rate AS rate FROM field_roles ORDER BY name');
+  const clean = list => (money ? list : list.map(({ rate, ...x }) => x));
+  return { workers: clean(workers), roles: clean(roles), can_see_cost: money };
+}
+// Duplicar tarefa: a função sempre vai junto; o profissional, só se mantiver os responsáveis e estiver disponível na obra de destino
+export function teamForCopy(itemId, projectId, keepWorkers) {
+  return all('SELECT worker_id, role, qty, days FROM checklist_item_team WHERE item_id = ? ORDER BY id', itemId).filter(e => {
+    if (!e.worker_id) return true;
+    if (!keepWorkers) return false;
+    return !!one('SELECT id FROM field_workers WHERE id = ? AND active = 1', e.worker_id)
+      && (!one('SELECT 1 FROM field_worker_projects WHERE worker_id = ?', e.worker_id) || !!one('SELECT 1 FROM field_worker_projects WHERE worker_id = ? AND project_id = ?', e.worker_id, projectId));
+  });
+}
+
+// Itens enviados pelo formulário: [{ group, text, description, assignee_id, start_date, duration_days, images, team }]
 // (responsável validado contra a equipe do projeto; com foto obrigatória, cada item novo precisa da foto de entrada)
 export function readItems(list, projectId, { required = false, requirePhoto = false } = {}) {
   const arr = Array.isArray(list) ? list : [];
@@ -63,6 +143,7 @@ export function readItems(list, projectId, { required = false, requirePhoto = fa
       assignee_id: validateAssignee(intOrNull(it?.assignee_id), projectId),
       ...readDeadline(it, `item ${i + 1}`),
       images,
+      team: readTeam(it?.team, projectId, `item ${i + 1}`),
     };
   });
   if (required && !items.length) throw badRequest('Inclua ao menos um item no check-list.');
@@ -96,6 +177,7 @@ export function insertItems(taskId, items, userId) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`, taskId, slotFor(taskId, it.group), it.group, it.specialty || null, it.text, it.description || null, it.assignee_id,
       it.start_date || null, it.duration_days ?? null, it.due_date || null, nowIso()).lastInsertRowid);
     if (it.images?.length) saveItemPhotos({ user: { id: userId } }, id, it.images, null, 'referencia');
+    if (it.team?.length) saveTeam(id, it.team);
   }
 }
 
@@ -190,9 +272,20 @@ export function checklistView(ctx, t) {
   const rows = all(`${ITEM_SQL} WHERE ci.task_id = ? ORDER BY ci.seq`, t.id);
   const hist = historyByItem(t.id);
   const ref = today();
+  const money = canSeeCost(ctx);
+  const teams = new Map();
+  for (const e of all(`${TEAM_SQL} ${TEAM_ITEM} WHERE ci.task_id = ? ORDER BY e.id`, t.id)) {
+    if (!teams.has(e.item_id)) teams.set(e.item_id, []);
+    teams.get(e.item_id).push(e);
+  }
   const items = rows.map(i => {
     const st = itemState(i, hist.get(i.id));
+    const team = teams.get(i.id) || [];
+    const cost = r2(team.reduce((n, e) => n + e.qty * e.days * e.rate, 0));
     return {
+      team: team.map(e => ({ id: e.id, worker_id: e.worker_id, role: e.worker_id ? e.worker_role : e.role, name: e.worker_name || null, qty: e.qty, days: e.days,
+        ...(money ? { rate: e.rate, value: r2(e.qty * e.days * e.rate) } : {}) })),
+      ...(money ? { cost, cost_missing: team.some(e => !e.rate) } : {}),
       id: i.id, seq: i.seq, group: i.group_name, specialty: i.specialty || null, text: i.text,
       assignee_id: i.assignee_id, assignee_name: i.assignee_name, assignee_external: !!i.a_external,
       responsible_name: i.assignee_name || t.assignee_name || 'Sem responsável',
@@ -214,8 +307,14 @@ export function checklistView(ctx, t) {
   });
   const count = r => items.filter(i => i.result === r).length;
   const done = items.filter(i => i.resolved).length;
+  // Total: N/A não é executado e fica de fora; "executado" = itens Conforme
+  const costOf = list => r2(list.reduce((n, i) => n + (i.cost || 0), 0));
+  const counted = items.filter(i => i.result !== 'na');
   return {
     photo_rule: t.photo_rule || 'livre',
+    can_see_cost: money,
+    ...(money ? { cost: { total: costOf(counted), done: costOf(counted.filter(i => i.result === 'conforme')), pending: costOf(counted.filter(i => i.result !== 'conforme')),
+      items: counted.filter(i => i.team.length).length, missing: counted.filter(i => i.cost_missing).length, na: costOf(items.filter(i => i.result === 'na')) } } : {}),
     items,
     summary: {
       total: items.length, done, pct: items.length ? Math.round((done / items.length) * 100) : 0,
@@ -342,6 +441,7 @@ export function answerItem(ctx, taskId, itemId, body = {}) {
       run(`UPDATE checklist_files SET answer_id = ? WHERE item_id = ? AND answer_id IS NULL AND kind = 'resposta'`, ansId, item.id);
       n = images.length ? saveItemPhotos(ctx, item.id, images, ansId) : 0;
       run('UPDATE checklist_items SET result = ?, note = ?, answered_by = ?, answered_at = ? WHERE id = ?', result, ansNote, ctx.user.id, now, item.id);
+      syncTeamRates(item.id, result);
       // Item resolvido depois do prazo: empurra as sucessoras do item pelo atraso real
       const finishDay = today();
       if (isResolved(result) && item.due_date && finishDay > item.due_date) {
@@ -451,8 +551,15 @@ export function updateItem(ctx, taskId, itemId, body) {
       changes.push(`responsável: ${name(item.assignee_id)} → ${name(v)}`);
     }
   }
+  // Equipe: o histórico mostra pessoas e dias, nunca valores (o histórico é visto por toda a equipe do projeto)
+  let teamNext = null;
+  if ('team' in body) {
+    const current = all('SELECT worker_id, role, qty, days FROM checklist_item_team WHERE item_id = ? ORDER BY id', item.id);
+    const v = readTeam(body.team, t.project_id, 'item', current);
+    if (JSON.stringify(v) !== JSON.stringify(current)) { teamNext = v; changes.push(`equipe: ${teamText(v)}`); }
+  }
   const fields = Object.keys(next);
-  if (!fields.length) return;
+  if (!fields.length && !teamNext) return;
   const endBefore = projectEndOf(t.project_id);
   const clDueBefore = checklistMaxDue(t.id) || t.due_date;
   tx(() => {
@@ -462,6 +569,7 @@ export function updateItem(ctx, taskId, itemId, body) {
     const rest = Object.keys(next);
     if (rest.length) run(`UPDATE checklist_items SET ${rest.map(f => `${f} = ?`).join(', ')} WHERE id = ?`, ...rest.map(f => next[f]), item.id);
     if (groupChanged) moveToGroup(t.id, item.id, group);
+    if (teamNext) saveTeam(item.id, teamNext, item.result);
     taskHistory(t.id, ctx.user.id, 'Item do check-list alterado', `${item.seq}. ${item.text} · ${changes.join(' · ')}`);
     syncTaskDue(t, ctx.user.id);
     // Prazo do item adiado: empurra as sucessoras do item (e as do check-list, se o prazo dele também andou)
@@ -584,7 +692,7 @@ export function checklistItemsAsSubtasks(tasks) {
 
 // ---------- Dashboard: situação de cada check-list ----------
 // userId: inclui os itens daquela pessoa (atribuídos a ela ou, sem responsável próprio, quando ela é a responsável global)
-export function checklistDashboard(tasks, { userId = null } = {}) {
+export function checklistDashboard(tasks, { userId = null, ctx = null } = {}) {
   let lists = tasks.filter(t => t.task_type === 'checklist' && !t.cancelled_at);
   const mine = new Map();
   if (userId && lists.length) {
@@ -607,14 +715,29 @@ export function checklistDashboard(tasks, { userId = null } = {}) {
       SUM(ci.result IS NULL) AS pending,
       SUM(ci.result IS NOT 'conforme' AND ci.result IS NOT 'na' AND ci.due_date IS NOT NULL AND ci.due_date < ?) AS overdue
     FROM checklist_items ci WHERE ci.task_id IN (${ids.map(() => '?').join(',')}) GROUP BY ci.task_id`, ref, ...ids).map(r => [r.task_id, r]));
+  // Equipe do cartão (itens N/A ficam de fora). Pessoas: cada profissional conta uma vez e cada função conta pela maior
+  // quantidade pedida num item (Pedreiro ×2 em dois itens = 2 pessoas). Valor: só para a seção Folha de Campo.
+  const money = !!ctx && canSeeCost(ctx);
+  const teams = new Map();
+  for (const e of all(`${TEAM_SQL} ${TEAM_ITEM} WHERE ci.task_id IN (${ids.map(() => '?').join(',')}) AND ci.result IS NOT 'na'`, ...ids)) {
+    if (!teams.has(e.task_id)) teams.set(e.task_id, { workers: new Set(), roles: new Map(), cost: 0, missing: false });
+    const g = teams.get(e.task_id);
+    if (e.worker_id) g.workers.add(e.worker_id);
+    else g.roles.set(e.role.toLowerCase(), Math.max(g.roles.get(e.role.toLowerCase()) || 0, e.qty));
+    g.cost += e.qty * e.days * e.rate;
+    if (!e.rate) g.missing = true;
+  }
   const RANK = { atrasada: 0, em_andamento: 1, aberta: 1, aguardando_conferencia: 2, concluida: 3 };
   return lists.map(t => {
+    const g = teams.get(t.id);
     const s = stats.get(t.id) || { total: 0, resolved: 0, nc_open: 0, nc_resolved: 0, pending: 0, overdue: 0 };
     return {
       id: t.id, code: t.code, title: t.title, project_code: t.project_code, project_name: t.project_name,
       assignee_name: t.assignee_name, due_date: t.due_date, eff_status: t.eff_status, status: t.status, days_late: t.days_late, days_to_due: t.days_to_due, photo_rule: t.photo_rule,
       total: s.total, resolved: s.resolved || 0, nc_open: s.nc_open || 0, nc_resolved: s.nc_resolved || 0, pending: s.pending || 0, overdue: s.overdue || 0,
       pct: s.total ? Math.round(((s.resolved || 0) / s.total) * 100) : 0,
+      people: g ? g.workers.size + [...g.roles.values()].reduce((n, q) => n + q, 0) : 0,
+      ...(money ? { cost: r2(g?.cost), cost_missing: !!g?.missing } : {}),
       ...(userId ? { user_items: mine.get(t.id)?.total || 0, user_open: mine.get(t.id)?.open || 0, user_global: t.assignee_id === userId } : {}),
     };
   }).sort((a, b) => RANK[a.eff_status] - RANK[b.eff_status] || b.nc_open + b.overdue - (a.nc_open + a.overdue) || (a.due_date || '9999').localeCompare(b.due_date || '9999'));

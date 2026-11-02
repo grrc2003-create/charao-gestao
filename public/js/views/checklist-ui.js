@@ -75,6 +75,72 @@ const fmtD = d => (d ? d.split('-').reverse().join('/') : '');
 const todayISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const plusDays = (d, n) => new Date(Date.parse(d) + n * 86400e3).toISOString().slice(0, 10);
 
+// ---------- Equipe necessária do item ----------
+// Cada linha: profissional da Folha de Campo ou só a função (com quantidade), mais os dias de cada um.
+// Os valores só chegam do servidor para quem tem a seção Folha de Campo (rate indefinido = não mostra valor).
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+export const brl = v => BRL.format(Number(v) || 0);
+const readNum = v => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+const numBR = v => String(Math.round(readNum(v) * 100) / 100).replace('.', ',');
+const daysLabel = d => `${numBR(d)} ${readNum(d) === 1 ? 'dia' : 'dias'}`;
+const teamValue = e => (e.rate === undefined ? null : (e.worker_id ? 1 : readNum(e.qty) || 1) * readNum(e.days) * e.rate);
+export const teamTotal = list => (list || []).reduce((n, e) => n + (teamValue(e) || 0), 0);
+const teamSeesCost = list => (list || []).some(e => e.rate !== undefined);
+const teamName = e => (e.worker_id ? e.name : `${e.role}${(readNum(e.qty) || 1) > 1 ? ` ×${numBR(e.qty)}` : ''}`);
+const teamSummary = list => (list || []).map(e => `${teamName(e)} (${daysLabel(e.days)})`).join(', ');
+const teamInvalid = list => (list || []).some(e => readNum(e.days) <= 0 || (!e.worker_id && (!Number.isInteger(readNum(e.qty)) || readNum(e.qty) <= 0)));
+const rateText = (rate, money) => (!money ? '' : rate ? `${brl(rate)}/dia` : 'sem diária cadastrada');
+
+export function bindTeamEditor(box, team, opts, onChange = () => {}) {
+  const money = !!opts.can_see_cost;
+  const draw = () => {
+    const workers = opts.workers.filter(w => !team.some(e => e.worker_id === w.id));
+    const roles = opts.roles.filter(r => !team.some(e => !e.worker_id && String(e.role).toLowerCase() === r.name.toLowerCase()));
+    box.innerHTML = html`<label class="cl-team-add"><span>Adicionar à equipe</span><select data-team-add>
+        <option value="">Escolha o profissional ou a função…</option>
+        ${workers.length ? html`<optgroup label="Profissionais da folha">${workers.map(w => html`<option value="w:${w.id}">${w.name}${w.role ? ` · ${w.role}` : ''}${money ? ` · ${rateText(w.rate, true)}` : ''}</option>`)}</optgroup>` : ''}
+        ${roles.length ? html`<optgroup label="Somente a função (diária genérica)">${roles.map(r => html`<option value="r:${r.name}">${r.name}${money ? ` · ${rateText(r.rate, true)}` : ''}</option>`)}</optgroup>` : ''}
+      </select></label>
+      ${!opts.workers.length && !opts.roles.length ? html`<span class="hint">Nenhum profissional ou função disponível. Cadastre em <b>Folha de Campo → Profissionais</b>.</span>` : ''}
+      <div class="cl-team-rows">${team.map((e, i) => html`<div class="cl-team-row" data-i="${i}">
+        <div class="cl-team-who"><b>${e.worker_id ? e.name : e.role}</b><small>${e.worker_id ? e.role || 'Profissional' : 'Função'}${money ? ` · ${rateText(e.rate, true)}` : ''}</small></div>
+        ${e.worker_id ? '' : html`<label class="cl-team-n"><span>Qtd.</span><input type="text" inputmode="numeric" data-team-qty value="${numBR(e.qty || 1)}" aria-label="Quantidade de ${e.role}"></label>`}
+        <label class="cl-team-n"><span>Dias${e.worker_id ? '' : ' cada'}</span><input type="text" inputmode="decimal" data-team-days value="${e.days === '' || e.days === undefined ? '' : numBR(e.days)}" placeholder="0" aria-label="Dias de ${e.worker_id ? e.name : e.role}"></label>
+        ${money ? html`<span class="cl-team-val" data-team-val>${brl(teamValue(e))}</span>` : ''}
+        <button type="button" class="icon-btn" data-team-rm aria-label="Remover ${e.worker_id ? e.name : e.role}">✕</button>
+      </div>`)}</div>
+      ${money && team.length ? html`<div class="cl-team-total"><span>Valor do item</span><b data-team-total>${brl(teamTotal(team))}</b></div>` : ''}`.toString();
+    box.querySelector('[data-team-add]').addEventListener('change', e => {
+      const v = e.target.value;
+      if (!v) return;
+      if (v.startsWith('w:')) {
+        const w = opts.workers.find(x => x.id === Number(v.slice(2)));
+        team.push({ worker_id: w.id, name: w.name, role: w.role || null, qty: 1, days: '', ...(money ? { rate: w.rate } : {}) });
+      } else {
+        const r = opts.roles.find(x => x.name === v.slice(2));
+        team.push({ worker_id: null, name: null, role: r.name, qty: 1, days: '', ...(money ? { rate: r.rate } : {}) });
+      }
+      draw();
+      onChange();
+      box.querySelector('.cl-team-row:last-child [data-team-days]')?.focus({ preventScroll: true });
+    });
+    box.querySelectorAll('.cl-team-row').forEach(row => {
+      const e = team[Number(row.dataset.i)];
+      const sync = () => {
+        const val = row.querySelector('[data-team-val]');
+        if (val) val.textContent = brl(teamValue(e));
+        const tot = box.querySelector('[data-team-total]');
+        if (tot) tot.textContent = brl(teamTotal(team));
+        onChange();
+      };
+      row.querySelector('[data-team-days]').addEventListener('input', ev => { e.days = ev.target.value; sync(); });
+      row.querySelector('[data-team-qty]')?.addEventListener('input', ev => { e.qty = ev.target.value; sync(); });
+      row.querySelector('[data-team-rm]').addEventListener('click', () => { team.splice(Number(row.dataset.i), 1); draw(); onChange(); });
+    });
+  };
+  draw();
+}
+
 export function itemForm() {
   return html`<div class="cl-wiz" data-cl-form>
     <div class="wiz-head"><span class="wiz-step" data-wiz-count></span><b data-wiz-title></b></div>
@@ -86,16 +152,19 @@ export function itemForm() {
 }
 
 // users(), groups(), globalName(), photoRequired(), quickList() são funções (a lista pode mudar com o projeto/regra)
-export function bindItemForm(el, { users, groups, specialties = () => [], specialtiesOwn = () => true, globalName = () => '', photoRequired, quickList = () => false, keep = {}, onAdd, onClose }) {
+export function bindItemForm(el, { users, groups, specialties = () => [], specialtiesOwn = () => true, globalName = () => '', photoRequired, quickList = () => false, projectId = () => null, keep = {}, onAdd, onClose }) {
   const q = s => el.querySelector(s);
   const err = q('[data-err]');
   let item, step = 0;
   const reset = () => {
     item = { group: keep.group ?? undefined, specialty: keep.specialty ?? undefined, images: [], text: '', assignee_id: keep.assignee_id ?? undefined,
-      start_date: keep.start_date || '', due_date: keep.due_date || '', description: '' };
+      start_date: keep.start_date || '', due_date: keep.due_date || '', description: '', team: [] };
     step = 0;
   };
   reset();
+  // Opções da equipe por projeto (carregadas ao chegar no passo)
+  const teamOpts = {};
+  const dayDiff = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400e3);
   const STEPS = () => [
     { k: 'group', title: 'Grupo', optional: false },
     // Especialidade só quando a obra tem um modelo de especialidades (Configurações → escolhido no projeto)
@@ -103,8 +172,9 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     { k: 'photo', title: 'Foto da não conformidade', optional: !photoRequired() },
     { k: 'text', title: 'Descrição do item', optional: false },
     { k: 'who', title: 'Responsável', optional: true },
+    { k: 'team', title: 'Equipe necessária', optional: true },
     { k: 'start', title: 'Data de início', optional: true },
-    { k: 'end', title: 'Data de término', optional: true },
+    { k: 'end', title: 'Prazo do item', optional: true },
     { k: 'obs', title: 'Observação', optional: true },
   ];
   const fail = msg => { err.textContent = msg; err.hidden = !msg; };
@@ -144,16 +214,22 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
       case 'who':
         return html`<p class="wiz-q">Quem responde este item? (opcional)</p>
           <div class="wiz-opts is-list">${pick('data-who', '', whoName(null), !item.assignee_id, 'padrão')}${users().map(u => pick('data-who', u.id, u.name, item.assignee_id === u.id, u.is_external ? `Terceirizado${u.company ? ` · ${u.company}` : ''}` : u.job_title || ''))}</div>`;
+      case 'team':
+        return html`<p class="wiz-q">Quem precisa trabalhar neste item e por quantos dias? (opcional)</p>
+          <div data-team-box>${!projectId() ? html`<span class="hint">Escolha o projeto para ver os profissionais e as funções.</span>` : teamOpts[projectId()] ? '' : html`<span class="hint">Carregando…</span>`}</div>
+          <span class="hint">Indique um profissional da folha (usa a diária do cadastro dele) ou só a função (usa a diária genérica da função).</span>`;
       case 'start':
         return html`<p class="wiz-q">Quando começa? (opcional)</p>
           <input type="date" class="wiz-input" data-f="start_date" value="${item.start_date}">
           <div class="wiz-quick">${pick('data-start', todayISO(), 'Hoje', item.start_date === todayISO())}${pick('data-start', plusDays(todayISO(), 1), 'Amanhã', item.start_date === plusDays(todayISO(), 1))}</div>`;
       case 'end': {
         const base = item.start_date || todayISO();
-        return html`<p class="wiz-q">Até quando deve estar pronto? (opcional)</p>
-          <input type="date" class="wiz-input" data-f="due_date" value="${item.due_date}" min="${item.start_date || ''}">
-          <div class="wiz-quick">${[1, 3, 7, 15].map(n => pick('data-end', plusDays(base, n), `+${n} ${n === 1 ? 'dia' : 'dias'}`, item.due_date === plusDays(base, n)))}</div>
-          <span class="hint">${item.start_date ? `Início em ${fmtD(item.start_date)}.` : 'Sem data de início: os atalhos contam a partir de hoje.'}</span>`;
+        const longest = Math.ceil(Math.max(0, ...item.team.map(e => readNum(e.days))));
+        return html`<p class="wiz-q">Em quantos dias deve estar pronto? (opcional)</p>
+          <div class="form-row"><div class="field"><label for="wiz-days">Prazo em dias</label><input type="text" inputmode="numeric" id="wiz-days" class="wiz-input" data-f="days" value="${item.due_date ? dayDiff(base, item.due_date) : ''}" placeholder="Ex.: 5"></div>
+            <div class="field"><label for="wiz-end">Data de término</label><input type="date" id="wiz-end" class="wiz-input" data-f="due_date" value="${item.due_date}" min="${item.start_date || ''}"></div></div>
+          <div class="wiz-quick">${longest ? pick('data-end', plusDays(base, longest), `${longest} ${longest === 1 ? 'dia' : 'dias'} (maior da equipe)`, item.due_date === plusDays(base, longest)) : ''}${[1, 3, 7, 15].map(n => pick('data-end', plusDays(base, n), `+${n} ${n === 1 ? 'dia' : 'dias'}`, item.due_date === plusDays(base, n)))}</div>
+          <span class="hint">${item.start_date ? `Os dias contam a partir do início, em ${fmtD(item.start_date)}.` : 'Sem data de início: os dias contam a partir de hoje.'}</span>`;
       }
       case 'obs':
         return html`<p class="wiz-q">Alguma observação? (opcional)</p>
@@ -164,8 +240,10 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
             ${summaryRow('photo', 'Foto', item.images.length ? `${item.images.length} foto(s)` : 'sem foto')}
             ${summaryRow('text', 'Item', item.text)}
             ${summaryRow('who', 'Responsável', whoName(item.assignee_id))}
+            ${summaryRow('team', 'Equipe', teamSummary(item.team) || 'não informada')}
+            ${teamSeesCost(item.team) ? summaryRow('team', 'Valor do item', brl(teamTotal(item.team))) : ''}
             ${summaryRow('start', 'Início', fmtD(item.start_date) || '—')}
-            ${summaryRow('end', 'Término', fmtD(item.due_date) || '—')}
+            ${summaryRow('end', 'Término', item.due_date ? `${fmtD(item.due_date)}${item.start_date ? ` (${daysLabel(dayDiff(item.start_date, item.due_date))})` : ''}` : '—')}
           </div>`;
     }
     return '';
@@ -186,7 +264,11 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     const s = STEPS()[step];
     if (s.k === 'text') item.text = (v('text') || '').trim();
     if (s.k === 'start') item.start_date = v('start_date') || '';
-    if (s.k === 'end') item.due_date = v('due_date') || '';
+    if (s.k === 'end') {
+      item.due_date = v('due_date') || '';
+      // Prazo informado em dias sem data de início: conta a partir de hoje
+      if (item.due_date && !item.start_date && (v('days') || '').trim()) item.start_date = todayISO();
+    }
     if (s.k === 'obs') item.description = (v('description') || '').trim();
   };
   const validate = () => {
@@ -194,6 +276,7 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     if (s.k === 'group' && item.group === undefined) return 'Escolha o grupo do item (ou “Sem grupo”).';
     if (s.k === 'photo' && photoRequired() && !item.images.length) return 'Foto obrigatória: tire ou escolha a foto da não conformidade para continuar.';
     if (s.k === 'text' && !item.text) return 'Descreva o item a verificar.';
+    if (s.k === 'team' && teamInvalid(item.team)) return 'Informe os dias de cada pessoa da equipe (e a quantidade, quando for só a função).';
     if (s.k === 'end' && item.due_date && item.start_date && item.due_date < item.start_date) return 'A data de término não pode ser anterior à data de início.';
     return '';
   };
@@ -207,6 +290,13 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     q('[data-wiz-nav]').innerHTML = navFor(s, step === steps.length - 1).toString();
     fail('');
     bindStep();
+    if (s.k === 'team' && projectId()) {
+      const pid = projectId();
+      const box = q('[data-team-box]');
+      if (teamOpts[pid]) bindTeamEditor(box, item.team, teamOpts[pid]);
+      else api(`/projects/${pid}/checklist-team`).then(o => { teamOpts[pid] = o; if (STEPS()[step]?.k === 'team') render(); })
+        .catch(e => { box.innerHTML = ''; fail(e.message); });
+    }
     const first = q('[data-wiz-body] .wiz-input');
     if (first) setTimeout(() => first.focus({ preventScroll: true }), 30);
   };
@@ -226,7 +316,7 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     }
     step = STEPS().length - 1;
     const out = { text: item.text, group: item.group || null, specialty: item.specialty || null, images: item.images.slice(), description: item.description || null,
-      assignee_id: item.assignee_id || null, start_date: item.start_date || null, due_date: item.due_date || null };
+      assignee_id: item.assignee_id || null, start_date: item.start_date || null, due_date: item.due_date || null, team: item.team.slice() };
     el.querySelectorAll('[data-add-again],[data-add-close]').forEach(b => (b.disabled = true));
     try {
       Object.assign(keep, { group: out.group, specialty: out.specialty, assignee_id: out.assignee_id, start_date: out.start_date, due_date: out.due_date });
@@ -246,6 +336,13 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     el.querySelectorAll('[data-who]').forEach(b => b.addEventListener('click', () => { item.assignee_id = b.dataset.who ? Number(b.dataset.who) : null; next(); }));
     el.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => { q('[data-f="start_date"]').value = b.dataset.start; next(); }));
     el.querySelectorAll('[data-end]').forEach(b => b.addEventListener('click', () => { q('[data-f="due_date"]').value = b.dataset.end; next(); }));
+    // Prazo em dias ⇄ data de término
+    const wizDays = q('[data-f="days"]'), wizEnd = q('[data-f="due_date"]');
+    if (wizDays) {
+      const base = () => item.start_date || todayISO();
+      wizDays.addEventListener('input', () => { const n = Number(wizDays.value); wizEnd.value = wizDays.value.trim() && Number.isInteger(n) && n >= 0 ? plusDays(base(), n) : ''; });
+      wizEnd.addEventListener('input', () => { wizDays.value = wizEnd.value ? dayDiff(base(), wizEnd.value) : ''; });
+    }
     el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => go(Number(b.dataset.goto))));
     el.querySelectorAll('[data-rm-photo]').forEach(b => b.addEventListener('click', () => { item.images.splice(Number(b.dataset.rmPhoto), 1); render(); }));
     el.querySelectorAll('input[data-new-photo]').forEach(inp => inp.addEventListener('change', async () => {
@@ -263,6 +360,7 @@ export function bindItemForm(el, { users, groups, specialties = () => [], specia
     q('[data-skip]')?.addEventListener('click', () => {
       const s = STEPS()[step];
       if (s.k === 'who') item.assignee_id = null;
+      if (s.k === 'team') item.team = [];
       if (s.k === 'spec') item.specialty = null;
       if (s.k === 'start') item.start_date = '';
       if (s.k === 'end') item.due_date = '';
@@ -308,6 +406,7 @@ export function renderDraft(items, users, globalName) {
       ${it.images?.length ? html`<img class="cl-draft-ph" src="${it.images[0].data}" alt="">` : html`<span class="cl-draft-ph is-empty">${icon('camera')}</span>`}
       <div class="cl-draft-txt"><b>${i + 1}. ${it.text}</b>
         <span>${it.specialty ? `${it.specialty} · ` : ''}${icon('user')} ${who(it.assignee_id)}${due ? html` · ${icon('calendar')} ${fmtD(due)}` : ''}${it.images?.length ? ` · ${it.images.length} foto(s)` : ''}</span>
+        ${it.team?.length ? html`<span>${icon('user')} Equipe: ${teamSummary(it.team)}${teamSeesCost(it.team) ? html` · <b>${brl(teamTotal(it.team))}</b>` : ''}</span>` : ''}
         ${it.description ? html`<em>${it.description}</em>` : ''}</div>
       <button type="button" class="icon-btn cl-draft-rm" aria-label="Remover item ${i + 1}">✕</button></div>`;
   })}`;
@@ -416,7 +515,7 @@ function itemCard(t, it, c) {
     if (!it.due_date) return html`<span class="fact-due is-none">${icon('calendar')}<span><small>Prazo</small><b>Sem prazo</b></span></span>`;
     const lv = dueLevel(it.due_date, it.resolved);
     const cls = lv.cls;
-    const rel = it.resolved ? (it.start_date ? `início ${fmtD(it.start_date)}` : '') : lv.rel;
+    const rel = [it.resolved ? (it.start_date ? `início ${fmtD(it.start_date)}` : '') : lv.rel, it.duration_days ? `prazo de ${daysLabel(it.duration_days)}` : ''].filter(Boolean).join(' · ');
     return html`<span class="fact-due ${cls}">${icon('calendar')}<span><small>Prazo</small><b>${fmtD(it.due_date)}</b>${rel ? html`<em>${rel}</em>` : ''}</span></span>`;
   })();
   const nPhotos = new Set([...it.refs, ...it.files, ...it.history.flatMap(h => h.files)].map(f => f.id)).size;
@@ -434,6 +533,7 @@ function itemCard(t, it, c) {
         <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
         ${!it.resolved && it.progress_pct !== null ? html`<span class="cli-pg" title="Avanço informado">${it.progress_pct}%</span>` : ''}
+        ${c.can_see_cost && it.team.length ? html`<span class="cli-cost ${it.result === 'na' ? 'is-out' : ''}" title="Valor do item">${brl(it.cost)}</span>` : ''}
         ${mainState}
       </span>
       <span class="cli-chev" aria-hidden="true">${icon('chevron')}</span>
@@ -449,6 +549,10 @@ function itemCard(t, it, c) {
       ${nPhotos ? html`<button type="button" class="cli-phcount" data-gallery aria-label="Ver as ${nPhotos} foto(s) do item">${icon('image')}${nPhotos} foto${nPhotos > 1 ? 's' : ''}</button>` : ''}
       ${it.result ? html`<span class="cli-when">${icon('check')}${it.answered_by_name || '—'} · ${shortDate(it.answered_at)}</span>` : ''}
     </div>
+    ${it.team.length ? html`<div class="cli-team"><small>Equipe necessária</small>
+      <ul>${it.team.map(e => html`<li><span><b>${e.name || `${e.role}${e.qty > 1 ? ` ×${e.qty}` : ''}`}</b>${e.name && e.role ? html` <em>${e.role}</em>` : ''}${e.name ? '' : html` <em>função</em>`}</span>
+        <span>${daysLabel(e.days)}${!e.name && e.qty > 1 ? ' cada' : ''}</span>${c.can_see_cost ? html`<span class="${e.rate ? '' : 'cli-team-warn'}">${e.rate ? brl(e.value) : 'sem diária'}</span>` : ''}</li>`)}</ul>
+      ${c.can_see_cost ? html`<div class="cli-team-sum"><span>Valor do item${it.result === 'na' ? ' (N/A: fora do total)' : ''}</span><b>${brl(it.cost)}</b></div>` : ''}</div>` : ''}
     ${it.description ? html`<div class="cli-desc"><b>Obs.:</b> ${it.description}</div>` : ''}`;
   const ansBtn = r => {
     const on = it.result === r;
@@ -598,6 +702,12 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           <span class="cnt na"><b>${s.na}</b>N/A</span><span class="cnt pend"><b>${s.pending}</b>Ainda não verificados</span>
         </div>
       </div>
+      ${c.can_see_cost && c.cost.items ? html`<div class="cl-cost">
+        <div class="cl-cost-main"><small>Valor total da mão de obra</small><b>${brl(c.cost.total)}</b><span>${c.cost.items} ${c.cost.items === 1 ? 'item com equipe' : 'itens com equipe'}</span></div>
+        <div><small>Executado (Conforme)</small><b>${brl(c.cost.done)}</b></div>
+        <div><small>A executar</small><b>${brl(c.cost.pending)}</b></div>
+        ${c.cost.missing || c.cost.na ? html`<p class="hint">${c.cost.missing ? html`<span class="cli-team-warn">${c.cost.missing} ${c.cost.missing === 1 ? 'item tem' : 'itens têm'} pessoa ou função sem diária cadastrada.</span> ` : ''}${c.cost.na ? `Itens N/A ficam fora do total (${brl(c.cost.na)}).` : ''}</p>` : ''}
+      </div>` : ''}
       ${c.locked && !t.cancelled_at ? html`<div class="notice">${icon('info')}<span>${t.status === 'concluida' ? 'Check-list concluído' : 'Check-list enviado para conferência'}: as respostas ficam bloqueadas.${t.status === 'aguardando_conferencia' ? ' Se precisar corrigir algo, quem confere pode devolver para ajustes.' : ''}</span></div>` : ''}
       <div class="cl-rules"><span class="cl-rule ${c.photo_rule === 'obrigatoria' ? 'is-req' : ''}">${icon('camera')} ${PHOTO_RULE[c.photo_rule]}</span>
         ${s.overdue ? html`<span class="cl-rule is-late">${icon('calendar')} ${s.overdue} ${s.overdue === 1 ? 'item atrasado' : 'itens atrasados'}</span>` : ''}</div>
@@ -883,7 +993,7 @@ export function bindChecklist(root, t, ctx, refresh) {
     if (!st.keep) st.keep = {};
     form = bindItemForm(panel.querySelector('[data-cl-form]'), {
       users: team, keep: st.keep, groups: () => groupOptions(t), specialties: () => specOptions(t), specialtiesOwn: () => !!t._specsOwn, globalName: () => t.assignee_name || '',
-      photoRequired: () => c.photo_rule === 'obrigatoria', quickList: () => c.photo_rule !== 'obrigatoria',
+      photoRequired: () => c.photo_rule === 'obrigatoria', quickList: () => c.photo_rule !== 'obrigatoria', projectId: () => t.project_id,
       onAdd: async (items, again) => {
         // Envia em lotes que cabem numa requisição (fotos de entrada)
         let updated;
@@ -902,6 +1012,8 @@ export function bindChecklist(root, t, ctx, refresh) {
     e.preventDefault();
     e.stopPropagation();
     const it = c.items.find(x => x.id === Number(b.dataset.editItem));
+    const teamOpt = await api(`/projects/${t.project_id}/checklist-team`).catch(() => null);
+    const teamState = it.team.map(e => ({ worker_id: e.worker_id, name: e.name, role: e.role, qty: e.qty, days: e.days, ...(e.rate !== undefined ? { rate: e.rate } : {}) }));
     const pending = sheet({
       title: `Item ${it.seq}`,
       submitLabel: 'Salvar',
@@ -915,7 +1027,10 @@ export function bindChecklist(root, t, ctx, refresh) {
         <div class="field"><label for="ei-who">Responsável</label><select id="ei-who" name="assignee_id">${personOptions(team(), it.assignee_id, t.assignee_name)}</select></div>
         <div class="form-row"><div class="field"><label for="ei-start">Data de início</label><input id="ei-start" name="start_date" type="date" value="${it.start_date || ''}"></div>
           <div class="field"><label for="ei-end">Data de término</label><input id="ei-end" name="due_date" type="date" value="${it.due_date || ''}"></div></div>
+        <div class="field"><label for="ei-days">Prazo em dias</label><input id="ei-days" type="text" inputmode="numeric" placeholder="Ex.: 5" value="${it.start_date && it.due_date ? Math.round((Date.parse(it.due_date) - Date.parse(it.start_date)) / 86400e3) : ''}">
+          <span class="hint">Conta a partir da data de início (sem início, a partir de hoje).</span></div>
         <div id="ei-impact"></div>
+        ${teamOpt ? html`<div class="field"><span class="label">Equipe necessária</span><div id="ei-team"></div></div>` : ''}
         <div class="field"><label for="ei-desc">Observação</label><textarea id="ei-desc" name="description" rows="3" maxlength="2000">${it.description || ''}</textarea></div>
         <div class="field"><span class="label">Fotos da não conformidade · cadastro (${it.refs.length} de ${PHOTO_LIMIT})</span>
           <div class="cli-photos">${it.refs.map(f => html`<figure class="cli-ph"><img src="/api/checklist-files/${f.id}" alt="Foto de entrada"><button type="button" class="rm" data-rm-ref="${f.id}" aria-label="Remover foto de entrada">✕</button></figure>`)}
@@ -924,9 +1039,31 @@ export function bindChecklist(root, t, ctx, refresh) {
           ${it.refs.length >= PHOTO_LIMIT ? html`<span class="hint">Limite de ${PHOTO_LIMIT} fotos atingido: remova uma para trocar.</span>` : ''}</div>
         ${!it.result ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-del-in-sheet>${icon('trash')}Excluir este item</button>`
           : html`<span class="hint">Item já respondido: pode ser editado, mas não excluído.</span>`}`,
-      onSubmit: d => api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, ...('specialty' in d ? { specialty: d.specialty || null } : {}), assignee_id: d.assignee_id || null,
-        description: d.description, start_date: d.start_date || null, due_date: d.due_date || null, ...(d.pull_successors ? { pull_successors: true } : {}) } }),
+      onSubmit: d => {
+        if (teamInvalid(teamState)) throw new Error('Informe os dias de cada pessoa da equipe (e a quantidade, quando for só a função).');
+        return api(`/tasks/${t.id}/items/${it.id}`, { method: 'PATCH', body: { text: d.text, group: d.group, ...('specialty' in d ? { specialty: d.specialty || null } : {}), assignee_id: d.assignee_id || null,
+          description: d.description, start_date: d.start_date || null, due_date: d.due_date || null, ...(d.pull_successors ? { pull_successors: true } : {}), ...(teamOpt ? { team: teamState } : {}) } });
+      },
     });
+    const eiTeam = document.querySelector('.sheet #ei-team');
+    if (eiTeam) bindTeamEditor(eiTeam, teamState, teamOpt);
+    // Prazo em dias ⇄ data de término
+    const eiDays = document.querySelector('.sheet #ei-days');
+    const eiStart = document.querySelector('.sheet #ei-start');
+    eiDays?.addEventListener('input', () => {
+      const n = Number(eiDays.value);
+      if (!eiDays.value.trim() || !Number.isInteger(n) || n < 0) return;
+      if (!eiStart.value) eiStart.value = todayISO();
+      const end = document.querySelector('.sheet #ei-end');
+      end.value = plusDays(eiStart.value, n);
+      end.dispatchEvent(new Event('change'));
+    });
+    const syncDays = () => {
+      const end = document.querySelector('.sheet #ei-end');
+      eiDays.value = end.value && eiStart.value ? Math.round((Date.parse(end.value) - Date.parse(eiStart.value)) / 86400e3) : '';
+    };
+    document.querySelector('.sheet #ei-end')?.addEventListener('input', syncDays);
+    eiStart?.addEventListener('input', syncDays);
     // Prazo do item: prévia das sucessoras empurradas (adiar) ou da opção de puxá-las (antecipar)
     const eiEnd = document.querySelector('.sheet #ei-end');
     eiEnd?.addEventListener('change', () => {

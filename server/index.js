@@ -199,7 +199,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     team_summary: team.length ? summarize(units.filter(t => ctx.team.has(t.assignee_id))) : null,
     team_size: team.length,
     my_checklist: Checklist.myPendingItems(ctx),
-    checklists: Checklist.checklistDashboard(tasks),
+    checklists: Checklist.checklistDashboard(tasks, { ctx }),
   });
 });
 
@@ -261,6 +261,9 @@ api.get('/api/process-files/:id', (req, res, { ctx, params }) => sendFile(req, r
 api.get('/api/field/workers', (req, res, { ctx }) => send(res, 200, Field.listWorkers(ctx)));
 api.post('/api/field/workers', (req, res, { ctx, body }) => send(res, 201, Field.createWorker(ctx, body, clientIp(req))));
 api.put('/api/field/workers/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.updateWorker(ctx, intOrNull(params.id), body, clientIp(req))));
+api.post('/api/field/roles', (req, res, { ctx, body }) => send(res, 201, Field.createRole(ctx, body, clientIp(req))));
+api.put('/api/field/roles/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.updateRole(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/field/roles/:id', (req, res, { ctx, params }) => send(res, 200, Field.deleteRole(ctx, intOrNull(params.id), clientIp(req))));
 api.get('/api/field/contracts', (req, res, { ctx, query }) => send(res, 200, Field.listContracts(ctx, intOrNull(query.get('obra')))));
 api.post('/api/field/contracts', (req, res, { ctx, body }) => send(res, 201, Field.createContract(ctx, body, clientIp(req))));
 api.put('/api/field/contracts/:id', (req, res, { ctx, params, body }) => send(res, 200, Field.updateContract(ctx, intOrNull(params.id), body, clientIp(req))));
@@ -487,6 +490,7 @@ api.post('/api/tasks/bulk-delete', (req, res, { ctx, body }) => send(res, 200, T
 api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200, Tasks.deleteTask(ctx, intOrNull(params.id), body, clientIp(req))));
 // ---------- Check-list (itens) ----------
 const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));
+api.get('/api/projects/:id/checklist-team', (req, res, { ctx, params }) => send(res, 200, Checklist.teamOptions(ctx, intOrNull(params.id))));
 api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }) => { Checklist.addReferencePhotos(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { Checklist.assignItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });

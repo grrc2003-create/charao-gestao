@@ -2,7 +2,7 @@ import { html, api, icon, PRIORITY, PROOF } from '../core.js';
 import { toast, readAttachments, pickAttachments, batchBySize } from '../ui.js';
 import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
-import { renderDraft, itemForm, bindItemForm, PHOTO_RULE, projectSpecialties } from './checklist-ui.js';
+import { renderDraft, itemForm, bindItemForm, PHOTO_RULE, projectSpecialties, teamTotal, brl } from './checklist-ui.js';
 import { renderImpactPreview } from './deps-ui.js';
 
 const PROOF_HELP = {
@@ -246,7 +246,8 @@ export async function view({ params, query, state, navigate }) {
         if (maxDue) f.due_date.value = maxDue;
         f.due_date.readOnly = !!maxDue;
         draft.innerHTML = renderDraft(items, team, globalName()).toString();
-        root.querySelector('#cl-count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'itens'}`;
+        const clTotal = items.reduce((n, i) => n + teamTotal(i.team), 0);
+        root.querySelector('#cl-count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'itens'}${clTotal ? ` · total ${brl(clTotal)}` : ''}`;
         root.querySelector('#cl-clear').hidden = !items.length;
       };
       const syncType = () => {
@@ -270,7 +271,7 @@ export async function view({ params, query, state, navigate }) {
       const syncTeam = () => wizard?.refresh();
       if (draft) {
         wizard = bindItemForm(itemEl, {
-          users: () => team, keep: {}, photoRequired: ruleRequired, quickList: () => !ruleRequired(),
+          users: () => team, keep: {}, photoRequired: ruleRequired, quickList: () => !ruleRequired(), projectId: () => Number(f.project_id.value) || null,
           groups: () => [...new Set([...projectGroups(), ...items.map(i => i.group).filter(Boolean)])], globalName,
           specialties: () => projectSpecialties(state.meta, f.project_id.value).list,
           specialtiesOwn: () => projectSpecialties(state.meta, f.project_id.value).own,

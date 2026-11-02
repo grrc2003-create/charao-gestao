@@ -659,6 +659,25 @@ async function workerSheet(w, mny, done, { pixTypes = ['CPF', 'CNPJ', 'Telefone'
   });
 }
 
+// Função com a diária genérica (usada na equipe dos itens do check-list)
+function roleSheet(r, done) {
+  const pending = sheet({ title: r ? 'Editar função' : 'Nova função', submitLabel: 'Salvar',
+    body: html`<div class="field"><label class="req" for="fr-name">Função</label><input id="fr-name" name="name" type="text" maxlength="80" required value="${r?.name || ''}" placeholder="Ex.: Pedreiro"></div>
+      <div class="field"><label for="fr-rate">Diária genérica (R$)</label><input id="fr-rate" name="daily_rate" type="text" inputmode="decimal" value="${r?.daily_rate ? n2(r.daily_rate) : ''}" placeholder="0,00">
+        <span class="hint">Itens em aberto acompanham o valor atual. Itens já marcados como Conforme mantêm o valor da época.</span></div>
+      ${r ? html`<button type="button" class="btn btn-danger-ghost btn-sm" data-role-del>${icon('trash')}Excluir função</button>` : ''}`,
+    onSubmit: d => api(r ? `/field/roles/${r.id}` : '/field/roles', { method: r ? 'PUT' : 'POST', body: { name: d.name, daily_rate: num(d.daily_rate) } }) });
+  document.querySelector('.sheet [data-role-del]')?.addEventListener('click', async () => {
+    try {
+      await api(`/field/roles/${r.id}`, { method: 'DELETE' });
+      document.querySelector('.sheet [data-close]')?.click();
+      toast('Função excluída.');
+      done();
+    } catch (ex) { toast(ex.message, 'err'); }
+  });
+  pending.then(saved => { if (saved) { toast('Função salva.'); done(); } });
+}
+
 export async function workers({ render, query, navigate }) {
   const d = await api('/field/workers');
   const sit = ['inativos', 'todos'].includes(query.get('sit')) ? query.get('sit') : 'ativos';
@@ -683,13 +702,20 @@ export async function workers({ render, query, navigate }) {
       ${fieldTabs('prof', 0)}
       ${d.projects.length > 1 ? html`<div class="fc-filter section"><label for="fw-obra">Obra</label><select id="fw-obra"><option value="">Todas as obras</option>${d.projects.map(p => html`<option value="${p.id}" ${obra === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></div>` : ''}
       <div class="fc-chips section">${[['ativos', 'Ativos', nAt], ['inativos', 'Inativos', base.length - nAt], ['todos', 'Todos', base.length]].map(([k, l, n]) => html`<a href="${sitHref(k)}" class="fc-chip ${sit === k ? 'on' : ''}">${l} <b>${n}</b></a>`)}</div>
-      ${group('diarista', 'Diaristas (mão de obra própria)')}${group('empreiteiro', 'Empreiteiros')}`,
+      ${group('diarista', 'Diaristas (mão de obra própria)')}${group('empreiteiro', 'Empreiteiros')}
+      ${mny ? html`<section class="card section"><div class="card-head"><h2>Funções e diária genérica</h2><button type="button" class="btn btn-ghost btn-sm fc-role-new" data-role-new>${icon('plus')}Nova função</button></div>
+        <p class="muted card-body fc-role-hint">Usada na equipe dos itens do check-list quando você indica só a função, sem escolher o profissional.</p>
+        ${d.roles.length ? html`<ul class="rows">${d.roles.map(r => html`<li class="fc-wrow"><div class="grow"><div class="row-title">${r.name}</div>
+          <div class="row-meta">${r.daily_rate ? html`<span>Diária ${money(r.daily_rate)}</span>` : html`<span class="fc-warn">sem valor da diária</span>`}</div></div>
+          <button type="button" class="btn btn-ghost btn-sm" data-role-ed="${r.id}">${icon('edit')}Editar</button></li>`)}</ul>` : html`<p class="muted card-body">Nenhuma função cadastrada.</p>`}</section>` : ''}`,
     mount(root) {
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
       const opts = { pixTypes: d.pix_types, leaders: d.leaders, projects: d.projects, obra };
       root.querySelector('[data-new]').addEventListener('click', () => workerSheet(null, mny, () => { toast('Profissional cadastrado.'); render(); }, opts));
       root.querySelectorAll('[data-ed]').forEach(b => b.addEventListener('click', () => workerSheet(d.workers.find(w => w.id === Number(b.dataset.ed)), mny, () => { toast('Cadastro salvo.'); render(); }, opts)));
       root.querySelector('#fw-obra')?.addEventListener('change', e => { const q = new URLSearchParams(); if (e.target.value) q.set('obra', e.target.value); if (sit !== 'ativos') q.set('sit', sit); const x = q.toString(); navigate(`/campo/profissionais${x ? `?${x}` : ''}`); });
+      root.querySelector('[data-role-new]')?.addEventListener('click', () => roleSheet(null, render));
+      root.querySelectorAll('[data-role-ed]').forEach(b => b.addEventListener('click', () => roleSheet(d.roles.find(r => r.id === Number(b.dataset.roleEd)), render)));
     },
   };
 }

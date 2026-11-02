@@ -74,7 +74,7 @@ export function getProject(ctx, id) {
     members: members(id),
     summary: execSummary(tasks),
     schedule: projectSchedule(id),
-    checklists: checklistDashboard(tasks),
+    checklists: checklistDashboard(tasks, { ctx }),
     tasks,
     people,
     can_edit: canManageProject(ctx, id),

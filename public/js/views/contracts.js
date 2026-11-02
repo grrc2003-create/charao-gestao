@@ -1,5 +1,5 @@
 // Contratos (liberação por usuário): faturamento global, contratos, planilha contratual e medições (boletins).
-import { html, raw, api, icon, fmtDate } from '../core.js';
+import { html, raw, api, icon, fmtDate, todayISO } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
 
@@ -784,6 +784,8 @@ export async function measurement({ params, query, state, render, navigate }) {
           ${m.can.correct && !correcting ? html`<a class="btn btn-ghost" href="#/medicoes/${m.id}?corrigir=1">${icon('edit')}Corrigir medição</a>` : ''}` })}
       ${correcting ? html`<div class="notice notice-warn m-correct-note">${icon('alert')}<span><b>Corrigindo o boletim ${m.code} (${M_STATUS[m.status].label}).</b> Situação, NF e recebimento ficam como estão; as medições seguintes recalculam o acumulado e o saldo.
         A correção exige motivo e fica registrada na auditoria. <a href="#/medicoes/${m.id}">Cancelar</a></span></div>` : ''}
+      ${m.mc_task ? html`<div class="notice section ct-mc-note">${icon(m.mc_task.status === 'concluida' ? 'check' : 'info')}<span>Mais Controle: tarefa <a href="#/tarefas/${m.mc_task.id}"><b>${m.mc_task.code}</b></a> no Financeiro para lançar este recebimento —
+        ${m.mc_task.cancelled_at ? 'cancelada' : m.mc_task.status === 'concluida' ? 'concluída' : `prazo ${fmtDate(m.mc_task.due_date)}${m.mc_task.assignee_name ? ` · ${m.mc_task.assignee_name}` : ' · sem responsável'}`}.</span></div>` : ''}
       <div class="kpis kpis-4 ct-kpis">
         ${kpi({ label: 'Medição do mês', value: money(T.measured), color: '#2F6FB3' })}
         ${kpi({ label: 'Descontos / acréscimos', value: money(T.adj), color: '#B7791F' })}
@@ -891,15 +893,23 @@ export async function measurement({ params, query, state, render, navigate }) {
           const r = await sheet({ title: 'Registrar faturamento', submitLabel: 'Registrar',
             body: html`<label class="check-row m-nonf"><input type="checkbox" name="no_nf" value="1" id="nonf"> Sem nota fiscal <small>(cobrança sem NF)</small></label>
               <div class="form-row"><div class="field" id="nf-field"><label class="req" for="nf">Nº da nota fiscal</label><input id="nf" name="nf_number" maxlength="40"></div>
-              <div class="field"><label for="nfd" id="nfd-label">Data da NF</label><input type="date" id="nfd" name="nf_date" value="${new Date().toISOString().slice(0, 10)}"></div></div>
+              <div class="field"><label for="nfd" id="nfd-label">Data da NF</label><input type="date" id="nfd" name="nf_date" value="${todayISO()}"></div></div>
               <span class="hint">Valor faturado: <b>${money(T.to_bill)}</b>.</span>` });
           if (r) act('bill', { ...r, no_nf: r.no_nf === '1' });
         } else if (a === 'receive') {
+          // A tarefa nunca é criada sem resposta: a pergunta Sim/Não vem sem opção marcada
           const r = await sheet({ title: 'Registrar recebimento', submitLabel: 'Registrar',
-            body: html`<div class="form-row"><div class="field"><label for="pd">Data do recebimento</label><input type="date" id="pd" name="paid_date" value="${new Date().toISOString().slice(0, 10)}"></div>
-              <div class="field"><label for="pa">Valor recebido (R$)</label><input id="pa" name="paid_amount" inputmode="decimal" value="${String(T.to_bill).replace('.', ',')}"></div></div>
-              <span class="hint">Em branco = valor do boletim (${money(T.to_bill)}).${m.status === 'emitida' ? ' Boletim sem faturamento registrado: o recebimento é lançado sem nota fiscal e a data do recebimento vale como data de faturamento.' : ''}</span>` });
-          if (r) act('receive', { ...r, paid_amount: r.paid_amount ? parseNum(r.paid_amount) : '' });
+            onSubmit: d => { if (!d.mc_task) throw new Error('Responda se deve criar a tarefa no Financeiro para atualizar o Mais Controle.'); return d; },
+            body: html`<div class="form-row"><div class="field"><label for="pd">Data do recebimento</label><input type="date" id="pd" name="paid_date" value="${todayISO()}"></div>
+              <div class="field"><label for="pa">Valor recebido (R$)</label><input type="text" id="pa" name="paid_amount" inputmode="decimal" value="${String(T.to_bill).replace('.', ',')}"></div></div>
+              <span class="hint">Em branco = valor do boletim (${money(T.to_bill)}).${m.status === 'emitida' ? ' Boletim sem faturamento registrado: o recebimento é lançado sem nota fiscal e a data do recebimento vale como data de faturamento.' : ''}</span>
+              <fieldset class="fieldset form ct-mc"><legend>Criar tarefa no Financeiro para atualizar o Mais Controle?</legend>
+                <div class="ct-mc-ask"><label class="pr-se-check"><input type="radio" name="mc_task" value="1"> Sim, criar a tarefa</label>
+                  <label class="pr-se-check"><input type="radio" name="mc_task" value="0"> Não criar</label></div>
+                <div class="ct-mc-fields"><div class="form-row"><div class="field"><label for="mc-a">Responsável</label><select id="mc-a" name="mc_assignee_id"><option value="">Equipe do Financeiro (sem responsável)</option>${(m.finance_assignees || []).map(u => html`<option value="${u.id}">${u.name}${u.job_title ? ` · ${u.job_title}` : ''}</option>`)}</select></div>
+                  <div class="field"><label for="mc-d">Prazo</label><input type="date" id="mc-d" name="mc_due" value="${(() => { const d = new Date(`${todayISO()}T12:00:00`); d.setDate(d.getDate() + 2); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })()}"></div></div>
+                <span class="hint">A tarefa vai para a área do <b>Financeiro</b> (classificação "Mais Controle") com o contrato, o cliente, o boletim, a NF e o valor recebido. Se o recebimento for desfeito, a tarefa aberta é cancelada.</span></div></fieldset>` });
+          if (r) act('receive', { ...r, paid_amount: r.paid_amount ? parseNum(r.paid_amount) : '', mc_task: r.mc_task === '1' });
         } else if (a === 'delete') {
           if (await confirmSheet('Excluir rascunho', `Excluir a medição ${m.code}? A numeração será reaproveitada.`, 'Excluir', true)) act('delete');
         } else if (a === 'reopen') {

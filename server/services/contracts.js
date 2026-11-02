@@ -8,6 +8,9 @@ import { today } from './metrics.js';
 import { defaultStageId } from './stages.js';
 import { validContractTypeId } from './settings.js';
 import { COMPANIES } from '../lib/companies.js';
+import { createFinanceTask, cancelOpenTask, financeAssigneeList } from './finance.js';
+
+const addDaysIso = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
 export const COMPANY_KEYS = Object.keys(COMPANIES);
 const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -306,6 +309,9 @@ export function getMeasurement(ctx, id) {
     ...m, ref_label: monthLabel(m.ref_month),
     contract: c, rows, adjustments, totals,
     issued_by_name: m.issued_by ? one('SELECT name FROM users WHERE id = ?', m.issued_by)?.name : null,
+    // Tarefa do Financeiro para atualizar o Mais Controle com o recebimento (e quem pode ser o responsável)
+    mc_task: m.mc_task_id ? one(`SELECT t.id, t.code, t.status, t.due_date, t.cancelled_at, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.id = ?`, m.mc_task_id) || null : null,
+    finance_assignees: ['emitida', 'faturada'].includes(m.status) ? financeAssigneeList() : [],
     can: {
       edit: m.status === 'rascunho',
       issue: m.status === 'rascunho',
@@ -442,12 +448,37 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
         const amount = body.paid_amount === '' || body.paid_amount === undefined || body.paid_amount === null ? view.totals.to_bill : r2(num(body.paid_amount, 'Valor recebido', { min: 0 }));
         // Recebido direto do emitido (sem NF): a data do recebimento vale como data de faturamento
         run(`UPDATE measurements SET status = 'recebida', paid_date = ?, paid_amount = ?, nf_date = COALESCE(nf_date, ?), updated_at = datetime('now') WHERE id = ?`, pd, amount, pd, id);
-        log('Recebimento registrado', { data: pd, valor: amount });
+        // Tarefa no Financeiro para lançar este recebimento no Mais Controle (pode ser desmarcada na janela)
+        let taskCode = null;
+        run('UPDATE measurements SET mc_task_id = NULL WHERE id = ?', id);
+        if ([true, 'true', '1', 1].includes(body.mc_task)) { // só com o Sim explícito de quem registra
+          const c = view.contract;
+          const due = date(body.mc_due, 'Prazo da tarefa do Mais Controle') || addDaysIso(today(), 2);
+          const brl = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+          const dmy = d => (d ? d.split('-').reverse().join('/') : '—');
+          const taskId = createFinanceTask({
+            title: `Atualizar no Mais Controle: recebimento ${m.code} · ${c.client} · ${brl(amount)}`,
+            description: [`Lançar no Mais Controle o recebimento desta medição de Contratos.`,
+              `Contrato: ${c.code}${c.number ? ` (nº ${c.number})` : ''} · ${c.title}`, `Cliente: ${c.client}${c.client_doc ? ` · ${c.client_doc}` : ''}`,
+              c.project_code ? `Obra: ${c.project_code} · ${c.project_name}` : '', `Empresa: ${c.company_name}`,
+              `Boletim: ${m.code} · referência ${monthLabel(m.ref_month)}`, m.nf_number ? `Nota fiscal: ${m.nf_number} de ${dmy(m.nf_date)}` : 'Sem nota fiscal',
+              `Recebido em ${dmy(pd)}: ${brl(amount)}${Math.abs(amount - view.totals.to_bill) > 0.005 ? ` (boletim ${brl(view.totals.to_bill)})` : ''}`,
+              `Abrir a medição: #/medicoes/${m.id}`].filter(Boolean).join('\n'),
+            due_date: due, assignee_id: intOrNull(body.mc_assignee_id), stage: 'Mais Controle', userId: ctx.user.id,
+          });
+          run('UPDATE measurements SET mc_task_id = ? WHERE id = ?', taskId, id);
+          taskCode = one('SELECT code FROM tasks WHERE id = ?', taskId)?.code;
+        }
+        log('Recebimento registrado', { data: pd, valor: amount, ...(taskCode ? { tarefa_mais_controle: taskCode } : {}) });
         break;
       }
       case 'undo': {
         if (!can.undo) throw badRequest('Nada a desfazer.');
-        if (m.status === 'recebida') run(`UPDATE measurements SET status = 'faturada', paid_date = NULL, paid_amount = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+        if (m.status === 'recebida') {
+          run(`UPDATE measurements SET status = 'faturada', paid_date = NULL, paid_amount = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+          // A tarefa do Mais Controle ainda aberta deixa de valer (concluída fica no histórico)
+          cancelOpenTask(m.mc_task_id, ctx.user.id, `Recebimento da medição ${m.code} desfeito em Contratos`);
+        }
         else run(`UPDATE measurements SET status = 'emitida', nf_number = NULL, nf_date = NULL, updated_at = datetime('now') WHERE id = ?`, id);
         log(m.status === 'recebida' ? 'Recebimento desfeito' : 'Faturamento desfeito');
         break;

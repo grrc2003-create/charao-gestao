@@ -3419,3 +3419,9 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .fa-kpis2 > div small { font-size: 11.5px; color: var(--muted); }/* Resumo e análise: no celular os cartões da grade não passam da tela (a tabela rola dentro do cartão) */
 .fa-grid > * { min-width: 0; }
 @media (max-width: 900px) { .fa-grid { grid-template-columns: minmax(0, 1fr); } }
+/* Contratos: tarefa do Mais Controle no recebimento */
+.ct-mc { margin-top: 12px; }
+.ct-mc legend { color: var(--navy); font-weight: 600; }
+.ct-mc-ask { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.ct-mc-fields { display: none; margin-top: 10px; }
+.ct-mc:has(input[name=mc_task][value="1"]:checked) .ct-mc-fields { display: block; }

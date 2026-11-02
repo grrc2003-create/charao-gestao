@@ -665,7 +665,29 @@ export function syncFromTask(taskId, action, userId) {
 // Quem pode ser responsável: usuários ativos com a liberação do Financeiro
 export function financeAssignees(ctx) {
   requireFinance(ctx.user);
-  return all('SELECT id, name, job_title FROM users WHERE active = 1 AND can_finance = 1 ORDER BY name');
+  return financeAssigneeList();
+}
+export const financeAssigneeList = () => all('SELECT id, name, job_title FROM users WHERE active = 1 AND can_finance = 1 ORDER BY name');
+
+// Tarefa avulsa na área do Financeiro (ex.: atualizar no Mais Controle o recebimento de uma medição de Contratos).
+// Responsável só entre quem tem o Financeiro liberado (sem responsável fica para a equipe do Financeiro distribuir).
+export function createFinanceTask({ title, description, due_date, assignee_id, stage, userId }) {
+  const area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId());
+  const assignee = assignee_id && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', assignee_id) ? assignee_id : null;
+  if (assignee_id && !assignee) throw badRequest('O responsável precisa ter o Financeiro liberado.');
+  const t = today();
+  return insertTask({
+    project: area,
+    data: { task_type: 'tarefa', title: String(title).slice(0, 200), description, field_summary: null, notes: null, due_date, start_date: t <= due_date ? t : due_date, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
+    stageInput: stageFor(area.id, stage),
+    creatorId: userId,
+  });
+}
+// Cancela uma tarefa ainda aberta (não concluída), com o motivo
+export function cancelOpenTask(taskId, userId, reason) {
+  if (!taskId) return false;
+  const now = new Date().toISOString();
+  return run(`UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ? AND cancelled_at IS NULL AND status <> 'concluida'`, now, userId, reason, now, taskId).changes > 0;
 }
 
 // ---------- Análise comparativa (mensal, trimestral, semestral, anual) ----------

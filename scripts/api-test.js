@@ -1216,6 +1216,16 @@ async function main() {
   ok(kMv.status === 'faturada' && kMv.nf_number === '123', 'medição faturada com NF');
   kMv = (await kAnaC('POST', `/measurements/${kM1}/actions/receive`, { paid_date: '2026-02-20' })).data;
   ok(kMv.status === 'recebida' && kMv.paid_amount === 9841.05, 'recebimento registrado (valor do boletim)');
+  ok(!kMv.mc_task, 'recebimento sem resposta não cria a tarefa do Mais Controle (o sistema sempre pergunta)');
+  await kAnaC('POST', '/measurements/' + kM1 + '/actions/undo');
+  kMv = (await kAnaC('POST', '/measurements/' + kM1 + '/actions/receive', { paid_date: '2026-02-20', mc_task: true })).data;
+  // Com o Sim, o recebimento cria no Financeiro a tarefa de atualizar o Mais Controle (desfazer cancela; dá para não criar)
+  // (a tarefa fica na área restrita do Financeiro: quem não tem o Financeiro não a abre, mas vê o código e a situação na medição)
+  ok(kMv.mc_task?.code && !kMv.mc_task.cancelled_at && kMv.mc_task.status !== 'concluida' && (await kAnaC('GET', `/tasks/${kMv.mc_task.id}`)).status === 404, 'recebimento cria a tarefa do Mais Controle na área restrita do Financeiro');
+  const kUndo = (await kAnaC('POST', `/measurements/${kM1}/actions/undo`)).data;
+  ok(kUndo.status === 'faturada' && kUndo.mc_task?.cancelled_at, 'desfazer o recebimento cancela a tarefa do Mais Controle aberta');
+  kMv = (await kAnaC('POST', `/measurements/${kM1}/actions/receive`, { paid_date: '2026-02-20', mc_task: false })).data;
+  ok(kMv.status === 'recebida' && !kMv.mc_task, 'recebimento sem criar a tarefa do Mais Controle (resposta Não)');
   const kDsh = (await kAnaC('GET', '/contracts/dashboard')).data;
   ok(kDsh.totals.value === 127000 && kDsh.totals.measured === 9841.05 && kDsh.totals.received === 9841.05 && kDsh.totals.drafts === 1 && kDsh.series.length === 12, 'faturamento global: contratado, medido, recebido e série mensal');
   const kAnn = kDsh.annual.find(y => y.year === '2026');

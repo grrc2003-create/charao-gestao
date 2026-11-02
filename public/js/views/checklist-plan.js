@@ -26,7 +26,8 @@ export async function view({ params }) {
   return {
     title: `Programar profissional · ${d.task.code}`,
     html: html`${pageHead({ back: { href: `#/tarefas/${taskId}`, label: d.task.code }, eyebrow: `Check-list ${d.task.code} · ${d.task.title}`, title: 'Programar profissional',
-        sub: 'Escolha o profissional e o dia em que ele inicia. Depois vá vinculando as pendências da função dele. Para limitar o tempo, informe também até quando.' })}
+        sub: 'Escolha o profissional e o dia em que ele inicia. Depois vá vinculando as pendências da função dele. Para limitar o tempo, informe também até quando.',
+        actions: html`<a class="btn btn-ghost" href="#/imprimir/checklist/${taskId}?sep=profissional&fmt=lista">${icon('print')}Relatório de todos os profissionais</a>` })}
       <div class="pl-filters section">
         <label class="pl-grow">Profissional<select id="pl-w"><option value="">Escolha o profissional…</option>${d.workers.map(w => html`<option value="${w.id}">${w.name}${w.role ? ` · ${w.role}` : ' · sem função'}</option>`)}</select></label>
         <label>Profissional inicia em<input type="date" id="pl-s"></label>
@@ -90,6 +91,7 @@ export async function view({ params }) {
                   ${i.outside ? html`<em>Fora das datas escolhidas</em>` : ''}</div>
                 ${edit && !i.resolved ? html`<button type="button" class="icon-btn" data-unlink="${i.id}" aria-label="Tirar ${i.text} da sequência">✕</button>` : ''}
               </li>`)}</ol>` : html`<p class="muted card-body">Nenhum item vinculado ainda.</p>`}
+              ${d.sequence.length ? html`<div class="pl-report"><a class="btn btn-ghost btn-sm" href="#/imprimir/checklist/${taskId}?sep=profissional&prof=${w.id}&fmt=lista">${icon('print')}Emitir relatório de ${w.name}</a></div>` : ''}
               ${d.others.length ? html`<details class="pl-others"><summary>Outros check-lists desta obra (${d.others.length})</summary>
                 <ul>${d.others.map(o => html`<li>${o.link ? html`<a href="${o.link}"><b class="mono">${o.code}</b> ${o.title}</a>` : html`<b class="mono">${o.code}</b> ${o.title}`} · ${daysLabel(o.days)} · ${span(o)}</li>`)}</ul>
                 <p class="hint">Só os itens com data dentro do período consomem o tempo.</p></details>` : ''}

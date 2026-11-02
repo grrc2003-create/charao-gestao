@@ -3563,3 +3563,4 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .pl-edit svg { width: 13px; height: 13px; }
 .pl-item.is-blocked .pl-main { opacity: 1; }
 .pl-item.is-blocked .pl-main > b, .pl-item.is-blocked .pl-main > small { opacity: .62; }
+.pl-report { padding: 2px 14px 10px; }

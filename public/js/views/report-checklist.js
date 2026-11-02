@@ -2,6 +2,8 @@
 // (agrupada por grupo, responsável e data em até 3 níveis), com histórico e fotos quando houver, assinaturas e,
 // ao final, o cronograma semanal (Gantt) dos itens.
 // "Separar por" gera uma parte por responsável, grupo etc., cada uma em folha nova, com resumo e assinaturas próprios.
+// Por profissional: uma parte por profissional da equipe dos itens, na ordem da sequência programada (o item com mais de
+// um profissional aparece na parte de cada um); valores não saem no relatório.
 // Formato: Completo (fotos, histórico e Gantt) ou Lista compacta (tabela com campo para anotar, para levar à obra).
 import { html, api, STATUS, fmtDate, fmtDateTime, fmtPct } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
@@ -24,6 +26,29 @@ const DIMS = {
   mes: { label: 'Data (mês)', key: i => periodKey(i.due_date, 'mes'), name: k => periodInfo(k, 'mes').label, sort: (a, b) => a.localeCompare(b) },
 };
 const DATE_DIMS = ['dia', 'semana', 'mes'];
+const NO_WORKER = 'sem';
+
+// Partes por profissional: itens na ordem da sequência; por último, os que ainda têm vaga de função ou não têm equipe
+function workerParts(items, onlyWorker) {
+  const by = new Map();
+  const add = (key, name, role, item, days, pos) => {
+    if (!by.has(key)) by.set(key, { key, name, role, rows: [] });
+    by.get(key).rows.push({ item, days, pos });
+  };
+  for (const i of items) {
+    for (const e of i.team.filter(x => x.worker_id)) add(String(e.worker_id), e.name, e.role, i, e.days, e.plan_seq ?? 1e6);
+    const open = i.team.filter(x => !x.worker_id);
+    if (open.length || !i.team.length) add(NO_WORKER, 'Sem profissional definido', null, i, open.length ? Math.max(...open.map(x => x.days)) : null, i.seq);
+  }
+  const list = [...by.values()].sort((a, b) => (a.key === NO_WORKER) - (b.key === NO_WORKER) || a.name.localeCompare(b.name, 'pt-BR'));
+  const options = list.map(p => ({ key: p.key, name: p.name }));
+  const shown = onlyWorker ? list.filter(p => p.key === onlyWorker) : list;
+  return { options, parts: shown.map((p, index) => {
+    const rows = p.rows.sort((a, b) => a.pos - b.pos || (a.item.start_date || a.item.due_date || '9999').localeCompare(b.item.start_date || b.item.due_date || '9999') || a.item.seq - b.item.seq);
+    return { items: rows.map(r => r.item), label: `Profissional: ${p.name}${p.role ? ` · ${p.role}` : ''}`, name: p.key === NO_WORKER ? '' : p.name, index, total: shown.length,
+      order: new Map(rows.map((r, n) => [r.item.id, n + 1])), days: new Map(rows.map(r => [r.item.id, r.days])) };
+  }) };
+}
 
 // Níveis escolhidos (?g1=&g2=&g3=): sem repetir dimensão e com no máximo uma de data. Padrão: por grupo.
 function readLevels(query) {
@@ -76,11 +101,14 @@ export async function view({ params, query, state }) {
   };
   const withPhotos = query.get('fotos') !== '0';
   const withGantt = query.get('gantt') !== '0';
-  const sep = DIMS[query.get('sep')] ? query.get('sep') : '';
+  const byWorker = query.get('sep') === 'profissional';
+  const sep = byWorker || DIMS[query.get('sep')] ? query.get('sep') : '';
   const compact = query.get('fmt') === 'lista';
   // O que já separa as partes não precisa agrupar de novo dentro de cada uma
-  const levels = readLevels(query).filter(d => d !== sep);
-  const parts = sep && items.length
+  // Por profissional, o padrão é a ordem da sequência, sem agrupar
+  const levels = (byWorker && !query.has('g1') ? [] : readLevels(query)).filter(d => d !== sep);
+  const workers = byWorker ? workerParts(items, query.get('prof') || '') : null;
+  const parts = workers?.parts.length ? workers.parts : sep && !byWorker && items.length
     ? groupBy(items, sep).map((g, i, all) => ({ items: g.items, label: `${DIMS[sep].label}: ${g.name}`, name: g.name, index: i, total: all.length }))
     : [{ items, label: '', name: '', index: 0, total: 1 }];
   const partHead = part => (part.label ? html`<div class="r-part-head"><b>${part.label}</b>${part.total > 1 ? html`<span>Parte ${part.index + 1} de ${part.total}</span>` : ''}</div>` : '');
@@ -125,6 +153,7 @@ export async function view({ params, query, state }) {
     return html`<article class="r-item avoid">
       <header><span class="r-item-n">${i.seq}</span><b>${i.text}</b><span class="r-st" style="--c:${st.c}">${st.t}</span></header>
       <div class="r-facts">
+        ${curPart?.order ? html`${curPart.name ? html`<span class="r-fact"><small>Profissional</small><b>${curPart.name}</b></span>` : ""}<span class="r-fact"><small>Ordem na sequência</small><b>${curPart.order.get(i.id)}º</b></span>${curPart.days?.get(i.id) ? html`<span class="r-fact"><small>Dias de trabalho</small><b>${String(curPart.days.get(i.id)).replace('.', ',')}</b></span>` : ''}${i.start_date ? html`<span class="r-fact"><small>Início</small><b>${fmtDate(i.start_date)}</b></span>` : ''}` : ''}
         <span class="r-fact"><small>Responsável${i.assignee_id ? '' : ' (global)'}</small><b>${i.responsible_name}</b></span>
         ${dueFact(i)}
       </div>
@@ -139,9 +168,10 @@ export async function view({ params, query, state }) {
       ${photosOf(i)}
     </article>`;
   };
-  // Lista única, com cabeçalho de cada nível de agrupamento
+  // Lista única, com cabeçalho de cada nível de agrupamento (por profissional, na ordem da sequência)
+  let curPart = null;
   const blocks = (items, depth = 0) => {
-    const list = [...items].sort((a, b) => a.seq - b.seq);
+    const list = [...items].sort((a, b) => (curPart?.order?.get(a.id) ?? a.seq) - (curPart?.order?.get(b.id) ?? b.seq));
     if (depth >= levels.length) return html`${list.map(itemBlock)}`;
     return html`${groupBy(list, levels[depth]).map(g => {
       const open = g.items.filter(i => i.open_nc).length;
@@ -154,19 +184,23 @@ export async function view({ params, query, state }) {
   // Lista compacta: uma tabela por parte, sem fotos, com campo para anotar à mão
   const listDoc = part => {
     const st = statsOf(part.items);
-    const showResp = sep !== 'responsavel';
-    const span = showResp ? 6 : 5;
+    const showResp = sep !== 'responsavel' && !byWorker;
+    const span = byWorker ? 7 : showResp ? 6 : 5;
+    const when = part.items.map(i => i.due_date).filter(Boolean).sort().at(-1);
+    const totalDays = byWorker ? part.items.reduce((n, i) => n + (part.days?.get(i.id) || 0), 0) : 0;
     const row = i => {
       const sit = situation(i);
       const tags = [!levels.includes('grupo') && sep !== 'grupo' ? i.group : '', !levels.includes('especialidade') && sep !== 'especialidade' ? i.specialty : ''].filter(Boolean).join(' · ');
-      return html`<tr><td class="num">${i.seq}</td>
-        <td><b>${i.text}</b>${tags ? html`<div class="small muted">${tags}</div>` : ''}${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}</td>
+      return html`<tr><td class="num">${part.order?.get(i.id) ?? i.seq}</td>
+        <td><b>${i.text}</b>${byWorker ? html` <span class="small muted" style="white-space:nowrap">(item ${i.seq})</span>` : ''}${tags ? html`<div class="small muted">${tags}</div>` : ''}${i.description ? html`<div class="small">Obs.: ${i.description}</div>` : ''}</td>
         ${showResp ? html`<td>${i.responsible_name}</td>` : ''}
+        ${byWorker ? html`<td class="r-l-due">${i.start_date ? fmtDate(i.start_date) : '—'}</td>` : ''}
         <td class="r-l-due">${i.due_date ? fmtDate(i.due_date) : '—'}</td>
+        ${byWorker ? html`<td class="num">${part.days?.get(i.id) === null ? '—' : String(part.days?.get(i.id)).replace('.', ',')}</td>` : ''}
         <td class="r-l-sit" style="color:${sit.c}"><b>${sit.t.replace(' em aberto', '')}</b></td><td class="r-l-note"></td></tr>`;
     };
     const rows = (list, depth = 0) => {
-      const sorted = [...list].sort((a, b) => a.seq - b.seq);
+      const sorted = [...list].sort((a, b) => (part.order?.get(a.id) ?? a.seq) - (part.order?.get(b.id) ?? b.seq));
       if (depth >= levels.length) return html`${sorted.map(row)}`;
       return html`${groupBy(sorted, levels[depth]).map(g => html`<tr class="r-grouprow r-lvl-${depth}"><td colspan="${span}"><b>${DIMS[levels[depth]].label}: ${g.name}</b> <span class="small muted">· ${g.items.filter(i => i.resolved).length}/${g.items.length} concluído(s)</span></td></tr>${rows(g.items, depth + 1)}`)}`;
     };
@@ -179,17 +213,18 @@ export async function view({ params, query, state }) {
       <h1 class="r-list-title">${t.title}</h1>
       <div class="muted small">${t.project_code} · ${t.project_name} · Emissão ${fmtDateTime(new Date().toISOString())}${filterText ? ` · ${filterText}` : ''}</div>
       ${partHead(part)}
-      <p class="r-list-sum"><b>${st.total}</b> ${st.total === 1 ? 'item' : 'itens'} · <b>${st.done}</b> concluído(s) · <b>${st.nao_conforme}</b> não conforme(s) em aberto · <b>${st.pending}</b> sem resposta</p>
-      <table class="r-table r-list-table"><thead><tr><th class="num">Nº</th><th>Item</th>${showResp ? html`<th>Responsável</th>` : ''}<th>Prazo</th><th>Situação</th><th>Anotações</th></tr></thead>
+      <p class="r-list-sum"><b>${st.total}</b> ${st.total === 1 ? 'item' : 'itens'} · <b>${st.done}</b> concluído(s) · <b>${st.nao_conforme}</b> não conforme(s) em aberto · <b>${st.pending}</b> sem resposta${totalDays ? html` · <b>${String(totalDays).replace('.', ',')}</b> dia(s) de trabalho` : ''}${byWorker && when ? html` · até <b>${fmtDate(when)}</b>` : ''}</p>
+      <table class="r-table r-list-table ${byWorker ? 'is-worker' : ''}"><thead>${byWorker ? html`<tr class="r-list-who"><th colspan="${span}">${part.label} · continua nas folhas seguintes, se houver</th></tr>` : ''}<tr><th class="num">${byWorker ? 'Ordem' : 'Nº'}</th><th>Item</th>${showResp ? html`<th>Responsável</th>` : ''}${byWorker ? html`<th>Início</th>` : ''}<th>Prazo</th>${byWorker ? html`<th class="num">Dias</th>` : ''}<th>Situação</th><th>Anotações</th></tr></thead>
         <tbody>${rows(part.items)}</tbody></table>
       <div class="r-sign r-list-sign" style="grid-template-columns:repeat(2,1fr)">
-        <div><span></span>${sep === 'responsavel' ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">Responsável</div></div>
+        <div><span></span>${(sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${byWorker && part.name ? 'Profissional' : 'Responsável'}</div></div>
         <div><span></span> <div class="muted">Data</div></div>
       </div>
       <footer class="r-footer"><span>Charão Engenharia & Construção · Check-list ${t.code}</span><span>Documento gerado pelo sistema Charão Gestão de Obras</span></footer>
     </article>`;
   };
   const fullDoc = part => {
+    curPart = part;
     const items = part.items;
     const s = statsOf(items);
     const judged = s.conforme + s.nao_conforme;
@@ -283,7 +318,7 @@ export async function view({ params, query, state }) {
 
         <section class="r-section avoid">
           <div class="r-sign" style="grid-template-columns:repeat(3,1fr)">
-            <div><span></span>${sep === 'responsavel' ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${sep === 'responsavel' ? 'Responsável' : 'Responsável pelo check-list'}</div></div>
+            <div><span></span>${(sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${byWorker && part.name ? 'Profissional' : sep === 'responsavel' ? 'Responsável' : 'Responsável pelo check-list'}</div></div>
             <div><span></span>${t.reviewer_name || ' '}<div class="muted">Conferente</div></div>
             <div><span></span> <div class="muted">Cliente / Recebedor</div></div>
           </div>
@@ -306,7 +341,8 @@ export async function view({ params, query, state }) {
     title: `Check-list ${t.code}`,
     html: html`${printToolbar({
       back: `#/tarefas/${t.id}`, title: `Check-list — ${t.code} · ${t.title}`,
-      extra: html`<label class="pt-opt">Separar por <select data-sep><option value="">Não separar</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${sep === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>
+      extra: html`<label class="pt-opt">Separar por <select data-sep><option value="">Não separar</option><option value="profissional" ${byWorker ? 'selected' : ''}>Profissional</option>${Object.entries(DIMS).map(([k, d]) => html`<option value="${k}" ${sep === k ? 'selected' : ''}>${d.label}</option>`)}</select></label>
+        ${byWorker && workers.options.length ? html`<label class="pt-opt">Profissional <select data-flt="prof"><option value="">Todos</option>${workers.options.map(o => html`<option value="${o.key}" ${query.get('prof') === o.key ? 'selected' : ''}>${o.name}</option>`)}</select></label>` : ''}
         <label class="pt-opt">Formato <select data-fmt><option value="">Completo</option><option value="lista" ${compact ? 'selected' : ''}>Lista compacta</option></select></label>
         ${sep ? html`<span class="pt-opt"><span><b>${parts.length} ${parts.length === 1 ? 'parte' : 'partes'}</b>, cada uma em folha nova</span></span>` : ''}
         ${[0, 1, 2].map(n => html`<label class="pt-opt">${n === 0 ? 'Agrupar por' : n === 1 ? 'depois' : 'e'}
@@ -322,7 +358,7 @@ export async function view({ params, query, state }) {
       setPageFooter(`Charão · Check-list ${t.code} · ${t.project_code}`);
       bindPrintToolbar(root);
       const q = () => Object.fromEntries(new URLSearchParams(location.hash.split('?')[1] || ''));
-      root.querySelector('[data-sep]').addEventListener('change', e => { ctx.setQuery({ ...q(), sep: e.target.value }); ctx.render(); });
+      root.querySelector('[data-sep]').addEventListener('change', e => { ctx.setQuery({ ...q(), sep: e.target.value, prof: '' }); ctx.render(); });
       root.querySelector('[data-fmt]').addEventListener('change', e => { ctx.setQuery({ ...q(), fmt: e.target.value }); ctx.render(); });
       root.querySelector('#fotos')?.addEventListener('change', e => { ctx.setQuery({ ...q(), fotos: e.target.checked ? '' : '0' }); ctx.render(); });
       root.querySelectorAll('[data-flt]').forEach(sel => sel.addEventListener('change', () => { ctx.setQuery({ ...q(), [sel.dataset.flt]: sel.value }); ctx.render(); }));

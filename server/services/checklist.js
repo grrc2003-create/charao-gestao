@@ -278,12 +278,14 @@ export function checklistView(ctx, t) {
     if (!teams.has(e.item_id)) teams.set(e.item_id, []);
     teams.get(e.item_id).push(e);
   }
+  // Posição do item na sequência programada de cada profissional (relatório por profissional)
+  const planSeq = new Map(all('SELECT p.worker_id, p.item_id, p.seq FROM checklist_plan p JOIN checklist_items ci ON ci.id = p.item_id WHERE ci.task_id = ?', t.id).map(p => [`${p.worker_id}:${p.item_id}`, p.seq]));
   const items = rows.map(i => {
     const st = itemState(i, hist.get(i.id));
     const team = teams.get(i.id) || [];
     const cost = r2(team.reduce((n, e) => n + e.qty * e.days * e.rate, 0));
     return {
-      team: team.map(e => ({ id: e.id, worker_id: e.worker_id, role: e.worker_id ? e.worker_role : e.role, name: e.worker_name || null, qty: e.qty, days: e.days,
+      team: team.map(e => ({ id: e.id, worker_id: e.worker_id, role: e.worker_id ? e.worker_role : e.role, name: e.worker_name || null, qty: e.qty, days: e.days, plan_seq: planSeq.get(`${e.worker_id}:${i.id}`) ?? null,
         ...(money ? { rate: e.rate, value: r2(e.qty * e.days * e.rate) } : {}) })),
       ...(money ? { cost, cost_missing: team.some(e => !e.rate) } : {}),
       id: i.id, seq: i.seq, group: i.group_name, specialty: i.specialty || null, text: i.text,

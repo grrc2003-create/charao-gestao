@@ -2580,6 +2580,9 @@ async function main() {
   const cplD3 = await cplD({ item_id: cplI2, days: '1,5' });
   ok(cplD3.status === 200 && cplD3.data.pending.find(i => i.id === cplI2).days === 1.5, 'prazo também pode ser alterado nas pendências');
   ok((await fcCam('POST', `/tasks/${cplT}/plan/days`, { worker_id: fcP.id, item_id: cplI2, days: 2 })).status >= 400, 'quem não gerencia o check-list não altera o prazo');
+  const cplView = (await fcJul('GET', `/tasks/${cplT}`)).data.checklist.items;
+  const cplRow = cplView.find(i => i.id === cplI1).team.find(e => e.worker_id === fcP.id);
+  ok(cplRow.plan_seq >= 1 && cplRow.name && cplRow.value === undefined, 'equipe do item traz a ordem da sequência para o relatório por profissional, sem valores');
   // Compromisso em outro check-list da obra consome o período
   const cplOther = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outro', items: [{ text: 'Outro', start_date: '2099-03-02', due_date: '2099-03-03', team: [{ worker_id: fcP.id, days: 2 }] }] })).data.id;
   const cplOut = (await cplGet(fcAna, cplQ)).data;

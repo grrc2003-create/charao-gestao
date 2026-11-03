@@ -3587,3 +3587,22 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 [aria-disabled="true"].act-item { opacity: .5; cursor: not-allowed; }
 [aria-disabled="true"].act-item:hover { background: transparent; }
 @media print { .why-tip { display: none; } }
+
+/* Indicadores de prazo clicáveis e lista das tarefas por trás deles */
+a.dl-bar.is-link { display: block; cursor: pointer; }
+a.dl-bar.is-link:hover, a.dl-bar.is-link:focus-visible { filter: brightness(1.15); outline: 2px solid var(--c); outline-offset: 1px; }
+a.dl-mlabel { display: block; color: inherit; }
+a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
+.dl-legend a { display: inline-flex; align-items: center; gap: 5px; color: inherit; }
+.dl-legend a:hover { text-decoration: underline; }
+.dl-click { margin: 8px 0 0; }
+.dt-causes { margin-bottom: 8px; flex-wrap: wrap; }
+.dt-note { margin: 0 0 8px; }
+.dt-meta { font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.dt-why { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.dt-why li { padding-left: 9px; border-left: 3px solid var(--line-strong); color: var(--ink-2); }
+.dt-why li.is-vencida, .dt-why li.is-entrega, .dt-why li.is-corretiva { border-left-color: #C0392B; }
+.dt-why li.is-cadastro { border-left-color: #C9520F; }
+.why-tip.is-calc { white-space: pre-line; }
+.why-tip.is-calc::first-line { font-weight: 700; }
+.rank-metrics [data-calc] { cursor: help; }

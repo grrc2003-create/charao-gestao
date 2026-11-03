@@ -19,9 +19,12 @@ export function level(kind, s) {
 const LEVEL = { bom: ['●', 'Bom'], atencao: ['▲', 'Atenção'], critico: ['■', 'Crítico'] };
 export const signal = l => (l ? html`<span class="signal sig-${l}"><i aria-hidden="true">${LEVEL[l][0]}</i>${LEVEL[l][1]}</span>` : '');
 
-export function deadlineKpis(s, chronicMin = 3) {
+// Link para as tarefas por trás de um número. link = { scope, id }; sem link, o número não é clicável.
+const tasksHref = (link, ver, month = '') => (link ? `#/prazos/tarefas?scope=${link.scope}${link.id ? `&id=${link.id}` : ''}&ver=${ver}${month ? `&mes=${month}` : ''}` : null);
+
+export function deadlineKpis(s, chronicMin = 3, link = null) {
   return html`<div class="kpis kpis-dl">
-    ${kpi({ label: html`Ficaram atrasadas ${signal(level('late', s))}`, value: fmtPct(s.late_rate ?? 0), color: STATUS_COLOR.atrasada,
+    ${kpi({ label: html`Ficaram atrasadas ${signal(level('late', s))}`, value: fmtPct(s.late_rate ?? 0), color: STATUS_COLOR.atrasada, href: tasksHref(link, 'atrasadas') || undefined,
       foot: `${s.ever_late} de ${s.with_due} tarefas com prazo, ao menos 1 vez` })}
     ${kpi({ label: 'Episódios de atraso', value: s.late_episodes, color: STATUS_COLOR.atrasada, foot: `média ${n1(s.late_episodes_avg)} por tarefa` })}
     ${kpi({ label: 'Taxa de repactuação', value: fmtPct(s.reschedule_rate ?? 0), color: ORANGE,
@@ -36,7 +39,7 @@ export function deadlineKpis(s, chronicMin = 3) {
 }
 
 // Distribuição: quantas tarefas foram reagendadas 0, 1, 2, 3+ vezes
-export function distBar(s) {
+export function distBar(s, link = null) {
   const d = s.reschedule_dist || { r0: 0, r1: 0, r2: 0, r3: 0 };
   const total = d.r0 + d.r1 + d.r2 + d.r3;
   if (!total) return '';
@@ -44,23 +47,34 @@ export function distBar(s) {
   return html`<div class="dl-dist">
     <div class="sub-label">Reagendamentos por tarefa</div>
     <div class="stackbar dl-stack">${seg.filter(([k]) => d[k]).map(([k, l, c]) => html`<span style="--c:${c};flex:${d[k] / total}" data-tip="${l}: ${d[k]} tarefa(s)"></span>`)}</div>
-    <div class="dl-legend">${seg.map(([k, l, c]) => html`<span><i style="background:${c}"></i>${l} <b>${d[k]}</b></span>`)}</div>
+    <div class="dl-legend">${seg.map(([k, l, c]) => {
+      const inner = html`<i style="background:${c}"></i>${l} <b>${d[k]}</b>`;
+      return link && d[k] ? html`<a href="${tasksHref(link, k)}" title="Ver estas tarefas">${inner}</a>` : html`<span>${inner}</span>`;
+    })}</div>
   </div>`;
 }
 
 // Evolução mensal (mês do prazo original): % que atrasou e % repactuada
-export function trendChart(trend) {
+export function trendChart(trend, link = null) {
   if (!trend?.some(m => m.total)) return html`<div class="muted" style="font-size:13px">Sem tarefas com prazo nos últimos meses.</div>`;
   const lab = m => `${MONTHS[Number(m.slice(5, 7)) - 1]}/${m.slice(2, 4)}`;
+  // Barra com tarefas abre a lista delas; sem tarefas, não há o que abrir
+  const bar = (m, ver, rate, count, c) => {
+    const inner = html`<em>${m.total ? `${Math.round(rate || 0)}%` : ''}</em>`;
+    return link && count
+      ? html`<a class="dl-bar is-link" href="${tasksHref(link, ver, m.month)}" style="height:${rate || 0}%;--c:${c}" aria-label="${ver === 'atrasadas' ? 'Ficaram atrasadas' : 'Repactuadas'} em ${lab(m.month)}: ${count} tarefa(s)">${inner}</a>`
+      : html`<span class="dl-bar" style="height:${rate || 0}%;--c:${c}">${inner}</span>`;
+  };
   return html`<div class="dl-trend">
     <div class="sub-label">Evolução mensal (pelo mês do prazo original)</div>
     <div class="dl-legend"><span><i style="background:${STATUS_COLOR.atrasada}"></i>Ficaram atrasadas</span><span><i style="background:${RESCHED_SERIES}"></i>Repactuadas</span></div>
     <div class="dl-months">${trend.map(m => html`<div class="dl-month" data-tip="${lab(m.month)}: ${m.total} tarefa(s) · ${m.ever_late} atrasaram · ${m.rescheduled} repactuadas">
       <div class="dl-bars">
-        <span class="dl-bar" style="height:${m.late_rate || 0}%;--c:${STATUS_COLOR.atrasada}"><em>${m.total ? `${Math.round(m.late_rate || 0)}%` : ''}</em></span>
-        <span class="dl-bar" style="height:${m.reschedule_rate || 0}%;--c:${RESCHED_SERIES}"><em>${m.total ? `${Math.round(m.reschedule_rate || 0)}%` : ''}</em></span>
+        ${bar(m, 'atrasadas', m.late_rate, m.ever_late, STATUS_COLOR.atrasada)}
+        ${bar(m, 'repactuadas', m.reschedule_rate, m.rescheduled, RESCHED_SERIES)}
       </div>
-      <div class="dl-mlabel">${lab(m.month)}<small>${m.total}</small></div></div>`)}</div>
+      ${link && m.total ? html`<a class="dl-mlabel" href="${tasksHref(link, 'todas', m.month)}">${lab(m.month)}<small>${m.total}</small></a>` : html`<div class="dl-mlabel">${lab(m.month)}<small>${m.total}</small></div>`}</div>`)}</div>
+    ${link ? html`<p class="hint dl-click">Clique em uma barra para ver as tarefas e o motivo de cada atraso.</p>` : ''}
   </div>`;
 }
 
@@ -74,12 +88,12 @@ export const howToRead = chronicMin => html`<details class="dl-help"><summary>${
     <li><b>Semáforo:</b> atraso ≤15% bom, ≤30% atenção; corretivas ≤30% bom, ≤50% atenção; crônicas: nenhuma = bom, até 5% = atenção.</li>
   </ul></details>`;
 
-export function deadlineSection(s, trend, { chronicMin = 3, title = 'Prazos e repactuação', sub = '', extra = '' } = {}) {
+export function deadlineSection(s, trend, { chronicMin = 3, title = 'Prazos e repactuação', sub = '', extra = '', link = null } = {}) {
   return html`<section class="card section">
     <div class="card-head"><h2>${icon('reschedule')}${title}</h2><span class="sub">${sub}</span></div>
     <div class="card-body dl-body">
-      ${deadlineKpis(s, chronicMin)}
-      <div class="grid grid-2">${distBar(s) || html`<div></div>`}${trendChart(trend)}</div>
+      ${deadlineKpis(s, chronicMin, link)}
+      <div class="grid grid-2">${distBar(s, link) || html`<div></div>`}${trendChart(trend, link)}</div>
       ${extra}
       ${howToRead(chronicMin)}
     </div>

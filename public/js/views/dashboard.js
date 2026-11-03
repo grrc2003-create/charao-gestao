@@ -89,6 +89,7 @@ export async function view({ state }) {
 
       ${impactRankingSection(impactRank.slice(0, 5))}
       ${deadlineSection(s, d.trend, {
+        link: { scope: 'empresa' },
         chronicMin: d.chronic_min,
         sub: 'constância de atrasos e de repactuações',
         extra: html`${d.users.length ? html`<div><div class="sub-label">Por responsável</div>${deadlineTable(

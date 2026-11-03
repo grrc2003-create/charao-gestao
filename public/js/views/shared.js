@@ -121,17 +121,37 @@ export const projectRow = p => html`<li><a class="row-link proj-row" href="#/pro
   <div class="proj-pct">${fmtPct(p.summary.completion_pct ?? 0)}</div>
   <span class="chev">${icon('chevron')}</span></a></li>`;
 
-export const userRankRow = (u, i) => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">
+// A conta de cada número da linha, com os números da pessoa (janela ao passar o mouse)
+const br = v => String(v ?? 0).replace('.', ',');
+const plural = (n, one, many) => (n === 1 ? one : many);
+const rankCalc = s => {
+  const delivered = s.delivered ?? 0;
+  const days = s.exec_work_days_avg ?? s.exec_days_avg;
+  return {
+    onTime: delivered
+      ? `No prazo\nEntregas no prazo ÷ total de entregas\n${s.on_time} ÷ ${delivered} = ${fmtPct(s.on_time_pct)}\n${s.late_deliveries} ${plural(s.late_deliveries, 'entrega', 'entregas')} depois do prazo. Entrega = concluída ou em conferência, comparada com o prazo vigente.`
+      : 'No prazo\nEntregas no prazo ÷ total de entregas\nAinda não há entregas para calcular.',
+    done: `Concluídas\nTarefas com a conclusão aprovada: ${s.done} de ${s.assigned} atribuídas\nNão conta as ${s.review} em conferência.`,
+    late: `Atrasadas\nEm aberto ou em andamento com o prazo já vencido hoje: ${s.late}\nNão conta as ${s.late_deliveries} entregues depois do prazo.`,
+    assigned: `Atribuídas\nTudo em que a pessoa é responsável: ${s.assigned}\nabertas ${s.open} + em andamento ${s.in_progress} + em conferência ${s.review} + atrasadas ${s.late} + concluídas ${s.done}${s.assigned_items ? `\nInclui ${s.assigned_items} ${plural(s.assigned_items, 'item', 'itens')} de check-list, que contam como tarefa.` : ''}`,
+    exec: s.exec_work_days_n
+      ? `Dias úteis por execução\nSoma dos dias úteis ÷ entregas\n${s.exec_work_days_sum} ÷ ${s.exec_work_days_n} = ${br(s.exec_work_days_avg)} dias úteis\nDo início até a conclusão real, pelo calendário de cada obra.`
+      : `Dias por execução\nMédia do início até a conclusão real: ${days === null || days === undefined ? 'ainda sem entregas' : `${br(days)} dias`}`,
+    early: `Antecipadas\nEntregas antes do prazo: ${s.early ?? 0} de ${delivered}${s.early ? ` (${fmtPct(s.early_pct)})\nEm média, ${br(s.early_days_avg)} dias antes do prazo.` : ''}`,
+    filling: `Atraso de preenchimento\nConclusões registradas depois do dia real: ${s.filling_delays ?? 0} de ${delivered}${s.filling_delays ? `\nEm média, ${br(s.filling_delay_days_avg)} dias depois.` : ''}`,
+  };
+};
+export const userRankRow = (u, i, _all, calc = rankCalc(u.stats)) => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">
   <span class="rank-num">${i + 1}</span>${avatar(u.name, 'sm', u.id)}
   <div class="grow"><div class="row-title truncate">${u.name}</div><div class="row-meta"><span class="truncate">${u.job_title || ''}</span></div></div>
   <div class="rank-metrics">
-    <div class="ok"><b>${fmtPct(u.stats.on_time_pct)}</b>no prazo</div>
-    <div><b>${u.stats.done}</b>concluídas</div>
-    <div class="late"><b>${u.stats.late}</b>atrasadas</div>
-    <div><b>${u.stats.assigned}</b>atribuídas</div>
-    <div title="Média de dias úteis do início à conclusão real"><b>${String(u.stats.exec_work_days_avg ?? u.stats.exec_days_avg ?? '—').replace('.', ',')}</b>${u.stats.exec_work_days_avg !== null && u.stats.exec_work_days_avg !== undefined ? 'dias úteis/exec.' : 'dias/exec.'}</div>
-    <div class="ok" title="Entregas antes do prazo"><b>${u.stats.early ?? 0}</b>antecipadas</div>
-    <div class="${u.stats.filling_delays ? 'warn' : ''}" title="Conclusões registradas depois do dia real${u.stats.filling_delays ? ` · média ${u.stats.filling_delay_days_avg} dia(s)` : ''}"><b>${u.stats.filling_delays ?? 0}</b>atr. preench.</div>
+    <div class="ok" data-calc="${calc.onTime}"><b>${fmtPct(u.stats.on_time_pct)}</b>no prazo</div>
+    <div data-calc="${calc.done}"><b>${u.stats.done}</b>concluídas</div>
+    <div class="late" data-calc="${calc.late}"><b>${u.stats.late}</b>atrasadas</div>
+    <div data-calc="${calc.assigned}"><b>${u.stats.assigned}</b>atribuídas</div>
+    <div data-calc="${calc.exec}"><b>${String(u.stats.exec_work_days_avg ?? u.stats.exec_days_avg ?? '—').replace('.', ',')}</b>${u.stats.exec_work_days_avg !== null && u.stats.exec_work_days_avg !== undefined ? 'dias úteis/exec.' : 'dias/exec.'}</div>
+    <div class="ok" data-calc="${calc.early}"><b>${u.stats.early ?? 0}</b>antecipadas</div>
+    <div class="${u.stats.filling_delays ? 'warn' : ''}" data-calc="${calc.filling}"><b>${u.stats.filling_delays ?? 0}</b>atr. preench.</div>
   </div><span class="chev">${icon('chevron')}</span></a></li>`;
 
 // Concluída após o prazo vigente: selo com os dias de atraso da entrega

@@ -122,6 +122,7 @@ export async function view({ params, query, setQuery, render, state, panel = fal
       </div>
 
       ${deadlineSection(s, d.trend, {
+        link: { scope: 'usuario', id: u.id },
         chronicMin: d.chronic_min || 3,
         sub: 'tarefas atribuídas a este usuário',
         extra: d.team.length ? html`<div><div class="sub-label">Equipe sob gestão</div>

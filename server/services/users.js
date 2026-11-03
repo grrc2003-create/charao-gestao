@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/h
 import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf, requireSection } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend } from './metrics.js';
-import { listVisible, execWorkDaysAvg } from './tasks.js';
+import { listVisible, execWorkDays } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
@@ -35,7 +35,10 @@ function usersMap() {
   return new Map(all(`SELECT ${PUBLIC_FIELDS} FROM users`).map(u => [u.id, u]));
 }
 
-const withExec = (st, tasks, userId) => ({ ...st, exec_work_days_avg: execWorkDaysAvg(tasks.filter(t => t.assignee_id === userId)) });
+const withExec = (st, tasks, userId) => {
+  const { n, sum } = execWorkDays(tasks.filter(t => t.assignee_id === userId));
+  return { ...st, exec_work_days_avg: n ? Math.round((sum / n) * 10) / 10 : null, exec_work_days_n: n, exec_work_days_sum: sum };
+};
 
 export function listUsers(ctx, tasks = listVisible(ctx)) {
   const map = usersMap();

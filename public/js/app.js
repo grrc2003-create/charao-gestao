@@ -37,6 +37,7 @@ import * as BmImport from './views/bm-import.js';
 import * as Finance from './views/finance.js';
 import * as FinanceYear from './views/finance-year.js';
 import * as FinanceImport from './views/finance-import.js';
+import * as DeadlineTasks from './views/deadline-tasks.js';
 import * as MaisControle from './views/mais-controle.js';
 import * as ReportMeasurement from './views/report-measurement.js';
 import * as Processes from './views/processes.js';
@@ -77,6 +78,7 @@ const routes = [
   ['/projetos/:id/editar', Projects.form],
   ['/projetos/:id/importar', PlanningImport.importPage],
   ['/projetos/:id/vinculos', DepMap.view],
+  ['/prazos/tarefas', DeadlineTasks.view],
   ['/tarefas', Tasks.view],
   ['/tarefas/nova', TaskForm.view],
   ['/tarefas/:id', Task.view],

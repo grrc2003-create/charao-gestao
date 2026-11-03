@@ -314,9 +314,13 @@ export function actualOf(t) {
 }
 
 // Média de execução em dias úteis (calendário de cada obra), do início à conclusão real
-export function execWorkDaysAvg(tasks) {
+export function execWorkDays(tasks) {
   const acts = tasks.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
-  return acts.length ? Math.round((acts.reduce((n, a) => n + a.work_days, 0) / acts.length) * 10) / 10 : null;
+  return { n: acts.length, sum: acts.reduce((n, a) => n + a.work_days, 0) };
+}
+export function execWorkDaysAvg(tasks) {
+  const { n, sum } = execWorkDays(tasks);
+  return n ? Math.round((sum / n) * 10) / 10 : null;
 }
 // Resumo com os indicadores de execução (antecipadas, atraso de preenchimento e média em dias úteis)
 export const execSummary = tasks => ({ ...summarize(tasks), exec_work_days_avg: execWorkDaysAvg(tasks) });

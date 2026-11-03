@@ -2833,6 +2833,51 @@ async function main() {
   ok((await cdAna('POST', `/tasks/${cdCan}/cancel`, { reason: 'Teste de cancelamento' })).status === 200, 'cancela a tarefa para o teste');
   ok((await cdAna('POST', `/tasks/${cdCan}/correct-dates`, { due_date: '2098-08-15' })).status === 400, 'tarefa cancelada não é corrigida');
 
+  console.log('Tarefas por trás dos indicadores de prazo');
+  const dtAna = await login('ana@charao.eng.br');
+  const dtCam = await login('camila@charao.eng.br');
+  const dtPast = new Date(Date.now() - 20 * 86400e3).toISOString().slice(0, 10);
+  const dtTask = (await cdRic('POST', '/tasks', { project_id: 1, title: 'Vencida para o detalhe', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', due_date: dtPast })).data.id;
+  const dtMonth = dtPast.slice(0, 7);
+  const dtDash = (await dtAna('GET', '/dashboard')).data;
+  const dtGet = (scope, id, ver, mes = '') => dtAna('GET', `/deadlines/tasks?scope=${scope}${id ? `&id=${id}` : ''}&ver=${ver}${mes ? `&mes=${mes}` : ''}`).then(r => r.data);
+  let dtSame = true;
+  for (const m of dtDash.trend) {
+    const late = await dtGet('empresa', null, 'atrasadas', m.month), re = await dtGet('empresa', null, 'repactuadas', m.month);
+    if (late.items.length !== m.ever_late || late.base !== m.total || re.items.length !== m.rescheduled) dtSame = false;
+  }
+  ok(dtSame, 'na empresa, cada barra do gráfico tem exatamente as tarefas da lista');
+  ok((await dtGet('empresa', null, 'atrasadas')).items.length === dtDash.summary.ever_late, 'o indicador geral bate com a lista');
+  ok((await dtGet('empresa', null, 'r0')).items.length === dtDash.summary.reschedule_dist.r0, 'a distribuição de reagendamentos bate com a lista');
+  const dtProj = (await dtAna('GET', '/projects/1')).data;
+  let dtProjSame = true;
+  for (const m of dtProj.trend) if ((await dtGet('projeto', 1, 'atrasadas', m.month)).items.length !== m.ever_late) dtProjSame = false;
+  ok(dtProjSame, 'no projeto, cada barra do gráfico tem exatamente as tarefas da lista');
+  ok((await dtGet('projeto', 1, 'atrasadas')).items.length === dtProj.summary.ever_late, 'no projeto, o indicador geral bate com a lista');
+  const dtUser = (await dtAna('GET', '/users/4')).data;
+  let dtUserSame = true;
+  for (const m of dtUser.trend) if ((await dtGet('usuario', 4, 'atrasadas', m.month)).items.length !== m.ever_late) dtUserSame = false;
+  ok(dtUserSame, 'no usuário, cada barra do gráfico tem exatamente as tarefas da lista');
+  ok((await dtGet('usuario', 4, 'atrasadas')).items.length === dtUser.stats.ever_late, 'no usuário, o indicador geral bate com a lista');
+  const dtRow = (await dtGet('projeto', 1, 'atrasadas', dtMonth)).items.find(t => t.id === dtTask);
+  ok(dtRow && dtRow.reasons.some(r => r.code === 'vencida' && r.days === 20) && dtRow.reasons.some(r => r.code === 'cadastro'), 'a tarefa vencida mostra o motivo e que foi cadastrada depois do prazo');
+  const dtItems = (await dtGet('empresa', null, 'todas')).items;
+  ok(dtItems.filter(t => t.kind === 'item').every(t => /^#\/tarefas\/\d+$/.test(t.href)), 'item de check-list abre o check-list a que pertence');
+  const dtCamList = await dtCam('GET', '/deadlines/tasks?scope=empresa&ver=todas');
+  const dtCamSee = new Set((await dtCam('GET', '/tasks')).data.map(t => t.id));
+  ok(dtCamList.status === 200 && dtCamList.data.items.filter(t => t.kind !== 'item').every(t => dtCamSee.has(t.id)), 'a lista da empresa só traz as tarefas que a pessoa pode ver');
+  ok((await dtAna('POST', '/users', { name: 'Sem Visão Teste', email: 'sem.visao@teste.com', role: 'colaborador', password: 'semvisao12345', sections: ['tarefas'] })).status === 201, 'cria usuário sem a visão da empresa');
+  const dtNoDash = await login('sem.visao@teste.com', 'semvisao12345');
+  ok((await dtNoDash('GET', '/dashboard')).status === 403 && (await dtNoDash('GET', '/deadlines/tasks?scope=empresa')).status === 403, 'sem a visão da empresa, a lista dela também é recusada');
+  ok((await dtCam('GET', '/deadlines/tasks?scope=usuario&id=1')).status >= 403, 'colaborador não abre a lista de outra pessoa');
+  ok((await dtAna('GET', '/deadlines/tasks?ver=x')).status === 400 && (await dtAna('GET', '/deadlines/tasks?mes=2026-13')).status === 400 && (await dtAna('GET', '/deadlines/tasks?scope=x')).status === 400, 'recorte, mês e escopo inválidos são recusados');
+  console.log('Conta dos números de desempenho');
+  const dtRank = (await dtAna('GET', '/dashboard')).data.users.filter(u => u.stats.delivered);
+  ok(dtRank.length && dtRank.every(u => u.stats.on_time + u.stats.late_deliveries === u.stats.delivered), 'no prazo + depois do prazo = total de entregas');
+  ok(dtRank.every(u => u.stats.open + u.stats.in_progress + u.stats.review + u.stats.late + u.stats.done === u.stats.assigned), 'a soma dos status bate com as atribuídas');
+  ok(dtRank.every(u => !u.stats.exec_work_days_n || Math.round((u.stats.exec_work_days_sum / u.stats.exec_work_days_n) * 10) / 10 === u.stats.exec_work_days_avg), 'soma ÷ entregas bate com a média de dias úteis');
+  ok(dtRank.some(u => u.stats.assigned_items > 0), 'os itens de check-list das atribuídas são informados');
+
 }
 
 main()

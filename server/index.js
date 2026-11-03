@@ -10,7 +10,7 @@ import {
   checkLoginRate, registerLoginFailure, clearLoginFailures, hashPassword, validatePasswordStrength,
 } from './lib/auth.js';
 import { seedDemo } from './demo-data.js';
-import { accessContext, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
+import { accessContext, canAccessProject, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
@@ -37,7 +37,7 @@ import * as Field from './services/field.js';
 import * as Reimb from './services/reimbursements.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
-import { summarize, userStats, today, daysBetween, monthlyTrend } from './services/metrics.js';
+import { summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
 import { all } from './db.js';
 
 migrate();
@@ -164,6 +164,29 @@ api.post('/api/auth/password', (req, res, { user, body }) => {
 });
 
 // ---------- Dashboard e metadados ----------
+// As tarefas por trás dos indicadores de prazo, com o mesmo universo de cada tela (na empresa, itens de check-list contam como tarefa)
+api.get('/api/deadlines/tasks', (req, res, { ctx, query }) => {
+  const scope = query.get('scope') || 'empresa', id = intOrNull(query.get('id'));
+  const month = query.get('mes') || '', view = query.get('ver') || 'atrasadas';
+  if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw badRequest('Mês inválido.');
+  if (!isDeadlineView(view)) throw badRequest('Recorte inválido.');
+  let units;
+  if (scope === 'projeto') {
+    requireSection(ctx.user, 'projetos');
+    if (!id || !canAccessProject(ctx.user, id, ctx.projects)) throw new HttpError(404, 'Projeto não encontrado.');
+    units = Tasks.listVisible(ctx, 'WHERE t.project_id = ?', id);
+  } else if (scope === 'usuario') {
+    if (id !== ctx.user.id && !hasSection(ctx.user, 'cadastro_usuarios')) requireSection(ctx.user, 'usuarios');
+    if (!id || !canSeeUser(ctx, id)) throw new HttpError(404, 'Usuário não encontrado.');
+    units = Tasks.listVisible(ctx).filter(t => t.assignee_id === id);
+  } else if (scope === 'empresa') {
+    requireSection(ctx.user, 'dashboard');
+    const tasks = Tasks.listVisible(ctx);
+    units = [...tasks, ...Checklist.checklistItemsAsSubtasks(tasks)];
+  } else throw badRequest('Recorte inválido.');
+  send(res, 200, deadlineDetail(units, { month, view }));
+});
+
 api.get('/api/dashboard', (req, res, { ctx }) => {
   requireSection(ctx.user, 'dashboard');
   const tasks = Tasks.listVisible(ctx);

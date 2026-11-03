@@ -2,7 +2,8 @@
 // 1) ao enviar um formulário com campo obrigatório vazio: destaca o campo, avisa quais faltam e não envia;
 // 2) botão de ação bloqueado (aria-disabled) explica o motivo ao ser tocado;
 // 3) erro devolvido pelo servidor num formulário também aparece como aviso e a tela rola até ele;
-// 4) passar o mouse (ou chegar pelo teclado) num botão bloqueado abre uma janela com o motivo.
+// 4) passar o mouse (ou chegar pelo teclado) num botão bloqueado abre uma janela com o motivo;
+// 5) o mesmo vale para um número com a conta dele (data-calc); no toque, tocar no número abre a janela.
 import { toast } from './ui.js';
 
 const labelOf = el => {
@@ -40,6 +41,7 @@ document.addEventListener('click', e => {
 }, true);
 
 const BLOCKED = '[aria-disabled="true"]';
+const WITH_TIP = `${BLOCKED}, [data-calc]`;
 let tip = null, tipFor = null, tipWatch = null;
 function hideTip() {
   clearInterval(tipWatch);
@@ -53,10 +55,10 @@ function showTip(el) {
   // O motivo em title viraria uma segunda janela, a do navegador
   if (el.title) { el.dataset.why ||= el.title; el.removeAttribute('title'); }
   tip = document.createElement('div');
-  tip.className = 'why-tip';
+  tip.className = el.dataset.calc ? 'why-tip is-calc' : 'why-tip';
   tip.id = 'why-tip';
   tip.setAttribute('role', 'tooltip');
-  tip.textContent = el.dataset.why || 'Ação indisponível no momento.';
+  tip.textContent = el.dataset.calc || el.dataset.why || 'Ação indisponível no momento.';
   document.body.appendChild(tip);
   tipFor = el;
   el.setAttribute('aria-describedby', tip.id);
@@ -65,19 +67,33 @@ function showTip(el) {
   tip.style.left = `${Math.max(edge, Math.min(b.left + b.width / 2 - t.width / 2, innerWidth - t.width - edge))}px`;
   tip.style.top = `${b.top - t.height - gap >= edge ? b.top - t.height - gap : b.bottom + gap}px`;
   // A tela pode redesenhar com o mouse parado sobre o botão
-  tipWatch = setInterval(() => { if (!el.isConnected || !el.matches(BLOCKED)) hideTip(); }, 250);
+  tipWatch = setInterval(() => { if (!el.isConnected || !el.matches(WITH_TIP)) hideTip(); }, 250);
 }
 document.addEventListener('pointerover', e => {
-  if (e.pointerType !== 'mouse') return; // no toque, o motivo aparece ao tocar (aviso acima)
-  const b = e.target.closest?.(BLOCKED);
+  if (e.pointerType !== 'mouse') return; // no toque, a janela e o aviso abrem ao tocar
+  const b = e.target.closest?.(WITH_TIP);
   if (b) showTip(b); else hideTip();
 });
+// No toque, o número fica dentro de um link: tocar nele abre a conta em vez de sair da tela
+let lastPointer = 'mouse';
+document.addEventListener('pointerdown', e => {
+  lastPointer = e.pointerType;
+  if (lastPointer !== 'mouse' && !e.target.closest?.('[data-calc]')) hideTip();
+}, true);
+document.addEventListener('click', e => {
+  const c = lastPointer !== 'mouse' && e.target.closest?.('[data-calc]');
+  if (!c) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (c === tipFor) hideTip(); else showTip(c);
+}, true);
 document.addEventListener('focusin', e => { const b = e.target.closest?.(BLOCKED); if (b && b.matches(':focus-visible')) showTip(b); });
 document.addEventListener('focusout', hideTip);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
 addEventListener('scroll', hideTip, true);
 addEventListener('resize', hideTip);
-addEventListener('hashchange', hideTip);
+// Ao mudar de tela, nenhuma janela fica para trás (a dica dos gráficos também: a barra pode ser um link)
+addEventListener('hashchange', () => { hideTip(); document.querySelectorAll('.chart-tip').forEach(x => x.remove()); });
 
 new MutationObserver(records => {
   const seen = new Set();

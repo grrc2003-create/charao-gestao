@@ -168,6 +168,42 @@ export function monthlyTrend(tasks, ref = today(), months = 6) {
   });
 }
 
+// Por que a tarefa entra nos indicadores de prazo (as mesmas regras de decorate). "cadastro" explica o atraso de quem
+// só foi lançada no sistema depois do prazo.
+function deadlineReasons(t, ref) {
+  const out = [];
+  const original = t.original_due || t.due_date;
+  if (t.eff_status === 'atrasada') out.push({ code: 'vencida', due: t.due_date, days: daysBetween(t.due_date, ref) });
+  if (t.delivered && t.due_date && t.delivered_date > t.due_date) out.push({ code: 'entrega', date: t.delivered_date, due: t.due_date, days: daysBetween(t.due_date, t.delivered_date) });
+  if (t.reschedules_corrective) out.push({ code: 'corretiva', n: t.reschedules_corrective });
+  const created = localDate(t.created_at);
+  if (t.ever_late && original && created > original) out.push({ code: 'cadastro', date: created, due: original });
+  if (t.reschedules_preventive) out.push({ code: 'preventiva', n: t.reschedules_preventive });
+  return out;
+}
+
+// As tarefas por trás de cada número: mês (como em monthlyTrend) e recorte (como em monthlyTrend e summarize)
+const DEADLINE_VIEWS = {
+  atrasadas: t => t.ever_late,
+  repactuadas: t => t.reschedule_count > 0,
+  todas: () => true,
+  r0: t => !t.reschedule_count,
+  r1: t => t.reschedule_count === 1,
+  r2: t => t.reschedule_count === 2,
+  r3: t => t.reschedule_count >= 3,
+};
+export const isDeadlineView = v => Object.hasOwn(DEADLINE_VIEWS, v);
+export function deadlineDetail(tasks, { month = '', view = 'atrasadas' } = {}, ref = today()) {
+  const base = (month ? tasks.filter(t => (t.original_due || t.due_date || '').startsWith(month)) : tasks).filter(t => !t.cancelled_at && (t.due_date || t.original_due));
+  const items = base.filter(DEADLINE_VIEWS[view]).map(t => ({
+    id: t.id, code: t.code, title: t.title, project_code: t.project_code, assignee_name: t.assignee_name,
+    kind: t.checklist_item ? 'item' : t.task_type === 'checklist' ? 'checklist' : t.parent_id ? 'subtarefa' : 'tarefa',
+    href: `#/tarefas/${t.checklist_item ? t.parent_id : t.id}`, status: t.eff_status, due: t.due_date, original_due: t.original_due || null,
+    reasons: deadlineReasons(t, ref),
+  })).sort((a, b) => (a.due || '').localeCompare(b.due || '') || String(a.code).localeCompare(String(b.code)));
+  return { base: base.length, items };
+}
+
 // Indicadores individuais (tarefas atribuídas ao usuário + origem das tarefas)
 export function userStats(user, tasks, usersById) {
   const assigned = tasks.filter(t => t.assignee_id === user.id);
@@ -181,6 +217,7 @@ export function userStats(user, tasks, usersById) {
   return {
     ...s,
     assigned: assigned.length,
+    assigned_items: assigned.filter(t => t.checklist_item).length,
     created_by_user: created.length,
     self_created: selfCreated.length,
     assigned_by_manager: byManager.length,

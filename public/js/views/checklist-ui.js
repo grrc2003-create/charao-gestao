@@ -414,7 +414,7 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set(), openGroups: new Set(), hideResolved: false });
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set(), groupFlip: new Set(), hideResolved: false });
 
 // Urgência do prazo: atrasado (vermelho) · vence hoje (laranja) · nos próximos 7 dias (amarelo) · depois (azul)
 export function dueLevel(due, resolved, today = todayISO()) {
@@ -433,7 +433,8 @@ const PHOTOS_KEY = 'cl-show-photos';
 // Padrão: fotos visíveis (ocultar fica guardado no aparelho)
 const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) !== '0'; } catch { return true; } };
 const saveShowPhotos = v => { try { localStorage.setItem(PHOTOS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
-// Só os grupos: itens recolhidos, abrindo grupo a grupo (a escolha fica guardada no aparelho)
+// Grupos abrem e fecham como os itens. Só os grupos: todos começam recolhidos (a escolha fica guardada no aparelho);
+// groupFlip guarda os grupos que o usuário deixou diferente desse padrão
 const GROUPS_KEY = 'cl-groups-only';
 const groupsOnly = () => { try { return localStorage.getItem(GROUPS_KEY) === '1'; } catch { return false; } };
 const saveGroupsOnly = v => { try { localStorage.setItem(GROUPS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
@@ -467,6 +468,14 @@ export const checklistReportLink = t => {
 let scrollTo = null;
 
 // "Bruno Costa" → "Bruno C." (cabe na linha recolhida)
+// Equipe no resumo do item: profissional alocado ou só a função (sem valores). "Sem equipe" só aparece se o check-list usa equipe
+const teamTag = (it, c) => {
+  if (!it.team.length) return c.items.some(x => x.team.length) ? html`<span class="cli-aloc is-none" title="Item sem equipe informada">Sem equipe</span>` : '';
+  const workers = it.team.filter(e => e.worker_id), roles = it.team.filter(e => !e.worker_id);
+  const roleName = e => (e.qty > 1 ? `${e.role} ×${e.qty}` : e.role);
+  const more = list => (list.length > 1 ? ` +${list.length - 1}` : '');
+  return html`${workers.length ? html`<span class="cli-aloc is-worker" title="Profissional alocado: ${workers.map(e => e.name).join(', ')}">Alocado: ${shortName(workers[0].name)}${more(workers)}</span>` : ''}${roles.length ? html`<span class="cli-aloc is-role" title="Sem profissional alocado. Função: ${roles.map(roleName).join(', ')}">Função: ${roleName(roles[0])}${more(roles)}</span>` : ''}`;
+};
 const shortName = n => { const p = String(n || '—').trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p.at(-1)[0]}.` : p[0]; };
 const initials = n => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
 const shortDate = iso => fmtDateTime(iso).replace(/\/\d{4},/, ',');
@@ -532,6 +541,7 @@ function itemCard(t, it, c) {
       <span class="cli-title">${it.text}</span>
       <span class="cli-sum-r">
         ${dep?.waiting?.length ? html`<span class="dep-wait-tag" title="Aguardando ${dep.waiting.map(d => d.code).join(', ')}">${icon('clock')}Aguardando</span>` : ''}
+        ${teamTag(it, c)}
         ${it.specialty && !uiOf(t.id).levels.includes('especialidade') ? html`<span class="cli-spec cli-spec-sm" title="Especialidade">${it.specialty}</span>` : ''}
         <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
@@ -682,14 +692,14 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
       const pct = Math.round((done / g.items.length) * 100);
       const isGroup = dim === 'grupo' && c.can_manage_items;
       const gk = `${path}/${g.key}`;
-      const opened = st.openGroups.has(gk);
-      return html`<section class="clg clg-l${depth} ${opened ? 'is-open' : ''}" data-gk="${gk}">
+      const closed = groupsOnly() !== st.groupFlip.has(gk);
+      return html`<section class="clg clg-l${depth} ${closed ? 'is-closed' : ''}" data-gk="${gk}">
         <header class="clg-head">
-          <button type="button" class="clg-chev" data-clg-toggle aria-expanded="${opened}" aria-label="Abrir ou recolher ${g.name}">${icon('chevron')}</button>
-          <div class="clg-name" data-clg-toggle>${depth === 0 ? html`<h3>${g.name}</h3>` : html`<h4><small>${GROUP_DIMS[dim].label}:</small> ${g.name}</h4>`}<div class="clg-bar"><span style="width:${pct}%"></span></div></div>
+          <div class="clg-name">${depth === 0 ? html`<h3>${g.name}</h3>` : html`<h4><small>${GROUP_DIMS[dim].label}:</small> ${g.name}</h4>`}<div class="clg-bar"><span style="width:${pct}%"></span></div></div>
           <span class="clg-count">${done}/${g.items.length}</span>
           ${isGroup ? html`<button type="button" class="clg-btn" data-add-group="${g.key}" title="Adicionar item neste grupo">${icon('plus')}<span>Item</span></button>
             ${g.items.length > 1 ? html`<button type="button" class="clg-btn" data-assign-group="${g.items.map(i => i.id).join(',')}" data-group-name="${g.name}" title="Definir o responsável do grupo">${icon('user')}<span>Grupo</span></button>` : ''}` : ''}
+          <button type="button" class="clg-chev" aria-expanded="${!closed}" aria-label="Abrir ou recolher ${g.name}">${icon('chevron')}</button>
         </header>
         <div class="clg-items">${sections(g.items, depth + 1, gk)}</div>
       </section>`;
@@ -735,7 +745,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         <div class="cl-add-head"><b>${icon('plus')} Novo item</b><button type="button" class="icon-btn" id="cl-add-close" aria-label="Fechar">✕</button></div>
         ${itemForm()}
       </div>` : ''}
-      <div class="cl-list ${photosOn ? '' : 'no-photos'} ${st.hideResolved ? 'hide-resolved' : ''} ${groupsOnly() && st.levels.length ? 'only-groups' : ''}" data-filter="${f}">
+      <div class="cl-list ${photosOn ? '' : 'no-photos'} ${st.hideResolved ? 'hide-resolved' : ''}" data-filter="${f}">
         ${st.levels.length ? sections(c.items) : html`<div class="clg-items">${c.items.map(it => itemCard(t, it, c))}</div>`}
         <div class="cl-none muted">Nenhum item neste filtro.</div>
       </div>
@@ -871,20 +881,26 @@ export function bindChecklist(root, t, ctx, refresh) {
   });
   // Só os grupos: recolhe os itens; tocar no grupo abre ou recolhe aquele grupo
   root.querySelector('[data-clgroups]')?.addEventListener('click', e => {
-    const on = list.classList.toggle('only-groups');
+    const on = !groupsOnly();
     saveGroupsOnly(on);
+    st.groupFlip.clear();
+    list.querySelectorAll('.clg').forEach(sec => setClosed(sec, on));
     e.currentTarget.setAttribute('aria-pressed', String(on));
     e.currentTarget.querySelector('span').textContent = on ? 'Mostrar os itens' : 'Mostrar só os grupos';
   });
+  function setClosed(sec, closed) {
+    sec.classList.toggle('is-closed', closed);
+    sec.querySelector(':scope > .clg-head [aria-expanded]')?.setAttribute('aria-expanded', String(!closed));
+  }
   const openGroup = (sec, open) => {
-    sec.classList.toggle('is-open', open);
-    sec.querySelector(':scope > .clg-head [aria-expanded]')?.setAttribute('aria-expanded', String(open));
-    if (open) st.openGroups.add(sec.dataset.gk); else st.openGroups.delete(sec.dataset.gk);
+    setClosed(sec, !open);
+    if (!open === groupsOnly()) st.groupFlip.delete(sec.dataset.gk); else st.groupFlip.add(sec.dataset.gk);
   };
-  list.querySelectorAll('[data-clg-toggle]').forEach(b => b.addEventListener('click', () => {
-    if (!list.classList.contains('only-groups')) return;
-    const sec = b.closest('.clg');
-    openGroup(sec, !sec.classList.contains('is-open'));
+  // Tocar no cabeçalho abre ou fecha o grupo (os botões do cabeçalho têm a própria ação)
+  list.querySelectorAll('.clg-head').forEach(h => h.addEventListener('click', e => {
+    if (e.target.closest('[data-add-group],[data-assign-group]')) return;
+    const sec = h.closest('.clg');
+    openGroup(sec, sec.classList.contains('is-closed'));
   }));
   // Fotos ocultas (lista mais compacta): o botão "N fotos" do card abre a galeria do item
   root.querySelector('[data-clphotos]')?.addEventListener('click', e => {

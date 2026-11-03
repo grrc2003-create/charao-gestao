@@ -3571,10 +3571,13 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 /* Check-list: resolvidos à mostra (botão oculta) e opção de ver só os grupos */
 .cl-list.hide-resolved .cli[data-resolved] { display: none; }
 .cl-list.hide-resolved .clg:not(:has(.cli:not([data-resolved]))) { display: none; }
-.clg-chev { display: none; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--navy); cursor: pointer; }
-.clg-chev svg { width: 18px; height: 18px; transition: transform .15s; }
-.cl-list.only-groups .clg-chev { display: inline-flex; }
-.cl-list.only-groups .clg.is-open > .clg-head .clg-chev svg { transform: rotate(90deg); }
-.cl-list.only-groups .clg:not(.is-open) > .clg-items { display: none; }
-.cl-list.only-groups .clg-head { padding: 8px 10px 8px 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card, #fff); }
-.cl-list.only-groups .clg-name { cursor: pointer; }
+.clg-head { padding: 8px 6px 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card, #fff); cursor: pointer; }
+.clg-head:hover { border-color: var(--navy-100); }
+.clg-chev { display: grid; place-items: center; flex: none; width: 30px; height: 32px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; transition: transform .15s; }
+.clg-chev svg { width: 16px; height: 16px; transform: rotate(90deg); }
+.clg:not(.is-closed) > .clg-head .clg-chev { transform: rotate(180deg); }
+.clg.is-closed > .clg-items { display: none; }
+.cli-aloc { display: inline-flex; align-items: center; min-height: 24px; padding: 1px 8px; border-radius: 999px; border: 1px solid transparent; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.cli-aloc.is-worker { background: #E7F3EC; color: #1F6B41; border-color: #BFE0CC; }
+.cli-aloc.is-role { background: #FBF3E6; color: #8A5A0B; border-color: #EBD7B2; }
+.cli-aloc.is-none { background: none; color: var(--muted); border-color: var(--line); font-weight: 500; }

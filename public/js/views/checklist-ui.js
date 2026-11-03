@@ -414,7 +414,9 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set(), groupFlip: new Set(), hideResolved: false });
+// Grupos abrem e fecham como os itens. Padrão: só os grupos, todos recolhidos, sempre que o check-list é aberto;
+// groupFlip guarda os grupos que o usuário deixou diferente desse padrão
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set(), groupsOnly: true, groupFlip: new Set(), hideResolved: false });
 
 // Urgência do prazo: atrasado (vermelho) · vence hoje (laranja) · nos próximos 7 dias (amarelo) · depois (azul)
 export function dueLevel(due, resolved, today = todayISO()) {
@@ -433,11 +435,6 @@ const PHOTOS_KEY = 'cl-show-photos';
 // Padrão: fotos visíveis (ocultar fica guardado no aparelho)
 const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) !== '0'; } catch { return true; } };
 const saveShowPhotos = v => { try { localStorage.setItem(PHOTOS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
-// Grupos abrem e fecham como os itens. Padrão: só os grupos, todos recolhidos (mostrar os itens fica guardado no aparelho);
-// groupFlip guarda os grupos que o usuário deixou diferente desse padrão
-const GROUPS_KEY = 'cl-groups-only';
-const groupsOnly = () => { try { return localStorage.getItem(GROUPS_KEY) !== '0'; } catch { return true; } };
-const saveGroupsOnly = v => { try { localStorage.setItem(GROUPS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
 const keyOf = v => v || NONE;
 // f = { group, spec, resp } (valores '' = todos)
 export const matchItem = (it, f) => (!f.group || keyOf(it.group) === f.group) && (!f.spec || keyOf(it.specialty) === f.spec)
@@ -692,7 +689,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
       const pct = Math.round((done / g.items.length) * 100);
       const isGroup = dim === 'grupo' && c.can_manage_items;
       const gk = `${path}/${g.key}`;
-      const closed = groupsOnly() !== st.groupFlip.has(gk);
+      const closed = st.groupsOnly !== st.groupFlip.has(gk);
       return html`<section class="clg clg-l${depth} ${closed ? 'is-closed' : ''}" data-gk="${gk}">
         <header class="clg-head">
           <div class="clg-name">${depth === 0 ? html`<h3>${g.name}</h3>` : html`<h4><small>${GROUP_DIMS[dim].label}:</small> ${g.name}</h4>`}<div class="clg-bar"><span style="width:${pct}%"></span></div></div>
@@ -734,7 +731,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         ${s.done && s.done < s.total ? html`<button type="button" class="btn btn-ghost btn-sm" data-clhide data-n="${s.done}">${icon('check')}<span>${st.hideResolved ? 'Mostrar' : 'Ocultar'} resolvidos (${s.done})</span></button>` : ''}
         <div class="cl-tools">
           ${filterMenu}
-          ${st.levels.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-clgroups aria-pressed="${groupsOnly()}">${icon('filter')}<span>${groupsOnly() ? 'Mostrar os itens' : 'Mostrar só os grupos'}</span></button>` : ''}
+          ${st.levels.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-clgroups aria-pressed="${st.groupsOnly}">${icon('filter')}<span>${st.groupsOnly ? 'Mostrar os itens' : 'Mostrar só os grupos'}</span></button>` : ''}
           <button type="button" class="btn btn-ghost btn-sm cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button>
           ${c.can_manage_items ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/programacao">${icon('calendar')}Programar profissional</a>` : ''}
           ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
@@ -881,8 +878,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   });
   // Só os grupos: recolhe os itens; tocar no grupo abre ou recolhe aquele grupo
   root.querySelector('[data-clgroups]')?.addEventListener('click', e => {
-    const on = !groupsOnly();
-    saveGroupsOnly(on);
+    const on = st.groupsOnly = !st.groupsOnly;
     st.groupFlip.clear();
     list.querySelectorAll('.clg').forEach(sec => setClosed(sec, on));
     e.currentTarget.setAttribute('aria-pressed', String(on));
@@ -894,7 +890,7 @@ export function bindChecklist(root, t, ctx, refresh) {
   }
   const openGroup = (sec, open) => {
     setClosed(sec, !open);
-    if (!open === groupsOnly()) st.groupFlip.delete(sec.dataset.gk); else st.groupFlip.add(sec.dataset.gk);
+    if (!open === st.groupsOnly) st.groupFlip.delete(sec.dataset.gk); else st.groupFlip.add(sec.dataset.gk);
   };
   // Tocar no cabeçalho abre ou fecha o grupo (os botões do cabeçalho têm a própria ação)
   list.querySelectorAll('.clg-head').forEach(h => h.addEventListener('click', e => {

@@ -6,7 +6,6 @@ import { periodKey, periodInfo } from './periods.js';
 import { depLists, renderImpactPreview } from './deps-ui.js';
 import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
-import { doneToggle } from './shared.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
@@ -415,7 +414,7 @@ export function renderDraft(items, users, globalName) {
 // ---------- Tela da tarefa ----------
 // Estado de tela por check-list (sobrevive ao redesenho após cada resposta)
 const ui = {};
-const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set() });
+const uiOf = id => (ui[id] ||= { filter: null, adding: false, fGroup: '', fResp: '', fSpec: '', levels: ['grupo'], open: new Set(), openGroups: new Set(), hideResolved: false });
 
 // Urgência do prazo: atrasado (vermelho) · vence hoje (laranja) · nos próximos 7 dias (amarelo) · depois (azul)
 export function dueLevel(due, resolved, today = todayISO()) {
@@ -434,6 +433,10 @@ const PHOTOS_KEY = 'cl-show-photos';
 // Padrão: fotos visíveis (ocultar fica guardado no aparelho)
 const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) !== '0'; } catch { return true; } };
 const saveShowPhotos = v => { try { localStorage.setItem(PHOTOS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
+// Só os grupos: itens recolhidos, abrindo grupo a grupo (a escolha fica guardada no aparelho)
+const GROUPS_KEY = 'cl-groups-only';
+const groupsOnly = () => { try { return localStorage.getItem(GROUPS_KEY) === '1'; } catch { return false; } };
+const saveGroupsOnly = v => { try { localStorage.setItem(GROUPS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
 const keyOf = v => v || NONE;
 // f = { group, spec, resp } (valores '' = todos)
 export const matchItem = (it, f) => (!f.group || keyOf(it.group) === f.group) && (!f.spec || keyOf(it.specialty) === f.spec)
@@ -605,9 +608,8 @@ function itemCard(t, it, c) {
     ${dep || c.can_manage_items ? html`<details class="cli-depbox" ${dep ? 'open' : ''}><summary>${icon('history')} Dependências${dep ? ` (${dep.predecessors.length + dep.successors.length})` : ''}</summary>
       <div class="cli-deps">${depLists(dep || { predecessors: [], successors: [], waiting: [] }, !!c.can_manage_items, `i:${it.id}`)}</div></details>` : ''}
     ${history}`;
-  // Itens resolvidos (Conforme/N/A) ficam ocultos enquanto houver pendentes ("Mostrar concluídos" exibe)
-  const hideDone = it.resolved && c.items.some(x => !x.resolved);
-  const attrs = `id="cli-${it.id}" data-item-id="${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"${hideDone ? ' data-done' : ''}`;
+  // Itens resolvidos (Conforme/N/A) ficam à mostra; o botão "Ocultar resolvidos" esconde
+  const attrs = `id="cli-${it.id}" data-item-id="${it.id}" data-pending="${it.resolved ? 0 : 1}" data-mine="${it.mine ? 1 : 0}" data-nc="${it.open_nc ? 1 : 0}"${it.resolved ? ' data-resolved' : ''}`;
   const cls = `cli ${it.open_nc ? 'res-nao_conforme' : it.result ? `res-${it.result}` : 'res-pending'} ${it.mine ? 'is-mine' : ''} cli-due-${lv.cls.slice(3)}`;
   // Recolhido: só descrição, prazo e situação. Ao tocar, abre com responsável, fotos, botões e histórico.
   const isOpen = uiOf(t.id).open.has(it.id);
@@ -672,21 +674,24 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
     </details>` : '';
   const groupInfo = st.levels.length ? st.levels.map(d => GROUP_DIMS[d].label).join(' › ') : 'sem agrupamento';
   // Seções aninhadas: cabeçalho com progresso; "+ Item" e "Grupo" quando o nível é Grupo
-  const sections = (items, depth = 0) => {
+  const sections = (items, depth = 0, path = '') => {
     if (depth >= st.levels.length) return html`${items.map(it => itemCard(t, it, c))}`;
     const dim = st.levels[depth];
     return html`${groupItems(items, dim, t._specs || []).map(g => {
       const done = g.items.filter(i => i.resolved).length;
       const pct = Math.round((done / g.items.length) * 100);
       const isGroup = dim === 'grupo' && c.can_manage_items;
-      return html`<section class="clg clg-l${depth}">
+      const gk = `${path}/${g.key}`;
+      const opened = st.openGroups.has(gk);
+      return html`<section class="clg clg-l${depth} ${opened ? 'is-open' : ''}" data-gk="${gk}">
         <header class="clg-head">
-          <div class="clg-name">${depth === 0 ? html`<h3>${g.name}</h3>` : html`<h4><small>${GROUP_DIMS[dim].label}:</small> ${g.name}</h4>`}<div class="clg-bar"><span style="width:${pct}%"></span></div></div>
+          <button type="button" class="clg-chev" data-clg-toggle aria-expanded="${opened}" aria-label="Abrir ou recolher ${g.name}">${icon('chevron')}</button>
+          <div class="clg-name" data-clg-toggle>${depth === 0 ? html`<h3>${g.name}</h3>` : html`<h4><small>${GROUP_DIMS[dim].label}:</small> ${g.name}</h4>`}<div class="clg-bar"><span style="width:${pct}%"></span></div></div>
           <span class="clg-count">${done}/${g.items.length}</span>
           ${isGroup ? html`<button type="button" class="clg-btn" data-add-group="${g.key}" title="Adicionar item neste grupo">${icon('plus')}<span>Item</span></button>
             ${g.items.length > 1 ? html`<button type="button" class="clg-btn" data-assign-group="${g.items.map(i => i.id).join(',')}" data-group-name="${g.name}" title="Definir o responsável do grupo">${icon('user')}<span>Grupo</span></button>` : ''}` : ''}
         </header>
-        <div class="clg-items">${sections(g.items, depth + 1)}</div>
+        <div class="clg-items">${sections(g.items, depth + 1, gk)}</div>
       </section>`;
     })}`;
   };
@@ -716,9 +721,10 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           ${chip('all', 'Todos', s.total)}${s.mine_pending || c.items.some(i => i.mine) ? chip('mine', 'Meus itens', s.mine_pending ? `${s.mine_pending} pend.` : undefined) : ''}
           ${chip('pending', 'Pendentes', s.total - s.done)}${s.nao_conforme ? chip('nc', 'Não conformes', s.nao_conforme) : ''}
         </div>
-        ${s.done && s.done < s.total ? doneToggle(s.done, 'resolvidos') : ''}
+        ${s.done && s.done < s.total ? html`<button type="button" class="btn btn-ghost btn-sm" data-clhide data-n="${s.done}">${icon('check')}<span>${st.hideResolved ? 'Mostrar' : 'Ocultar'} resolvidos (${s.done})</span></button>` : ''}
         <div class="cl-tools">
           ${filterMenu}
+          ${st.levels.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-clgroups aria-pressed="${groupsOnly()}">${icon('filter')}<span>${groupsOnly() ? 'Mostrar os itens' : 'Mostrar só os grupos'}</span></button>` : ''}
           <button type="button" class="btn btn-ghost btn-sm cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button>
           ${c.can_manage_items ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/programacao">${icon('calendar')}Programar profissional</a>` : ''}
           ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
@@ -729,7 +735,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
         <div class="cl-add-head"><b>${icon('plus')} Novo item</b><button type="button" class="icon-btn" id="cl-add-close" aria-label="Fechar">✕</button></div>
         ${itemForm()}
       </div>` : ''}
-      <div class="cl-list ${photosOn ? '' : 'no-photos'}" data-filter="${f}">
+      <div class="cl-list ${photosOn ? '' : 'no-photos'} ${st.hideResolved ? 'hide-resolved' : ''} ${groupsOnly() && st.levels.length ? 'only-groups' : ''}" data-filter="${f}">
         ${st.levels.length ? sections(c.items) : html`<div class="clg-items">${c.items.map(it => itemCard(t, it, c))}</div>`}
         <div class="cl-none muted">Nenhum item neste filtro.</div>
       </div>
@@ -858,6 +864,28 @@ export function bindChecklist(root, t, ctx, refresh) {
     applySel();
   });
   applySel();
+  // Resolvidos à mostra por padrão; ocultar vale para a tela aberta
+  root.querySelector('[data-clhide]')?.addEventListener('click', e => {
+    st.hideResolved = list.classList.toggle('hide-resolved');
+    e.currentTarget.querySelector('span').textContent = `${st.hideResolved ? 'Mostrar' : 'Ocultar'} resolvidos (${e.currentTarget.dataset.n})`;
+  });
+  // Só os grupos: recolhe os itens; tocar no grupo abre ou recolhe aquele grupo
+  root.querySelector('[data-clgroups]')?.addEventListener('click', e => {
+    const on = list.classList.toggle('only-groups');
+    saveGroupsOnly(on);
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+    e.currentTarget.querySelector('span').textContent = on ? 'Mostrar os itens' : 'Mostrar só os grupos';
+  });
+  const openGroup = (sec, open) => {
+    sec.classList.toggle('is-open', open);
+    sec.querySelector(':scope > .clg-head [aria-expanded]')?.setAttribute('aria-expanded', String(open));
+    if (open) st.openGroups.add(sec.dataset.gk); else st.openGroups.delete(sec.dataset.gk);
+  };
+  list.querySelectorAll('[data-clg-toggle]').forEach(b => b.addEventListener('click', () => {
+    if (!list.classList.contains('only-groups')) return;
+    const sec = b.closest('.clg');
+    openGroup(sec, !sec.classList.contains('is-open'));
+  }));
   // Fotos ocultas (lista mais compacta): o botão "N fotos" do card abre a galeria do item
   root.querySelector('[data-clphotos]')?.addEventListener('click', e => {
     const on = list.classList.toggle('no-photos') === false;
@@ -1110,6 +1138,8 @@ export function bindChecklist(root, t, ctx, refresh) {
     const el = scrollTo === 'cl-new' ? panel : root.querySelector(`#cli-${scrollTo}`);
     const isForm = scrollTo === 'cl-new';
     scrollTo = null;
+    // O próximo item pode estar em outro grupo recolhido: abre o caminho até ele
+    for (let sec = el?.closest?.('.clg'); !isForm && sec; sec = sec.parentElement.closest('.clg')) openGroup(sec, true);
     if (el) setTimeout(() => { el.scrollIntoView({ block: isForm ? 'start' : 'nearest', behavior: 'smooth' }); if (isForm) form?.focus(); }, 30);
   }
 }

@@ -3568,3 +3568,13 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .pl-gap.has-gap { border-left-style: dashed; color: #B45309; }
 .pl-gap .pl-edit { margin-left: 0; }
 .pl-step:not(:last-child)::before { bottom: 0; }
+/* Check-list: resolvidos à mostra (botão oculta) e opção de ver só os grupos */
+.cl-list.hide-resolved .cli[data-resolved] { display: none; }
+.cl-list.hide-resolved .clg:not(:has(.cli:not([data-resolved]))) { display: none; }
+.clg-chev { display: none; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--navy); cursor: pointer; }
+.clg-chev svg { width: 18px; height: 18px; transition: transform .15s; }
+.cl-list.only-groups .clg-chev { display: inline-flex; }
+.cl-list.only-groups .clg.is-open > .clg-head .clg-chev svg { transform: rotate(90deg); }
+.cl-list.only-groups .clg:not(.is-open) > .clg-items { display: none; }
+.cl-list.only-groups .clg-head { padding: 8px 10px 8px 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--card, #fff); }
+.cl-list.only-groups .clg-name { cursor: pointer; }

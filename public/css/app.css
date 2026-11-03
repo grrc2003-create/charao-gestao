@@ -3618,3 +3618,16 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .pie-body li i { width: 10px; height: 10px; border-radius: 2px; }
 .pie-body li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pie-body li b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Conclusão por projeto: recolhida na altura do quadro ao lado */
+.dash-left { align-self: start; }
+.dash-fold .fold-body { overflow: hidden; }
+.dash-fold:not(.is-open):not(.fits) .fold-body { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent); }
+.fold-toggle { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 46px; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius, 12px) var(--radius, 12px); background: transparent; color: var(--navy); font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer; }
+.fold-toggle:hover, .fold-toggle:focus-visible { background: var(--navy-50); }
+.fold-toggle svg { width: 16px; height: 16px; transform: rotate(90deg); transition: transform .15s; }
+.dash-fold.is-open .fold-toggle svg { transform: rotate(-90deg); }
+.dash-fold.fits .fold-toggle { display: none; }
+/* No PDF e na impressão saem todos os projetos */
+#print-one .fold-body, .po-body .fold-body { max-height: none !important; overflow: visible !important; -webkit-mask-image: none !important; mask-image: none !important; }
+@media print { .dash-fold .fold-body { max-height: none !important; overflow: visible !important; -webkit-mask-image: none !important; mask-image: none !important; } .fold-toggle { display: none !important; } }

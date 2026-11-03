@@ -30,6 +30,30 @@ function typeAnalysis(rows) {
     <ul class="rows">${rows.map(row)}</ul></section>`;
 }
 
+// Conclusão por projeto: recolhida na altura do quadro ao lado, com botão para ampliar (a escolha vale enquanto a tela estiver aberta)
+let foldOpen = false;
+function bindProjectFold(root, total) {
+  const card = root.querySelector('.dash-fold'), left = root.querySelector('.dash-left');
+  if (!card || !left) return;
+  const head = card.querySelector('.card-head'), body = card.querySelector('.fold-body'), btn = card.querySelector('.fold-toggle');
+  const fit = () => {
+    const room = Math.max(100, left.offsetHeight - head.offsetHeight - 46 - 2); // 46 = botão, 2 = bordas
+    const fits = body.scrollHeight <= room + 46;
+    body.style.maxHeight = foldOpen || fits ? '' : `${room}px`;
+    card.classList.toggle('is-open', foldOpen);
+    card.classList.toggle('fits', fits);
+    btn.setAttribute('aria-expanded', String(foldOpen));
+    btn.querySelector('span').textContent = foldOpen ? 'Recolher' : `Ver todos os projetos (${total})`;
+  };
+  btn.addEventListener('click', () => {
+    foldOpen = !foldOpen;
+    fit();
+    if (!foldOpen && card.getBoundingClientRect().top < 0) card.scrollIntoView({ block: 'start' });
+  });
+  new ResizeObserver(fit).observe(left);
+  fit();
+}
+
 export async function view({ state }) {
   const [d, impactRank] = await Promise.all([api('/dashboard'), api('/impact-ranking').catch(() => [])]);
   const u = state.user;
@@ -68,15 +92,18 @@ export async function view({ state }) {
       ${checklistSection(d.checklists || [])}
 
       <div class="grid grid-dash section">
-        <section class="card">
+        <section class="card dash-left">
           <div class="card-head"><h2>Distribuição por status</h2><a class="sub" href="#/tarefas">Ver tarefas</a></div>
           <div class="card-body">${donut(s.by_status)}</div>
         </section>
-        <section class="card">
+        <section class="card dash-fold">
           <div class="card-head"><h2>Conclusão por projeto</h2><a class="sub" href="#/projetos">Todos os projetos</a></div>
+          <div class="fold-body">
           <ul class="rows">${projects.map(projectRow)}</ul>
           ${d.internal_areas.length ? html`<div class="card-head" style="border-top:1px solid var(--line)"><h2>Interno (empresa)</h2><span class="sub">tarefas da própria Charão</span></div>
             <ul class="rows">${d.internal_areas.map(projectRow)}</ul>` : ''}
+          </div>
+          <button type="button" class="fold-toggle no-print" aria-expanded="false">${icon('chevron')}<span></span></button>
         </section>
       </div>
 
@@ -135,6 +162,7 @@ export async function view({ state }) {
       </div>
       <a class="fab" href="#/tarefas/nova" aria-label="Nova tarefa">${icon('plus')}</a>`,
     mount: root => {
+      bindProjectFold(root, projects.length + d.internal_areas.length);
       bindCommon(root);
       bindChecklistCards(root);
     },

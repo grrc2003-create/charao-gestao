@@ -1,7 +1,7 @@
 // Financeiro › Importar planilha: baixar a planilha modelo, enviar preenchida, conferir a prévia
 // (erros por linha, tarefas que já existem) e confirmar. Cada linha vira uma obrigação, com as parcelas geradas como hoje.
 import { html, api, icon } from '../core.js';
-import { toast, confirmSheet } from '../ui.js';
+import { toast, confirmSheet, setBlocked } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -93,7 +93,7 @@ function previewHtml(p) {
       </label></li>`)}</ul>
     </section>`;
   return html`${tasks}${plansHtml(p)}${paysHtml(p)}
-    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-fi-apply ${n ? '' : 'disabled'}>${icon('check')}<span>${applyLabel(t.ok, t.pay_count, t.plan_months)}</span></button></div>`;
+    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-fi-apply aria-disabled="${n ? 'false' : 'true'}" data-why="${n ? '' : 'Nenhuma linha válida marcada para importar.'}">${icon('check')}<span>${applyLabel(t.ok, t.pay_count, t.plan_months)}</span></button></div>`;
 }
 const applyLabel = (tasks, pays, plans = 0) => (!tasks && !pays && !plans ? 'Nada para importar'
   : `Importar ${[tasks ? `${tasks} tarefa(s)` : '', plans ? `${plans} previsto(s)` : '', pays ? `${pays} pagamento(s)` : ''].filter(Boolean).join(', ')}`);
@@ -131,7 +131,7 @@ export async function importPage({ state, navigate, render }) {
               <input type="file" id="fi-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
               <ul class="bi-files" data-fi-name></ul></div></div>
           </div>
-          <button type="button" class="btn btn-primary" data-fi-read disabled>Ler e mostrar prévia</button>
+          <button type="button" class="btn btn-primary" data-fi-read aria-disabled="true" data-why="Escolha o arquivo para liberar a leitura.">Ler e mostrar prévia</button>
         </div>
       </section>
       <div data-fi-preview></div>
@@ -159,7 +159,7 @@ export async function importPage({ state, navigate, render }) {
       input.addEventListener('change', () => {
         file = [...input.files].find(f => /\.xlsx$/i.test(f.name)) || null;
         nameBox.innerHTML = file ? html`<li>${icon('file')}${file.name} <small>${Math.max(1, Math.round(file.size / 1024))} KB</small></li>`.toString() : '';
-        read.disabled = !file; out.innerHTML = '';
+        setBlocked(read, file ? '' : 'Escolha o arquivo para liberar a leitura.'); out.innerHTML = '';
         if (input.files.length && !file) toast('Envie um arquivo .xlsx.', 'error');
       });
       read.addEventListener('click', async () => {
@@ -175,7 +175,7 @@ export async function importPage({ state, navigate, render }) {
             && (r.target.id || out.querySelector(`[data-fiok="${r.target.line}"]`)?.checked)).reduce((s, r) => s + r.months.filter(m => m.status === 'ok').length, 0);
           const planCount = () => (p.plans || []).filter(r => r.status === 'ok' && out.querySelector(`[data-fplok="${r.line}"]`)?.checked
             && (r.target.id || out.querySelector(`[data-fiok="${r.target.line}"]`)?.checked)).reduce((s, r) => s + r.months.length, 0);
-          const count = () => { const n = out.querySelectorAll('[data-fiok]:checked').length, k = payCount(), q = planCount(); btn.disabled = !(n + k + q); btn.querySelector('span').textContent = applyLabel(n, k, q); };
+          const count = () => { const n = out.querySelectorAll('[data-fiok]:checked').length, k = payCount(), q = planCount(); setBlocked(btn, n + k + q ? '' : 'Nenhuma linha válida marcada para importar.'); btn.querySelector('span').textContent = applyLabel(n, k, q); };
           out.querySelectorAll('[data-fiok], [data-fpok], [data-fplok]').forEach(cb => cb.addEventListener('change', () => { cb.closest('li').classList.toggle('is-off', !cb.checked); count(); }));
           btn.addEventListener('click', async () => {
             const skip = [...out.querySelectorAll('[data-fiok]:not(:checked):not(:disabled)')].map(c => Number(c.dataset.fiok));

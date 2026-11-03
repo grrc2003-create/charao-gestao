@@ -2,7 +2,7 @@
 // (tarefas, subtarefas recuadas, dependências, erros e avisos). Só importa quando não há erro.
 // No cadastro de um projeto novo, a planilha escolhida no formulário chega aqui (setPendingPlanning) e a prévia abre direto.
 import { html, api, icon, fmtDate } from '../core.js';
-import { toast } from '../ui.js';
+import { toast, setBlocked } from '../ui.js';
 import { pageHead } from './shared.js';
 
 // Planilha escolhida no cadastro do projeto: fica guardada até a prévia carregar (a tela pode ser desenhada mais de uma vez)
@@ -45,7 +45,7 @@ function previewHtml(p) {
         <span class="fi-val"><span class="m-badge ${r.status === 'ok' ? 'm-paid' : 'fi-err'}">${r.status === 'ok' ? 'Pronta' : 'Com erro'}</span></span>
       </div></li>`)}</ul>
     </section>
-    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-pl-apply ${t.erro || !t.ok ? 'disabled' : ''}>${icon('check')}${t.erro ? 'Corrija os erros para importar' : `Importar ${t.ok} tarefa(s)`}</button></div>`;
+    <div class="bi-confirm"><button type="button" class="btn btn-accent" data-pl-apply aria-disabled="${t.erro || !t.ok ? 'true' : 'false'}" data-why="${t.erro ? 'A planilha tem linhas com erro. Corrija os erros e leia o arquivo de novo.' : t.ok ? '' : 'Nenhuma tarefa válida para importar nesta planilha.'}">${icon('check')}${t.erro ? 'Corrija os erros para importar' : `Importar ${t.ok} tarefa(s)`}</button></div>`;
 }
 
 export async function importPage({ params, state, navigate }) {
@@ -66,7 +66,7 @@ export async function importPage({ params, state, navigate }) {
               <input type="file" id="pl-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
               <ul class="bi-files" data-pl-name></ul></div></div>
           </div>
-          <button type="button" class="btn btn-primary" data-pl-read disabled>Ler e mostrar prévia</button>
+          <button type="button" class="btn btn-primary" data-pl-read aria-disabled="true" data-why="Escolha o arquivo para liberar a leitura.">Ler e mostrar prévia</button>
         </div>
       </section>
       <div data-pl-preview></div>`,
@@ -76,7 +76,7 @@ export async function importPage({ params, state, navigate }) {
       const pick = f => {
         file = f && /\.xlsx$/i.test(f.name) ? f : null;
         nameBox.innerHTML = file ? html`<li>${icon('file')}${file.name} <small>${Math.max(1, Math.round(file.size / 1024))} KB</small></li>`.toString() : '';
-        read.disabled = !file; out.innerHTML = '';
+        setBlocked(read, file ? '' : 'Escolha o arquivo para liberar a leitura.'); out.innerHTML = '';
         if (f && !file) toast('Envie um arquivo .xlsx.', 'error');
       };
       root.querySelector('[data-pl-template]').addEventListener('click', async ev => {
@@ -103,7 +103,7 @@ export async function importPage({ params, state, navigate }) {
             } catch (ex) { toast(ex.message, 'error'); btn.disabled = false; btn.lastChild.textContent = 'Tentar de novo'; }
           });
         } catch (ex) { toast(ex.message, 'error'); }
-        read.disabled = !file; read.textContent = 'Ler e mostrar prévia';
+        read.disabled = false; setBlocked(read, file ? '' : 'Escolha o arquivo para liberar a leitura.'); read.textContent = 'Ler e mostrar prévia';
       };
       read.addEventListener('click', load);
       if (auto) { pick(auto); load(); }

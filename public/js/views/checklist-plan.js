@@ -98,7 +98,7 @@ export async function view({ params }) {
                   <div class="pl-main"><b><span class="pl-n">${i.seq}</span>${i.text}</b>${tags(i) ? html`<small>${tags(i)}</small>` : ''}
                     <span class="pl-days">${daysLabel(i.days)}${i.qty > 1 ? ` · ${i.qty} vagas` : ''}${i.value !== undefined ? ` · ${BRL.format(i.value)}` : ''}${editDays(i)}</span>
                     ${i.fits ? '' : html`<em>Não cabe: precisa de ${daysLabel(needOf(i.days))} e restam ${daysLabel(d.capacity.remaining)}</em>`}</div>
-                  ${edit ? html`<button type="button" class="btn ${i.fits ? 'btn-primary' : 'btn-ghost'} btn-sm" data-link="${i.id}" ${i.fits ? '' : 'disabled'}>${icon('plus')}Vincular</button>` : ''}
+                  ${edit ? html`<button type="button" class="btn ${i.fits ? 'btn-primary' : 'btn-ghost'} btn-sm" data-link="${i.id}" aria-disabled="${i.fits ? 'false' : 'true'}" data-why="${i.fits ? '' : `Não cabe no período: precisa de ${daysLabel(needOf(i.days))} e restam ${daysLabel(d.capacity.remaining)}.`}">${icon('plus')}Vincular</button>` : ''}
                 </li>`)}</ul>` : html`<p class="muted card-body">Nenhuma pendência desta função sem profissional neste check-list.</p>`}
               ${d.items_without_team ? html`<p class="hint pl-hint">${d.items_without_team} ${d.items_without_team === 1 ? 'item em aberto está' : 'itens em aberto estão'} sem equipe e não ${d.items_without_team === 1 ? 'aparece' : 'aparecem'} aqui. Informe a função e os dias na edição do item.</p>` : ''}
             </section>

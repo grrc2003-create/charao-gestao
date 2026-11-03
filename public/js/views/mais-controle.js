@@ -158,7 +158,7 @@ export async function view({ state, render }) {
         <div class="card-head"><h2>${icon('reschedule')}Buscar pagamentos</h2><span class="sub">API para Relatórios · plano ${PLAN[st.plan] || st.plan}</span></div>
         <div class="card-body mc-fetch">
           ${st.configured ? html`<div>
-              <button type="button" class="btn btn-primary" data-mc-fetch ${st.next_allowed ? 'disabled' : ''}>${icon('reschedule')}Buscar no Mais Controle</button>
+              <button type="button" class="btn btn-primary" data-mc-fetch aria-disabled="${st.next_allowed ? 'true' : 'false'}" data-why="${st.next_allowed ? `Pelo plano ${PLAN[st.plan] || st.plan}, a próxima busca fica liberada em ${when(st.next_allowed)}.` : ''}">${icon('reschedule')}Buscar no Mais Controle</button>
               <small class="hint">${st.next_allowed ? `Pelo plano ${PLAN[st.plan] || st.plan}, a próxima busca fica liberada em ${when(st.next_allowed)}.` : 'Traz todo o histórico (2024 em diante) e usa 1 consulta da cota do plano.'}${st.auto ? ' Automático: às segundas-feiras, a partir das 8h, o sistema busca e sincroniza sozinho.' : ''}</small>
               ${st.auto && st.next_auto ? html`<small class="hint mc-next">${icon('calendar')}Próxima busca automática: <b>${wday(st.next_auto)}</b></small>` : ''}</div>`
             : html`<div class="mc-cfg"><b>Integração ainda não configurada.</b> No painel do servidor (Render › Environment), cadastre <code>MAISCONTROLE_USUARIO</code> e <code>MAISCONTROLE_SENHA</code> com a credencial da API para Relatórios (Mais Controle › Configurações › Integração). Opcional: <code>MAISCONTROLE_PLANO</code> = semanal, diario ou horario. A senha fica só no servidor.</div>`}

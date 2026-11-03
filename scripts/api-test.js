@@ -2791,6 +2791,48 @@ async function main() {
   ok((await fcJul('DELETE', `/field/sheets/${fcS2.id}`)).data.ok && (await fcAna('GET', '/field/contracts?obra=2')).data.find(c => c.id === fcC.id).measured_pct === 40, 'excluir folha aberta devolve o saldo da empreitada');
   ok((await fcAna('GET', '/audit')).data.some(a => a.entity === 'field' && a.action === 'Folha de campo fechada') && !(await fcCam('GET', '/audit')).data?.some?.(a => a.entity === 'field'), 'ações da Folha de Campo na auditoria (só para a seção)');
 
+  console.log('Correção de datas pelo Administrador');
+  const cdAna = await login('ana@charao.eng.br');
+  const cdRic = await login('ricardo@charao.eng.br');
+  const cdAnaId = (await cdAna('GET', '/auth/me')).data.user.id;
+  ok((await cdAna('POST', '/users', { name: 'Admin Dois Teste', email: 'admin.dois@teste.com', role: 'admin', password: 'admin12345' })).status === 201, 'cria um segundo administrador');
+  const cdOutro = await login('admin.dois@teste.com', 'admin12345');
+  const cdTask = (over = {}) => cdRic('POST', '/tasks', { project_id: 1, title: 'Datas com erro', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', start_date: '2098-03-01', due_date: '2098-03-10', ...over }).then(r => r.data.id);
+  const cdA = await cdTask();
+  const cdB = await cdTask({ start_date: '2098-03-11', due_date: '2098-03-20' });
+  await cdRic('POST', '/dependencies', { pred: `t:${cdA}`, succ: `t:${cdB}` });
+  const cdB0 = (await cdAna('GET', `/tasks/${cdB}`)).data;
+  ok((await cdAna('GET', `/tasks/${cdA}`)).data.can.correct_dates === true && (await cdRic('GET', `/tasks/${cdA}`)).data.can.correct_dates === false, 'só o administrador tem a correção de datas');
+  ok((await cdRic('POST', `/tasks/${cdA}/correct-dates`, { due_date: '2098-04-30' })).status === 403, 'gestor não corrige datas sem reagendar');
+  const cdFix = await cdAna('POST', `/tasks/${cdA}/correct-dates`, { start_date: '2098-03-02', due_date: '2098-04-30', note: 'Erro da importação' });
+  ok(cdFix.status === 200 && cdFix.data.start_date === '2098-03-02' && cdFix.data.due_date === '2098-04-30', 'administrador corrige início e prazo da tarefa de outra pessoa, sem justificativa');
+  ok(cdFix.data.reschedule_count === 0 && !cdFix.data.reschedules.length && !cdFix.data.original_due, 'a correção não conta como reagendamento');
+  const cdHist = cdFix.data.history.find(h => h.action === 'Datas corrigidas pelo Administrador');
+  ok(cdHist && cdHist.user_name === 'Ana Charão' && /2098|\/2098/.test(cdHist.details) && cdHist.details.includes('Erro da importação'), 'a correção fica no histórico, com quem fez, as datas e a observação');
+  const cdB1 = (await cdAna('GET', `/tasks/${cdB}`)).data;
+  ok(cdB1.start_date === cdB0.start_date && cdB1.due_date === cdB0.due_date, 'a correção não empurra as sucessoras');
+  ok((await cdAna('POST', `/tasks/${cdA}/correct-dates`, { start_date: '2098-05-10', due_date: '2098-05-01' })).status === 400, 'início depois do prazo é recusado');
+  const cdHistN = (await cdAna('GET', `/tasks/${cdA}`)).data.history.length;
+  await cdAna('POST', `/tasks/${cdA}/correct-dates`, { start_date: '2098-03-02', due_date: '2098-04-30' });
+  ok((await cdAna('GET', `/tasks/${cdA}`)).data.history.length === cdHistN, 'sem mudança de data, nada é registrado');
+  const cdOwn = await cdTask({ assignee_id: cdAnaId });
+  ok((await cdAna('GET', `/tasks/${cdOwn}`)).data.can.correct_dates === false && (await cdOutro('GET', `/tasks/${cdOwn}`)).data.can.correct_dates === true, 'na própria tarefa a opção só fica ativa para outro administrador');
+  ok(/outro Administrador/.test((await cdAna('GET', `/tasks/${cdOwn}`)).data.can.correct_dates_blocked) && !(await cdOutro('GET', `/tasks/${cdOwn}`)).data.can.correct_dates_blocked && !(await cdRic('GET', `/tasks/${cdOwn}`)).data.can.correct_dates_blocked, 'o motivo do bloqueio vai só para o administrador responsável');
+  ok((await cdAna('POST', `/tasks/${cdOwn}/correct-dates`, { due_date: '2098-04-01' })).status === 403, 'administrador não corrige as datas da própria tarefa');
+  ok((await cdAna('GET', `/tasks/${cdOwn}`)).data.due_date === '2098-03-10', 'a tentativa recusada não altera a data');
+  ok((await cdOutro('POST', `/tasks/${cdOwn}/correct-dates`, { due_date: '2098-04-01' })).data.due_date === '2098-04-01', 'outro administrador corrige as datas dessa tarefa');
+  const cdMade = (await cdAna('POST', '/tasks', { project_id: 1, title: 'Criada pela Ana', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', due_date: '2098-03-10' })).data.id;
+  ok((await cdAna('POST', `/tasks/${cdMade}/correct-dates`, { due_date: '2098-03-20' })).status === 200, 'tarefa criada pelo administrador, mas de outro responsável, pode ser corrigida por ele');
+  const cdPai = await cdTask();
+  const cdFilho = (await cdRic('POST', '/tasks', { project_id: 1, parent_id: cdPai, title: 'Subtarefa', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', start_date: '2098-03-02', due_date: '2098-03-05' })).data.id;
+  ok((await cdAna('POST', `/tasks/${cdPai}/correct-dates`, { due_date: '2098-09-01' })).status === 400, 'término da principal continua acompanhando as subtarefas');
+  ok((await cdAna('GET', `/tasks/${cdPai}`)).data.can.correct_dates === false, 'sem a opção na principal cujas datas vêm das subtarefas');
+  ok(/subtarefas/.test((await cdAna('GET', `/tasks/${cdPai}`)).data.can.correct_dates_blocked), 'a principal explica por que a correção está bloqueada');
+  ok((await cdAna('POST', `/tasks/${cdFilho}/correct-dates`, { due_date: '2098-08-15' })).status === 200 && (await cdAna('GET', `/tasks/${cdPai}`)).data.due_date === '2098-08-15', 'corrigir a subtarefa atualiza a principal');
+  const cdCan = await cdTask();
+  ok((await cdAna('POST', `/tasks/${cdCan}/cancel`, { reason: 'Teste de cancelamento' })).status === 200, 'cancela a tarefa para o teste');
+  ok((await cdAna('POST', `/tasks/${cdCan}/correct-dates`, { due_date: '2098-08-15' })).status === 400, 'tarefa cancelada não é corrigida');
+
 }
 
 main()

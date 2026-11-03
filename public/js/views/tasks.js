@@ -1,5 +1,5 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
-import { sheet, toast } from '../ui.js';
+import { sheet, toast, setBlocked } from '../ui.js';
 import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions } from './shared.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 
@@ -79,7 +79,7 @@ export async function view({ state, query, setQuery }) {
         <span><b id="bulk-n">0</b> selecionada(s) · toque nas tarefas para marcar</span>
         <span class="bulk-acts"><button type="button" class="btn btn-ghost btn-sm" id="bulk-all">Selecionar todas (${tasks.length})</button>
           <button type="button" class="btn btn-ghost btn-sm" id="bulk-off">Cancelar</button>
-          <button type="button" class="btn btn-danger btn-sm" id="bulk-go" disabled>${icon('trash')}Excluir</button></span></div>` : ''}
+          <button type="button" class="btn btn-danger btn-sm" id="bulk-go" aria-disabled="true" data-why="Marque ao menos uma tarefa para excluir.">${icon('trash')}Excluir</button></span></div>` : ''}
       ${taskList(tasks, { groupBy: f.org })}
       <a class="fab" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}" aria-label="Nova tarefa">${icon('plus')}</a>`,
     mount(root, ctx) {
@@ -143,7 +143,7 @@ export async function view({ state, query, setQuery }) {
         const paint = () => {
           items().forEach(el => el.classList.toggle('is-selected', sel.has(idOf(el))));
           root.querySelector('#bulk-n').textContent = sel.size;
-          root.querySelector('#bulk-go').disabled = !sel.size;
+          setBlocked(root.querySelector('#bulk-go'), sel.size ? '' : 'Marque ao menos uma tarefa para excluir.');
         };
         const setOn = v => { on = v; bar.hidden = !v; root.classList.toggle('is-selecting', v); if (!v) sel.clear(); paint(); };
         root.querySelector('#bulk-on').addEventListener('click', () => setOn(!on));

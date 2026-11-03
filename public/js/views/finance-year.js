@@ -84,8 +84,8 @@ export async function view({ state, query, setQuery, render }) {
 
   const mobileMonth = k => {
     const m = d.month_totals[k];
-    return html`<div class="fy-mnav"><button type="button" class="icon-btn" data-mm="-1" aria-label="Mês anterior" ${k === 0 ? 'disabled' : ''}>‹</button>
-        <b>${MESES[k]} ${d.year}</b><button type="button" class="icon-btn" data-mm="1" aria-label="Próximo mês" ${k === 11 ? 'disabled' : ''}>›</button></div>
+    return html`<div class="fy-mnav"><button type="button" class="icon-btn" data-mm="-1" aria-label="Mês anterior" aria-disabled="${k === 0 ? 'true' : 'false'}" data-why="${k === 0 ? 'Janeiro é o primeiro mês deste ano.' : ''}">‹</button>
+        <b>${MESES[k]} ${d.year}</b><button type="button" class="icon-btn" data-mm="1" aria-label="Próximo mês" aria-disabled="${k === 11 ? 'true' : 'false'}" data-why="${k === 11 ? 'Dezembro é o último mês deste ano.' : ''}">›</button></div>
       <div class="fy-mtot"><span>Previsto <b>${money(m.planned)}</b></span><span>Real <b>${money(m.real)}</b></span><span>${m.paid} de ${m.count} pago(s)</span>
         ${(() => { const b = bal(m.planned, m.real, k); return b ? html`<span class="fy-mbal ${b.cls}">${b.label === 'mês em andamento' ? 'Em andamento · falta do previsto' : b.cls === 'is-over' ? 'Estourou' : 'Positivo'} <b>${b.cls === 'is-over' ? money(-b.v) : money(b.v)}</b></span>` : ''; })()}</div>
       ${d.groups.map(g => {

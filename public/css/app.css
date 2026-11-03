@@ -3581,3 +3581,9 @@ a.ct-cl:hover .ct-cl-id b { color: var(--navy); text-decoration: underline; }
 .cli-aloc.is-worker { background: #E7F3EC; color: #1F6B41; border-color: #BFE0CC; }
 .cli-aloc.is-role { background: #FBF3E6; color: #8A5A0B; border-color: #EBD7B2; }
 .cli-aloc.is-none { background: none; color: var(--muted); border-color: var(--line); font-weight: 500; }
+
+/* Janela com o motivo de um botão bloqueado */
+.why-tip { position: fixed; z-index: 10000; max-width: min(320px, calc(100vw - 24px)); padding: 8px 11px; border-radius: 8px; background: #1E2C3A; color: #fff; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; box-shadow: 0 6px 18px rgba(30, 44, 58, .28); pointer-events: none; }
+[aria-disabled="true"].act-item { opacity: .5; cursor: not-allowed; }
+[aria-disabled="true"].act-item:hover { background: transparent; }
+@media print { .why-tip { display: none; } }

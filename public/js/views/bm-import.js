@@ -2,7 +2,7 @@
 // e um BM (Recebida) por mês do que foi recebido; parcelas em aberto ficam como saldo a medir.
 // Prévia antes de gravar; em cada obra escolhe criar contrato novo, usar um contrato já cadastrado ou não importar.
 import { html, api, icon, fmtDate } from '../core.js';
-import { toast } from '../ui.js';
+import { toast, setBlocked } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -75,7 +75,7 @@ export async function importBms({ state, navigate }) {
           <label class="bi-drop" for="bi-files">${icon('file')}<span><b>Escolher planilhas</b><small>pode selecionar várias (ex.: 2024, 2025 e 2026)</small></span></label>
           <input type="file" id="bi-files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
           <ul class="bi-files" data-bi-names></ul>
-          <button type="button" class="btn btn-primary" data-bi-read disabled>Ler e mostrar prévia</button>
+          <button type="button" class="btn btn-primary" data-bi-read aria-disabled="true" data-why="Escolha ao menos um arquivo para liberar a leitura.">Ler e mostrar prévia</button>
           <p class="hint" style="margin:0">Reenviar a planilha não duplica: o que já foi importado é ignorado e as parcelas que estavam em aberto e foram recebidas ganham o BM.</p>
         </div>
       </section>
@@ -86,7 +86,7 @@ export async function importBms({ state, navigate }) {
       input.addEventListener('change', () => {
         files = [...input.files].filter(f => /\.xlsx$/i.test(f.name));
         names.innerHTML = files.map(f => html`<li>${icon('file')}${f.name} <small>${Math.max(1, Math.round(f.size / 1024))} KB</small></li>`).join('');
-        read.disabled = !files.length;
+        setBlocked(read, files.length ? '' : 'Escolha ao menos um arquivo para liberar a leitura.');
         out.innerHTML = '';
         if (files.length < input.files.length) toast('Só arquivos .xlsx são aceitos.', 'error');
       });

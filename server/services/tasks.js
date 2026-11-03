@@ -239,6 +239,7 @@ export function permissionsFor(ctx, t) {
     edit: manage && t.status !== 'concluida',
     reassign: canReassignTask(ctx, t),
     reschedule: manage && t.status !== 'concluida' && !!t.due_date && !(t.task_type === 'checklist' && checklistMaxDue(t.id)) && !(!t.parent_id && subtasksMaxDue(t.id)),
+    ...correctDatesPermission(ctx, t),
     due_from_items: t.task_type === 'checklist' && !!checklistMaxDue(t.id),
     due_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMaxDue(t.id),
     start_from_subtasks: !t.parent_id && t.task_type !== 'checklist' && !!subtasksMinStart(t.id),
@@ -599,6 +600,49 @@ export function updateTask(ctx, id, body, { trusted = false } = {}) {
         applyPull({ userId: ctx.user.id, cause: { taskId: t.parent_id, code: pBefore.code, title: pBefore.title }, sources: [{ key: `t:${t.parent_id}`, oldFinish: pBefore.due_date, newFinish: pAfter }] });
       }
     }
+  });
+}
+
+// Correção de datas pelo Administrador (erros de implantação): não conta como reagendamento, não pede justificativa e não
+// mexe nas sucessoras; fica no histórico. Tarefa da qual o administrador é o responsável só outro administrador corrige.
+function canCorrectDates(ctx, t) {
+  return isAdmin(ctx.user) && t.assignee_id !== ctx.user.id;
+}
+
+function correctDatesPermission(ctx, t) {
+  if (!isAdmin(ctx.user)) return { correct_dates: false, correct_dates_blocked: null };
+  const why = !canCorrectDates(ctx, t) ? 'Você é o responsável por esta tarefa: somente outro Administrador pode corrigir as datas dela.'
+    : !t.parent_id && t.task_type !== 'checklist' && subtasksMaxDue(t.id) && subtasksMinStart(t.id) ? 'As datas desta tarefa principal acompanham as subtarefas. Para mudar, corrija as subtarefas.' : null;
+  return { correct_dates: !why, correct_dates_blocked: why };
+}
+
+export function correctTaskDates(ctx, id, body) {
+  const t = loadVisible(ctx, id);
+  assertNotCancelled(t);
+  if (!isAdmin(ctx.user)) throw forbidden('Somente o Administrador corrige datas sem reagendar.');
+  if (!canCorrectDates(ctx, t)) throw forbidden('Somente outro Administrador pode corrigir as datas de uma tarefa sua.');
+  const ns = 'start_date' in body ? date(body.start_date, 'Início previsto') ?? null : t.start_date ?? null;
+  const nd = 'due_date' in body ? date(body.due_date, 'Prazo') ?? null : t.due_date ?? null;
+  const startChanged = ns !== (t.start_date ?? null), dueChanged = nd !== (t.due_date ?? null);
+  if (dueChanged) {
+    const maxDue = t.task_type === 'checklist' ? checklistMaxDue(t.id) : null;
+    if (maxDue) throw badRequest(`O prazo do check-list acompanha o maior prazo dos itens (${fmtDate(maxDue)}). Para mudar, altere o prazo dos itens.`);
+    const subMax = !t.parent_id && t.task_type !== 'checklist' ? subtasksMaxDue(t.id) : null;
+    if (subMax) throw badRequest(`O término da tarefa principal acompanha a subtarefa que termina mais tarde (${fmtDate(subMax)}). Para mudar, corrija as subtarefas.`);
+  }
+  if (startChanged && !t.parent_id && t.task_type !== 'checklist') {
+    const subMin = subtasksMinStart(t.id);
+    if (subMin) throw badRequest(`O início da tarefa principal acompanha a subtarefa que começa mais cedo (${fmtDate(subMin)}). Para mudar, corrija as subtarefas.`);
+  }
+  assertDateOrder(ns, nd);
+  if (!startChanged && !dueChanged) return;
+  const note = str(body.note, { max: 1000, label: 'Observação' });
+  const show = d => (d ? fmtDate(d) : '—');
+  tx(() => {
+    run('UPDATE tasks SET start_date = ?, due_date = ?, updated_at = ? WHERE id = ?', ns, nd, nowIso(), id);
+    taskHistory(id, ctx.user.id, 'Datas corrigidas pelo Administrador', [startChanged ? `início ${show(t.start_date)} → ${show(ns)}` : '', dueChanged ? `término ${show(t.due_date)} → ${show(nd)}` : '',
+      'não conta como reagendamento', note].filter(Boolean).join(' · '));
+    if (t.parent_id) syncParentDue(t.parent_id, ctx.user.id, t.code);
   });
 }
 

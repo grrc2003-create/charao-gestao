@@ -228,6 +228,8 @@ function build(t, ctx) {
           ${can.edit ? html`<a class="act-item" href="#/tarefas/${t.id}/editar">${icon('edit')}Editar solicitação</a>` : ''}
           ${can.reassign ? html`<button type="button" class="act-item" data-act="reassign">${icon('user')}Alterar responsável</button>` : ''}
           ${can.reschedule ? html`<button type="button" class="act-item" data-act="reschedule">${icon('reschedule')}Reagendar prazo</button>` : ''}
+          ${!can.reschedule && can.edit && t.due_date && (can.due_from_items || can.due_from_subtasks) ? html`<button type="button" class="act-item" aria-disabled="true" data-why="${can.due_from_items ? 'O prazo do check-list acompanha o maior prazo dos itens. Para mudar, altere o prazo dos itens.' : 'O término da tarefa principal acompanha a subtarefa que termina mais tarde. Para mudar, reagende as subtarefas.'}">${icon('reschedule')}Reagendar prazo</button>` : ''}
+          ${can.correct_dates || can.correct_dates_blocked ? html`<button type="button" class="act-item" data-act="correctdates" aria-disabled="${can.correct_dates ? 'false' : 'true'}" data-why="${can.correct_dates_blocked || ''}">${icon('calendar')}Corrigir datas (sem reagendar)</button>` : ''}
           ${can.duplicate ? html`<button type="button" class="act-item" data-act="duplicate">${icon('file')}Duplicar${t.parent_id ? ' subtarefa' : t.subtasks?.length ? ' com subtarefas' : ' tarefa'}</button>` : ''}
           ${can.conclude_directly ? html`<button type="button" class="act-item" data-act="conclude">${icon('check')}Concluir diretamente</button>` : ''}
           ${can.reopen ? html`<button type="button" class="act-item" data-act="reopen">${icon('history')}Reabrir tarefa</button>` : ''}
@@ -466,6 +468,19 @@ function mount(root, t, ctx) {
         onSubmit: d => api(`/tasks/${t.id}/reschedule`, { method: 'POST', body: d }),
       });
       if (r) { toast('Prazo reagendado.'); refresh(await api(`/tasks/${t.id}`).catch(() => r)); }
+    },
+    correctdates: async () => {
+      const startLocked = t.can.start_from_subtasks, dueLocked = t.can.due_from_items || t.can.due_from_subtasks;
+      const r = await sheet({
+        title: 'Corrigir datas',
+        body: html`<div class="notice">${icon('info')}<span>Para corrigir erros: não conta como reagendamento, não pede justificativa e não altera as tarefas vinculadas. A correção fica registrada no histórico.</span></div>
+          ${startLocked ? '' : html`<div class="field"><label for="cd-start">Início previsto</label><input id="cd-start" name="start_date" type="date" value="${t.start_date || ''}"></div>`}
+          ${dueLocked ? html`<p class="muted small">O término acompanha ${t.can.due_from_items ? 'os prazos dos itens' : 'as subtarefas'}.</p>` : html`<div class="field"><label for="cd-due">Prazo</label><input id="cd-due" name="due_date" type="date" value="${t.due_date || ''}"></div>`}
+          <div class="field"><label for="cd-note">Observação</label><textarea id="cd-note" name="note" rows="2" maxlength="1000" placeholder="Opcional: o que estava errado"></textarea></div>`,
+        submitLabel: 'Corrigir datas',
+        onSubmit: d => api(`/tasks/${t.id}/correct-dates`, { method: 'POST', body: d }),
+      });
+      if (r) { toast('Datas corrigidas.'); refresh(r); }
     },
     desc: async () => {
       const r = await textSheet('exec_description', 'Descrição da execução', 'O que foi executado', t.exec_description, 'Descreva o serviço realizado, materiais e conferências feitas.');

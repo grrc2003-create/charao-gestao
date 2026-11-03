@@ -589,7 +589,7 @@ const itemRow = (i = {}) => html`<tr class="ct-item" data-id="${i.id || ''}">
   <td><input type="text" data-f="quantity" inputmode="decimal" value="${i.quantity !== undefined ? String(i.quantity).replace('.', ',') : ''}" placeholder="0" aria-label="Quantidade" class="ct-num"></td>
   <td class="num ct-value"></td>
   <td><label class="ct-add" title="Item incluído por aditivo"><input type="checkbox" data-f="additive" ${i.additive ? 'checked' : ''}>Aditivo</label></td>
-  <td><button type="button" class="icon-btn" data-rm-item ${i.used ? 'disabled' : ''} title="${i.used ? 'Item já medido: não pode ser removido' : 'Remover item'}" aria-label="Remover item">✕</button></td>
+  <td><button type="button" class="icon-btn" data-rm-item aria-disabled="${i.used ? 'true' : 'false'}" title="${i.used ? 'Item já medido: não pode ser removido' : 'Remover item'}" aria-label="Remover item">✕</button></td>
 </tr>`;
 const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return 0; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : 0; };
 

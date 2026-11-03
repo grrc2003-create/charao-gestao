@@ -68,6 +68,11 @@ export function sheet({ title, body, submitLabel = 'Salvar', danger = false, onS
 export const confirmSheet = (title, message, label = 'Confirmar', danger = false) =>
   sheet({ title, body: html`<p class="muted">${message}</p>`, submitLabel: label, danger }).then(r => r !== null);
 
+// Botão bloqueado por um motivo: fica inativo e explica o porquê (ao passar o mouse ou tocar). Sem motivo, volta ao normal.
+export function setBlocked(el, why) {
+  if (why) { el.setAttribute('aria-disabled', 'true'); el.dataset.why = why; } else { el.removeAttribute('aria-disabled'); delete el.dataset.why; }
+}
+
 // Redimensiona fotos no aparelho antes do envio (economiza dados em campo)
 export function readImages(files, max = 1600, quality = 0.82) {
   return Promise.all([...files].slice(0, 10).map(file => new Promise((resolve, reject) => {

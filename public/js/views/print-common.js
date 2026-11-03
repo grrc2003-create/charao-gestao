@@ -14,9 +14,11 @@ async function imagesReady(root) {
   await Promise.all(imgs.map(img => (img.complete ? null : new Promise(r => { img.onload = img.onerror = r; }))));
 }
 
-export function bindPrintToolbar(root) {
+// ready: o que ainda precisa terminar antes de imprimir (ex.: fotos sendo preparadas)
+export function bindPrintToolbar(root, ready) {
   root.querySelector('#do-print').addEventListener('click', async () => {
     toast('Preparando documento…', 'warn');
+    await ready;
     await imagesReady(root);
     window.print();
   });

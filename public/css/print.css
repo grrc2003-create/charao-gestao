@@ -606,3 +606,15 @@
 .r-list-table .r-list-who th { background: #fff; color: #1E2C3A; font-size: 8.5pt; text-transform: none; letter-spacing: 0; border-bottom: 1px solid #ECE9E3; }
 .r-list-table .r-l-gap td { padding: 3px 6px; background: #FBF3E6; color: #8A5A0B; font-size: 8.5pt; font-weight: 700; text-align: center; }
 .r-item-gap { margin: 4px 0; padding: 3px 8px; background: #FBF3E6; color: #8A5A0B; font-size: 8.5pt; font-weight: 700; text-align: center; border-radius: 4px; break-after: avoid; }
+
+/* Check-list: faixa da parte e agrupamentos repetem no topo de cada página; caixa "Informações" da barra */
+.r-rep { width: 100%; border-collapse: collapse; }
+.r-rep > thead { display: table-header-group; }
+.r-rep > tbody > tr > td, .r-rep > thead > tr > td { padding: 0; }
+.r-rep .r-part-head { margin-top: 0; }
+.r-list-table + .r-list-table { margin-top: 10px; }
+.r-list-table .r-list-who th { background: #F3EEE5; font-size: 10pt; font-weight: 700; border-left: 4px solid #2A3D50; }
+.pt-show { position: relative; }
+.pt-show summary { cursor: pointer; list-style-position: inside; }
+.pt-show-list { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; display: grid; gap: 8px; min-width: 250px; padding: 10px 12px; background: #fff; border: 1px solid var(--navy-100); border-radius: 8px; box-shadow: 0 6px 18px rgba(30, 44, 58, .16); }
+.pt-show-list label { display: flex; align-items: center; gap: 8px; cursor: pointer; }

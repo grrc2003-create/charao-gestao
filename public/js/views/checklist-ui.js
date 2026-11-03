@@ -433,10 +433,10 @@ const PHOTOS_KEY = 'cl-show-photos';
 // Padrão: fotos visíveis (ocultar fica guardado no aparelho)
 const showPhotos = () => { try { return localStorage.getItem(PHOTOS_KEY) !== '0'; } catch { return true; } };
 const saveShowPhotos = v => { try { localStorage.setItem(PHOTOS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
-// Grupos abrem e fecham como os itens. Só os grupos: todos começam recolhidos (a escolha fica guardada no aparelho);
+// Grupos abrem e fecham como os itens. Padrão: só os grupos, todos recolhidos (mostrar os itens fica guardado no aparelho);
 // groupFlip guarda os grupos que o usuário deixou diferente desse padrão
 const GROUPS_KEY = 'cl-groups-only';
-const groupsOnly = () => { try { return localStorage.getItem(GROUPS_KEY) === '1'; } catch { return false; } };
+const groupsOnly = () => { try { return localStorage.getItem(GROUPS_KEY) !== '0'; } catch { return true; } };
 const saveGroupsOnly = v => { try { localStorage.setItem(GROUPS_KEY, v ? '1' : '0'); } catch { /* sem armazenamento */ } };
 const keyOf = v => v || NONE;
 // f = { group, spec, resp } (valores '' = todos)

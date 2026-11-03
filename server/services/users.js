@@ -4,7 +4,7 @@ import { impactOfAssignee } from './dependencies.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
 import { canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf, requireSection } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
-import { userStats, summarize, monthlyTrend } from './metrics.js';
+import { userStats, summarize, monthlyTrend, rescheduleContributors } from './metrics.js';
 import { listVisible, execWorkDays } from './tasks.js';
 import { audit } from './audit.js';
 import { getSetting } from './settings.js';
@@ -67,6 +67,7 @@ export function getUser(ctx, id) {
     user: { ...publicUser(ctx, u), manager_name: map.get(u.manager_id)?.name || null, project_ids: projects },
     stats: withExec(userStats(u, tasks, map), tasks, id),
     trend: monthlyTrend(own),
+    dist_by: rescheduleContributors(own),
     chronic_min: getSetting('chronic_reschedule_threshold'),
     checklists: checklistDashboard(tasks, { userId: id, ctx }),
     impact: impactOfAssignee(id),

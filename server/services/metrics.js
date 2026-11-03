@@ -158,6 +158,26 @@ export function summarize(tasks, ref = today(), { raw = false } = {}) {
   };
 }
 
+// Quanto cada responsável contribui em um número: os 3 maiores e, se houver mais, o restante em "Outros"
+function topContributors(tasks) {
+  const m = new Map();
+  for (const t of tasks) {
+    const k = t.assignee_id || 0;
+    if (!m.has(k)) m.set(k, { name: t.assignee_name || 'Sem responsável', n: 0 });
+    m.get(k).n++;
+  }
+  const list = [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, 'pt-BR'));
+  const rest = list.slice(3).reduce((n, u) => n + u.n, 0);
+  return [...list.slice(0, 3), ...(rest ? [{ name: 'Outros', n: rest, other: true }] : [])];
+}
+
+// Os mesmos grupos de "Reagendamentos por tarefa" (summarize), por responsável
+export function rescheduleContributors(tasks) {
+  const ts = tasks.filter(t => !t.cancelled_at && countsInIndicators(t) && (t.due_date || t.original_due));
+  const of = fn => topContributors(ts.filter(fn));
+  return { r0: of(t => !t.reschedule_count), r1: of(t => t.reschedule_count === 1), r2: of(t => t.reschedule_count === 2), r3: of(t => t.reschedule_count >= 3) };
+}
+
 // Evolução mensal (mês do prazo original): % de tarefas que atrasaram ao menos uma vez e % repactuadas
 export function monthlyTrend(tasks, ref = today(), months = 6) {
   const out = [];
@@ -171,7 +191,8 @@ export function monthlyTrend(tasks, ref = today(), months = 6) {
     const ts = tasks.filter(t => (t.original_due || t.due_date || '').startsWith(month));
     const late = ts.filter(t => t.ever_late).length;
     const resch = ts.filter(t => t.reschedule_count > 0).length;
-    return { month, total: ts.length, ever_late: late, rescheduled: resch, late_rate: pct(late, ts.length), reschedule_rate: pct(resch, ts.length) };
+    return { month, total: ts.length, ever_late: late, rescheduled: resch, late_rate: pct(late, ts.length), reschedule_rate: pct(resch, ts.length),
+      by: { todas: topContributors(ts), atrasadas: topContributors(ts.filter(t => t.ever_late)), repactuadas: topContributors(ts.filter(t => t.reschedule_count > 0)) } };
   });
 }
 

@@ -3,7 +3,8 @@
 // 2) botão de ação bloqueado (aria-disabled) explica o motivo ao ser tocado;
 // 3) erro devolvido pelo servidor num formulário também aparece como aviso e a tela rola até ele;
 // 4) passar o mouse (ou chegar pelo teclado) num botão bloqueado abre uma janela com o motivo;
-// 5) o mesmo vale para um número com a conta dele (data-calc); no toque, tocar no número abre a janela.
+// 5) o mesmo vale para um número com a conta dele (data-calc); no toque, tocar no número abre a janela;
+// 6) e para a pizza de quanto cada usuário contribui em um número (data-pie).
 import { toast } from './ui.js';
 
 const labelOf = el => {
@@ -41,7 +42,47 @@ document.addEventListener('click', e => {
 }, true);
 
 const BLOCKED = '[aria-disabled="true"]';
-const WITH_TIP = `${BLOCKED}, [data-calc]`;
+const WITH_TIP = `${BLOCKED}, [data-calc], [data-pie]`;
+const ON_TAP = '[data-calc], [data-pie]';
+// Cores validadas para o fundo escuro da janela; "Outros" fica neutro
+const PIE_COLORS = ['#3987e5', '#d95926', '#199e70'], PIE_OTHER = '#6E7A86';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function fillPie(box, { title, by }) {
+  const total = by.reduce((n, u) => n + u.n, 0);
+  const color = (u, i) => (u.other ? PIE_OTHER : PIE_COLORS[i]);
+  const head = document.createElement('div');
+  head.className = 'pie-title';
+  head.textContent = title;
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '-50 -50 100 100');
+  svg.setAttribute('aria-hidden', 'true');
+  let at = -Math.PI / 2;
+  by.forEach((u, i) => {
+    const end = at + (u.n / total) * 2 * Math.PI;
+    const p = document.createElementNS(SVG_NS, 'path');
+    const pt = a => `${(48 * Math.cos(a)).toFixed(2)} ${(48 * Math.sin(a)).toFixed(2)}`;
+    p.setAttribute('d', `M0 0L${pt(at)}A48 48 0 ${end - at > Math.PI ? 1 : 0} 1 ${pt(end)}Z`);
+    p.setAttribute('fill', color(u, i));
+    svg.appendChild(p);
+    at = end;
+  });
+  const list = document.createElement('ul');
+  by.forEach((u, i) => {
+    const li = document.createElement('li');
+    const sw = document.createElement('i');
+    sw.style.background = color(u, i);
+    const name = document.createElement('span');
+    name.textContent = u.name;
+    const val = document.createElement('b');
+    val.textContent = `${u.n} · ${Math.round((u.n / total) * 100)}%`;
+    li.append(sw, name, val);
+    list.appendChild(li);
+  });
+  const body = document.createElement('div');
+  body.className = 'pie-body';
+  body.append(svg, list);
+  box.append(head, body);
+}
 let tip = null, tipFor = null, tipWatch = null;
 function hideTip() {
   clearInterval(tipWatch);
@@ -55,10 +96,11 @@ function showTip(el) {
   // O motivo em title viraria uma segunda janela, a do navegador
   if (el.title) { el.dataset.why ||= el.title; el.removeAttribute('title'); }
   tip = document.createElement('div');
-  tip.className = el.dataset.calc ? 'why-tip is-calc' : 'why-tip';
+  tip.className = el.dataset.pie ? 'why-tip is-pie' : el.dataset.calc ? 'why-tip is-calc' : 'why-tip';
   tip.id = 'why-tip';
   tip.setAttribute('role', 'tooltip');
-  tip.textContent = el.dataset.calc || el.dataset.why || 'Ação indisponível no momento.';
+  if (el.dataset.pie) fillPie(tip, JSON.parse(el.dataset.pie));
+  else tip.textContent = el.dataset.calc || el.dataset.why || 'Ação indisponível no momento.';
   document.body.appendChild(tip);
   tipFor = el;
   el.setAttribute('aria-describedby', tip.id);
@@ -78,11 +120,13 @@ document.addEventListener('pointerover', e => {
 let lastPointer = 'mouse';
 document.addEventListener('pointerdown', e => {
   lastPointer = e.pointerType;
-  if (lastPointer !== 'mouse' && !e.target.closest?.('[data-calc]')) hideTip();
+  if (lastPointer !== 'mouse' && !e.target.closest?.(ON_TAP)) hideTip();
 }, true);
 document.addEventListener('click', e => {
-  const c = lastPointer !== 'mouse' && e.target.closest?.('[data-calc]');
+  const c = lastPointer !== 'mouse' && e.target.closest?.(ON_TAP);
   if (!c) return;
+  // Pizza em um link: o primeiro toque mostra, o segundo abre a lista
+  if (c === tipFor && c.dataset.pie && c.matches('a')) { hideTip(); return; }
   e.preventDefault();
   e.stopImmediatePropagation();
   if (c === tipFor) hideTip(); else showTip(c);

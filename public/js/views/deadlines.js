@@ -39,17 +39,23 @@ export function deadlineKpis(s, chronicMin = 3, link = null) {
 }
 
 // Distribuição: quantas tarefas foram reagendadas 0, 1, 2, 3+ vezes
-export function distBar(s, link = null) {
+// Pizza da contribuição por usuário (janela ao passar o mouse). Uma pessoa só não pede pizza: fica o número.
+const pieAttrs = (title, by, count) => (by?.length > 1
+  ? html`data-pie="${JSON.stringify({ title, by })}"`
+  : html`data-calc="${title}${by?.length ? `\n${by[0].name}: ${count}` : ''}"`);
+const tasksLabel = n => `${n} ${n === 1 ? 'tarefa' : 'tarefas'}`;
+
+export function distBar(s, link = null, distBy = null) {
   const d = s.reschedule_dist || { r0: 0, r1: 0, r2: 0, r3: 0 };
   const total = d.r0 + d.r1 + d.r2 + d.r3;
   if (!total) return '';
   const seg = [['r0', 'Nenhuma', '#D6DCE2'], ['r1', '1 vez', '#F3B48A'], ['r2', '2 vezes', '#E07A3A'], ['r3', '3+ vezes', '#A8430C']];
   return html`<div class="dl-dist">
     <div class="sub-label">Reagendamentos por tarefa</div>
-    <div class="stackbar dl-stack">${seg.filter(([k]) => d[k]).map(([k, l, c]) => html`<span style="--c:${c};flex:${d[k] / total}" data-tip="${l}: ${d[k]} tarefa(s)"></span>`)}</div>
+    <div class="stackbar dl-stack">${seg.filter(([k]) => d[k]).map(([k, l, c]) => html`<span style="--c:${c};flex:${d[k] / total}" ${pieAttrs(`Reagendamentos: ${l} · ${tasksLabel(d[k])}`, distBy?.[k], d[k])}></span>`)}</div>
     <div class="dl-legend">${seg.map(([k, l, c]) => {
       const inner = html`<i style="background:${c}"></i>${l} <b>${d[k]}</b>`;
-      return link && d[k] ? html`<a href="${tasksHref(link, k)}" title="Ver estas tarefas">${inner}</a>` : html`<span>${inner}</span>`;
+      return link && d[k] ? html`<a href="${tasksHref(link, k)}" ${pieAttrs(`Reagendamentos: ${l} · ${tasksLabel(d[k])}`, distBy?.[k], d[k])}>${inner}</a>` : html`<span>${inner}</span>`;
     })}</div>
   </div>`;
 }
@@ -59,22 +65,25 @@ export function trendChart(trend, link = null) {
   if (!trend?.some(m => m.total)) return html`<div class="muted" style="font-size:13px">Sem tarefas com prazo nos últimos meses.</div>`;
   const lab = m => `${MONTHS[Number(m.slice(5, 7)) - 1]}/${m.slice(2, 4)}`;
   // Barra com tarefas abre a lista delas; sem tarefas, não há o que abrir
+  const VER = { atrasadas: 'Ficaram atrasadas', repactuadas: 'Repactuadas' };
   const bar = (m, ver, rate, count, c) => {
     const inner = html`<em>${m.total ? `${Math.round(rate || 0)}%` : ''}</em>`;
+    const tip = count ? pieAttrs(`${VER[ver]} · ${lab(m.month)}: ${count} de ${tasksLabel(m.total)}`, m.by?.[ver], count)
+      : m.total ? html`data-calc="${VER[ver]} · ${lab(m.month)}\nNenhuma de ${tasksLabel(m.total)}"` : '';
     return link && count
-      ? html`<a class="dl-bar is-link" href="${tasksHref(link, ver, m.month)}" style="height:${rate || 0}%;--c:${c}" aria-label="${ver === 'atrasadas' ? 'Ficaram atrasadas' : 'Repactuadas'} em ${lab(m.month)}: ${count} tarefa(s)">${inner}</a>`
-      : html`<span class="dl-bar" style="height:${rate || 0}%;--c:${c}">${inner}</span>`;
+      ? html`<a class="dl-bar is-link" ${tip} href="${tasksHref(link, ver, m.month)}" style="height:${rate || 0}%;--c:${c}" aria-label="${ver === 'atrasadas' ? 'Ficaram atrasadas' : 'Repactuadas'} em ${lab(m.month)}: ${count} tarefa(s)">${inner}</a>`
+      : html`<span class="dl-bar" ${tip} style="height:${rate || 0}%;--c:${c}">${inner}</span>`;
   };
   return html`<div class="dl-trend">
     <div class="sub-label">Evolução mensal (pelo mês do prazo original)</div>
     <div class="dl-legend"><span><i style="background:${STATUS_COLOR.atrasada}"></i>Ficaram atrasadas</span><span><i style="background:${RESCHED_SERIES}"></i>Repactuadas</span></div>
-    <div class="dl-months">${trend.map(m => html`<div class="dl-month" data-tip="${lab(m.month)}: ${m.total} tarefa(s) · ${m.ever_late} atrasaram · ${m.rescheduled} repactuadas">
+    <div class="dl-months">${trend.map(m => html`<div class="dl-month">
       <div class="dl-bars">
         ${bar(m, 'atrasadas', m.late_rate, m.ever_late, STATUS_COLOR.atrasada)}
         ${bar(m, 'repactuadas', m.reschedule_rate, m.rescheduled, RESCHED_SERIES)}
       </div>
-      ${link && m.total ? html`<a class="dl-mlabel" href="${tasksHref(link, 'todas', m.month)}">${lab(m.month)}<small>${m.total}</small></a>` : html`<div class="dl-mlabel">${lab(m.month)}<small>${m.total}</small></div>`}</div>`)}</div>
-    ${link ? html`<p class="hint dl-click">Clique em uma barra para ver as tarefas e o motivo de cada atraso.</p>` : ''}
+      ${link && m.total ? html`<a class="dl-mlabel" ${pieAttrs(`Tarefas com prazo · ${lab(m.month)}: ${m.total}`, m.by?.todas, m.total)} href="${tasksHref(link, 'todas', m.month)}">${lab(m.month)}<small>${m.total}</small></a>` : html`<div class="dl-mlabel">${lab(m.month)}<small>${m.total}</small></div>`}</div>`)}</div>
+    ${link ? html`<p class="hint dl-click">Passe o mouse para ver quanto cada usuário contribui e clique para ver as tarefas e o motivo de cada atraso. No celular: primeiro toque mostra a pizza, o segundo abre a lista.</p>` : ''}
   </div>`;
 }
 
@@ -89,12 +98,12 @@ export const howToRead = chronicMin => html`<details class="dl-help"><summary>${
     <li><b>Semáforo:</b> atraso ≤15% bom, ≤30% atenção; corretivas ≤30% bom, ≤50% atenção; crônicas: nenhuma = bom, até 5% = atenção.</li>
   </ul></details>`;
 
-export function deadlineSection(s, trend, { chronicMin = 3, title = 'Prazos e repactuação', sub = '', extra = '', link = null } = {}) {
+export function deadlineSection(s, trend, { chronicMin = 3, title = 'Prazos e repactuação', sub = '', extra = '', link = null, distBy = null } = {}) {
   return html`<section class="card section">
     <div class="card-head"><h2>${icon('reschedule')}${title}</h2><span class="sub">${sub}</span></div>
     <div class="card-body dl-body">
       ${deadlineKpis(s, chronicMin, link)}
-      <div class="grid grid-2">${distBar(s, link) || html`<div></div>`}${trendChart(trend, link)}</div>
+      <div class="grid grid-2">${distBar(s, link, distBy) || html`<div></div>`}${trendChart(trend, link)}</div>
       ${extra}
       ${howToRead(chronicMin)}
     </div>

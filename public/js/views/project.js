@@ -94,6 +94,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
       ${impactRankingSection(impactRank, { sub: 'neste projeto' })}
       ${deadlineSection(p.summary, p.trend, {
         link: { scope: 'projeto', id: p.id },
+        distBy: p.dist_by,
         chronicMin: p.chronic_min || 3,
         sub: 'neste projeto',
         extra: usedStages.length > 1 ? html`<div><div class="sub-label">Por classificação (Grupo/Local/Etapa)</div>

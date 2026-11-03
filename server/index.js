@@ -37,7 +37,7 @@ import * as Field from './services/field.js';
 import * as Reimb from './services/reimbursements.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
-import { countsInIndicators, summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
+import { countsInIndicators, rescheduleContributors, summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
 import { all } from './db.js';
 
 migrate();
@@ -209,6 +209,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     summary: summarize(units),
     checklist_items: clItems.length,
     trend: monthlyTrend(units),
+    dist_by: rescheduleContributors(units),
     chronic_min: Settings.getSetting('chronic_reschedule_threshold'),
     // Tarefas com mais atrasos/repactuações (atenção)
     deadline_watch: counted.filter(t => t.late_episodes > 1 || t.chronic)

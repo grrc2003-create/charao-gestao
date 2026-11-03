@@ -3,7 +3,7 @@ import { projectSchedule } from './schedule.js';
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } from '../lib/permissions.js';
-import { summarize, monthlyTrend } from './metrics.js';
+import { summarize, monthlyTrend, rescheduleContributors } from './metrics.js';
 import { listVisible, listCancelled, execSummary } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
@@ -69,6 +69,7 @@ export function getProject(ctx, id) {
     ...p,
     stages,
     trend: monthlyTrend(tasks),
+    dist_by: rescheduleContributors(tasks),
     cancelled_count: listCancelled(ctx, 'WHERE t.project_id = ?', id).length,
     recurrences: listRecurrences(ctx, { project: id }),
     chronic_min: getSetting('chronic_reschedule_threshold'),

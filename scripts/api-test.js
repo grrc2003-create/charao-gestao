@@ -2913,6 +2913,21 @@ async function main() {
   ok((await ficRead()).total === ficNew.total, 'criada no dia seguinte à data de corte volta a contar');
   ficDb.close();
 
+  console.log('Contribuição por usuário nos gráficos de prazo');
+  const ctAna = await login('ana@charao.eng.br');
+  const ctDash = (await ctAna('GET', '/dashboard')).data;
+  const ctSum = list => list.reduce((n, u) => n + u.n, 0);
+  ok(ctDash.trend.every(m => ctSum(m.by.todas) === m.total && ctSum(m.by.atrasadas) === m.ever_late && ctSum(m.by.repactuadas) === m.rescheduled), 'em cada mês, a soma da pizza bate com a barra');
+  const ctAll = [...ctDash.trend.flatMap(m => Object.values(m.by)), ...Object.values(ctDash.dist_by)];
+  ok(ctAll.every(l => l.length <= 4 && l.filter(u => u.other).length <= 1 && (!l.some(u => u.other) || l[3].other)), 'no máximo 3 usuários e, depois deles, Outros');
+  ok(ctAll.every(l => l.filter(u => !u.other).every((u, i, a) => !i || a[i - 1].n >= u.n)), 'os usuários vêm do maior para o menor');
+  ok(ctAll.some(l => l.some(u => u.other)), 'o agrupamento em Outros é usado quando há mais de 3');
+  ok(['r0', 'r1', 'r2', 'r3'].every(k => ctSum(ctDash.dist_by[k]) === ctDash.summary.reschedule_dist[k]), 'a pizza dos reagendamentos bate com a distribuição');
+  const ctProj = (await ctAna('GET', '/projects/1')).data;
+  ok(ctProj.trend.every(m => ctSum(m.by.atrasadas) === m.ever_late) && ['r0', 'r1', 'r2', 'r3'].every(k => ctSum(ctProj.dist_by[k]) === ctProj.summary.reschedule_dist[k]), 'no projeto, a pizza bate com os números');
+  const ctUser = (await ctAna('GET', '/users/4')).data;
+  ok(ctUser.trend.every(m => m.by.todas.length <= 1) && ctUser.dist_by.r0.length <= 1, 'na tela do usuário só ele aparece');
+
 }
 
 main()

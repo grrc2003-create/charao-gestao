@@ -11,6 +11,11 @@ export const localDate = ts => (ts ? fmt.format(parseTs(ts)) : null);
 export const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400e3);
 export const addDays = (d, n) => new Date(Date.parse(d) + n * 86400e3).toISOString().slice(0, 10);
 
+// Tarefas do Financeiro (área restrita 2) só entram nos indicadores se criadas depois desta data: as anteriores são da
+// implantação. Continuam nas listas de tarefas e no Financeiro; as demais tarefas não mudam.
+const FINANCE_COUNTS_AFTER = process.env.FINANCE_INDICATORS_AFTER || '2026-11-03';
+export const countsInIndicators = t => t.project_restricted !== 2 || localDate(t.created_at) > FINANCE_COUNTS_AFTER;
+
 export const STATUSES = ['aberta', 'em_andamento', 'aguardando_conferencia', 'atrasada', 'concluida'];
 
 // 'atrasada' = prazo vencido e ainda não entregue (aberta ou em andamento)
@@ -70,14 +75,15 @@ export function decorate(t, ref = today(), reschedules = null, chronicMin = 3) {
 
 const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
-export function summarize(tasks, ref = today()) {
+// raw: resume exatamente as tarefas recebidas (subtarefas na tela da própria tarefa, que não é indicador)
+export function summarize(tasks, ref = today(), { raw = false } = {}) {
   const by = Object.fromEntries(STATUSES.map(s => [s, 0]));
   let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0, rescheduled = 0, reschedules = 0;
   let withDue = 0, everLate = 0, episodes = 0, preventive = 0, corrective = 0, chronic = 0, daysAdded = 0, onTimeOriginal = 0;
   const dist = { r0: 0, r1: 0, r2: 0, r3: 0 };
   // Execução: dias do início à conclusão real, entregas antecipadas e atraso de preenchimento
   let execN = 0, execDays = 0, early = 0, earlyDays = 0, fillN = 0, fillDays = 0;
-  tasks = tasks.filter(t => !t.cancelled_at);
+  tasks = tasks.filter(t => !t.cancelled_at && (raw || countsInIndicators(t)));
   for (const t of tasks) {
     if (t.delivered && t.delivered_date) {
       const st = t.start_date || localDate(t.started_at) || localDate(t.created_at);
@@ -160,6 +166,7 @@ export function monthlyTrend(tasks, ref = today(), months = 6) {
     out.unshift(`${y}-${String(m).padStart(2, '0')}`);
     m--; if (!m) { m = 12; y--; }
   }
+  tasks = tasks.filter(countsInIndicators);
   return out.map(month => {
     const ts = tasks.filter(t => (t.original_due || t.due_date || '').startsWith(month));
     const late = ts.filter(t => t.ever_late).length;
@@ -194,7 +201,7 @@ const DEADLINE_VIEWS = {
 };
 export const isDeadlineView = v => Object.hasOwn(DEADLINE_VIEWS, v);
 export function deadlineDetail(tasks, { month = '', view = 'atrasadas' } = {}, ref = today()) {
-  const base = (month ? tasks.filter(t => (t.original_due || t.due_date || '').startsWith(month)) : tasks).filter(t => !t.cancelled_at && (t.due_date || t.original_due));
+  const base = (month ? tasks.filter(t => (t.original_due || t.due_date || '').startsWith(month)) : tasks).filter(t => !t.cancelled_at && countsInIndicators(t) && (t.due_date || t.original_due));
   const items = base.filter(DEADLINE_VIEWS[view]).map(t => ({
     id: t.id, code: t.code, title: t.title, project_code: t.project_code, assignee_name: t.assignee_name,
     kind: t.checklist_item ? 'item' : t.task_type === 'checklist' ? 'checklist' : t.parent_id ? 'subtarefa' : 'tarefa',
@@ -206,6 +213,7 @@ export function deadlineDetail(tasks, { month = '', view = 'atrasadas' } = {}, r
 
 // Indicadores individuais (tarefas atribuídas ao usuário + origem das tarefas)
 export function userStats(user, tasks, usersById) {
+  tasks = tasks.filter(countsInIndicators);
   const assigned = tasks.filter(t => t.assignee_id === user.id);
   const s = summarize(assigned);
   const created = tasks.filter(t => t.creator_id === user.id);

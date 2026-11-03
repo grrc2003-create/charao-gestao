@@ -682,7 +682,7 @@ export function checklistItemsAsSubtasks(tasks) {
     return decorate({
       id: `cl-${i.id}`, checklist_item: true, task_type: 'checklist_item', parent_id: t.id, parent_code: t.code,
       code: `${t.code}·${i.seq}`, title: i.text, stage_name: i.group_name,
-      project_id: t.project_id, project_code: t.project_code, project_name: t.project_name, project_kind: t.project_kind,
+      project_id: t.project_id, project_code: t.project_code, project_name: t.project_name, project_kind: t.project_kind, project_restricted: t.project_restricted,
       assignee_id: i.assignee_id || t.assignee_id, assignee_name: i.assignee_name || t.assignee_name,
       creator_id: null, assigned_by_id: t.creator_id,
       status, due_date: i.due_date || t.due_date, original_due: null, reschedule_count: 0,

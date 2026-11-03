@@ -3,7 +3,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import {
   canSeeTask, canManageTask, canReviewTask, canExecuteTask, canCreateTaskIn, canReassignTask, userHasProjectAccess, isAdmin, isManagerRole, isLeaderOfNoLogin, isProjectLead } from '../lib/permissions.js';
-import { decorate, today, daysBetween, localDate, summarize, addDays } from './metrics.js';
+import { countsInIndicators, decorate, today, daysBetween, localDate, summarize, addDays } from './metrics.js';
 import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
@@ -20,7 +20,7 @@ const PRIORITY_LABEL = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente:
 const PROOF_LABEL = { nenhuma: 'Nenhuma', foto: 'Somente foto', descricao: 'Somente descrição', foto_descricao: 'Foto + descrição' };
 const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', concluida: 'Concluída' };
 
-const BASE_SQL = `SELECT t.*, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
+const BASE_SQL = `SELECT t.*, p.restricted AS project_restricted, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
     p.lead_id AS project_lead_id, (SELECT pl.name FROM users pl WHERE pl.id = p.lead_id) AS project_lead_name,
     a.name AS assignee_name, a.is_external AS assignee_external, a.login_enabled AS assignee_login, a.manager_id AS assignee_leader_id, a.company AS assignee_company, (SELECT lu.name FROM users lu WHERE lu.id = a.manager_id) AS assignee_leader_name,
     c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
@@ -314,16 +314,16 @@ export function actualOf(t) {
 }
 
 // Média de execução em dias úteis (calendário de cada obra), do início à conclusão real
-export function execWorkDays(tasks) {
-  const acts = tasks.filter(t => t.delivered && !t.cancelled_at).map(actualOf).filter(a => a && a.work_days !== null);
+export function execWorkDays(tasks, { raw = false } = {}) {
+  const acts = tasks.filter(t => t.delivered && !t.cancelled_at && (raw || countsInIndicators(t))).map(actualOf).filter(a => a && a.work_days !== null);
   return { n: acts.length, sum: acts.reduce((n, a) => n + a.work_days, 0) };
 }
-export function execWorkDaysAvg(tasks) {
-  const { n, sum } = execWorkDays(tasks);
+export function execWorkDaysAvg(tasks, opts) {
+  const { n, sum } = execWorkDays(tasks, opts);
   return n ? Math.round((sum / n) * 10) / 10 : null;
 }
 // Resumo com os indicadores de execução (antecipadas, atraso de preenchimento e média em dias úteis)
-export const execSummary = tasks => ({ ...summarize(tasks), exec_work_days_avg: execWorkDaysAvg(tasks) });
+export const execSummary = (tasks, { raw = false } = {}) => ({ ...summarize(tasks, undefined, { raw }), exec_work_days_avg: execWorkDaysAvg(tasks, { raw }) });
 
 export function getTask(ctx, id) {
   const t = loadVisible(ctx, id);
@@ -345,7 +345,7 @@ export function getTask(ctx, id) {
     ...dec, files, history, subtasks,
     actual: actualOf(dec),
     // Subtarefas: indicadores de desempenho do conjunto
-    sub_summary: subtasks.length ? execSummary(subtasks) : null,
+    sub_summary: subtasks.length ? execSummary(subtasks, { raw: true }) : null,
     reschedules: entries,
     chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),

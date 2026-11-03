@@ -85,6 +85,7 @@ export const howToRead = chronicMin => html`<details class="dl-help"><summary>${
     <li><b>Preventiva × corretiva:</b> preventiva = prazo reagendado antes de vencer (planejamento); corretiva = reagendado depois de vencer (cobre um atraso).</li>
     <li><b>Crônica:</b> tarefa reagendada ${chronicMin} vezes ou mais (ajustável em Configurações).</li>
     <li><b>Pontualidade real × repactuada:</b> % das entregas feitas até o prazo original × até o prazo vigente. A diferença mostra quanto a repactuação “melhora” o indicador.</li>
+    <li><b>Financeiro:</b> as tarefas do Financeiro só entram nestes indicadores se criadas depois de 03/11/2026. As anteriores continuam nas listas de tarefas e no Financeiro.</li>
     <li><b>Semáforo:</b> atraso ≤15% bom, ≤30% atenção; corretivas ≤30% bom, ≤50% atenção; crônicas: nenhuma = bom, até 5% = atenção.</li>
   </ul></details>`;
 

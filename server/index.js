@@ -37,7 +37,7 @@ import * as Field from './services/field.js';
 import * as Reimb from './services/reimbursements.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
-import { summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
+import { countsInIndicators, summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
 import { all } from './db.js';
 
 migrate();
@@ -196,8 +196,9 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
   const projects = Projects.listProjects(ctx, units);
   const users = Users.listUsers(ctx, units).filter(u => u.active && u.stats.assigned > 0);
   const ref = today();
-  const upcoming = tasks.filter(t => !t.delivered && t.due_date && t.due_date >= ref && daysBetween(ref, t.due_date) <= 7).slice(0, 8);
-  const late = tasks.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 8);
+  const counted = tasks.filter(countsInIndicators);
+  const upcoming = counted.filter(t => !t.delivered && t.due_date && t.due_date >= ref && daysBetween(ref, t.due_date) <= 7).slice(0, 8);
+  const late = counted.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late).slice(0, 8);
   const visibleIds = new Set(tasks.map(t => t.id));
   const activity = all(`SELECT h.task_id, h.action, h.details, h.created_at, u.name AS user_name, t.code, t.title
     FROM task_history h JOIN tasks t ON t.id = h.task_id LEFT JOIN users u ON u.id = h.user_id ORDER BY h.id DESC LIMIT 200`)
@@ -210,7 +211,7 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     trend: monthlyTrend(units),
     chronic_min: Settings.getSetting('chronic_reschedule_threshold'),
     // Tarefas com mais atrasos/repactuações (atenção)
-    deadline_watch: tasks.filter(t => t.late_episodes > 1 || t.chronic)
+    deadline_watch: counted.filter(t => t.late_episodes > 1 || t.chronic)
       .sort((a, b) => b.late_episodes - a.late_episodes || b.reschedule_count - a.reschedule_count).slice(0, 6),
     projects: projects.filter(p => p.status !== 'cancelado' && p.kind !== 'interno'),
     internal_areas: projects.filter(p => p.kind === 'interno' && p.status !== 'cancelado'),

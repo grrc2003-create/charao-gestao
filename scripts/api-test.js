@@ -1,6 +1,7 @@
 // Testes de API ponta a ponta (fluxos e permissões). Usa um banco temporário — não altera os dados reais.
 // Uso: npm test
 import { spawn, execFileSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,7 +42,9 @@ const mcServer = http.createServer((req, res) => {
   if (req.headers.authorization !== MC_AUTH) { res.writeHead(401); return res.end(); }
   res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8' }); res.end('\uFEFF' + MC_CSV);
 }).listen(MC_PORT);
-const env = { ...process.env, DATA_DIR, PORT: String(PORT), HOLIDAYS_OFFLINE: '1',
+// Data de corte do Financeiro: 2 dias atrás, para o teste não depender do dia em que roda
+const FIN_CUT = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+const env = { ...process.env, DATA_DIR, PORT: String(PORT), HOLIDAYS_OFFLINE: '1', FINANCE_INDICATORS_AFTER: FIN_CUT,
   MAISCONTROLE_URL: `http://localhost:${MC_PORT}/data-exports/pagamentos`, MAISCONTROLE_USUARIO: 'mc-teste', MAISCONTROLE_SENHA: 'mc-senha-teste', MAISCONTROLE_PLANO: 'semanal', MAISCONTROLE_AUTO: '0' };
 const NODE = [process.execPath, '--disable-warning=ExperimentalWarning'];
 
@@ -2877,6 +2880,38 @@ async function main() {
   ok(dtRank.every(u => u.stats.open + u.stats.in_progress + u.stats.review + u.stats.late + u.stats.done === u.stats.assigned), 'a soma dos status bate com as atribuídas');
   ok(dtRank.every(u => !u.stats.exec_work_days_n || Math.round((u.stats.exec_work_days_sum / u.stats.exec_work_days_n) * 10) / 10 === u.stats.exec_work_days_avg), 'soma ÷ entregas bate com a média de dias úteis');
   ok(dtRank.some(u => u.stats.assigned_items > 0), 'os itens de check-list das atribuídas são informados');
+
+  console.log('Tarefas do Financeiro nos indicadores');
+  const ficAna = await login('ana@charao.eng.br');
+  const ficId = (await ficAna('GET', '/auth/me')).data.user.id;
+  const ficMonth = new Date().toISOString().slice(0, 7);
+  const ficOb = (await ficAna('POST', '/finance/obligations', { title: 'Corte de indicadores', category: 'Outros', amount: 70, frequency: 'mensal', due_day: 1, start_month: ficMonth, assignee_id: ficId })).data.id;
+  const ficItem = (await ficAna('GET', `/finance/obligations/${ficOb}`)).data.items[0];
+  await ficAna('POST', '/finance/task-suggestions', { ids: [ficItem.id], create: true });
+  const ficTask = (await ficAna('GET', `/finance/items/${ficItem.id}`)).data.task_id;
+  const ficProj = (await ficAna('GET', `/tasks/${ficTask}`)).data.project_id;
+  const ficOther = (await ficAna('POST', '/tasks', { project_id: 1, title: 'Fora do Financeiro', description: 'Teste', assignee_id: ficId, proof_type: 'nenhuma', due_date: '2050-01-01' })).data.id;
+  const ficDb = new DatabaseSync(path.join(DATA_DIR, 'charao.db'));
+  const ficSetDate = (id, day) => ficDb.prepare('UPDATE tasks SET created_at = ? WHERE id = ?').run(`${day}T15:00:00.000Z`, id);
+  const ficRead = async () => {
+    const d = (await ficAna('GET', '/dashboard')).data;
+    return { total: d.summary.total, user: (await ficAna('GET', `/users/${ficId}`)).data.stats.assigned, proj: (await ficAna('GET', `/projects/${ficProj}`)).data.summary.total, one: (await ficAna('GET', '/projects/1')).data.summary.total,
+      list: (await ficAna('GET', '/deadlines/tasks?scope=empresa&ver=todas')).data.items.some(t => t.id === ficTask) };
+  };
+  const ficNew = await ficRead();
+  ok(ficNew.list, 'tarefa do Financeiro criada depois da data de corte entra nos indicadores');
+  ficSetDate(ficTask, FIN_CUT);
+  const ficOld = await ficRead();
+  ok(ficOld.total === ficNew.total - 1 && ficOld.user === ficNew.user - 1 && ficOld.proj === ficNew.proj - 1, 'criada na própria data de corte sai dos indicadores da empresa, do usuário e do projeto');
+  ok(!ficOld.list, 'e sai da lista por trás dos gráficos');
+  ok((await ficAna('GET', `/tasks/${ficTask}`)).status === 200 && (await ficAna('GET', '/tasks')).data.some(t => t.id === ficTask), 'continua existindo e aparecendo na lista de Tarefas');
+  ok((await ficAna('GET', `/finance/items/${ficItem.id}`)).data.task_id === ficTask, 'continua ligada à parcela do Financeiro');
+  ficSetDate(ficOther, '2001-01-01');
+  const ficNotFin = await ficRead();
+  ok(ficNotFin.total === ficOld.total && ficNotFin.one === ficOld.one, 'tarefa antiga fora do Financeiro continua nos indicadores');
+  ficSetDate(ficTask, new Date(Date.parse(FIN_CUT) + 86400e3).toISOString().slice(0, 10));
+  ok((await ficRead()).total === ficNew.total, 'criada no dia seguinte à data de corte volta a contar');
+  ficDb.close();
 
 }
 

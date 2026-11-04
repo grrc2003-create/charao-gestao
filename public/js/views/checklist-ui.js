@@ -1,7 +1,7 @@
 // Check-list: cadastro rápido dos itens (Enter, colar lista, "# Grupo", "@Nome") e preenchimento item a item
 // numa tela só (Conforme / Não conforme / N/A, observação e fotos), com avanço automático para o próximo item.
 import { html, raw, esc, api, icon, fmtDateTime } from '../core.js';
-import { toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
+import { setBlocked, toast, sheet, confirmSheet, readAttachments, fileInput, lightbox, galleryFrom, batchBySize } from '../ui.js';
 import { periodKey, periodInfo } from './periods.js';
 import { depLists, renderImpactPreview } from './deps-ui.js';
 import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
@@ -770,6 +770,7 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
           ${filterMenu}
           ${st.levels.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-clgroups aria-pressed="${st.groupsOnly}">${icon('filter')}<span>${st.groupsOnly ? 'Mostrar os itens' : 'Mostrar só os grupos'}</span></button>` : ''}
           <button type="button" class="btn btn-ghost btn-sm cl-phtoggle" data-clphotos aria-pressed="${photosOn}">${icon('image')}<span>${photosOn ? 'Ocultar fotos' : 'Mostrar fotos'}</span></button>
+          ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" data-clpick aria-pressed="${String(!!st.picking)}">${icon('team')}<span>Equipe em vários itens</span></button>` : ''}
           ${c.can_manage_items ? html`<a class="btn btn-ghost btn-sm" href="#/tarefas/${t.id}/programacao">${icon('calendar')}Programar profissional</a>` : ''}
           ${c.can_manage_items ? html`<button type="button" class="btn btn-ghost btn-sm" id="cl-add-toggle" aria-expanded="${st.adding}">${icon('plus')}Adicionar itens</button>` : ''}
           <span class="cl-ginfo muted">Agrupado: ${groupInfo}<span data-clsel-info2></span></span>
@@ -782,6 +783,13 @@ export function checklistSection(t, { reviewBox, reviewActions, can }) {
       <div class="cl-list ${photosOn ? '' : 'no-photos'} ${st.hideResolved ? 'hide-resolved' : ''}" data-filter="${f}">
         ${st.levels.length ? sections(c.items) : html`<div class="clg-items">${c.items.map(it => itemCard(t, it, c))}</div>`}
         <div class="cl-none muted">Nenhum item neste filtro.</div>
+        ${c.can_manage_items ? html`<div class="cl-pickbar" hidden>
+          <b data-pick-count></b>
+          <button type="button" class="btn btn-ghost btn-sm" data-pick-all>Selecionar os visíveis</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-pick-none>Limpar</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-pick-exit>Cancelar</button>
+          <button type="button" class="btn btn-primary btn-sm" data-pick-go>${icon('team')}Definir equipe</button>
+        </div>` : ''}
       </div>
       <details class="cl-gantt" data-cl-gantt>
         <summary>${icon('calendar')} Cronograma dos itens (Gantt)</summary>
@@ -1181,6 +1189,110 @@ export function bindChecklist(root, t, ctx, refresh) {
     });
     if (r && r.id) { toast('Responsável do grupo definido.'); refresh(r); }
   }));
+
+  // Equipe em vários itens: marca os itens (ou um grupo inteiro) e define a equipe uma vez só
+  const pickBtn = root.querySelector('[data-clpick]');
+  if (pickBtn) {
+    st.picked ||= new Set();
+    const bar = list.querySelector('.cl-pickbar');
+    const itemOf = el => byId.get(Number(el.dataset.itemId));
+    const canPick = it => it && it.result !== 'conforme';
+    const shownEls = scope => [...scope.querySelectorAll('.cli')].filter(el => el.dataset.vis === '1' && !(list.classList.contains('hide-resolved') && el.hasAttribute('data-resolved')) && canPick(itemOf(el)));
+    const box = (attr, label) => { const s = document.createElement('span'); s.className = 'cli-pick'; s.setAttribute(attr, ''); s.setAttribute('role', 'checkbox'); s.tabIndex = 0; s.setAttribute('aria-label', label); return s; };
+    const drawPick = () => {
+      list.classList.toggle('is-picking', !!st.picking);
+      bar.hidden = !st.picking;
+      pickBtn.setAttribute('aria-pressed', String(!!st.picking));
+      list.querySelectorAll('.cli').forEach(el => {
+        const it = itemOf(el), sum = el.querySelector(':scope > summary');
+        let mark = sum?.querySelector(':scope > .cli-pick');
+        if (!st.picking) { mark?.remove(); return; }
+        if (!sum) return;
+        if (!mark) { mark = box('data-pick-item', `Selecionar o item ${it.seq}`); sum.prepend(mark); }
+        const ok = canPick(it);
+        mark.classList.toggle('is-locked', !ok);
+        mark.setAttribute('aria-checked', String(ok && st.picked.has(it.id)));
+        mark.setAttribute('aria-disabled', String(!ok));
+        mark.title = ok ? '' : 'Item Conforme: a diária já está fechada. Para mudar a equipe, edite o item.';
+      });
+      list.querySelectorAll('.clg').forEach(sec => {
+        const head = sec.querySelector(':scope > .clg-head');
+        let mark = head.querySelector(':scope > .cli-pick');
+        if (!st.picking) { mark?.remove(); return; }
+        if (!mark) { mark = box('data-pick-group', `Selecionar o grupo ${head.querySelector('h3,h4')?.textContent.trim() || ''}`); head.prepend(mark); }
+        const els = shownEls(sec), on = els.filter(el => st.picked.has(Number(el.dataset.itemId))).length;
+        mark.setAttribute('aria-checked', !on ? 'false' : on === els.length ? 'true' : 'mixed');
+        mark.classList.toggle('is-locked', !els.length);
+      });
+      const n = st.picked.size;
+      bar.querySelector('[data-pick-count]').textContent = `${n} ${n === 1 ? 'item selecionado' : 'itens selecionados'}`;
+      setBlocked(bar.querySelector('[data-pick-go]'), n ? null : 'Marque ao menos um item.');
+    };
+    const flipItem = el => { const it = itemOf(el); if (!canPick(it)) return; if (st.picked.has(it.id)) st.picked.delete(it.id); else st.picked.add(it.id); };
+    const flipGroup = sec => {
+      const ids = shownEls(sec).map(el => Number(el.dataset.itemId));
+      const all_ = ids.length && ids.every(id => st.picked.has(id));
+      ids.forEach(id => (all_ ? st.picked.delete(id) : st.picked.add(id)));
+    };
+    const onPick = target => {
+      if (target.closest('.cl-pickbar')) return false;
+      const g = target.closest('[data-pick-group]');
+      if (g) { flipGroup(g.closest('.clg')); return true; }
+      if (target.closest('.clg-head')) return false; // o resto do cabeçalho continua abrindo e fechando o grupo
+      const el = target.closest('.cli');
+      if (el) { flipItem(el); return true; }
+      return false;
+    };
+    list.addEventListener('click', e => {
+      if (st.picking && onPick(e.target)) { e.preventDefault(); e.stopPropagation(); drawPick(); }
+    }, true);
+    list.addEventListener('keydown', e => {
+      if (!st.picking || (e.key !== ' ' && e.key !== 'Enter') || !e.target.classList?.contains('cli-pick')) return;
+      if (onPick(e.target)) { e.preventDefault(); e.stopPropagation(); drawPick(); }
+    }, true);
+    pickBtn.addEventListener('click', () => {
+      st.picking = !st.picking;
+      if (st.picking) root.querySelector('.cl-filters [data-clf="all"]')?.click(); // a seleção começa vendo todos os itens: o grupo vem completo
+      else st.picked.clear();
+      drawPick();
+    });
+    bar.querySelector('[data-pick-exit]').addEventListener('click', () => { st.picking = false; st.picked.clear(); drawPick(); });
+    bar.querySelector('[data-pick-none]').addEventListener('click', () => { st.picked.clear(); drawPick(); });
+    bar.querySelector('[data-pick-all]').addEventListener('click', () => { shownEls(list).forEach(el => st.picked.add(Number(el.dataset.itemId))); drawPick(); });
+    bar.querySelector('[data-pick-go]').addEventListener('click', async () => {
+      if (!st.picked.size) return;
+      const chosen = [...st.picked].map(id => byId.get(id)).filter(Boolean);
+      const n = chosen.length, withTeam = chosen.filter(i => i.team.length).length;
+      let opts;
+      try { opts = await api(`/projects/${t.project_id}/checklist-team`); } catch (ex) { toast(ex.message, 'err'); return; }
+      const state = [];
+      const pending = sheet({
+        title: `Equipe de ${n} ${n === 1 ? 'item' : 'itens'}`,
+        submitLabel: `Aplicar a ${n} ${n === 1 ? 'item' : 'itens'}`,
+        body: html`<p class="muted" style="margin:0 0 10px">${withTeam ? `${withTeam} de ${n} já ${withTeam === 1 ? 'tem' : 'têm'} equipe.` : 'Nenhum destes itens tem equipe ainda.'}</p>
+          <div class="field"><span class="label">Como aplicar</span>
+            <label class="cl-bt-opt"><input type="radio" name="mode" value="add" checked><span><b>Adicionar à equipe atual</b><small>Mantém quem já está. Se a pessoa ou a função já estiver no item, valem a quantidade e os dias daqui.</small></span></label>
+            <label class="cl-bt-opt"><input type="radio" name="mode" value="replace"><span><b>Substituir a equipe</b><small>A equipe de cada item passa a ser só esta. Sem ninguém na lista, a equipe dos itens é removida.</small></span></label></div>
+          <div class="field"><span class="label">Equipe</span><div id="bt-team"></div></div>`,
+        onSubmit: async d => {
+          if (d.mode === 'add' && !state.length) throw new Error('Escolha quem entra na equipe.');
+          if (teamInvalid(state)) throw new Error('Informe os dias de cada pessoa da equipe (e a quantidade, quando for só a função).');
+          return api(`/tasks/${t.id}/items/team`, { method: 'POST', body: { item_ids: chosen.map(i => i.id), mode: d.mode,
+            team: state.map(e => ({ worker_id: e.worker_id, role: e.role, qty: readNum(e.qty) || 1, days: readNum(e.days) })) } });
+        },
+      });
+      const bt = document.querySelector('.sheet #bt-team');
+      if (bt) bindTeamEditor(bt, state, opts);
+      const r = await pending;
+      if (!r || !r.team_result) return;
+      const { updated, unchanged, skipped } = r.team_result;
+      toast([`Equipe aplicada a ${updated} ${updated === 1 ? 'item' : 'itens'}.`, unchanged ? `${unchanged} já ${unchanged === 1 ? 'estava' : 'estavam'} assim.` : '', skipped ? `${skipped} Conforme ${skipped === 1 ? 'ficou' : 'ficaram'} de fora.` : ''].filter(Boolean).join(' '));
+      st.picking = false;
+      st.picked.clear();
+      refresh(r);
+    });
+    drawPick();
+  }
 
   // Depois de responder/incluir, leva ao próximo item pendente (ou mantém o foco na digitação)
   if (scrollTo) {

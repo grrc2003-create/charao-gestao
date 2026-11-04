@@ -3687,3 +3687,27 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .cl-role-new { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .cl-role-name { flex: 1 1 180px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); min-width: 0; }
 .cl-role-name input { width: 100%; }
+
+/* Check-list: equipe em vários itens */
+.cli-pick { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border: 2px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; }
+.cli-pick[aria-checked="true"], .cli-pick[aria-checked="mixed"] { background: var(--navy); border-color: var(--navy); }
+.cli-pick[aria-checked="true"]::before { content: "✓"; }
+.cli-pick[aria-checked="mixed"]::before { content: "−"; }
+.cli-pick.is-locked { opacity: .4; cursor: not-allowed; background: var(--bg); }
+.cli-pick:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.cl-list.is-picking .cli > summary { position: relative; padding-left: 46px; cursor: pointer; }
+.cl-list.is-picking .cli > summary > .cli-pick { position: absolute; left: 12px; top: 50%; margin-top: -11px; }
+.cl-list.is-picking .cli > .cli-detail, .cl-list.is-picking .clg-btn, .cl-list.is-picking .cli-menu { display: none; }
+.cl-list.is-picking .cli:has(> summary > .cli-pick[aria-checked="true"]) { border-color: var(--navy); box-shadow: 0 0 0 1px var(--navy); }
+.cl-pickbar { position: sticky; bottom: 12px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 6px 20px rgba(28, 42, 56, .18); }
+.cl-pickbar[hidden] { display: none; }
+.cl-pickbar b { flex: 1 1 100%; font-size: 13.5px; }
+.cl-pickbar [data-pick-go] { margin-left: auto; }
+@media (min-width: 700px) { .cl-pickbar b { flex: 1 1 auto; } .cl-pickbar [data-pick-go] { margin-left: 0; } }
+@media (max-width: 899px) { .cl-pickbar { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
+.cl-bt-opt { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; margin-top: 6px; cursor: pointer; }
+.cl-bt-opt:has(input:checked) { border-color: var(--navy); background: var(--navy-50); }
+.cl-bt-opt input { margin-top: 3px; flex: none; }
+.cl-bt-opt span { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
+.cl-bt-opt small { color: var(--muted); font-size: 12px; font-weight: 400; }
+@media print { .cl-pickbar, .cli-pick { display: none !important; } }

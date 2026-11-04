@@ -2957,6 +2957,38 @@ async function main() {
   const trItem = (await trAna('GET', `/tasks/${trList.data.id}`)).data.checklist?.items?.[0];
   ok(trItem?.team?.[0]?.role === 'Gesseiro Teste' && trItem.team[0].qty === 2, 'e fica salva no item');
 
+  console.log('Check-list: equipe em vários itens');
+  const btList = (await trAna('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'Equipe em massa', description: 'Teste', assignee_id: 1, proof_type: 'nenhuma', due_date: '2050-01-01',
+    items: [{ text: 'Item A', team: [{ role: 'Gesseiro Teste', qty: 1, days: 1 }, { role: 'Azulejista Teste', qty: 1, days: 2 }] }, { text: 'Item B' }, { text: 'Item C' }, { text: 'Item D, conforme', team: [{ role: 'Gesseiro Teste', qty: 1, days: 9 }] }] })).data;
+  const btRead = async () => (await trAna('GET', `/tasks/${btList.id}`)).data.checklist.items;
+  const btItems = await btRead();
+  const btIds = btItems.map(i => i.id);
+  const btTeam = (list, seq) => list.find(i => i.seq === seq).team.map(e => `${e.role}:${e.qty}:${e.days}`).sort().join();
+  ok((await trAna('POST', `/tasks/${btList.id}/items/${btIds[3]}/answer`, { result: 'conforme' })).status === 200, 'um item é marcado Conforme');
+  const btRate = (await trAna('GET', `/tasks/${btList.id}`)).data.checklist.items[3].team[0].rate;
+  const btPost = (who, body) => who('POST', `/tasks/${btList.id}/items/team`, body);
+  ok((await btPost(trAna, { item_ids: [], mode: 'add', team: [] })).status === 400 && (await btPost(trAna, { item_ids: btIds, mode: 'x', team: [] })).status === 400 && (await btPost(trAna, { item_ids: [999999], mode: 'add', team: [{ role: 'Gesseiro Teste', qty: 1, days: 1 }] })).status === 400, 'sem itens, modo inválido ou item de fora são recusados');
+  ok((await btPost(trAna, { item_ids: btIds.slice(0, 3), mode: 'add', team: [] })).status === 400, 'adicionar exige alguém na equipe');
+  ok((await btPost(trAna, { item_ids: [btIds[0]], mode: 'add', team: [{ role: 'Função Inexistente', qty: 1, days: 1 }] })).status === 400, 'função não cadastrada é recusada');
+  ok((await btPost(trAna, { item_ids: [btIds[3]], mode: 'add', team: [{ role: 'Gesseiro Teste', qty: 1, days: 1 }] })).status === 400, 'só itens Conforme: nada a aplicar');
+  const btAdd = await btPost(trAna, { item_ids: btIds, mode: 'add', team: [{ role: 'Gesseiro Teste', qty: 2, days: 5 }] });
+  ok(btAdd.status === 200 && btAdd.data.team_result.updated === 3 && btAdd.data.team_result.skipped === 1, 'adicionar: muda os itens abertos e informa os Conforme que ficaram de fora');
+  let btNow = await btRead();
+  ok(btTeam(btNow, 1) === 'Azulejista Teste:1:2,Gesseiro Teste:2:5', 'quem já estava é atualizado e os demais continuam');
+  ok(btTeam(btNow, 2) === 'Gesseiro Teste:2:5' && btTeam(btNow, 3) === 'Gesseiro Teste:2:5', 'item sem equipe recebe a equipe');
+  ok(btTeam(btNow, 4) === 'Gesseiro Teste:1:9' && btNow[3].team[0].rate === btRate, 'item Conforme não muda e mantém a diária fechada');
+  const btAgain = await btPost(trAna, { item_ids: btIds.slice(1, 3), mode: 'add', team: [{ role: 'Gesseiro Teste', qty: 2, days: 5 }] });
+  ok(btAgain.data.team_result.updated === 0 && btAgain.data.team_result.unchanged === 2, 'aplicar de novo não altera nada');
+  const btRep = await btPost(trAna, { item_ids: btIds.slice(0, 2), mode: 'replace', team: [{ role: 'Azulejista Teste', qty: 1, days: 3 }] });
+  btNow = await btRead();
+  ok(btRep.data.team_result.updated === 2 && btTeam(btNow, 1) === 'Azulejista Teste:1:3' && btTeam(btNow, 2) === 'Azulejista Teste:1:3' && btTeam(btNow, 3) === 'Gesseiro Teste:2:5', 'substituir troca só nos itens escolhidos');
+  await btPost(trAna, { item_ids: [btIds[0]], mode: 'replace', team: [] });
+  ok(!(await btRead())[0].team.length, 'substituir sem ninguém remove a equipe');
+  const btHist = (await trAna('GET', `/tasks/${btList.id}`)).data.history.filter(h => h.action === 'Equipe de itens do check-list alterada');
+  ok(btHist.length === 3 && btHist.every(h => !/R\$/.test(h.details || '')), 'cada aplicação gera uma linha no histórico, sem valores');
+  const btOut = await login('marcos@charao.eng.br');
+  ok((await btPost(btOut, { item_ids: btIds, mode: 'add', team: [{ role: 'Gesseiro Teste', qty: 1, days: 1 }] })).status >= 403, 'quem não gerencia os itens não aplica');
+
   console.log('Financeiro: conferência no fim do mês e tarefa até o 10º dia útil do mês seguinte');
   const dfcAna = await login('ana@charao.eng.br');
   const dfcToday = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);

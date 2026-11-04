@@ -564,6 +564,7 @@ api.post('/api/tasks/:id/plan/unlink', (req, res, { ctx, params, body }) => send
 api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }) => { Checklist.addReferencePhotos(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { Checklist.assignItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
+api.post('/api/tasks/:id/items/team', (req, res, { ctx, params, body }) => { const team_result = Checklist.setItemsTeam(ctx, intOrNull(params.id), body); send(res, 200, { ...Tasks.getTask(ctx, intOrNull(params.id)), team_result }); });
 api.patch('/api/tasks/:id/items/:iid', (req, res, { ctx, params, body }) => { Checklist.updateItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.delete('/api/tasks/:id/items/:iid', (req, res, { ctx, params }) => { Checklist.deleteItem(ctx, intOrNull(params.id), intOrNull(params.iid)); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/progress', (req, res, { ctx, params, body }) => { Checklist.setItemProgress(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });

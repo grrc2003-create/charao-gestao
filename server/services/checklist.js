@@ -638,6 +638,41 @@ export function assignItems(ctx, taskId, body) {
   });
 }
 
+// Equipe de vários itens de uma vez. Adicionar: mantém o que há e atualiza quem já estava; substituir: troca a equipe inteira.
+// Item Conforme fica de fora: a diária dele já está fechada no custo executado. Tudo ou nada, com uma linha só no histórico.
+export function setItemsTeam(ctx, taskId, body) {
+  const t = loadChecklistTask(ctx, taskId);
+  assertManage(ctx, t);
+  const ids = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : []).map(intOrNull).filter(Boolean))];
+  if (!ids.length) throw badRequest('Selecione os itens.');
+  const mode = oneOf(body.mode, ['add', 'replace'], 'Como aplicar a equipe');
+  const items = all(`SELECT id, seq, text, result FROM checklist_items WHERE task_id = ? AND id IN (${ids.map(() => '?').join(',')}) ORDER BY seq`, t.id, ...ids);
+  if (items.length !== ids.length) throw badRequest('Item inválido.');
+  const incoming = readTeam(body.team, t.project_id, 'equipe');
+  if (mode === 'add' && !incoming.length) throw badRequest('Escolha quem entra na equipe.');
+  const targets = items.filter(i => i.result !== 'conforme');
+  if (!targets.length) throw badRequest('Os itens escolhidos estão Conforme: a diária deles já está fechada.');
+  const keyOf = e => (e.worker_id ? `w${e.worker_id}` : `r${String(e.role).toLowerCase()}`);
+  const writes = [];
+  for (const i of targets) {
+    const current = all('SELECT worker_id, role, qty, days FROM checklist_item_team WHERE item_id = ? ORDER BY id', i.id);
+    let next = incoming;
+    if (mode === 'add') {
+      const novo = new Map(incoming.map(e => [keyOf(e), e]));
+      const kept = current.map(e => { const n = novo.get(keyOf(e)); if (n) novo.delete(keyOf(e)); return n || e; });
+      next = [...kept, ...novo.values()];
+    }
+    if (next.length > MAX_TEAM) throw badRequest(`A equipe aceita no máximo ${MAX_TEAM} linhas (item ${i.seq}).`);
+    if (JSON.stringify(next) !== JSON.stringify(current)) writes.push({ item: i, next });
+  }
+  if (writes.length) tx(() => {
+    for (const w of writes) saveTeam(w.item.id, w.next, w.item.result);
+    const seqs = writes.map(w => w.item.seq);
+    taskHistory(t.id, ctx.user.id, 'Equipe de itens do check-list alterada', `Itens ${seqs.slice(0, 40).join(', ')}${seqs.length > 40 ? ` e mais ${seqs.length - 40}` : ''} · ${mode === 'add' ? 'adicionado' : 'equipe trocada por'}: ${teamText(incoming)}`);
+  });
+  return { updated: writes.length, unchanged: targets.length - writes.length, skipped: items.length - targets.length };
+}
+
 export function deleteItem(ctx, taskId, itemId) {
   const t = loadChecklistTask(ctx, taskId);
   assertManage(ctx, t);

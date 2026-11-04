@@ -5,7 +5,7 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull, date } from '../lib/http.js';
 import { today, addDays, daysBetween, decorate } from './metrics.js';
 import { canExecuteTask, canManageTask, hasSection, canAccessProject } from '../lib/permissions.js';
-import { taskHistory } from './audit.js';
+import { audit, taskHistory } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, isPdf } from './files.js';
 import { loadVisible, validateAssignee, autoStart, checklistMaxDue, readProgress } from './tasks.js';
 import { applyShift, applyPull, projectEndOf } from './dependencies.js';
@@ -113,7 +113,24 @@ export function teamOptions(ctx, projectId) {
     ORDER BY name`, projectId);
   const roles = all('SELECT name, daily_rate AS rate FROM field_roles ORDER BY name');
   const clean = list => (money ? list : list.map(({ rate, ...x }) => x));
-  return { workers: clean(workers), roles: clean(roles), can_see_cost: money };
+  return { project_id: projectId, workers: clean(workers), roles: clean(roles), can_see_cost: money };
+}
+// Função genérica cadastrada na hora de definir a equipe: entra na mesma lista da Folha de Campo. Quem tem acesso à obra cadastra
+// o nome; a diária só vale para quem vê valores (editar e excluir continuam na Folha de Campo). Nome repetido usa a que já existe.
+export function createTeamRole(ctx, projectId, body, ip) {
+  if (!one('SELECT id FROM projects WHERE id = ?', projectId)) throw notFound('Projeto não encontrado.');
+  if (!canAccessProject(ctx.user, projectId, ctx.projects)) throw forbidden('Sem acesso a este projeto.');
+  const money = canSeeCost(ctx);
+  const name = str(body?.name, { max: 80, required: true, label: 'Função' });
+  const view = r => ({ name: r.name, ...(money ? { rate: r.daily_rate } : {}) });
+  const found = one('SELECT name, daily_rate FROM field_roles WHERE name = ? COLLATE NOCASE', name);
+  if (found) return { role: view(found), created: false };
+  const raw = money && body?.daily_rate !== undefined && body.daily_rate !== null && body.daily_rate !== '' ? Number(String(body.daily_rate).replace(',', '.')) : 0;
+  if (!Number.isFinite(raw) || raw < 0 || raw > 100000) throw badRequest('Valor da diária inválido.');
+  const rate = r2(raw);
+  const id = Number(run('INSERT INTO field_roles (name, daily_rate) VALUES (?,?)', name, rate).lastInsertRowid);
+  audit(ctx.user.id, 'field', id, 'Função de campo cadastrada', { nome: name, ...(money ? { diaria: rate } : {}), origem: 'equipe do check-list' }, ip);
+  return { role: view({ name, daily_rate: rate }), created: true };
 }
 // Duplicar tarefa: a função sempre vai junto; o profissional, só se mantiver os responsáveis e estiver disponível na obra de destino
 export function teamForCopy(itemId, projectId, keepWorkers) {

@@ -2936,6 +2936,27 @@ async function main() {
   const ctUser = (await ctAna('GET', '/users/4')).data;
   ok(ctUser.trend.every(m => m.by.todas.length <= 1) && ctUser.dist_by.r0.length <= 1, 'na tela do usuário só ele aparece');
 
+  console.log('Equipe do check-list: função genérica cadastrada na hora');
+  const trAna = await login('ana@charao.eng.br');
+  const trCam = await login('camila@charao.eng.br');
+  const trRoleOf = async (who, name) => (await who('GET', '/projects/1/checklist-team')).data.roles.find(r => r.name === name);
+  const trNew = await trAna('POST', '/projects/1/checklist-roles', { name: 'Gesseiro Teste', daily_rate: '180,50' });
+  ok(trNew.status === 200 && trNew.data.created && trNew.data.role.rate === 180.5, 'quem vê valores cadastra a função com a diária');
+  ok((await trRoleOf(trAna, 'Gesseiro Teste'))?.rate === 180.5, 'a função entra na lista da equipe');
+  ok((await trAna('GET', '/field/workers')).data.roles?.some(r => r.name === 'Gesseiro Teste' && r.daily_rate === 180.5) ?? true, 'e na lista da Folha de Campo');
+  const trRep = await trAna('POST', '/projects/1/checklist-roles', { name: 'gesseiro teste', daily_rate: 999 });
+  ok(trRep.status === 200 && !trRep.data.created && trRep.data.role.name === 'Gesseiro Teste' && trRep.data.role.rate === 180.5, 'nome repetido usa a que já existe, sem mudar a diária');
+  const trCamProj = (await trCam('GET', '/meta')).data.projects[0]?.id;
+  const trCamNew = await trCam('POST', `/projects/${trCamProj}/checklist-roles`, { name: 'Azulejista Teste', daily_rate: 500 });
+  ok(trCamNew.status === 200 && trCamNew.data.created && trCamNew.data.role.rate === undefined, 'quem tem acesso à obra cadastra só o nome, sem ver valores');
+  ok((await trAna('POST', `/projects/${trCamProj}/checklist-roles`, { name: 'Azulejista Teste' })).data.role.rate === 0, 'a diária de quem não vê valores é ignorada');
+  ok((await trAna('POST', '/projects/1/checklist-roles', { name: '' })).status === 400 && (await trAna('POST', '/projects/1/checklist-roles', { name: 'Diária ruim', daily_rate: 'abc' })).status === 400 && (await trAna('POST', '/projects/999999/checklist-roles', { name: 'X' })).status === 404, 'nome vazio, diária inválida e obra inexistente são recusados');
+  ok((await trCam('POST', '/field/roles', { name: 'Direto Teste', daily_rate: 10 })).status === 403, 'editar valores continua só na Folha de Campo');
+  const trList = (await trAna('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'Check-list da função nova', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', due_date: '2050-01-01', items: [{ text: 'Rebaixar o forro', team: [{ role: 'Gesseiro Teste', qty: 2, days: 3 }] }] }));
+  ok(trList.status === 201, 'a função nova é aceita na equipe de um item');
+  const trItem = (await trAna('GET', `/tasks/${trList.data.id}`)).data.checklist?.items?.[0];
+  ok(trItem?.team?.[0]?.role === 'Gesseiro Teste' && trItem.team[0].qty === 2, 'e fica salva no item');
+
   console.log('Financeiro: conferência no fim do mês e tarefa até o 10º dia útil do mês seguinte');
   const dfcAna = await login('ana@charao.eng.br');
   const dfcToday = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);

@@ -554,6 +554,7 @@ api.delete('/api/tasks/:id', (req, res, { ctx, params, body }) => send(res, 200,
 // ---------- Check-list (itens) ----------
 const taskOut = (res, ctx, id) => send(res, 200, Tasks.getTask(ctx, id));
 api.get('/api/projects/:id/checklist-team', (req, res, { ctx, params }) => send(res, 200, Checklist.teamOptions(ctx, intOrNull(params.id))));
+api.post('/api/projects/:id/checklist-roles', (req, res, { ctx, params, body }) => send(res, 200, Checklist.createTeamRole(ctx, intOrNull(params.id), body, clientIp(req))));
 api.get('/api/tasks/:id/plan', (req, res, { ctx, params, query }) => send(res, 200, ChecklistPlan.planState(ctx, intOrNull(params.id), { worker: query.get('worker'), start: query.get('de'), end: query.get('ate') })));
 api.post('/api/tasks/:id/plan/link', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.linkItem(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/plan/gap', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.setItemGap(ctx, intOrNull(params.id), body)));

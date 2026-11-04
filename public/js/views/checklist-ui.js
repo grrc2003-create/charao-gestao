@@ -92,6 +92,14 @@ const rateText = (rate, money) => (!money ? '' : rate ? `${brl(rate)}/dia` : 'se
 
 export function bindTeamEditor(box, team, opts, onChange = () => {}) {
   const money = !!opts.can_see_cost;
+  let adding = false;
+  const addRole = role => {
+    if (!opts.roles.some(r => r.name.toLowerCase() === role.name.toLowerCase())) {
+      opts.roles.push(role);
+      opts.roles.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    }
+    if (!team.some(e => !e.worker_id && String(e.role).toLowerCase() === role.name.toLowerCase())) team.push({ worker_id: null, name: null, role: role.name, qty: 1, days: '', ...(money ? { rate: role.rate } : {}) });
+  };
   const draw = () => {
     const workers = opts.workers.filter(w => !team.some(e => e.worker_id === w.id));
     const roles = opts.roles.filter(r => !team.some(e => !e.worker_id && String(e.role).toLowerCase() === r.name.toLowerCase()));
@@ -100,7 +108,13 @@ export function bindTeamEditor(box, team, opts, onChange = () => {}) {
         ${workers.length ? html`<optgroup label="Profissionais da folha">${workers.map(w => html`<option value="w:${w.id}">${w.name}${w.role ? ` · ${w.role}` : ''}${money ? ` · ${rateText(w.rate, true)}` : ''}</option>`)}</optgroup>` : ''}
         ${roles.length ? html`<optgroup label="Somente a função (diária genérica)">${roles.map(r => html`<option value="r:${r.name}">${r.name}${money ? ` · ${rateText(r.rate, true)}` : ''}</option>`)}</optgroup>` : ''}
       </select></label>
-      ${!opts.workers.length && !opts.roles.length ? html`<span class="hint">Nenhum profissional ou função disponível. Cadastre em <b>Folha de Campo → Profissionais</b>.</span>` : ''}
+      ${adding ? html`<div class="cl-role-new">
+          <label class="cl-role-name"><span>Nome da função</span><input type="text" data-role-name maxlength="80" placeholder="Ex.: Pintor" aria-label="Nome da nova função"></label>
+          ${money ? html`<label class="cl-team-n"><span>Diária (R$)</span><input type="text" inputmode="decimal" data-role-rate placeholder="0,00" aria-label="Diária genérica da nova função"></label>` : ''}
+          <button type="button" class="btn btn-primary btn-sm" data-role-save>Salvar</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-role-cancel>Cancelar</button>
+        </div>` : opts.project_id ? html`<button type="button" class="btn btn-ghost btn-sm cl-role-add" data-role-add>${icon('plus')}Nova função</button>` : ''}
+      ${!opts.workers.length && !opts.roles.length && !adding ? html`<span class="hint">Nenhum profissional ou função disponível. Use <b>Nova função</b> ou cadastre profissionais em <b>Folha de Campo → Profissionais</b>.</span>` : ''}
       <div class="cl-team-rows">${team.map((e, i) => html`<div class="cl-team-row" data-i="${i}">
         <div class="cl-team-who"><b>${e.worker_id ? e.name : e.role}</b><small>${e.worker_id ? e.role || 'Profissional' : 'Função'}${money ? ` · ${rateText(e.rate, true)}` : ''}</small></div>
         ${e.worker_id ? '' : html`<label class="cl-team-n"><span>Qtd.</span><input type="text" inputmode="numeric" data-team-qty value="${numBR(e.qty || 1)}" aria-label="Quantidade de ${e.role}"></label>`}
@@ -109,6 +123,29 @@ export function bindTeamEditor(box, team, opts, onChange = () => {}) {
         <button type="button" class="icon-btn" data-team-rm aria-label="Remover ${e.worker_id ? e.name : e.role}">✕</button>
       </div>`)}</div>
       ${money && team.length ? html`<div class="cl-team-total"><span>Valor do item</span><b data-team-total>${brl(teamTotal(team))}</b></div>` : ''}`.toString();
+    box.querySelector('[data-role-add]')?.addEventListener('click', () => { adding = true; draw(); box.querySelector('[data-role-name]').focus(); });
+    box.querySelector('[data-role-cancel]')?.addEventListener('click', () => { adding = false; draw(); });
+    const saveRole = async () => {
+      const name = box.querySelector('[data-role-name]').value.trim();
+      if (!name) { toast('Informe o nome da função.', 'error'); box.querySelector('[data-role-name]').focus(); return; }
+      const btn = box.querySelector('[data-role-save]');
+      btn.disabled = true;
+      try {
+        const rate = box.querySelector('[data-role-rate]')?.value;
+        const r = await api(`/projects/${opts.project_id}/checklist-roles`, { method: 'POST', body: { name, ...(rate ? { daily_rate: rate } : {}) } });
+        addRole(r.role);
+        adding = false;
+        draw();
+        onChange();
+        toast(r.created ? 'Função cadastrada e incluída na equipe.' : 'Essa função já existia e foi incluída na equipe.');
+        box.querySelector('.cl-team-row:last-child [data-team-days]')?.focus({ preventScroll: true });
+      } catch (ex) { toast(ex.message, 'error'); btn.disabled = false; }
+    };
+    box.querySelector('[data-role-save]')?.addEventListener('click', saveRole);
+    box.querySelector('.cl-role-new')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); saveRole(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); adding = false; draw(); }
+    });
     box.querySelector('[data-team-add]').addEventListener('change', e => {
       const v = e.target.value;
       if (!v) return;

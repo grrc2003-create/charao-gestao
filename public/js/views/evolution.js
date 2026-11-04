@@ -16,7 +16,7 @@ const INDICATORS = [
   { key: 'on_time', label: 'No prazo', fmt: pct, max: 100, best: 'high', help: 'Das entregas feitas até o fim de cada mês, quantas foram no prazo.' },
   { key: 'done', label: 'Concluídas', fmt: dec, best: 'high', count: true, help: 'Tarefas concluídas até o fim de cada mês.' },
   { key: 'late', label: 'Atrasadas', fmt: dec, best: 'low', count: true, help: 'Tarefas em aberto com o prazo vencido no fim de cada mês (não acumula: é a foto do mês).' },
-  { key: 'assigned', label: 'Atribuídas', fmt: dec, best: 'high', count: true, help: 'Tarefas sob responsabilidade da pessoa até o fim de cada mês.' },
+  { key: 'assigned', label: 'Atribuídas', fmt: dec, best: 'high', neutral: true, count: true, help: 'Tarefas sob responsabilidade da pessoa até o fim de cada mês.' },
   { key: 'exec', label: 'Dias úteis/exec.', fmt: dec, best: 'low', help: 'Média de dias úteis do início à conclusão, nas entregas feitas até o fim de cada mês.' },
   { key: 'early', label: 'Antecipadas', fmt: dec, best: 'high', count: true, help: 'Entregas antes do prazo até o fim de cada mês.' },
   { key: 'filling', label: 'Atr. preench.', fmt: dec, best: 'low', count: true, help: 'Conclusões registradas depois do dia real, até o fim de cada mês.' },
@@ -70,7 +70,10 @@ function chart(card, d) {
   inds.innerHTML = INDICATORS.map(i => {
     const main = scope === 'usuario' ? d.people[0].series[i.key][last] : d.overall.series[i.key][last];
     const cmp = scope === 'usuario' ? refSeries(i)[last] : null;
-    return html`<button type="button" class="ev-ind" data-ev-ind="${i.key}" aria-pressed="${String(i.key === chosen)}"><b>${i.fmt(main)}</b>${i.label}${cmp !== null ? html`<small>${d.overall.label === 'Empresa' ? 'empresa' : 'visível'} ${i.fmt(cmp)}</small>` : ''}</button>`.toString();
+    // Pior que a média: destaque no quadro, com o sinal e o texto (não só a cor). Atribuídas não é melhor nem pior.
+    const worse = cmp !== null && main !== null && !i.neutral && (i.best === 'high' ? main < cmp : main > cmp);
+    const who = d.overall.label === 'Empresa' ? 'empresa' : 'visível';
+    return html`<button type="button" class="ev-ind ${worse ? 'is-worse' : ''}" data-ev-ind="${i.key}" aria-pressed="${String(i.key === chosen)}" title="${worse ? `Pior que a média da ${who === 'empresa' ? 'empresa' : 'parte visível para você'}` : ''}"><b>${i.fmt(main)}</b>${i.label}${cmp !== null ? html`<small>${worse ? '▼ pior que ' : ''}${who} ${i.fmt(cmp)}</small>` : ''}</button>`.toString();
   }).join('');
 
   // ---------- Desenho ----------

@@ -308,6 +308,8 @@ export function actualOf(t) {
     // Conclusão informada depois do fato: quando foi registrada e quantos dias de atraso de preenchimento
     registered: t.delivered_registered_at ? localDate(t.delivered_registered_at) : null,
     filling_delay_days: t.filling_delay_days || 0,
+    review_late_hours: t.review_late_hours || 0,
+    review_leader_name: t.review_late_hours ? t.assignee_leader_name : null,
     date_status: t.done_date_status || null,
     claimed: t.done_date_status === 'pendente' ? t.claimed_done_date : null,
   };
@@ -323,7 +325,7 @@ export function execWorkDaysAvg(tasks, opts) {
   return n ? Math.round((sum / n) * 10) / 10 : null;
 }
 // Resumo com os indicadores de execução (antecipadas, atraso de preenchimento e média em dias úteis)
-export const execSummary = (tasks, { raw = false } = {}) => ({ ...summarize(tasks, undefined, { raw }), exec_work_days_avg: execWorkDaysAvg(tasks, { raw }) });
+export const execSummary = (tasks, { raw = false, reviewTasks = null } = {}) => ({ ...summarize(tasks, undefined, { raw, reviewTasks }), exec_work_days_avg: execWorkDaysAvg(tasks, { raw }) });
 
 export function getTask(ctx, id) {
   const t = loadVisible(ctx, id);

@@ -14,12 +14,14 @@ const pct = v => (v === null || v === undefined ? '—' : `${num(v)}%`);
 const dec = v => (v === null || v === undefined ? '—' : num(v));
 const INDICATORS = [
   { key: 'on_time', label: 'No prazo', fmt: pct, max: 100, best: 'high', help: 'Das entregas feitas até o fim de cada mês, quantas foram no prazo.' },
+  { key: 'real', label: 'Pontualidade real', fmt: pct, max: 100, best: 'high', help: 'Das entregas feitas até o fim de cada mês, quantas foram até o prazo original, sem contar os reagendamentos.' },
+  { key: 'resched', label: 'Repactuação', fmt: pct, max: 100, best: 'low', help: 'Das tarefas com prazo até o fim de cada mês, quantas já tinham sido reagendadas.' },
   { key: 'done', label: 'Concluídas', fmt: dec, best: 'high', count: true, help: 'Tarefas concluídas até o fim de cada mês.' },
   { key: 'late', label: 'Atrasadas', fmt: dec, best: 'low', count: true, help: 'Tarefas em aberto com o prazo vencido no fim de cada mês (não acumula: é a foto do mês).' },
   { key: 'assigned', label: 'Atribuídas', fmt: dec, best: 'high', neutral: true, count: true, help: 'Tarefas sob responsabilidade da pessoa até o fim de cada mês.' },
   { key: 'exec', label: 'Dias úteis/exec.', fmt: dec, best: 'low', help: 'Média de dias úteis do início à conclusão, nas entregas feitas até o fim de cada mês.' },
   { key: 'early', label: 'Antecipadas', fmt: dec, best: 'high', count: true, help: 'Entregas antes do prazo até o fim de cada mês.' },
-  { key: 'filling', label: 'Atr. preench.', fmt: dec, best: 'low', count: true, help: 'Conclusões registradas depois do dia real, até o fim de cada mês.' },
+  { key: 'filling', label: 'Atr. preench.', fmt: dec, best: 'low', count: true, help: 'Conclusões registradas depois do dia real e conferências de liderados acima de 36 horas (contam para o líder direto), até o fim de cada mês.' },
 ];
 
 let chosen = 'on_time'; // vale enquanto o sistema estiver aberto

@@ -200,7 +200,10 @@ api.get('/api/evolution', (req, res, { ctx, query }) => {
     if (!id || !one('SELECT id FROM projects WHERE id = ?', id) || !canAccessProject(ctx.user, id, ctx.projects)) throw new HttpError(404, 'Projeto não encontrado.');
     const tasks = Tasks.listVisible(ctx, 'WHERE t.project_id = ?', id);
     const people = new Map();
-    for (const t of tasks) people.set(t.assignee_id || 0, { id: t.assignee_id || null, name: t.assignee_name || 'Sem responsável', job_title: null });
+    for (const t of tasks) {
+      people.set(t.assignee_id || 0, { id: t.assignee_id || null, name: t.assignee_name || 'Sem responsável', job_title: null });
+      if (t.review_leader_id && !people.has(t.review_leader_id)) people.set(t.review_leader_id, { id: t.review_leader_id, name: t.assignee_leader_name, job_title: null });
+    }
     return send(res, 200, { scope, ...evolution({ tasks, people: [...people.values()], overallLabel: 'Projeto' }) });
   }
   if (scope === 'usuario') {

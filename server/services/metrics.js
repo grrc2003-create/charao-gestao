@@ -40,6 +40,21 @@ export function deadlineStats(t, reschedules = [], ref = today(), chronicMin = 3
   return { entries, preventive, corrective, daysAdded, chronic: reschedules.length >= chronicMin };
 }
 
+// Conferência acima do limite: a entrega do liderado esperou mais de 36 horas e o atraso de preenchimento é do líder direto.
+// Conta também a que ainda está esperando. Tarefas do Financeiro ficam de fora: são baixadas pelo pagamento, sem conferência.
+export const REVIEW_LIMIT_HOURS = 36;
+function reviewDelay(t, now = Date.now()) {
+  const leader = t.assignee_leader_id;
+  if (!leader || leader === t.assignee_id || t.project_restricted === 2) return null;
+  const waiting = t.status === 'aguardando_conferencia';
+  if (!waiting && !(t.status === 'concluida' && t.reviewed_at)) return null;
+  const from = parseTs(t.delivered_registered_at || t.delivered_at);
+  if (!from) return null;
+  const hours = ((waiting ? now : parseTs(t.reviewed_at).getTime()) - from.getTime()) / 3600e3;
+  if (hours <= REVIEW_LIMIT_HOURS) return null;
+  return { leader, hours: Math.round(hours), on: localDate(new Date(from.getTime() + REVIEW_LIMIT_HOURS * 3600e3).toISOString()) };
+}
+
 // Enriquecimento com dados derivados (usado em listas, telas e relatórios)
 export function decorate(t, ref = today(), reschedules = null, chronicMin = 3) {
   const eff = effectiveStatus(t, ref);
@@ -53,8 +68,12 @@ export function decorate(t, ref = today(), reschedules = null, chronicMin = 3) {
   const deliveredLate = delivered && t.due_date && deliveredDate > t.due_date ? 1 : 0;
   const lateEpisodes = ds.corrective + deliveredLate + lateNow;
   const originalDue = t.original_due || t.due_date || null;
+  const rd = reviewDelay(t);
   return {
     ...t,
+    review_leader_id: rd ? rd.leader : null,
+    review_late_hours: rd ? rd.hours : 0,
+    review_late_on: rd ? rd.on : null,
     eff_status: eff,
     delivered,
     delivered_date: deliveredDate,
@@ -76,7 +95,8 @@ export function decorate(t, ref = today(), reschedules = null, chronicMin = 3) {
 const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
 // raw: resume exatamente as tarefas recebidas (subtarefas na tela da própria tarefa, que não é indicador)
-export function summarize(tasks, ref = today(), { raw = false } = {}) {
+// reviewTasks: resumo de uma pessoa, em que as conferências atrasadas são as dos liderados dela (no resumo de um grupo, as do próprio grupo)
+export function summarize(tasks, ref = today(), { raw = false, reviewTasks = null } = {}) {
   const by = Object.fromEntries(STATUSES.map(s => [s, 0]));
   let delivered = 0, onTime = 0, lateDeliveries = 0, lateDaysSum = 0, lateCount = 0, dueSoon = 0, rescheduled = 0, reschedules = 0;
   let withDue = 0, everLate = 0, episodes = 0, preventive = 0, corrective = 0, chronic = 0, daysAdded = 0, onTimeOriginal = 0;
@@ -84,6 +104,8 @@ export function summarize(tasks, ref = today(), { raw = false } = {}) {
   // Execução: dias do início à conclusão real, entregas antecipadas e atraso de preenchimento
   let execN = 0, execDays = 0, early = 0, earlyDays = 0, fillN = 0, fillDays = 0;
   tasks = tasks.filter(t => !t.cancelled_at && (raw || countsInIndicators(t)));
+  const reviewLate = (reviewTasks || tasks).filter(t => t.review_late_hours > 0 && !t.cancelled_at && (raw || countsInIndicators(t)));
+  const reviewHours = reviewLate.reduce((n, t) => n + t.review_late_hours, 0);
   for (const t of tasks) {
     if (t.delivered && t.delivered_date) {
       const st = t.start_date || localDate(t.started_at) || localDate(t.created_at);
@@ -153,7 +175,10 @@ export function summarize(tasks, ref = today(), { raw = false } = {}) {
     early,
     early_pct: pct(early, delivered),
     early_days_avg: early ? Math.round((earlyDays / early) * 10) / 10 : 0,
-    filling_delays: fillN,
+    filling_delays: fillN + reviewLate.length, // conclusões registradas depois do dia real + conferências de liderados acima de 36 h
+    filling_own: fillN,
+    review_delays: reviewLate.length,
+    review_delay_hours_avg: reviewLate.length ? Math.round(reviewHours / reviewLate.length) : 0,
     filling_delay_days_avg: fillN ? Math.round((fillDays / fillN) * 10) / 10 : 0,
   };
 }
@@ -236,7 +261,7 @@ export function deadlineDetail(tasks, { month = '', view = 'atrasadas' } = {}, r
 export function userStats(user, tasks, usersById) {
   tasks = tasks.filter(countsInIndicators);
   const assigned = tasks.filter(t => t.assignee_id === user.id);
-  const s = summarize(assigned);
+  const s = summarize(assigned, undefined, { reviewTasks: tasks.filter(t => t.review_leader_id === user.id) });
   const created = tasks.filter(t => t.creator_id === user.id);
   const selfCreated = assigned.filter(t => t.creator_id === user.id);
   const byManager = assigned.filter(t => {
@@ -275,7 +300,8 @@ export function behaviorSummary(s, assigned, selfCreated) {
   if (s.chronic) lines.push(`${s.chronic} tarefa(s) crônica(s), com reagendamentos repetidos.`);
   if (s.exec_days_avg !== null) lines.push(`Executa as tarefas em média em ${br(s.exec_days_avg)} dia(s) (do início à conclusão).`);
   if (s.early) lines.push(`${s.early} entrega(s) antecipada(s), em média ${br(s.early_days_avg)} dia(s) antes do prazo.`);
-  if (s.filling_delays) lines.push(`${s.filling_delays} conclusão(ões) registrada(s) com atraso de preenchimento (média de ${br(s.filling_delay_days_avg)} dia(s)) — registrar no dia evita dependências e indicadores defasados.`);
+  if (s.filling_own) lines.push(`${s.filling_own} conclusão(ões) registrada(s) com atraso de preenchimento (média de ${br(s.filling_delay_days_avg)} dia(s)) — registrar no dia evita dependências e indicadores defasados.`);
+  if (s.review_delays) lines.push(`${s.review_delays} conferência(s) de liderados acima de ${REVIEW_LIMIT_HOURS} horas (média de ${s.review_delay_hours_avg} horas) — contam como atraso de preenchimento.`);
   if (s.on_time_original_pct !== null && s.on_time_pct !== null && s.on_time_pct - s.on_time_original_pct >= 10) {
     lines.push(`Pontualidade cai de ${String(s.on_time_pct).replace('.', ',')}% para ${String(s.on_time_original_pct).replace('.', ',')}% quando medida contra o prazo original.`);
   }

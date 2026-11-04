@@ -61,7 +61,9 @@ export function getProject(ctx, id) {
     if (!byUser.has(k)) byUser.set(k, { id: t.assignee_id, name: t.assignee_name || 'Sem responsável', tasks: [] });
     byUser.get(k).tasks.push(t);
   }
-  const people = [...byUser.values()].map(u => ({ id: u.id, name: u.name, summary: execSummary(u.tasks) }))
+  // Líder direto com conferência atrasada neste projeto aparece mesmo sem tarefas próprias
+  for (const t of tasks) if (t.review_leader_id && !byUser.has(t.review_leader_id)) byUser.set(t.review_leader_id, { id: t.review_leader_id, name: t.assignee_leader_name, tasks: [] });
+  const people = [...byUser.values()].map(u => ({ id: u.id, name: u.name, summary: execSummary(u.tasks, { reviewTasks: u.id ? tasks.filter(t => t.review_leader_id === u.id) : [] }) }))
     .sort((a, b) => b.summary.total - a.summary.total);
   // Andamento por classificação (Grupo/Local/Etapa)
   const stages = listStages(id).map(s => ({ ...s, summary: execSummary(tasks.filter(t => t.stage_id === s.id)) }));

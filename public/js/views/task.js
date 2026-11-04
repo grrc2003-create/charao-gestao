@@ -200,6 +200,7 @@ function build(t, ctx) {
                 <small>Tempo total: ${fmtDate(a.start)} → ${fmtDate(a.end)} · <b>${a.work_days ?? '—'} dia${a.work_days === 1 ? '' : 's'} út${a.work_days === 1 ? 'il' : 'eis'}</b> (${a.calendar_days} corrido${a.calendar_days === 1 ? '' : 's'})${a.planned_work_days !== null ? ` · planejado ${a.planned_work_days} dia(s) útil(eis)${plan ? ` (${plan > 0 ? '+' : '−'}${Math.abs(plan)})` : ''}` : ''}</small>
                 ${a.original_due ? html`<small>Prazo ${a.due_shift > 0 ? 'adiado' : 'antecipado'}: original ${fmtDate(a.original_due)} → final ${fmtDate(t.due_date)} (${a.due_shift > 0 ? '+' : '−'}${d(a.due_shift)}) · contra o original: ${a.vs_original > 0 ? `${d(a.vs_original)} depois` : a.vs_original < 0 ? `${d(a.vs_original)} antes` : 'no dia'}</small>` : ''}
                 ${a.registered ? html`<small class="fill-delay">${a.date_status === 'negada' ? 'Data informada negada pelo superior' : 'Data autorizada'} · registrada no sistema em ${fmtDate(a.registered)} · <b>${a.filling_delay_days} dia(s) de atraso de preenchimento</b></small>` : ''}
+                ${a.review_late_hours ? html`<small class="fill-delay">Conferência: <b>${a.review_late_hours} horas de espera</b> (limite de 36 horas) · conta como atraso de preenchimento de ${a.review_leader_name}, líder direto</small>` : ''}
                 ${a.approved && a.approved !== a.end ? html`<small>Conferência aprovada em ${fmtDate(a.approved)}</small>` : ''}</div></div>`;
           })()}
           ${(() => {

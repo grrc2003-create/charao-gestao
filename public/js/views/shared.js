@@ -47,7 +47,7 @@ export function execKpis(s, { title = '' } = {}) {
     ${kpi({ label: 'Média de execução', value: avg !== null ? dec(avg) : s.exec_days_avg !== null && s.exec_days_avg !== undefined ? dec(s.exec_days_avg) : '—', unit: s.exec_count ? (avg !== null ? ' dias úteis' : ' dias') : '', color: '#2A3D50',
       foot: s.exec_count ? `${dec(s.exec_days_avg)} dias corridos · do início à conclusão real · ${s.exec_count} entrega(s)` : 'sem entregas ainda' })}
     ${kpi({ label: 'Tarefas antecipadas', value: s.early ?? 0, color: STATUS_COLOR.concluida, foot: s.early ? `${fmtPct(s.early_pct)} das entregas · em média ${dec(s.early_days_avg)} dia(s) antes do prazo` : 'nenhuma entrega antes do prazo' })}
-    ${kpi({ label: 'Atraso de preenchimento', value: s.filling_delays ?? 0, color: '#B7791F', foot: s.filling_delays ? `conclusões registradas depois do dia real · média ${dec(s.filling_delay_days_avg)} dia(s)` : 'todas registradas no dia da conclusão' })}
+    ${kpi({ label: 'Atraso de preenchimento', value: s.filling_delays ?? 0, color: '#B7791F', foot: s.filling_delays ? [s.filling_own ? `${s.filling_own} registrada(s) depois do dia real · média ${dec(s.filling_delay_days_avg)} dia(s)` : '', s.review_delays ? `${s.review_delays} conferência(s) acima de 36 h · média ${s.review_delay_hours_avg} h` : ''].filter(Boolean).join(' · ') : 'registros e conferências em dia' })}
   </div>`;
 }
 // Versão em linha (listas: classificações, projetos, pessoas, subtarefas)
@@ -57,7 +57,7 @@ export function execInline(s) {
   return html`<div class="exec-inline">
     ${avg !== null && avg !== undefined ? html`<span title="Média do início à conclusão real">⏱ <b>${dec(avg)}</b> ${s.exec_work_days_avg !== null && s.exec_work_days_avg !== undefined ? 'dias úteis' : 'dias'}/exec.</span>` : ''}
     <span class="ok" title="Entregas antes do prazo">✓ <b>${s.early || 0}</b> antecipada(s)</span>
-    <span class="${s.filling_delays ? 'warn' : ''}" title="Conclusões registradas depois do dia real${s.filling_delays ? ` · média ${dec(s.filling_delay_days_avg)} dia(s)` : ''}">✎ <b>${s.filling_delays || 0}</b> atr. preench.</span>
+    <span class="${s.filling_delays ? 'warn' : ''}" title="Conclusões registradas depois do dia real${s.filling_own ? ` (${s.filling_own}, média ${dec(s.filling_delay_days_avg)} dia(s))` : ''} e conferências de liderados acima de 36 h${s.review_delays ? ` (${s.review_delays})` : ''}">✎ <b>${s.filling_delays || 0}</b> atr. preench.</span>
   </div>`;
 }
 
@@ -138,7 +138,7 @@ const rankCalc = s => {
       ? `Dias úteis por execução\nSoma dos dias úteis ÷ entregas\n${s.exec_work_days_sum} ÷ ${s.exec_work_days_n} = ${br(s.exec_work_days_avg)} dias úteis\nDo início até a conclusão real, pelo calendário de cada obra.`
       : `Dias por execução\nMédia do início até a conclusão real: ${days === null || days === undefined ? 'ainda sem entregas' : `${br(days)} dias`}`,
     early: `Antecipadas\nEntregas antes do prazo: ${s.early ?? 0} de ${delivered}${s.early ? ` (${fmtPct(s.early_pct)})\nEm média, ${br(s.early_days_avg)} dias antes do prazo.` : ''}`,
-    filling: `Atraso de preenchimento\nConclusões registradas depois do dia real: ${s.filling_delays ?? 0} de ${delivered}${s.filling_delays ? `\nEm média, ${br(s.filling_delay_days_avg)} dias depois.` : ''}`,
+    filling: `Atraso de preenchimento\nRegistradas depois do dia real ${s.filling_own ?? 0} + conferências de liderados acima de 36 h ${s.review_delays ?? 0} = ${s.filling_delays ?? 0}${s.filling_own ? `\nRegistro: em média, ${br(s.filling_delay_days_avg)} dias depois.` : ''}${s.review_delays ? `\nConferência: em média, ${s.review_delay_hours_avg} horas de espera.` : ''}`,
   };
 };
 export const userRankRow = (u, i, _all, calc = rankCalc(u.stats)) => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">

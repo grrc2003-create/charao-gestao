@@ -4,7 +4,7 @@ import { today, localDate, countsInIndicators } from './metrics.js';
 import { actualOf } from './tasks.js';
 
 const MAX_MONTHS = 12;
-const KEYS = ['on_time', 'done', 'late', 'assigned', 'exec', 'early', 'filling'];
+const KEYS = ['on_time', 'real', 'resched', 'done', 'late', 'assigned', 'exec', 'early', 'filling'];
 const COUNTS = ['done', 'late', 'assigned', 'early', 'filling']; // os demais (percentual e média) já são comparáveis entre pessoa e empresa
 const round1 = v => Math.round(v * 10) / 10;
 
@@ -29,6 +29,12 @@ function factsOf(t) {
   return {
     who: t.assignee_id || 0, born, delivered, doneOn,
     on_time: !!t.on_time,
+    real: !!t.on_time_original,
+    with_due: !!(t.due_date || t.original_due),
+    resched_now: t.reschedule_count > 0,
+    first_move: (t.reschedule_entries || [])[0] ? localDate(t.reschedule_entries[0].created_at) : null,
+    leader: t.review_leader_id || 0,
+    review_on: t.review_late_on || null,
     early: !!(delivered && t.due_date && delivered < t.due_date),
     filling: !!(delivered && t.filling_delay_days > 0),
     work: act && act.work_days !== null ? act.work_days : null,
@@ -45,16 +51,21 @@ function dueOn(f, day) {
   return due;
 }
 
-const blank = () => ({ assigned: 0, delivered: 0, on: 0, done: 0, late: 0, early: 0, filling: 0, n: 0, sum: 0 });
+const blank = () => ({ assigned: 0, delivered: 0, on: 0, real: 0, with_due: 0, resched: 0, done: 0, late: 0, early: 0, filling: 0, n: 0, sum: 0 });
 
 function add(c, f, day) {
   const open = day === null; // último ponto: o estado atual, exatamente como na tabela
   if (!open && f.born > day) return false;
   c.assigned++;
+  if (f.with_due) {
+    c.with_due++;
+    if (open ? f.resched_now : f.first_move && f.first_move <= day) c.resched++;
+  }
   const deliveredYet = f.delivered && (open || f.delivered <= day);
   if (deliveredYet) {
     c.delivered++;
     if (f.on_time) c.on++;
+    if (f.real) c.real++;
     if (f.early) c.early++;
     if (f.filling) c.filling++;
     if (f.work !== null) { c.n++; c.sum += f.work; }
@@ -69,8 +80,13 @@ function add(c, f, day) {
   return true;
 }
 
+// Conferência de liderado acima de 36 h: conta para o líder direto, a partir do dia em que passou do limite
+const addReview = (c, f, day) => { if (c && f.review_on && (day === null || f.review_on <= day)) c.filling++; };
+
 const valuesOf = c => ({
   on_time: c.delivered ? round1((c.on / c.delivered) * 100) : null,
+  real: c.delivered ? round1((c.real / c.delivered) * 100) : null,
+  resched: c.with_due ? round1((c.resched / c.with_due) * 100) : null,
   done: c.done, late: c.late, assigned: c.assigned,
   exec: c.n ? round1(c.sum / c.n) : null,
   early: c.early, filling: c.filling,
@@ -99,6 +115,7 @@ export function evolution({ tasks, people, overallTasks = tasks, overallLabel })
     const active = new Set();
     for (const f of all) if (add(total, f, day) && f.who) active.add(f.who);
     for (const f of own) if (cells.has(f.who)) add(cells.get(f.who), f, day);
+    for (const f of all) { addReview(total, f, day); addReview(cells.get(f.leader), f, day); }
     for (const r of runners) {
       const v = valuesOf(cells.get(r.id || 0));
       for (const k of KEYS) r.series[k].push(v[k]);

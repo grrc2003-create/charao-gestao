@@ -2990,6 +2990,57 @@ async function main() {
   const evOwnData = (await evOwn('GET', `/evolution?scope=usuario&id=${evOwnId}`)).data;
   ok(evOwnData.overall.label === 'Visível para você' && evLast(evOwnData.overall.series.assigned) === 0, 'quem só vê as próprias não recebe os números da empresa');
 
+  console.log('Pontualidade real, repactuação e conferência acima de 36 horas');
+  const rvDash0 = (await evAna('GET', '/dashboard')).data;
+  const rvCo0 = await evGet('scope=empresa');
+  ok(evLast(rvCo0.overall.series.real) === rvDash0.summary.on_time_original_pct && evLast(rvCo0.overall.series.resched) === rvDash0.summary.reschedule_rate, 'pontualidade real e repactuação da empresa batem com os indicadores da tela');
+  ok(rvDash0.users.every(u => {
+    const p = rvCo0.people.find(x => x.id === u.id);
+    return evLast(p.series.real) === u.stats.on_time_original_pct && evLast(p.series.resched) === (u.stats.reschedule_rate ?? null);
+  }), 'e as de cada pessoa também');
+  ok(rvCo0.people.every(p => p.series.resched.every(v => v === null || (v >= 0 && v <= 100))), 'repactuação fica entre 0% e 100%');
+  const rvLeaderId = (await evAna('GET', '/users/4')).data.user.manager_id;
+  ok(!!rvLeaderId, 'a pessoa do teste tem líder direto');
+  const rvMarcos = await login('marcos@charao.eng.br');
+  const rvStats = async () => {
+    const d = (await evAna('GET', '/dashboard')).data;
+    return { co: d.summary.filling_delays, rev: d.summary.review_delays, own: d.users.find(u => u.id === 4).stats, lead: (await evAna('GET', `/users/${rvLeaderId}`)).data.stats };
+  };
+  const rvTask = (await evAna('POST', '/tasks', { project_id: 1, title: 'Conferência demorada', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', due_date: '2050-01-01' })).data.id;
+  ok((await rvMarcos('POST', `/tasks/${rvTask}/actions/start`, SD)).status === 200 && (await rvMarcos('POST', `/tasks/${rvTask}/actions/submit`, SD)).status === 200, 'o liderado envia para conferência');
+  const rvBase = await rvStats();
+  const rvDb = new DatabaseSync(path.join(DATA_DIR, 'charao.db'));
+  const rvAgo = h => new Date(Date.now() - h * 3600e3).toISOString();
+  rvDb.prepare('UPDATE tasks SET delivered_at = ? WHERE id = ?').run(rvAgo(35), rvTask);
+  ok((await rvStats()).co === rvBase.co, 'esperando há 35 horas ainda não conta');
+  rvDb.prepare('UPDATE tasks SET delivered_at = ? WHERE id = ?').run(rvAgo(37), rvTask);
+  const rvLate = await rvStats();
+  ok(rvLate.lead.filling_delays === rvBase.lead.filling_delays + 1 && rvLate.lead.review_delays === rvBase.lead.review_delays + 1, 'esperando há 37 horas conta para o líder direto');
+  ok(rvLate.own.filling_delays === rvBase.own.filling_delays, 'e não conta para o liderado');
+  ok(rvLate.co === rvBase.co + 1, 'e conta no total da empresa');
+  const rvLeadEvo = await evGet(`scope=usuario&id=${rvLeaderId}`);
+  ok(evLast(rvLeadEvo.people[0].series.filling) === rvLate.lead.filling_delays, 'o gráfico do líder bate com a tela dele');
+  ok(evLast((await evGet('scope=empresa')).overall.series.filling) === rvLate.co, 'o gráfico da empresa bate com a tela');
+  const rvProj = (await evAna('GET', '/projects/1')).data;
+  const rvProjEvo = await evGet('scope=projeto&id=1');
+  const rvProjLead = rvProj.people.find(u => u.id === rvLeaderId);
+  ok(rvProjLead && rvProjLead.summary.review_delays >= 1 && evLast(rvProjEvo.people.find(p => p.id === rvLeaderId).series.filling) === rvProjLead.summary.filling_delays, 'no projeto, o líder aparece com a conferência atrasada');
+  ok((await evAna('GET', `/tasks/${rvTask}`)).data.actual.review_late_hours === 37, 'a tarefa mostra as horas de espera');
+  ok((await evAna('POST', `/tasks/${rvTask}/actions/approve`, SD)).status === 200, 'a entrega é aprovada');
+  rvDb.prepare('UPDATE tasks SET delivered_at = ?, reviewed_at = ? WHERE id = ?').run(rvAgo(100), rvAgo(70), rvTask);
+  ok((await rvStats()).co === rvBase.co, 'aprovada em 30 horas não conta, mesmo depois de muito tempo');
+  rvDb.prepare('UPDATE tasks SET reviewed_at = ? WHERE id = ?').run(rvAgo(50), rvTask);
+  ok((await rvStats()).co === rvBase.co + 1, 'aprovada em 50 horas continua contando');
+  const rvNoLeader = (await evAna('POST', '/tasks', { project_id: 1, title: 'Sem líder direto', description: 'Teste', assignee_id: rvLeaderId, proof_type: 'nenhuma', due_date: '2050-01-01' })).data.id;
+  const rvHasBoss = (await evAna('GET', `/users/${rvLeaderId}`)).data.user.manager_id;
+  rvDb.prepare("UPDATE tasks SET status = 'aguardando_conferencia', review_status = 'pendente', delivered_at = ? WHERE id = ?").run(rvAgo(100), rvNoLeader);
+  rvDb.prepare('UPDATE users SET manager_id = NULL WHERE id = ?').run(rvLeaderId);
+  const rvBefore = (await rvStats()).co;
+  ok(rvBefore === rvBase.co + 1, 'quem não tem líder direto não gera atraso de conferência');
+  rvDb.prepare('UPDATE users SET manager_id = ? WHERE id = ?').run(rvHasBoss, rvLeaderId);
+  rvDb.prepare("UPDATE tasks SET status = 'aberta', review_status = NULL, delivered_at = NULL WHERE id = ?").run(rvNoLeader);
+  rvDb.close();
+
 }
 
 main()

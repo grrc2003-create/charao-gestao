@@ -15,6 +15,7 @@ const FREQ = { mensal: 'Mensal', bimestral: 'Bimestral', trimestral: 'Trimestral
 // Situação: cor de estado sempre com ícone + texto
 export const SIT = {
   atrasada: { label: 'Atrasada', ic: 'alert', cls: 'fs-late' },
+  a_conferir: { label: 'Vencida, dentro do prazo', ic: 'calendar', cls: 'fs-week' },
   hoje: { label: 'Vence hoje', ic: 'clock', cls: 'fs-today' },
   semana: { label: 'Próximos 7 dias', ic: 'calendar', cls: 'fs-week' },
   futura: { label: 'A vencer', ic: 'calendar', cls: 'fs-future' },
@@ -126,6 +127,7 @@ export async function view({ state, query, setQuery, render }) {
   // Lista por vencimento
   const groups = [
     ['atrasada', 'Atrasadas', items.filter(i => i.situation === 'atrasada')],
+    ['a_conferir', 'Vencidas, dentro do prazo (até o 10º dia útil do mês seguinte)', items.filter(i => i.situation === 'a_conferir')],
     ['hoje', 'Vencem hoje', items.filter(i => i.situation === 'hoje')],
     ['semana', 'Próximos 7 dias', items.filter(i => i.situation === 'semana')],
     ['futura', 'Mais adiante no mês', inMonth.filter(i => i.situation === 'futura')],
@@ -134,7 +136,7 @@ export async function view({ state, query, setQuery, render }) {
   ];
   const row = i => html`<li class="fin-row ${SIT[i.situation].cls}">
     <div class="fin-row-main"><b>${i.title}</b><small>${i.category} · ${i.frequency_label}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></div>
-    <div class="fin-row-due"><span>${fmtDate(i.due_date)}</span>${sitBadge(i.situation)}</div>
+    <div class="fin-row-due"><span>${fmtDate(i.due_date)}</span>${sitBadge(i.situation)}${i.situation === 'a_conferir' ? html`<small>registrar até ${fmtDate(i.task_limit)}</small>` : ''}</div>
     <div class="fin-row-val"><b>${money(i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected)}</b>${i.status === 'paga' ? html`<small>pago em ${fmtDate(i.paid_date)}</small>` : i.estimated ? html`<small class="fin-est">valor estimado</small>` : i.variable ? html`<small>valor variável</small>` : ''}${i.payroll_ref ? html`<small>Folha ${i.payroll_ref.slice(5, 7)}/${i.payroll_ref.slice(0, 4)} vinculada</small>` : ''}</div>
     <div class="fin-row-act">
       ${i.status === 'pendente' ? html`<button type="button" class="btn btn-success btn-sm" data-pay="${i.id}">${icon('check')}Pagar</button>

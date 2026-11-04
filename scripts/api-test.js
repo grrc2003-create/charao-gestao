@@ -1289,7 +1289,7 @@ async function main() {
   const fObId = (await fAna('POST', '/finance/obligations', { title: 'DAS Simples Nacional', category: 'Impostos', payee: 'Receita Federal', amount: '1.234,50', frequency: 'mensal', due_day: 20, start_month: fRef })).data.id;
   let fMonth = (await fAna('GET', '/finance/month')).data;
   const fIt0 = fMonth.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
-  ok(fIt0 && fIt0.amount_expected === 1234.5 && fIt0.due_date === `${fRef}-20` && fIt0.status === 'pendente' && !fIt0.task_id, 'obrigação mensal gera a parcela do mês (vencimento dia 20, valor previsto), sem criar a tarefa sozinha');
+  ok(fIt0 && fIt0.amount_expected === 1234.5 && fIt0.planned_date === `${fRef}-20` && fIt0.due_date === new Date(Date.UTC(+fRef.slice(0, 4), +fRef.slice(5, 7), 0)).toISOString().slice(0, 10) && fIt0.status === 'pendente' && !fIt0.task_id, 'obrigação mensal gera a parcela do mês (previsto dia 20, vence no fim do mês), sem criar a tarefa sozinha');
   const fSug = (await fAna('GET', '/finance/task-suggestions')).data;
   ok(fSug.some(i => i.id === fIt0.id), 'Criar tarefa?: a parcela sem tarefa aparece para a pessoa decidir');
   const fOb = (await fAna('GET', `/finance/obligations/${fObId}`)).data;
@@ -2267,7 +2267,16 @@ async function main() {
     await new Promise(r => setTimeout(r, 1100));
     await fo('POST', '/finance/maiscontrole/upload', { file: { name: 'semana.xlsx', data: none } });
     const wk3 = (await fo('GET', '/finance/week')).data.items.find(i => i.id === it.id);
-    ok(wk3.state === 'nao_encontrado', 'busca sem o pagamento marcado: alerta "não realizado ou não lançado"');
+    ok(wk3.state === 'aguardando', 'busca dentro do mês sem o pagamento marcado: continua aguardando até o fim do mês');
+    // Busca que já cobre o fim do mês, ainda sem o pagamento → não encontrado
+    const wkDb = new DatabaseSync(path.join(DATA_DIR, 'charao.db'));
+    const wkFetch = wkDb.prepare("SELECT id, data_until FROM ext_fetches WHERE source = 'maiscontrole' AND row_count > 0 ORDER BY id DESC LIMIT 1").get();
+    const wkEnd = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).toISOString().slice(0, 10);
+    wkDb.prepare('UPDATE ext_fetches SET data_until = ? WHERE id = ?').run(wkEnd, wkFetch.id);
+    const wk3b = (await fo('GET', '/finance/week')).data.items.find(i => i.id === it.id);
+    wkDb.prepare('UPDATE ext_fetches SET data_until = ? WHERE id = ?').run(wkFetch.data_until, wkFetch.id);
+    wkDb.close();
+    ok(wk3b.state === 'nao_encontrado', 'busca que cobre o fim do mês sem o pagamento marcado: alerta "não realizado ou não lançado"');
     ok((await fo('POST', `/finance/items/${it.id}/justify`, { kind: 'vai_ocorrer', reason: '' })).status === 400, 'justificativa exige motivo');
     const nd = new Date(Date.parse(t0) + 3 * 86400e3).toISOString().slice(0, 10);
     const j1 = await fo('POST', `/finance/items/${it.id}/justify`, { kind: 'vai_ocorrer', reason: 'Boleto atrasou', new_date: nd });
@@ -2292,8 +2301,7 @@ async function main() {
     ok(pv.plans.length === 1 && pv.totals.plan_months === 12 && pv.totals.plan_zeros === 11 && !pv.pays.length, 'prévia do previsto: lê a aba "Previsto…" (ignora a linha TOTAL)');
     const imp = (await fo('POST', '/finance/import', { file: { name: 'prev.xlsx', data: file } })).data;
     const after = await row();
-    const lateBefore = before.cells.filter(c => c && c.status === 'atrasada').length;
-    ok(imp.planned === 12 && lateBefore > 0 && !after.cells.some(c => c && c.status === 'atrasada') && after.cells[11].planned === 250 && after.cells[0].status === 'sem_previsto',
+    ok(imp.planned === 12 && !after.cells.some(c => c && c.status === 'atrasada') && after.cells[11].planned === 250 && after.cells[0].status === 'sem_previsto',
       'previsto 0: mês sem previsão (não fica atrasada); DEZ com o previsto da planilha');
     const it0 = (await fo('GET', `/finance/obligations/${oid}`)).data.items.find(i => i.ref_month === `${y}-01`);
     const t0 = (await fo('GET', `/tasks/${it0.task_id}`)).data;
@@ -2927,6 +2935,47 @@ async function main() {
   ok(ctProj.trend.every(m => ctSum(m.by.atrasadas) === m.ever_late) && ['r0', 'r1', 'r2', 'r3'].every(k => ctSum(ctProj.dist_by[k]) === ctProj.summary.reschedule_dist[k]), 'no projeto, a pizza bate com os números');
   const ctUser = (await ctAna('GET', '/users/4')).data;
   ok(ctUser.trend.every(m => m.by.todas.length <= 1) && ctUser.dist_by.r0.length <= 1, 'na tela do usuário só ele aparece');
+
+  console.log('Financeiro: conferência no fim do mês e tarefa até o 10º dia útil do mês seguinte');
+  const dfcAna = await login('ana@charao.eng.br');
+  const dfcToday = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const dfcShift = (ym, n) => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1)).toISOString().slice(0, 7);
+  const dfcCur = dfcToday.slice(0, 7), dfcPrev = dfcShift(dfcCur, -1), dfcPrev2 = dfcShift(dfcCur, -2), dfcNext = dfcShift(dfcCur, 1);
+  const dfcEnd = ym => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).toISOString().slice(0, 10);
+  const dfcOb = (await dfcAna('POST', '/finance/obligations', { title: 'Conferência no fim do mês', category: 'Outros', amount: 90, frequency: 'mensal', due_day: 1, start_month: dfcPrev2, assignee_id: 1 })).data.id;
+  const dfcItems = (await dfcAna('GET', `/finance/obligations/${dfcOb}`)).data.items;
+  const dfcOld = dfcItems.find(i => i.ref_month === dfcPrev2), dfcLast = dfcItems.find(i => i.ref_month === dfcPrev), dfcNow = dfcItems.find(i => i.ref_month === dfcCur);
+  ok(dfcOld && dfcNow && dfcNow.due_date === `${dfcCur}-01`, 'a parcela guarda o dia previsto');
+  const dfcMonth = (await dfcAna('GET', '/finance/month')).data;
+  const dfcM = id => dfcMonth.items.find(i => i.id === id);
+  ok(dfcM(dfcNow.id).due_date === dfcEnd(dfcCur) && dfcM(dfcNow.id).planned_date === `${dfcCur}-01` && !dfcM(dfcNow.id).late, 'o vencimento é o último dia do mês e a despesa do mês não fica atrasada');
+  ok(dfcM(dfcLast.id) && dfcM(dfcLast.id).late === (dfcM(dfcLast.id).task_limit < dfcToday) && dfcM(dfcLast.id).situation === (dfcM(dfcLast.id).late ? 'atrasada' : 'a_conferir'), 'o mês passado só fica atrasado depois do 10º dia útil deste mês');
+  ok(dfcM(dfcLast.id).task_limit.slice(0, 7) === dfcCur && dfcM(dfcLast.id).due_date === dfcEnd(dfcPrev), 'e o limite cai neste mês');
+  ok(dfcM(dfcOld.id).late && dfcM(dfcOld.id).situation === 'atrasada', 'passado o limite sem o dado, fica atrasada');
+  const dfcWeek = (await dfcAna('GET', '/finance/week')).data.items;
+  const dfcW = id => dfcWeek.find(i => i.id === id);
+  ok((dfcM(dfcLast.id).late ? ['atrasada', 'justificar'] : ['no_prazo', 'conferir']).includes(dfcW(dfcLast.id).state) && dfcW(dfcLast.id).conf_date === dfcEnd(dfcPrev), 'contas da semana: o mês passado só cobra depois do limite');
+  if (dfcToday.slice(8) !== '01') ok(dfcW(dfcNow.id).state === 'no_mes', 'contas da semana: vencida dentro do mês não pede justificativa');
+  const dfcYear = (await dfcAna('GET', `/finance/year?ano=${dfcCur.slice(0, 4)}`)).data.groups.flatMap(g => g.rows).find(r => r.id === dfcOb);
+  ok(dfcYear.cells.find(c => c && c.ym === dfcCur).status === 'pendente', 'planejamento anual: despesa do mês continua a pagar');
+  const dfcOverdue = (await dfcAna('GET', '/finance/obligations')).data;
+  ok((Array.isArray(dfcOverdue) ? dfcOverdue : dfcOverdue.obligations).find(o => o.id === dfcOb).overdue === (dfcM(dfcLast.id).late ? 2 : 1), 'a obrigação conta como atrasado só o que passou do limite');
+  ok((Array.isArray(dfcOverdue) ? dfcOverdue : dfcOverdue.obligations).find(o => o.id === dfcOb).next_due === dfcEnd(dfcPrev2), 'o próximo vencimento é o fim do mês');
+  const dfcSug = (await dfcAna('GET', '/finance/task-suggestions')).data.find(i => i.id === dfcNow.id);
+  await dfcAna('POST', '/finance/task-suggestions', { ids: [dfcNow.id], create: true });
+  const dfcTaskId = (await dfcAna('GET', `/finance/items/${dfcNow.id}`)).data.task_id;
+  const dfcTask = (await dfcAna('GET', `/tasks/${dfcTaskId}`)).data;
+  const dfcWeekdays = d => { let n = 0; for (let x = `${d.slice(0, 7)}-01`; x <= d; x = new Date(Date.parse(x) + 86400e3).toISOString().slice(0, 10)) { const w = new Date(x).getUTCDay(); if (w && w < 6) n++; } return n; };
+  ok(dfcTask.start_date === dfcEnd(dfcCur) && dfcTask.due_date.slice(0, 7) === dfcNext, 'a tarefa começa no fim do mês e vence no mês seguinte');
+  ok(dfcWeekdays(dfcTask.due_date) >= 10 && dfcWeekdays(dfcTask.due_date) <= 13 && ![0, 6].includes(new Date(dfcTask.due_date).getUTCDay()), 'o prazo é o 10º dia útil do mês seguinte');
+  ok(dfcSug.task_due === dfcTask.due_date, 'a pergunta de criar tarefa mostra esse prazo');
+  ok((await dfcAna('PUT', `/finance/obligations/${dfcOb}`, { due_day: 15 })).status === 200, 'muda o dia de vencimento da obrigação');
+  const dfcEdited = (await dfcAna('GET', `/tasks/${dfcTaskId}`)).data;
+  ok(dfcEdited.due_date === dfcTask.due_date && (await dfcAna('GET', `/finance/items/${dfcNow.id}`)).data.due_date === `${dfcCur}-15`, 'o vencimento muda, o prazo da tarefa continua pelo fim do mês');
+  const dfcNd = `${dfcNext}-20`;
+  ok((await dfcAna('POST', `/finance/items/${dfcNow.id}/justify`, { kind: 'vai_ocorrer', reason: 'Boleto adiado', new_date: dfcNd })).status === 200, 'justifica: vai ocorrer no mês seguinte');
+  const dfcMoved = (await dfcAna('GET', `/tasks/${dfcTaskId}`)).data;
+  ok(dfcMoved.start_date === dfcEnd(dfcNext) && dfcMoved.due_date.slice(0, 7) === dfcShift(dfcNext, 1), 'despesa reprogramada: conferência e tarefa acompanham o novo mês');
 
   console.log('Corrida dos indicadores');
   const evAna = await login('ana@charao.eng.br');

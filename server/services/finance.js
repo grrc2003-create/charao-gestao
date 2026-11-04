@@ -8,6 +8,7 @@ import { defaultStageId } from './stages.js';
 import { saveImageFromDataUrl, isPdf, cleanFileName } from './files.js';
 import { insertTask } from './tasks.js';
 import { billedByMonth } from './contracts.js';
+import { addWorkingDays } from './calendar.js';
 
 export const CATEGORIES = ['Impostos', 'Folha de pagamento', 'Encargos e benefícios', 'Aluguel e condomínio', 'Fornecedores', 'Financiamentos e empréstimos', 'Seguros', 'Serviços e assinaturas', 'Contas de consumo', 'Outros'];
 export const FREQUENCIES = { mensal: 1, bimestral: 2, trimestral: 3, semestral: 6, anual: 12, unica: 0 };
@@ -61,6 +62,17 @@ function stageFor(areaId, category) {
   return Number(run('INSERT INTO project_stages (project_id, name, sort_order) VALUES (?,?,?)', areaId, category, n + 1).lastInsertRowid);
 }
 
+// Vencimento das despesas: o último dia do mês em que caem, não o dia em que ocorrem. Só ficam atrasadas depois do 10º dia
+// útil do mês seguinte, que é também o prazo da tarefa. A coluna due_date guarda o dia previsto (lembrete de pagar e data da folha).
+export const conferenceDate = it => dueOf(it.due_date && it.due_date.slice(0, 7) > it.ref_month ? it.due_date.slice(0, 7) : it.ref_month, 31);
+const TASK_WORK_DAYS = 10;
+const financeTaskDue = (areaId, conf) => addWorkingDays(areaId, conf, TASK_WORK_DAYS);
+// Data limite (antes dela não há atraso); guarda o cálculo por mês enquanto a tela é montada
+export function limitReader() {
+  const memo = new Map(), area = financeAreaId();
+  return conf => { if (!memo.has(conf)) memo.set(conf, area ? financeTaskDue(area, conf) : conf); return memo.get(conf); };
+}
+
 // ---------- Geração das parcelas (e das tarefas) ----------
 const HORIZON = 2; // gera até 2 meses à frente do mês atual
 export function monthsOf(o, until, history = true) {
@@ -100,9 +112,10 @@ function createItem(o, ref, userId, { noTask = false } = {}) {
 function itemTask(o, it, userId, area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId())) {
   const assignee = o.assignee_id && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', o.assignee_id) ? o.assignee_id : null;
   const amount = r2(it.amount_expected);
+  const conf = conferenceDate(it);
   const taskId = insertTask({
     project: area,
-    data: { task_type: 'tarefa', title: taskTitle(o, it.ref_month), description: taskDescription(o, amount), field_summary: null, notes: null, due_date: it.due_date, start_date: it.due_date, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
+    data: { task_type: 'tarefa', title: taskTitle(o, it.ref_month), description: taskDescription(o, amount), field_summary: null, notes: null, due_date: financeTaskDue(area.id, conf), start_date: conf, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
     stageInput: stageFor(area.id, o.category),
     creatorId: userId || o.created_by,
   });
@@ -120,7 +133,7 @@ export function taskSuggestions(ctx) {
       FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id LEFT JOIN users u ON u.id = o.assignee_id
       WHERE i.task_id IS NULL AND i.task_skip = 0 AND i.status = 'pendente' AND i.amount_expected > 0 AND o.active = 1 AND i.ref_month BETWEEN ? AND ?
       ORDER BY i.due_date, o.title`, [addMonths(cur, -1), cutoff()].sort().at(-1), addMonths(cur, 1))
-      .map(i => ({ ...i, month_label: monthLabel(i.ref_month) }));
+      .map(i => ({ ...i, month_label: monthLabel(i.ref_month), conf_date: conferenceDate(i), task_due: financeTaskDue(financeAreaId(), conferenceDate(i)) }));
   } catch { return []; } // antes da migração
 }
 export function answerTaskSuggestions(ctx, body, ip) {
@@ -317,6 +330,7 @@ export function financeYear(ctx, y) {
   // Mês fechado: anterior ao mês passado e já coberto pela última busca do Mais Controle
   const prevMonth = (() => { const [yy, mm] = ref.slice(0, 7).split('-').map(Number); return mm === 1 ? `${yy - 1}-12` : `${yy}-${String(mm - 1).padStart(2, '0')}`; })();
   const cut = cutoff();
+  const limitOf = limitReader();
   const closed = k => (!!cov && k < prevMonth && cov.data_until.slice(0, 7) > k) || k < cut; // antes do início do controle: histórico
   const rows = [];
   for (const o of all(`SELECT o.*, u.name AS assignee_name FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.category, o.title`)) {
@@ -326,16 +340,16 @@ export function financeYear(ctx, y) {
       const it = mine.get(k);
       if (it) {
         const paid = it.status === 'paga';
-        return { ym: k, item_id: it.id, planned: r2(it.amount_expected), real: paid ? r2(it.paid_amount ?? it.amount_expected) : null, paid_date: it.paid_date, due_date: it.due_date,
+        return { ym: k, item_id: it.id, planned: r2(it.amount_expected), real: paid ? r2(it.paid_amount ?? it.amount_expected) : null, paid_date: it.paid_date, due_date: conferenceDate(it), planned_date: it.due_date,
           // Real = 0: a previsão não ocorreu no mês (resolvido, não é atraso)
-          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : r2(it.amount_expected) === 0 ? 'sem_previsto' : it.marked_paid_at ? markState(it, cov) : closed(k) ? 'sem_pagamento' : it.due_date < ref ? 'atrasada' : 'pendente',
+          status: paid ? (r2(it.paid_amount ?? it.amount_expected) === 0 ? 'nao_ocorreu' : 'pago') : r2(it.amount_expected) === 0 ? 'sem_previsto' : it.marked_paid_at ? markState(it, cov) : closed(k) ? 'sem_pagamento' : limitOf(conferenceDate(it)) < ref ? 'atrasada' : 'pendente',
           source: it.source,
           estimated: !!it.estimated, files: it.files, marked_amount: it.marked_amount, marked_paid_at: it.marked_paid_at, justify_kind: it.justify_kind, justify_reason: it.justify_reason };
       }
       if (!due.has(k)) return null;
       const p = plans.get(`${o.id}|${k}`);
       const pl = r2(p ?? o.amount);
-      return { ym: k, item_id: null, planned: pl, custom: p != null && !autoPlans.has(`${o.id}|${k}`), real: null, due_date: dueOf(k, o.due_day), status: pl === 0 ? 'sem_previsto' : closed(k) ? 'sem_pagamento' : 'projetado' };
+      return { ym: k, item_id: null, planned: pl, custom: p != null && !autoPlans.has(`${o.id}|${k}`), real: null, due_date: dueOf(k, 31), status: pl === 0 ? 'sem_previsto' : closed(k) ? 'sem_pagamento' : 'projetado' };
     });
     if (!cells.some(Boolean)) continue;
     const sum = f => r2(cells.reduce((s, c) => s + (c ? f(c) : 0), 0));
@@ -436,11 +450,14 @@ export function readObligation(body) {
 
 export function listObligations(ctx) {
   requireFinance(ctx.user);
+  const ref = today(), limitOf = limitReader(), overdue = new Map();
+  for (const i of all(`SELECT obligation_id, ref_month, due_date FROM finance_items WHERE status = 'pendente' AND ref_month >= ? AND amount_expected > 0`, cutoff())) {
+    if (limitOf(conferenceDate(i)) < ref) overdue.set(i.obligation_id, (overdue.get(i.obligation_id) || 0) + 1);
+  }
   return all(`SELECT o.*, u.name AS assignee_name,
-      (SELECT COUNT(*) FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente' AND i.due_date < ? AND i.ref_month >= ? AND i.amount_expected > 0) AS overdue,
-      (SELECT MIN(i.due_date) FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente' AND i.ref_month >= ?) AS next_due
-    FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.active DESC, o.category, o.title`, today(), cutoff(), cutoff())
-    .map(o => ({ ...o, frequency_label: FREQ_LABEL[o.frequency] }));
+      (SELECT date(MIN(max(i.ref_month || '-01', i.due_date)), 'start of month', '+1 month', '-1 day') FROM finance_items i WHERE i.obligation_id = o.id AND i.status = 'pendente' AND i.ref_month >= ?) AS next_due
+    FROM finance_obligations o LEFT JOIN users u ON u.id = o.assignee_id ORDER BY o.active DESC, o.category, o.title`, cutoff())
+    .map(o => ({ ...o, overdue: overdue.get(o.id) || 0, frequency_label: FREQ_LABEL[o.frequency] }));
 }
 
 export function getObligation(ctx, id) {
@@ -513,8 +530,9 @@ export function updateObligation(ctx, id, body, ip) {
       const due = dueOf(it.ref_month, no.due_day);
       const amount = no.variable && o.variable ? it.amount_expected : no.amount;
       run('UPDATE finance_items SET due_date = ?, amount_expected = ? WHERE id = ?', due, amount, it.id);
+      const conf = conferenceDate({ ref_month: it.ref_month, due_date: due });
       if (it.task_id) run('UPDATE tasks SET title = ?, description = ?, due_date = ?, start_date = ?, assignee_id = ?, stage_id = ?, updated_at = ? WHERE id = ? AND status <> \'concluida\'',
-        taskTitle(no, it.ref_month), taskDescription(no, amount), due, due, no.assignee_id, stageFor(area, no.category), new Date().toISOString(), it.task_id);
+        taskTitle(no, it.ref_month), taskDescription(no, amount), financeTaskDue(area, conf), conf, no.assignee_id, stageFor(area, no.category), new Date().toISOString(), it.task_id);
     }
     pruneFuture(no, ctx.user.id);
     pruneOutOfRange(ctx.user.id);
@@ -760,13 +778,18 @@ export function financeMonth(ctx, ym) {
     LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN users u ON u.id = t.assignee_id
     WHERE (i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ? AND i.ref_month >= ?)) AND NOT (i.status = 'pendente' AND i.amount_expected = 0) ORDER BY i.due_date, o.title`, month, ref, cutoff());
   const cut = cutoff();
+  const limitOf = limitReader();
   const decorate = it => {
     const before = it.status === 'pendente' && it.ref_month < cut; // antes do início do controle: histórico, não é atraso
-    const late = !before && it.status === 'pendente' && it.due_date < ref && r2(it.amount_expected) > 0;
-    const days = Math.round((Date.parse(it.due_date) - Date.parse(ref)) / 86400e3);
-    return { ...it, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : before ? 'antes' : late ? 'atrasada' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
+    const conf = conferenceDate(it);
+    const limit = limitOf(conf);
+    const late = !before && it.status === 'pendente' && limit < ref && r2(it.amount_expected) > 0;
+    const days = Math.round((Date.parse(conf) - Date.parse(ref)) / 86400e3);
+    return { ...it, due_date: conf, planned_date: it.due_date, task_limit: limit, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : before ? 'antes' : late ? 'atrasada' : days < 0 ? 'a_conferir' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
   };
-  const items = rows.map(decorate).map(it => ({ ...it, previous_amount: it.variable ? previousAmount(it.obligation_id, it.ref_month) : null }));
+  // De outro mês, só as atrasadas; no mês atual, também as vencidas que ainda estão no prazo
+  const items = rows.map(decorate).filter(it => it.ref_month === month || it.late || (it.situation === 'a_conferir' && month === ref.slice(0, 7)))
+    .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.title.localeCompare(b.title, 'pt-BR')).map(it => ({ ...it, previous_amount: it.variable ? previousAmount(it.obligation_id, it.ref_month) : null }));
   const inMonth = items.filter(i => i.ref_month === month);
   const sum = (arr, f) => r2(arr.reduce((s, i) => s + f(i), 0));
   const cats = new Map();
@@ -801,9 +824,9 @@ export function coverage() {
   try { return one(`SELECT data_until, fetched_at FROM ext_fetches WHERE source = 'maiscontrole' AND row_count > 0 ORDER BY id DESC LIMIT 1`) || null; } catch { return null; }
 }
 const tsOf = s => Date.parse(/Z$|T/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
-// "Paguei" sem confirmação: aguardando a próxima busca; se a busca já cobre o vencimento e não achou → não encontrado
+// "Paguei" sem confirmação: aguardando a próxima busca; se a busca já cobre o fim do mês da despesa e não achou → não encontrado
 export function markState(it, cov) {
-  if (cov && cov.data_until >= it.due_date && tsOf(cov.fetched_at) > tsOf(it.marked_paid_at)) return 'nao_encontrado';
+  if (cov && cov.data_until >= conferenceDate(it) && tsOf(cov.fetched_at) > tsOf(it.marked_paid_at)) return 'nao_encontrado';
   return 'aguardando';
 }
 // Custos de Projetos pagos pela Empresa (centros de custo diferentes de Empresa), uma linha por centro de custo
@@ -894,7 +917,8 @@ export function justifyItem(ctx, id, body, ip) {
   tx(() => {
     run('UPDATE finance_items SET due_date = ?, justify_kind = ?, justify_reason = ?, justified_at = ?, justified_by = ?, marked_paid_at = NULL, marked_amount = NULL WHERE id = ?', nd, kind, reason, now, ctx.user.id, id);
     if (it.task_id) {
-      run(`UPDATE tasks SET due_date = ?, status = CASE WHEN status = 'concluida' THEN 'aberta' ELSE status END, updated_at = ? WHERE id = ?`, nd, now, it.task_id);
+      const conf = conferenceDate({ ref_month: it.ref_month, due_date: nd });
+      run(`UPDATE tasks SET due_date = ?, start_date = ?, status = CASE WHEN status = 'concluida' THEN 'aberta' ELSE status END, updated_at = ? WHERE id = ?`, financeTaskDue(financeAreaId(), conf), conf, now, it.task_id);
       taskHistory(it.task_id, ctx.user.id, 'Pagamento reprogramado', `Vai ocorrer em ${nd.split('-').reverse().join('/')} · ${reason}`);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Despesa sem pagamento justificada', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, vai_ocorrer: nd, motivo: reason }, ip);

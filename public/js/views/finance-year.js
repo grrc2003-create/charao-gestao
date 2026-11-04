@@ -17,9 +17,11 @@ const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return ''; con
 const numIn = v => (v === null || v === undefined || v === '' ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 const ST = { pago: 'Pago', nao_ocorreu: 'Não ocorreu', sem_previsto: 'Sem previsão', aguardando: 'Paguei · aguardando Mais Controle', sem_pagamento: 'Sem pagamento no mês', nao_encontrado: 'Não encontrado no Mais Controle', atrasada: 'Atrasada', pendente: 'A pagar', projetado: 'Previsto' };
-const WST = { hoje: ['pagar hoje', 'is-today'], a_pagar: ['', ''], atrasada: ['atrasada', 'is-late'], aguardando: ['paguei · aguardando confirmação', 'is-wait'], nao_encontrado: ['não encontrado no Mais Controle: pagamento não realizado ou não lançado', 'is-late'], justificar: ['sem pagamento no Mais Controle: justifique', 'is-late'] };
+const WST = { hoje: ['pagar hoje', 'is-today'], a_pagar: ['', ''], atrasada: ['atrasada', 'is-late'], no_mes: ['', ''], no_prazo: ['', ''], conferir: ['', ''], aguardando: ['paguei · aguardando confirmação', 'is-wait'], nao_encontrado: ['não encontrado no Mais Controle: pagamento não realizado ou não lançado', 'is-late'], justificar: ['sem pagamento no Mais Controle: justifique', 'is-late'] };
 const DOW = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
-const dueLabel = i => (i.days < 0 ? `venceu ${fmtDate(i.due_date)}` : i.days === 0 ? 'hoje' : i.days === 1 ? 'amanhã' : `${DOW[new Date(`${i.due_date}T12:00:00`).getDay()]} ${i.due_date.slice(8, 10)}/${i.due_date.slice(5, 7)}`);
+// Vence no fim do mês; o dia cadastrado é só o previsto para pagar
+const wNote = i => ({ no_prazo: `registrar até ${fmtDate(i.task_limit)}`, conferir: `sem pagamento no Mais Controle: justifique até ${fmtDate(i.task_limit)}`, no_mes: `vence ${fmtDate(i.conf_date)}`, a_pagar: `vence ${fmtDate(i.conf_date)}`, hoje: `previsto para hoje · vence ${fmtDate(i.conf_date)}` })[i.state] || WST[i.state][0];
+const dueLabel = i => (i.conf_date < today() ? `venceu ${fmtDate(i.conf_date)}` : i.days < 0 ? `previsto ${fmtDate(i.due_date)}` : i.days === 0 ? 'hoje' : i.days === 1 ? 'amanhã' : `${DOW[new Date(`${i.due_date}T12:00:00`).getDay()]} ${i.due_date.slice(8, 10)}/${i.due_date.slice(5, 7)}`);
 const done = c => c.status === 'pago' || c.status === 'nao_ocorreu';
 
 function cellHtml(row, c, i, cur) {
@@ -42,7 +44,7 @@ export async function view({ state, query, setQuery, render }) {
   const sugCard = !sug.length ? '' : html`<section class="card section fs-card">
       <div class="card-head"><h2>${icon('plus')}Criar tarefas?</h2><span class="sub">${sug.length} parcela(s) do mês anterior, atual e próximo sem tarefa</span></div>
       <div class="card-body"><p class="muted" style="margin:0">As parcelas não criam mais tarefa sozinhas (nem quando o Mais Controle atualiza). Escolha quais viram tarefa no Financeiro; “Não criar” não pergunta de novo. Tarefa excluída também não volta.</p></div>
-      <ul class="fs-list">${sug.map(i => html`<li data-fs="${i.id}"><span><b>${i.title} — ${i.month_label}</b><small>${i.category} · vence ${fmtDate(i.due_date)} · previsto ${money(i.amount_expected)}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></span>
+      <ul class="fs-list">${sug.map(i => html`<li data-fs="${i.id}"><span><b>${i.title} — ${i.month_label}</b><small>${i.category} · vence ${fmtDate(i.conf_date)} · tarefa até ${fmtDate(i.task_due)} · previsto ${money(i.amount_expected)}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></span>
         <span class="fs-acts"><button type="button" class="btn btn-primary btn-sm" data-fs-yes="${i.id}">${icon('plus')}Criar</button><button type="button" class="btn btn-ghost btn-sm" data-fs-no="${i.id}">Não criar</button></span></li>`)}</ul>
       ${sug.length > 1 ? html`<div class="fs-all"><button type="button" class="btn btn-primary btn-sm" data-fs-all="1">Criar todas (${sug.length})</button><button type="button" class="btn btn-ghost btn-sm" data-fs-all="0">Não criar nenhuma</button></div>` : ''}
     </section>`;
@@ -56,11 +58,11 @@ export async function view({ state, query, setQuery, render }) {
           al.issues ? `${al.issues} lançamento(s) para ajustar no Mais Controle (cliente ou conta fora do centro de custo Empresa)` : ''].filter(Boolean).join(' · ')}</span></a>` : ''}
       ${wItems.length ? html`<ul class="fw-list">${wItems.map(i => html`<li class="${WST[i.state][1]}">
         <span class="fw-when">${dueLabel(i)}</span>
-        <span class="fw-main"><b>${i.title}</b><small>${i.category} · ${money(i.amount_expected)}${WST[i.state][0] ? html` · <em>${WST[i.state][0]}</em>` : ''}${i.justify_reason && i.justify_kind === 'vai_ocorrer' ? ` · reprogramado: ${i.justify_reason}` : ''}</small></span>
+        <span class="fw-main"><b>${i.title}</b><small>${i.category} · ${money(i.amount_expected)}${wNote(i) ? html` · <em>${wNote(i)}</em>` : ''}${i.justify_reason && i.justify_kind === 'vai_ocorrer' ? ` · reprogramado: ${i.justify_reason}` : ''}</small></span>
         <span class="fw-acts">
           ${i.state === 'aguardando' || i.state === 'nao_encontrado' ? html`<button type="button" class="btn btn-ghost btn-sm" data-w-unmark="${i.id}">Desfazer “Paguei”</button>`
             : html`<button type="button" class="btn btn-primary btn-sm" data-w-mark="${i.id}">${icon('check')}Paguei</button>`}
-          ${['justificar', 'nao_encontrado', 'atrasada'].includes(i.state) ? html`<button type="button" class="btn btn-ghost btn-sm" data-w-just="${i.id}">Justificar</button>` : ''}
+          ${['justificar', 'nao_encontrado', 'atrasada', 'no_mes', 'no_prazo', 'conferir'].includes(i.state) ? html`<button type="button" class="btn btn-ghost btn-sm" data-w-just="${i.id}">Justificar</button>` : ''}
         </span></li>`)}</ul>` : html`<div class="card-body muted">Nenhuma conta a pagar nesta semana. 👍</div>`}
     </section>`;
   const T = d.totals;
@@ -294,7 +296,7 @@ export async function view({ state, query, setQuery, render }) {
       root.querySelectorAll('[data-w-mark]').forEach(b => b.addEventListener('click', async () => {
         const i = wItem(b.dataset.wMark);
         const res = await sheet({ title: `Paguei · ${i.title}`, submitLabel: 'Marcar como pago',
-          body: html`<p class="muted" style="margin:0 0 10px">Vence ${fmtDate(i.due_date)} · previsto ${money(i.amount_expected)}. Na próxima atualização o sistema confere no Mais Controle; se não achar o pagamento, avisa.</p>
+          body: html`<p class="muted" style="margin:0 0 10px">Vence ${fmtDate(i.conf_date)} · previsto ${money(i.amount_expected)}. Na próxima atualização o sistema confere no Mais Controle; se não achar o pagamento, avisa.</p>
             <div class="field"><label for="w-v">Valor pago (opcional)</label><input type="text" id="w-v" name="amount" inputmode="decimal" placeholder="em branco = o Mais Controle informa"></div>`,
           onSubmit: f => { const v = parseNum(f.amount); if (Number.isNaN(v)) throw new Error('Valor inválido.'); return api(`/finance/items/${i.id}/mark`, { method: 'POST', body: { amount: v === '' ? null : v } }); } });
         if (res) { toast('Marcado como pago: aguardando a confirmação do Mais Controle.'); wReload(); }

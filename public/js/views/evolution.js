@@ -42,6 +42,11 @@ function niceMax(v) {
 function chart(card, d) {
   const body = card.querySelector('[data-ev-body]');
   const scope = d.scope;
+  // Quem não enxerga a empresa toda compara com o que pode ver: o subtítulo acompanha
+  if (scope === 'usuario' && d.overall.label !== 'Empresa') {
+    const sub = card.querySelector('.card-head .sub');
+    if (sub) sub.textContent = sub.textContent.replace('a empresa', 'o que você pode ver');
+  }
   if (!d.months.length || !d.people.length) { body.innerHTML = `<div class="ev-empty">Ainda não há tarefas para acompanhar aqui.</div>`; return; }
   // A cor acompanha a pessoa em todos os indicadores: as 8 com mais tarefas têm cor própria e começam ligadas
   const last = d.months.length - 1;
@@ -132,7 +137,7 @@ function chart(card, d) {
       const h = document.createElement('div');
       h.className = 'ev-head is-overall';
       h.style.setProperty('--c', OVERALL);
-      h.textContent = (scope === 'projeto' ? 'P' : 'E');
+      h.textContent = scope === 'projeto' ? 'P' : d.overall.label === 'Empresa' ? 'E' : 'V';
       plot.appendChild(h);
       heads.set('ref', h);
     } else if (!rs && heads.has('ref')) { heads.get('ref').remove(); heads.delete('ref'); }

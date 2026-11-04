@@ -8,6 +8,7 @@ import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { weekPlanSection, bindWeekPlan } from './week-plan.js';
 import { myVacationCard, bindMyVacationCard } from './vacation-ui.js';
 import { myReimbCard, bindMyReimbCard } from './reimb-ui.js';
+import { evolutionSection, bindEvolution } from './evolution.js';
 
 const dec = v => String(v ?? '—').replace('.', ',');
 
@@ -126,6 +127,7 @@ export async function view({ state, query, setQuery, render }) {
         <section class="card"><div class="card-head"><h2>${icon('calendar')}Próximos 7 dias</h2><span class="sub">${soon.length}</span></div>
           ${soon.length ? html`<ul class="rows">${soon.slice(0, 8).map(t => taskRow(t))}</ul>` : html`<div class="card-body muted">Nada vencendo nos próximos dias.</div>`}</section>
       </div>
+      ${evolutionSection({ scope: 'usuario', id: me.id, sub: 'você comparado com a empresa' })}
       ${(() => {
         // Férias (e aprovações) à esquerda, reembolsos à direita: sem colunas vazias
         const vacCards = vac ? myVacationCard(vac, me, { bare: true }) : '';
@@ -137,6 +139,7 @@ export async function view({ state, query, setQuery, render }) {
       ${teamSection}`,
     mount(root) {
       bindCommon(root);
+      bindEvolution(root);
       bindChecklistCards(root);
       if (vac) bindMyVacationCard(root, vac, render);
       if (reimb) bindMyReimbCard(root, render);

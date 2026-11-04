@@ -296,13 +296,13 @@ export function checklistView(ctx, t) {
     teams.get(e.item_id).push(e);
   }
   // Posição do item na sequência programada de cada profissional (relatório por profissional)
-  const planSeq = new Map(all('SELECT p.worker_id, p.item_id, p.seq, p.gap_days FROM checklist_plan p JOIN checklist_items ci ON ci.id = p.item_id WHERE ci.task_id = ?', t.id).map(p => [`${p.worker_id}:${p.item_id}`, p]));
+  const planSeq = new Map(all('SELECT p.worker_id, p.item_id, p.seq, p.gap_days, p.working_at FROM checklist_plan p JOIN checklist_items ci ON ci.id = p.item_id WHERE ci.task_id = ?', t.id).map(p => [`${p.worker_id}:${p.item_id}`, p]));
   const items = rows.map(i => {
     const st = itemState(i, hist.get(i.id));
     const team = teams.get(i.id) || [];
     const cost = r2(team.reduce((n, e) => n + e.qty * e.days * e.rate, 0));
     return {
-      team: team.map(e => ({ id: e.id, worker_id: e.worker_id, role: e.worker_id ? e.worker_role : e.role, name: e.worker_name || null, qty: e.qty, days: e.days, plan_seq: planSeq.get(`${e.worker_id}:${i.id}`)?.seq ?? null, plan_gap: planSeq.get(`${e.worker_id}:${i.id}`)?.gap_days || 0,
+      team: team.map(e => ({ id: e.id, worker_id: e.worker_id, role: e.worker_id ? e.worker_role : e.role, name: e.worker_name || null, qty: e.qty, days: e.days, plan_seq: planSeq.get(`${e.worker_id}:${i.id}`)?.seq ?? null, plan_gap: planSeq.get(`${e.worker_id}:${i.id}`)?.gap_days || 0, working_at: !isResolved(i.result) ? planSeq.get(`${e.worker_id}:${i.id}`)?.working_at || null : null,
         ...(money ? { rate: e.rate, value: r2(e.qty * e.days * e.rate) } : {}) })),
       ...(money ? { cost, cost_missing: team.some(e => !e.rate) } : {}),
       id: i.id, seq: i.seq, group: i.group_name, specialty: i.specialty || null, text: i.text,
@@ -311,6 +311,7 @@ export function checklistView(ctx, t) {
       result: i.result, resolved: isResolved(i.result), note: i.note, answered_by_name: i.answered_by_name, answered_at: i.answered_at,
       description: i.description, start_date: i.start_date, duration_days: i.duration_days, due_date: i.due_date,
       progress_pct: isResolved(i.result) ? 100 : i.progress_pct ?? null,
+      started_on: i.started_on || null,
       overdue: !isResolved(i.result) && !!i.due_date && i.due_date < ref,
       refs: st.refs,
       files: [...st.currentFiles, ...st.loose], loose_count: st.loose.length,
@@ -410,7 +411,39 @@ export function setItemProgress(ctx, taskId, itemId, body = {}) {
   tx(() => {
     run('UPDATE checklist_items SET progress_pct = ? WHERE id = ?', v, item.id);
     taskHistory(t.id, ctx.user.id, `Avanço do item ${item.seq} atualizado`, `${item.text}: ${fmt(item.progress_pct)} → ${fmt(v)}`);
+    // Avanço sem início marcado: o realizado começa hoje (o planejado não muda)
+    if (v && !item.started_on) markStarted(ctx, t, item, today());
     if (v) autoStart(ctx, t);
+  });
+}
+
+// Início REALIZADO do item: hoje, um dia informado ou desmarcar. O planejado (start_date) e as dependências não mudam.
+function markStarted(ctx, t, item, day) {
+  run('UPDATE checklist_items SET started_on = ?, started_by = ? WHERE id = ?', day, ctx.user.id, item.id);
+  taskHistory(t.id, ctx.user.id, 'Início real do item registrado', `${item.seq}. ${item.text} · iniciado em ${day.split('-').reverse().join('/')}`);
+}
+export function setItemStart(ctx, taskId, itemId, body = {}) {
+  const t = loadChecklistTask(ctx, taskId);
+  const item = loadItem(t, itemId);
+  if (!canAnswerItem(ctx, t, item)) {
+    throw isOpen(t) ? forbidden('Este item é de outro responsável.') : badRequest('O check-list não pode ser alterado neste status.');
+  }
+  if ([true, 'true', '1', 1, 'on'].includes(body.clear)) {
+    if (item.result || item.progress_pct) throw badRequest('Este item já tem avanço ou resposta: informe o dia certo em vez de desmarcar.');
+    if (!item.started_on) return;
+    tx(() => {
+      run('UPDATE checklist_items SET started_on = NULL, started_by = NULL WHERE id = ?', item.id);
+      taskHistory(t.id, ctx.user.id, 'Início real do item desmarcado', `${item.seq}. ${item.text}`);
+    });
+    return;
+  }
+  const day = date(body.date || null, 'Dia do início') || today();
+  if (day < '2000-01-01') throw badRequest('Data inválida: confira o ano.');
+  if (day > today()) throw badRequest('O início real não pode ser no futuro. O planejado fica nas datas do item.');
+  if (day === item.started_on) return;
+  tx(() => {
+    markStarted(ctx, t, item, day);
+    if (!isResolved(item.result)) autoStart(ctx, t);
   });
 }
 

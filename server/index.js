@@ -560,6 +560,8 @@ api.post('/api/tasks/:id/plan/link', (req, res, { ctx, params, body }) => send(r
 api.post('/api/tasks/:id/plan/gap', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.setItemGap(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/plan/days', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.setItemDays(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/plan/reschedule', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.rescheduleSequence(ctx, intOrNull(params.id), body)));
+api.post('/api/tasks/:id/plan/pull', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.pullItem(ctx, intOrNull(params.id), body)));
+api.post('/api/tasks/:id/plan/working', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.setWorking(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/plan/unlink', (req, res, { ctx, params, body }) => send(res, 200, ChecklistPlan.unlinkItem(ctx, intOrNull(params.id), body)));
 api.post('/api/tasks/:id/items', (req, res, { ctx, params, body }) => { Checklist.addItems(ctx, intOrNull(params.id), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/reference', (req, res, { ctx, params, body }) => { Checklist.addReferencePhotos(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
@@ -567,6 +569,7 @@ api.post('/api/tasks/:id/items/assign', (req, res, { ctx, params, body }) => { C
 api.post('/api/tasks/:id/items/team', (req, res, { ctx, params, body }) => { const team_result = Checklist.setItemsTeam(ctx, intOrNull(params.id), body); send(res, 200, { ...Tasks.getTask(ctx, intOrNull(params.id)), team_result }); });
 api.patch('/api/tasks/:id/items/:iid', (req, res, { ctx, params, body }) => { Checklist.updateItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.delete('/api/tasks/:id/items/:iid', (req, res, { ctx, params }) => { Checklist.deleteItem(ctx, intOrNull(params.id), intOrNull(params.iid)); taskOut(res, ctx, intOrNull(params.id)); });
+api.post('/api/tasks/:id/items/:iid/start', (req, res, { ctx, params, body }) => { Checklist.setItemStart(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/progress', (req, res, { ctx, params, body }) => { Checklist.setItemProgress(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.post('/api/tasks/:id/items/:iid/answer', (req, res, { ctx, params, body }) => { Checklist.answerItem(ctx, intOrNull(params.id), intOrNull(params.iid), body); taskOut(res, ctx, intOrNull(params.id)); });
 api.delete('/api/tasks/:id/items/:iid/files/:fid', (req, res, { ctx, params }) => {

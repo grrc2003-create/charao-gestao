@@ -508,7 +508,8 @@ const teamTag = (it, c) => {
   const workers = it.team.filter(e => e.worker_id), roles = it.team.filter(e => !e.worker_id);
   const roleName = e => (e.qty > 1 ? `${e.role} ×${e.qty}` : e.role);
   const more = list => (list.length > 1 ? ` +${list.length - 1}` : '');
-  return html`${workers.length ? html`<span class="cli-aloc is-worker" title="Profissional alocado: ${workers.map(e => e.name).join(', ')}">Alocado: ${shortName(workers[0].name)}${more(workers)}</span>` : ''}${roles.length ? html`<span class="cli-aloc is-role" title="Sem profissional alocado. Função: ${roles.map(roleName).join(', ')}">Função: ${roleName(roles[0])}${more(roles)}</span>` : ''}`;
+  const busy = workers.filter(e => e.working_at);
+  return html`${busy.length ? html`<span class="cli-aloc is-working" title="Registrado na programação: ${busy.map(e => e.name).join(', ')}">Trabalhando: ${shortName(busy[0].name)}${more(busy)}</span>` : ''}${workers.length ? html`<span class="cli-aloc is-worker" title="Profissional alocado: ${workers.map(e => e.name).join(', ')}">Alocado: ${shortName(workers[0].name)}${more(workers)}</span>` : ''}${roles.length ? html`<span class="cli-aloc is-role" title="Sem profissional alocado. Função: ${roles.map(roleName).join(', ')}">Função: ${roleName(roles[0])}${more(roles)}</span>` : ''}`;
 };
 const shortName = n => { const p = String(n || '—').trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p.at(-1)[0]}.` : p[0]; };
 const initials = n => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase();
@@ -579,6 +580,7 @@ function itemCard(t, it, c) {
         ${it.specialty && !uiOf(t.id).levels.includes('especialidade') ? html`<span class="cli-spec cli-spec-sm" title="Especialidade">${it.specialty}</span>` : ''}
         <span class="cli-who ${it.mine ? 'is-mine' : ''}" title="Responsável${it.assignee_id ? '' : ' (global)'}: ${it.responsible_name}"><i>${initials(it.responsible_name)}</i>${shortName(it.responsible_name)}</span>
         <span class="cli-due ${lv.cls}" title="${lv.rel || (it.due_date ? 'Prazo' : 'Sem prazo')}">${icon('calendar')}${it.due_date ? fmtD(it.due_date).slice(0, 5) : 'Sem prazo'}</span>
+        ${!it.resolved && it.started_on ? html`<span class="cli-started-tag" title="Início real: ${fmtD(it.started_on)}">Iniciado ${fmtD(it.started_on).slice(0, 5)}</span>` : ''}
         ${!it.resolved && it.progress_pct !== null ? html`<span class="cli-pg" title="Avanço informado">${it.progress_pct}%</span>` : ''}
         ${c.can_see_cost && it.team.length ? html`<span class="cli-cost ${it.result === 'na' ? 'is-out' : ''}" title="Valor do item">${brl(it.cost)}</span>` : ''}
         ${mainState}
@@ -597,7 +599,7 @@ function itemCard(t, it, c) {
       ${it.result ? html`<span class="cli-when">${icon('check')}${it.answered_by_name || '—'} · ${shortDate(it.answered_at)}</span>` : ''}
     </div>
     ${it.team.length ? html`<div class="cli-team"><small>Equipe necessária</small>
-      <ul>${it.team.map(e => html`<li><span><b>${e.name || `${e.role}${e.qty > 1 ? ` ×${e.qty}` : ''}`}</b>${e.name && e.role ? html` <em>${e.role}</em>` : ''}${e.name ? '' : html` <em>função</em>`}</span>
+      <ul>${it.team.map(e => html`<li><span><b>${e.name || `${e.role}${e.qty > 1 ? ` ×${e.qty}` : ''}`}</b>${e.name && e.role ? html` <em>${e.role}</em>` : ''}${e.name ? '' : html` <em>função</em>`}${e.working_at ? html` <em class="cli-working">trabalhando desde ${fmtDateTime(e.working_at)}</em>` : ''}</span>
         <span>${daysLabel(e.days)}${!e.name && e.qty > 1 ? ' cada' : ''}</span>${c.can_see_cost ? html`<span class="${e.rate ? '' : 'cli-team-warn'}">${e.rate ? brl(e.value) : 'sem diária'}</span>` : ''}</li>`)}</ul>
       ${c.can_see_cost ? html`<div class="cli-team-sum"><span>Valor do item${it.result === 'na' ? ' (N/A: fora do total)' : ''}</span><b>${brl(it.cost)}</b></div>` : ''}</div>` : ''}
     ${it.description ? html`<div class="cli-desc"><b>Obs.:</b> ${it.description}</div>` : ''}`;
@@ -636,6 +638,11 @@ function itemCard(t, it, c) {
       ${it.open_nc ? html`<div class="cli-hint">${icon('info')} Não conformidade em aberto: depois de corrigir, marque Conforme${c.photo_rule === 'obrigatoria' ? ' com a foto do depois' : ''}.</div>`
         : needPhoto && !it.result ? html`<div class="cli-hint">${icon('camera')} Foto obrigatória: ao tocar em Conforme ou Não conforme a câmera abre.</div>` : ''}`
       : !it.resolved ? html`<div class="cli-hint">${icon('clock')} ${c.locked ? 'Check-list fechado para alterações.' : `Aguardando ${it.responsible_name} (ou o responsável global).`}</div>` : ''}
+    ${it.can_answer || it.started_on ? html`<div class="cli-started"><span class="k">Início real</span>
+      ${it.started_on ? html`<b>${fmtD(it.started_on)}</b>` : html`<span class="muted">não informado</span>`}
+      ${it.start_date ? html`<small>planejado ${fmtD(it.start_date)}</small>` : ''}
+      ${it.can_answer ? html`<span class="cli-started-acts">${it.started_on ? html`<button type="button" class="btn btn-ghost btn-sm" data-start-other="${it.id}">Alterar</button>`
+        : html`<button type="button" class="btn btn-primary btn-sm" data-start-today="${it.id}">${icon('check')}Iniciei hoje</button><button type="button" class="btn btn-ghost btn-sm" data-start-other="${it.id}">Outro dia</button>`}</span>` : ''}</div>` : ''}
     ${!it.resolved && (it.can_answer || it.progress_pct !== null) ? html`<div class="cli-progress"><span class="k">Avanço</span>
       ${it.progress_pct !== null ? html`${pctBar(it.progress_pct, { small: true })}<b>${it.progress_pct}%</b>` : html`<span class="muted">não informado</span>`}
       ${it.can_answer ? html`<button type="button" class="btn btn-ghost btn-sm" data-item-progress="${it.id}">${it.progress_pct !== null ? 'Atualizar' : 'Informar'}</button>` : ''}</div>` : ''}
@@ -975,6 +982,23 @@ export function bindChecklist(root, t, ctx, refresh) {
     list.dataset.filter = b.dataset.clf;
     root.querySelectorAll('.cl-filters [data-clf]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     applySel();
+  }));
+  // Início real do item (o planejado não muda): hoje, outro dia ou alterar
+  root.querySelectorAll('[data-start-today]').forEach(b => b.addEventListener('click', () => {
+    b.disabled = true;
+    run(() => api(`/tasks/${t.id}/items/${b.dataset.startToday}/start`, { method: 'POST', body: {} }), 'Início real registrado: hoje.');
+  }));
+  root.querySelectorAll('[data-start-other]').forEach(b => b.addEventListener('click', async () => {
+    const it = c.items.find(x => x.id === Number(b.dataset.startOther));
+    const canClear = it.started_on && !it.result && !it.progress_pct;
+    const r = await sheet({
+      title: `Início real do item ${it.seq}`, submitLabel: 'Salvar',
+      body: html`<p class="muted" style="margin:0 0 10px">${it.text}${it.start_date ? html`<br>Planejado: ${fmtD(it.start_date)} (não muda)` : ''}</p>
+        <div class="field"><label for="st-day">Dia em que começou</label><input id="st-day" name="date" type="date" max="${todayISO()}" value="${it.started_on || todayISO()}"></div>
+        ${canClear ? html`<label class="switch"><input type="checkbox" name="clear">Desmarcar: ainda não começou</label>` : ''}`,
+      onSubmit: f => api(`/tasks/${t.id}/items/${it.id}/start`, { method: 'POST', body: f.clear ? { clear: true } : { date: f.date } }),
+    });
+    if (r && r.id) { toast('Início real salvo.'); refresh(r); }
   }));
   // Avanço parcial do item
   root.querySelectorAll('[data-item-progress]').forEach(b => b.addEventListener('click', async () => {

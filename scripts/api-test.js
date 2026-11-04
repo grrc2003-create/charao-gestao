@@ -2957,6 +2957,91 @@ async function main() {
   const trItem = (await trAna('GET', `/tasks/${trList.data.id}`)).data.checklist?.items?.[0];
   ok(trItem?.team?.[0]?.role === 'Gesseiro Teste' && trItem.team[0].qty === 2, 'e fica salva no item');
 
+  console.log('Check-list: início real do item, sem mudar o planejado');
+  const srT = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL início real', items: [
+    { text: 'R1', start_date: '2099-03-02', due_date: '2099-03-06', team: [{ role: 'Pedreiro', days: 1 }] }, { text: 'R2', start_date: '2099-03-02', due_date: '2099-03-06' }, { text: 'R3' }, { text: 'R4', team: [{ role: 'Pedreiro', days: 1 }] }] })).data.id;
+  const srRead = async () => Object.fromEntries((await fcAna('GET', `/tasks/${srT}`)).data.checklist.items.map(i => [i.text, i]));
+  let srI = await srRead();
+  const srToday = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const srStart = (txt, body, who = fcAna) => who('POST', `/tasks/${srT}/items/${srI[txt].id}/start`, body);
+  ok(srI.R1.started_on === null && srI.R1.start_date === '2099-03-02', 'o item nasce sem início real, com o planejado');
+  ok((await srStart('R1', {})).status === 200, 'marca que iniciou hoje');
+  srI = await srRead();
+  ok(srI.R1.started_on === srToday && srI.R1.start_date === '2099-03-02' && srI.R1.due_date === '2099-03-06', 'o início real é hoje e o planejado não muda');
+  ok((await srStart('R1', { date: '2026-10-05' })).status === 200 && (await srRead()).R1.started_on === '2026-10-05', 'informa outro dia');
+  ok((await srStart('R1', { date: '2099-01-01' })).status === 400 && (await srStart('R1', { date: '0202-01-01' })).status === 400 && (await srStart('R1', { date: 'x' })).status === 400, 'futuro, ano incompleto ou data inválida são recusados');
+  ok((await srStart('R1', {}, fcCam)).status >= 403, 'quem não responde o item não marca');
+  const srProg = (txt, progress) => fcAna('POST', `/tasks/${srT}/items/${srI[txt].id}/progress`, { progress });
+  await srProg('R2', 30);
+  srI = await srRead();
+  ok(srI.R2.started_on === srToday && srI.R2.start_date === '2099-03-02', 'avanço sem início marcado: o início real vira hoje e o planejado fica');
+  await srProg('R1', 50);
+  srI = await srRead();
+  ok(srI.R1.started_on === '2026-10-05', 'avanço não troca o início já marcado');
+  await srProg('R3', 0);
+  ok((await srRead()).R3.started_on === null, 'avanço zero não marca início');
+  ok((await srStart('R2', { clear: true })).status === 400, 'com avanço, não desmarca');
+  await srStart('R3', {});
+  ok((await srStart('R3', { clear: true })).status === 200 && (await srRead()).R3.started_on === null, 'sem avanço nem resposta, desmarca');
+  ok((await fcAna('GET', `/tasks/${srT}`)).data.history.some(h => h.action === 'Início real do item registrado'), 'fica no histórico');
+  const srPlan = (await fcAna('GET', `/tasks/${srT}/plan?worker=${fcH.id}`)).data;
+  ok(!srPlan.other_roles.some(i => i.text === 'R1') && srPlan.other_roles.some(i => i.text === 'R4'), 'na programação, item com início real não conta como não iniciado');
+  await fcAna('POST', `/tasks/${srT}/plan/link`, { worker_id: fcP.id, item_id: srI.R4.id });
+  await fcAna('POST', `/tasks/${srT}/plan/working`, { worker_id: fcP.id, item_id: srI.R4.id, working: true });
+  ok((await srRead()).R4.started_on === srToday, 'registrar que está trabalhando também marca o início real');
+
+  console.log('Programar profissional: outras atividades, puxar e registro de trabalho');
+  const oprQ = (await fcAna('POST', '/field/workers', { name: 'Segundo Pedreiro Teste', kind: 'diarista', role: 'pedreiro', daily_rate: 200 })).data;
+  const oprT = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL outras atividades', items: [
+    { text: 'L1', team: [{ role: 'Pedreiro', days: 1 }] }, { text: 'L2', team: [{ role: 'Pedreiro', days: 1 }] },
+    { text: 'L3', team: [{ role: 'Ajudante', days: 2 }] }, { text: 'L4', team: [{ role: 'Pedreiro', days: 1 }, { role: 'Ajudante', days: 1 }] }, { text: 'L5', team: [{ role: 'Ajudante', days: 1 }] }, { text: 'L6', team: [{ role: 'Ajudante', days: 1 }] }] })).data.id;
+  const oprState = async (w, who = fcAna) => (await who('GET', `/tasks/${oprT}/plan?worker=${w.id}`)).data;
+  const oprTxt = list => list.map(i => i.text).join();
+  const oprPost = (act, body, who = fcAna) => who('POST', `/tasks/${oprT}/plan/${act}`, body);
+  let oprS = await oprState(fcP);
+  const oprId = Object.fromEntries((await fcAna('GET', `/tasks/${oprT}`)).data.checklist.items.map(i => [i.text, i.id]));
+  ok(oprTxt(oprS.pending) === 'L1,L2,L4' && oprTxt(oprS.other_roles) === 'L3,L5,L6' && !oprS.taken.length, 'mostra as disponíveis da função e as de outras funções, sem repetir item');
+  ok(oprS.other_roles[0].role === 'Ajudante' && oprS.other_roles[0].value === 2 * oprS.worker.rate, 'a outra função informa o que o item pede, com o valor pela diária do profissional');
+  ok((await oprPost('link', { worker_id: oprQ.id, item_id: oprId.L1 })).status === 200, 'outro pedreiro assume um item');
+  oprS = await oprState(fcP);
+  ok(oprTxt(oprS.pending) === 'L2,L4' && oprTxt(oprS.taken) === 'L1' && oprS.taken[0].owner_id === oprQ.id && oprS.taken[0].owner_name === oprQ.name, 'o item aparece como não iniciado com o outro profissional da mesma função');
+  ok(!(await oprState(fcH)).taken.length, 'profissional de outra função não vê para puxar');
+  ok((await oprPost('pull', { worker_id: fcH.id, item_id: oprId.L1, from_worker_id: oprQ.id })).status === 400, 'não puxa de outra função');
+  ok((await oprPost('pull', { worker_id: fcP.id, item_id: oprId.L1, from_worker_id: oprQ.id }, fcCam)).status >= 400, 'quem não gerencia o check-list não puxa');
+  const oprPull = await oprPost('pull', { worker_id: fcP.id, item_id: oprId.L1, from_worker_id: oprQ.id });
+  const oprTeamOf = async txt => (await fcAna('GET', `/tasks/${oprT}`)).data.checklist.items.find(i => i.text === txt).team;
+  ok(oprPull.status === 200 && oprTxt(oprPull.data.sequence) === 'L1' && (await oprTeamOf('L1')).map(e => e.worker_id).join() === String(fcP.id) && !(await oprTeamOf('L1')).some(e => !e.worker_id), 'puxar passa o item para o profissional, sem sobrar vaga');
+  oprS = await oprState(oprQ);
+  ok(!oprS.sequence.length && oprTxt(oprS.taken) === 'L1' && oprS.taken[0].owner_id === fcP.id, 'e sai da sequência do outro, que passa a ver o item com o novo responsável');
+  ok((await fcAna('GET', `/tasks/${oprT}`)).data.history.some(h => h.action === 'Atividade passada para outro profissional' && h.details.includes(oprQ.name)), 'a troca fica no histórico');
+  ok((await oprPost('pull', { worker_id: oprQ.id, item_id: oprId.L1, from_worker_id: oprQ.id })).status === 400, 'não puxa de si mesmo');
+  // Registro de trabalho
+  const oprWork = (w, id, working, who = fcAna) => oprPost('working', { worker_id: w.id, item_id: id, working }, who);
+  ok((await oprWork(fcP, oprId.L2, true)).status === 400, 'só registra em item em que o profissional está');
+  ok((await oprWork(fcP, oprId.L1, true, fcCam)).status >= 400, 'quem não gerencia o check-list não registra');
+  const oprW1 = await oprWork(fcP, oprId.L1, true);
+  ok(oprW1.status === 200 && oprW1.data.sequence[0].working_at && oprW1.data.sequence[0].started_on, 'registra que está trabalhando no item');
+  ok((await oprTeamOf('L1'))[0].working_at, 'o item do check-list mostra quem está trabalhando');
+  ok(!(await oprState(oprQ)).taken.length && (await oprPost('pull', { worker_id: oprQ.id, item_id: oprId.L1, from_worker_id: fcP.id })).status === 400, 'iniciada não aparece para puxar nem pode ser puxada');
+  await oprPost('link', { worker_id: fcP.id, item_id: oprId.L2 });
+  const oprW2 = (await oprWork(fcP, oprId.L2, true)).data.sequence;
+  ok(oprW2.find(i => i.text === 'L2').working_at && !oprW2.find(i => i.text === 'L1').working_at && oprW2.find(i => i.text === 'L1').started_on, 'um item por vez: ao mudar, o anterior para, mas continua iniciado');
+  const oprW3 = (await oprWork(fcP, oprId.L2, false)).data.sequence;
+  ok(!oprW3.find(i => i.text === 'L2').working_at && oprW3.find(i => i.text === 'L2').started_on, 'registra que parou');
+  const oprHist = (await fcAna('GET', `/tasks/${oprT}`)).data.history.map(h => h.action);
+  ok(oprHist.filter(a => a === 'Profissional trabalhando no item').length === 2 && oprHist.filter(a => a === 'Profissional parou de trabalhar no item').length === 2, 'início e parada ficam no histórico');
+  // Assumir vaga de outra função
+  const oprOther = await oprPost('link', { worker_id: fcP.id, item_id: oprId.L3, role: 'Ajudante' });
+  ok(oprOther.status === 200 && oprOther.data.sequence.some(i => i.text === 'L3') && !oprOther.data.other_roles.some(i => i.text === 'L3') && (await oprTeamOf('L3')).every(e => e.worker_id === fcP.id), 'assume a vaga de outra função');
+  ok((await oprPost('link', { worker_id: fcP.id, item_id: oprId.L5, role: 'Inexistente' })).status === 400, 'função que o item não pede é recusada');
+  ok((await oprPost('link', { worker_id: fcP.id, item_id: oprId.L5 })).status === 400, 'sem informar a função, continua pedindo a do profissional');
+  await oprPost('unlink', { worker_id: fcP.id, item_id: oprId.L3 });
+  ok((await oprTeamOf('L3')).length === 1 && (await oprTeamOf('L3'))[0].role === 'Ajudante' && !(await oprTeamOf('L3'))[0].worker_id, 'ao sair, a vaga volta para a função original');
+  await fcAna('POST', `/tasks/${oprT}/items/${oprId.L6}/progress`, { progress: 30 });
+  oprS = await oprState(fcP);
+  ok(!oprS.other_roles.some(i => i.text === 'L6') && (await oprPost('link', { worker_id: fcP.id, item_id: oprId.L6, role: 'Ajudante' })).status === 400, 'outra função com avanço informado é considerada iniciada');
+  ok(!/"(value|rate)"/.test(JSON.stringify((await oprState(fcP, fcJul)).other_roles)) , 'valores das outras atividades só para a Folha de Campo');
+
   console.log('Check-list: equipe em vários itens');
   const btList = (await trAna('POST', '/tasks', { project_id: 1, task_type: 'checklist', title: 'Equipe em massa', description: 'Teste', assignee_id: 1, proof_type: 'nenhuma', due_date: '2050-01-01',
     items: [{ text: 'Item A', team: [{ role: 'Gesseiro Teste', qty: 1, days: 1 }, { role: 'Azulejista Teste', qty: 1, days: 2 }] }, { text: 'Item B' }, { text: 'Item C' }, { text: 'Item D, conforme', team: [{ role: 'Gesseiro Teste', qty: 1, days: 9 }] }] })).data;

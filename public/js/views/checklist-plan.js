@@ -1,8 +1,8 @@
 // Programação do profissional no check-list: escolhe o profissional, vê as pendências da função dele com os dias e vai
 // vinculando em sequência. Com o dia de início, os itens recebem datas a partir dele; com o fim também, o tempo vai se
 // esgotando e o que não cabe fica bloqueado. Sem dia de início, não há limite e as datas não mudam.
-import { html, api, icon, fmtDate } from '../core.js';
-import { toast, sheet } from '../ui.js';
+import { html, api, icon, fmtDate, fmtDateTime } from '../core.js';
+import { toast, sheet, confirmSheet } from '../ui.js';
 import { pageHead } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -26,7 +26,7 @@ export async function view({ params }) {
   return {
     title: `Programar profissional · ${d.task.code}`,
     html: html`${pageHead({ back: { href: `#/tarefas/${taskId}`, label: d.task.code }, eyebrow: `Check-list ${d.task.code} · ${d.task.title}`, title: 'Programar profissional',
-        sub: 'Escolha o profissional e o dia em que ele inicia. Depois vá vinculando as pendências da função dele. Para limitar o tempo, informe também até quando.',
+        sub: 'Escolha o profissional e o dia em que ele inicia. Depois vá vinculando as atividades. Para limitar o tempo, informe também até quando.',
         actions: html`<a class="btn btn-ghost" href="#/imprimir/checklist/${taskId}?sep=profissional&fmt=lista">${icon('print')}Relatório de todos os profissionais</a>` })}
       <div class="pl-filters section">
         <label class="pl-grow">Profissional<select id="pl-w"><option value="">Escolha o profissional…</option>${d.workers.map(w => html`<option value="${w.id}">${w.name}${w.role ? ` · ${w.role}` : ' · sem função'}</option>`)}</select></label>
@@ -90,9 +90,17 @@ export async function view({ params }) {
         }
         const w = d.worker;
         const edit = d.can_manage;
+        const first = w.name.split(' ')[0];
+        const noFit = i => `Não cabe no período: precisa de ${daysLabel(needOf(i.days))} e restam ${daysLabel(d.capacity?.remaining ?? 0)}.`;
+        const extra = (i, line, btn) => html`<li class="pl-item ${i.fits ? '' : 'is-blocked'}">
+          <div class="pl-main"><b><span class="pl-n">${i.seq}</span>${i.text}</b>${tags(i) ? html`<small>${tags(i)}</small>` : ''}
+            <span class="pl-days">${daysLabel(i.days)}${i.value !== undefined ? ` · ${BRL.format(i.value)}` : ''} · ${span(i)}</span>
+            <small class="pl-who">${line}</small>
+            ${i.fits ? '' : html`<em>${noFit(i)}</em>`}</div>${edit ? btn : ''}</li>`;
         box.innerHTML = html`${capacity(d.capacity)}
           <div class="pl-cols">
-            <section class="card pl-col"><div class="card-head"><h2>Pendências da função${w.role ? `: ${w.role}` : ''}</h2><span class="sub">${d.pending.length}</span></div>
+            <div class="pl-left">
+            <section class="card pl-col"><div class="card-head"><h2>Disponíveis da função${w.role ? `: ${w.role}` : ''}</h2><span class="sub">${d.pending.length}</span></div>
               ${!w.role ? html`<p class="muted card-body">Este profissional está sem função no cadastro. Defina em Folha de Campo → Profissionais.</p>`
                 : d.pending.length ? html`<ul class="pl-list">${d.pending.map(i => html`<li class="pl-item ${i.fits ? '' : 'is-blocked'}">
                   <div class="pl-main"><b><span class="pl-n">${i.seq}</span>${i.text}</b>${tags(i) ? html`<small>${tags(i)}</small>` : ''}
@@ -102,13 +110,27 @@ export async function view({ params }) {
                 </li>`)}</ul>` : html`<p class="muted card-body">Nenhuma pendência desta função sem profissional neste check-list.</p>`}
               ${d.items_without_team ? html`<p class="hint pl-hint">${d.items_without_team} ${d.items_without_team === 1 ? 'item em aberto está' : 'itens em aberto estão'} sem equipe e não ${d.items_without_team === 1 ? 'aparece' : 'aparecem'} aqui. Informe a função e os dias na edição do item.</p>` : ''}
             </section>
+            ${w.role ? html`<section class="card pl-col"><div class="card-head"><h2>Com outro profissional da função</h2><span class="sub">não iniciadas · ${d.taken.length}</span></div>
+              ${d.taken.length ? html`<ul class="pl-list">${d.taken.map(i => extra(i, html`Com <b>${i.owner_name}</b>`,
+                html`<button type="button" class="btn btn-ghost btn-sm" data-pull="${i.id}" data-owner="${i.owner_id}" aria-disabled="${i.fits ? 'false' : 'true'}" data-why="${i.fits ? '' : noFit(i)}">${icon('reschedule')}Puxar para ${first}</button>`))}</ul>`
+                : html`<p class="muted card-body">Nenhuma atividade não iniciada com outro profissional desta função.</p>`}
+            </section>` : ''}
+            <section class="card pl-col"><div class="card-head"><h2>Outras funções disponíveis</h2><span class="sub">não iniciadas · ${d.other_roles.length}</span></div>
+              ${d.other_roles.length ? html`<ul class="pl-list">${d.other_roles.map(i => extra(i, html`Função pedida: <b>${i.role}</b>${i.qty > 1 ? ` · ${i.qty} vagas` : ''}`,
+                html`<button type="button" class="btn btn-ghost btn-sm" data-link="${i.id}" data-role="${i.role}" aria-disabled="${i.fits ? 'false' : 'true'}" data-why="${i.fits ? '' : noFit(i)}">${icon('plus')}Vincular</button>`))}</ul>`
+                : html`<p class="muted card-body">Nenhuma vaga de outra função sem início neste check-list.</p>`}
+            </section>
+            </div>
             <section class="card pl-col"><div class="card-head"><h2>Sequência de ${w.name}</h2><span class="sub">${daysLabel(d.totals.days)}${d.totals.value !== undefined ? ` · ${BRL.format(d.totals.value)}` : ''}</span></div>
               ${d.sequence.length ? html`<ol class="pl-seq">${d.sequence.map((i, n) => html`${gapRow(i, n)}<li class="pl-step ${i.resolved ? 'is-done' : ''}">
                 <span class="pl-dot">${n + 1}</span>
                 <div class="pl-main"><b>${i.text}</b>${tags(i) ? html`<small>${tags(i)}</small>` : ''}
                   <span class="pl-days">${daysLabel(i.days)} · ${span(i)}${i.value !== undefined ? ` · ${BRL.format(i.value)}` : ''}${i.resolved ? ' · resolvido' : editDays(i)}</span>
                   ${i.pushed_days ? html`<em>Início adiado: ${daysLabel(i.pushed_days)} ocupado${i.pushed_days === 1 ? '' : 's'} em outros check-lists</em>` : ''}
-                  ${i.outside ? html`<em>Fora das datas escolhidas</em>` : ''}</div>
+                  ${i.outside ? html`<em>Fora das datas escolhidas</em>` : ''}
+                  ${i.working_at ? html`<span class="pl-working">${icon('clock')}Trabalhando desde ${fmtDateTime(i.working_at)}</span>` : i.started_on && !i.resolved ? html`<small>Início real: ${fmtDate(i.started_on)}</small>` : ''}
+                  ${edit && !i.resolved ? html`<span class="pl-work-acts">${i.working_at ? html`<button type="button" class="btn btn-ghost btn-sm" data-working="${i.id}" data-on="0">Parou de trabalhar</button>`
+                    : html`<button type="button" class="btn btn-ghost btn-sm" data-working="${i.id}" data-on="1">${icon('clock')}Está trabalhando aqui</button>`}</span>` : ''}</div>
                 ${edit && !i.resolved ? html`<button type="button" class="icon-btn" data-unlink="${i.id}" aria-label="Tirar ${i.text} da sequência">✕</button>` : ''}
               </li>`)}</ol>` : html`<p class="muted card-body">Nenhum item vinculado ainda.</p>`}
               ${d.sequence.length ? html`<div class="pl-report"><a class="btn btn-ghost btn-sm" href="#/imprimir/checklist/${taskId}?sep=profissional&prof=${w.id}&fmt=lista">${icon('print')}Emitir relatório de ${w.name}</a></div>` : ''}
@@ -165,11 +187,35 @@ export async function view({ params }) {
         const gg = e.target.closest('[data-gap]');
         if (gg) return askGap(Number(gg.dataset.gap));
         if (e.target.closest('[data-fill]')) return fillUndated();
+        const planBody = () => ({ worker_id: Number(st.worker), start: st.start || null, end: st.start && st.end ? st.end : null });
+        const wk = e.target.closest('[data-working]');
+        if (wk) {
+          wk.disabled = true;
+          const on = wk.dataset.on === '1';
+          try {
+            d = await api(`/tasks/${taskId}/plan/working`, { method: 'POST', body: { ...planBody(), item_id: Number(wk.dataset.working), working: on } });
+            toast(on ? 'Registrado: está trabalhando neste item.' : 'Registrado: parou de trabalhar neste item.');
+            draw();
+          } catch (er) { toast(er.message, 'err'); load(); }
+          return;
+        }
+        const pl = e.target.closest('[data-pull]');
+        if (pl) {
+          if (pl.getAttribute('aria-disabled') === 'true') return;
+          const it = d.taken.find(i => i.id === Number(pl.dataset.pull));
+          if (!(await confirmSheet('Puxar atividade', `“${it.text}” sai da sequência de ${it.owner_name} e entra na de ${d.worker.name}.`, 'Puxar'))) return;
+          try {
+            d = await api(`/tasks/${taskId}/plan/pull`, { method: 'POST', body: { ...planBody(), item_id: it.id, from_worker_id: it.owner_id } });
+            toast('Atividade puxada.');
+            draw();
+          } catch (er) { toast(er.message, 'err'); load(); }
+          return;
+        }
         const a = e.target.closest('[data-link]'), b = e.target.closest('[data-unlink]'), r = e.target.closest('[data-resched]');
         if (!a && !b && !r) return;
         const btn = a || b || r;
         btn.disabled = true;
-        const body = { worker_id: Number(st.worker), item_id: Number(btn.dataset.link || btn.dataset.unlink) || null, start: st.start || null, end: st.start && st.end ? st.end : null };
+        const body = { ...planBody(), item_id: Number(btn.dataset.link || btn.dataset.unlink) || null, ...(btn.dataset.role ? { role: btn.dataset.role } : {}) };
         try {
           d = await api(`/tasks/${taskId}/plan/${a ? 'link' : b ? 'unlink' : 'reschedule'}`, { method: 'POST', body });
           toast(a ? 'Item vinculado.' : b ? 'Item retirado da sequência.' : 'Sequência reprogramada.');

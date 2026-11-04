@@ -3711,3 +3711,19 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .cl-bt-opt span { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
 .cl-bt-opt small { color: var(--muted); font-size: 12px; font-weight: 400; }
 @media print { .cl-pickbar, .cli-pick { display: none !important; } }
+
+/* Programar profissional: outras atividades e registro de trabalho */
+.pl-left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pl-who { font-size: 12.5px; color: var(--ink-2); }
+.pl-working { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 3px; padding: 2px 8px; border-radius: 999px; background: #E8F4EC; color: #1F6B41; font-size: 12px; font-weight: 650; }
+.pl-working svg { width: 13px; height: 13px; }
+.pl-work-acts { display: flex; margin-top: 5px; }
+.cli-aloc.is-working { background: #E8F4EC; color: #1F6B41; border-color: #A9D3B8; }
+.cli-working { color: #1F6B41; font-weight: 650; }
+
+/* Check-list: início real do item */
+.cli-started { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; font-size: 13px; }
+.cli-started .k { font-size: 12px; font-weight: 700; color: var(--muted); }
+.cli-started small { color: var(--muted); }
+.cli-started-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.cli-started-tag { padding: 2px 8px; border-radius: 999px; background: #E8F4EC; color: #1F6B41; font-size: 11.5px; font-weight: 650; white-space: nowrap; }

@@ -3,6 +3,7 @@ import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, st
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
+import { evolutionSection, bindEvolution } from './evolution.js';
 import { typeColor } from './projects.js';
 
 // Análise por tipo de projeto: obras, conclusão, atrasos e entregas no prazo de cada tipo
@@ -109,6 +110,8 @@ export async function view({ state }) {
 
       ${typeAnalysis(d.by_type)}
 
+      ${evolutionSection({ scope: 'empresa' })}
+
       <section class="card section">
         <div class="card-head"><h2>${icon('team')}Desempenho por usuário</h2><span class="sub">ordenado por entregas no prazo</span></div>
         ${ranking.length ? html`<ul class="rows">${ranking.map(userRankRow)}</ul>` : html`<div class="card-body muted">Sem dados de usuários para o seu perfil.</div>`}
@@ -165,6 +168,7 @@ export async function view({ state }) {
       bindProjectFold(root, projects.length + d.internal_areas.length);
       bindCommon(root);
       bindChecklistCards(root);
+      bindEvolution(root);
     },
   };
 }

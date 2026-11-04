@@ -6,6 +6,7 @@ import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { weekPlanSection, bindWeekPlan } from './week-plan.js';
+import { evolutionSection, bindEvolution } from './evolution.js';
 
 // Meu desempenho completo: a mesma tela, aberta dentro do Meu painel (sem passar pela seção Usuários)
 export const myPerformance = ctx => view({ ...ctx, params: { id: ctx.state.user.id }, panel: true });
@@ -100,6 +101,8 @@ export async function view({ params, query, setQuery, render, state, panel = fal
       </div>
       ${execKpis(s)}
 
+      ${evolutionSection({ scope: 'usuario', id: u.id, sub: `${u.name.split(' ')[0]} comparado com a empresa` })}
+
       ${d.impact ? html`<section class="card section dep-user-impact"><div class="card-head"><h2>${icon('alert')}Impacto dos atrasos em outras tarefas</h2>
           <span class="sub">${d.impact.causes} tarefa(s) que atrasaram · ${d.impact.tasks} impactada(s) · <b>${d.impact.days} dia(s)-tarefa</b></span></div>
         <ul class="rows">${d.impact.list.map(x => html`<li><a class="row-link" href="#/tarefas/${x.id}"><div class="grow"><div class="row-title"><span class="mono">${x.code}</span> ${x.title}</div>
@@ -136,6 +139,7 @@ export async function view({ params, query, setQuery, render, state, panel = fal
       </section>`,
     mount(root) {
       bindCommon(root);
+      bindEvolution(root);
       bindGanttSections(root, url => api(url));
       bindChecklistCards(root);
       bindWeekPlan(root, { d, user: u, meta: state.meta, week, render,

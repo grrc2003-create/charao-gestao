@@ -2839,7 +2839,7 @@ async function main() {
   console.log('Tarefas por trás dos indicadores de prazo');
   const dtAna = await login('ana@charao.eng.br');
   const dtCam = await login('camila@charao.eng.br');
-  const dtPast = new Date(Date.now() - 20 * 86400e3).toISOString().slice(0, 10);
+  const dtPast = new Date(Date.now() - 3 * 3600e3 - 20 * 86400e3).toISOString().slice(0, 10);
   const dtTask = (await cdRic('POST', '/tasks', { project_id: 1, title: 'Vencida para o detalhe', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', due_date: dtPast })).data.id;
   const dtMonth = dtPast.slice(0, 7);
   const dtDash = (await dtAna('GET', '/dashboard')).data;
@@ -2927,6 +2927,68 @@ async function main() {
   ok(ctProj.trend.every(m => ctSum(m.by.atrasadas) === m.ever_late) && ['r0', 'r1', 'r2', 'r3'].every(k => ctSum(ctProj.dist_by[k]) === ctProj.summary.reschedule_dist[k]), 'no projeto, a pizza bate com os números');
   const ctUser = (await ctAna('GET', '/users/4')).data;
   ok(ctUser.trend.every(m => m.by.todas.length <= 1) && ctUser.dist_by.r0.length <= 1, 'na tela do usuário só ele aparece');
+
+  console.log('Corrida dos indicadores');
+  const evAna = await login('ana@charao.eng.br');
+  const evGet = async q => (await evAna('GET', `/evolution?${q}`)).data;
+  const evLast = s => s[s.length - 1];
+  const evSame = (series, st) => evLast(series.on_time) === st.on_time_pct && evLast(series.done) === st.done && evLast(series.late) === st.late
+    && evLast(series.early) === (st.early ?? 0) && evLast(series.filling) === (st.filling_delays ?? 0);
+  const evDash = (await evAna('GET', '/dashboard')).data;
+  const evCo = await evGet('scope=empresa');
+  ok(evCo.overall.label === 'Empresa' && evSame(evCo.overall.series, evDash.summary) && evLast(evCo.overall.series.assigned) === evDash.summary.total, 'na empresa, o último ponto geral bate com os indicadores da tela');
+  ok(evCo.people.map(p => p.id).sort().join() === evDash.users.map(u => u.id).sort().join(), 'correm exatamente as pessoas da tabela de desempenho');
+  ok(evDash.users.every(u => {
+    const p = evCo.people.find(x => x.id === u.id);
+    return evSame(p.series, u.stats) && evLast(p.series.assigned) === u.stats.assigned && evLast(p.series.exec) === u.stats.exec_work_days_avg;
+  }), 'o último ponto de cada pessoa é igual à linha dela na tabela, nos 7 indicadores');
+  const evMonth = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7);
+  ok(evCo.months.length <= 12 && evLast(evCo.months) === evMonth && evCo.months.every((m, i, a) => !i || new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 2, 1)).toISOString().slice(0, 7) === a[i - 1]), 'até 12 meses seguidos, terminando no mês atual');
+  const evGrow = s => s.every((v, i) => !i || v >= s[i - 1]);
+  ok(evCo.people.every(p => ['done', 'assigned', 'early', 'filling'].every(k => evGrow(p.series[k]))), 'os indicadores acumulados nunca diminuem');
+  ok(evCo.people.every(p => p.series.done.every((v, i) => v <= p.series.assigned[i])), 'em nenhum mês há mais concluídas do que atribuídas');
+  const evProj = (await evAna('GET', '/projects/1')).data;
+  const evPr = await evGet('scope=projeto&id=1');
+  ok(evPr.overall.label === 'Projeto' && evSame(evPr.overall.series, evProj.summary) && evLast(evPr.overall.series.assigned) === evProj.summary.total, 'no projeto, o último ponto geral bate com os indicadores do projeto');
+  ok(evPr.people.length === evProj.people.length && evProj.people.every(u => {
+    const p = evPr.people.find(x => (x.id || 0) === (u.id || 0));
+    return p && evSame(p.series, u.summary) && evLast(p.series.assigned) === u.summary.total && evLast(p.series.exec) === u.summary.exec_work_days_avg;
+  }), 'no projeto, cada pessoa é igual à linha de Desempenho por responsável');
+  const evUserData = (await evAna('GET', '/users/4')).data;
+  const evUs = await evGet('scope=usuario&id=4');
+  ok(evUs.people.length === 1 && evUs.people[0].id === 4 && evSame(evUs.people[0].series, evUserData.stats) && evLast(evUs.people[0].series.assigned) === evUserData.stats.assigned, 'no usuário, a linha dele é igual à tela dele');
+  ok(evUs.overall.label === 'Empresa' && evLast(evUs.overall.series.assigned) >= evLast(evUs.people[0].series.assigned), 'e é comparada com a empresa');
+  ok(evUs.months.every((_, i) => evUs.overall.per_person.assigned[i] <= evUs.overall.series.assigned[i]) && evLast(evUs.overall.per_person.assigned) > 0, 'as contagens da empresa também vêm como média por pessoa');
+  // Foto do mês: atrasada só enquanto o prazo em vigor estava vencido
+  const evDay = n => new Date(Date.now() - n * 86400e3).toISOString().slice(0, 10);
+  const evOld = evDay(150), evPlus = evDay(90);
+  const evUserId = 4;
+  const evBefore = await evGet(`scope=usuario&id=${evUserId}`);
+  const evTask = (await evAna('POST', '/tasks', { project_id: 1, title: 'Corrida: foto do mês', description: 'Teste', assignee_id: evUserId, proof_type: 'nenhuma', due_date: evOld })).data.id;
+  const evDb = new DatabaseSync(path.join(DATA_DIR, 'charao.db'));
+  evDb.prepare('UPDATE tasks SET created_at = ? WHERE id = ?').run(`${evDay(170)}T15:00:00.000Z`, evTask);
+  evDb.prepare('INSERT INTO task_reschedules (task_id, old_due, new_due, reason_name, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(evTask, evOld, '2050-01-01', 'Teste', 1, `${evPlus}T15:00:00.000Z`);
+  evDb.prepare('UPDATE tasks SET due_date = ? WHERE id = ?').run('2050-01-01', evTask);
+  evDb.close();
+  const evAfter = await evAna('GET', `/evolution?scope=usuario&id=${evUserId}`).then(r => r.data);
+  const evEnd = m => new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
+  const evDelta = evAfter.months.map(m => {
+    const i = evAfter.months.indexOf(m), j = evBefore.months.indexOf(m);
+    return { m, late: evAfter.people[0].series.late[i] - (j < 0 ? 0 : evBefore.people[0].series.late[j]), assigned: evAfter.people[0].series.assigned[i] - (j < 0 ? 0 : evBefore.people[0].series.assigned[j]) };
+  });
+  ok(evDelta.every(x => x.late === (evEnd(x.m) > evOld && evEnd(x.m) < evPlus ? 1 : 0)), 'atrasada conta só nos meses em que o prazo em vigor estava vencido');
+  ok(evDelta.every(x => x.assigned === (evEnd(x.m) >= evDay(170) ? 1 : 0)), 'atribuída conta a partir do mês em que a tarefa existe');
+  // Permissões
+  const evCam = await login('camila@charao.eng.br');
+  ok((await evCam('GET', '/evolution?scope=usuario&id=1')).status >= 403, 'colaborador não abre a corrida de outra pessoa');
+  const evNoDash = await login('sem.visao@teste.com', 'semvisao12345');
+  ok((await evNoDash('GET', '/evolution?scope=empresa')).status === 403, 'sem a visão da empresa, a corrida dela é recusada');
+  ok((await evAna('GET', '/evolution?scope=x')).status === 400 && (await evAna('GET', '/evolution?scope=projeto&id=999999')).status === 404, 'recorte inválido e projeto inexistente são recusados');
+  ok((await evAna('POST', '/users', { name: 'So Proprias Teste', email: 'so.proprias@teste.com', role: 'colaborador', access_scope: 'proprias', password: 'soproprias12345', sections: ['dashboard', 'usuarios', 'tarefas'] })).status === 201, 'cria usuário que só vê as próprias tarefas');
+  const evOwn = await login('so.proprias@teste.com', 'soproprias12345');
+  const evOwnId = (await evOwn('GET', '/auth/me')).data.user.id;
+  const evOwnData = (await evOwn('GET', `/evolution?scope=usuario&id=${evOwnId}`)).data;
+  ok(evOwnData.overall.label === 'Visível para você' && evLast(evOwnData.overall.series.assigned) === 0, 'quem só vê as próprias não recebe os números da empresa');
 
 }
 

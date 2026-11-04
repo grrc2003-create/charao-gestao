@@ -12,6 +12,7 @@ import {
 import { seedDemo } from './demo-data.js';
 import { accessContext, canAccessProject, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
+import { evolution } from './services/evolution.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
 import * as Reports from './services/reports.js';
@@ -185,6 +186,38 @@ api.get('/api/deadlines/tasks', (req, res, { ctx, query }) => {
     units = [...tasks, ...Checklist.checklistItemsAsSubtasks(tasks)];
   } else throw badRequest('Recorte inválido.');
   send(res, 200, deadlineDetail(units, { month, view }));
+});
+
+// Corrida dos indicadores: mês a mês, com o mesmo universo e as mesmas permissões de cada tela
+api.get('/api/evolution', (req, res, { ctx, query }) => {
+  const scope = query.get('scope') || 'empresa', id = intOrNull(query.get('id'));
+  // Só é "Empresa" para quem enxerga a empresa toda; os demais comparam com o que podem ver
+  const seesAll = isAdmin(ctx.user) || (ctx.projects === null && ctx.user.access_scope !== 'proprias');
+  const companyLabel = seesAll ? 'Empresa' : 'Visível para você';
+  const person = u => ({ id: u.id, name: u.name, job_title: u.job_title || null });
+  if (scope === 'projeto') {
+    requireSection(ctx.user, 'projetos');
+    if (!id || !one('SELECT id FROM projects WHERE id = ?', id) || !canAccessProject(ctx.user, id, ctx.projects)) throw new HttpError(404, 'Projeto não encontrado.');
+    const tasks = Tasks.listVisible(ctx, 'WHERE t.project_id = ?', id);
+    const people = new Map();
+    for (const t of tasks) people.set(t.assignee_id || 0, { id: t.assignee_id || null, name: t.assignee_name || 'Sem responsável', job_title: null });
+    return send(res, 200, { scope, ...evolution({ tasks, people: [...people.values()], overallLabel: 'Projeto' }) });
+  }
+  if (scope === 'usuario') {
+    if (id !== ctx.user.id && !hasSection(ctx.user, 'cadastro_usuarios')) requireSection(ctx.user, 'usuarios');
+    if (!id || !canSeeUser(ctx, id)) throw new HttpError(404, 'Usuário não encontrado.');
+    const u = one('SELECT id, name, job_title FROM users WHERE id = ?', id);
+    if (!u) throw new HttpError(404, 'Usuário não encontrado.');
+    const all_ = Tasks.listVisible(ctx);
+    return send(res, 200, { scope, ...evolution({ tasks: all_.filter(t => t.assignee_id === id), overallTasks: all_, people: [person(u)], overallLabel: companyLabel }) });
+  }
+  if (scope !== 'empresa') throw badRequest('Recorte inválido.');
+  requireSection(ctx.user, 'dashboard');
+  const visible = Tasks.listVisible(ctx);
+  const units = [...visible, ...Checklist.checklistItemsAsSubtasks(visible)];
+  const counted = new Set(units.filter(countsInIndicators).map(t => t.assignee_id));
+  const people = all('SELECT id, name, job_title FROM users WHERE active = 1 ORDER BY name').filter(u => counted.has(u.id) && canSeeUser(ctx, u.id)).map(person);
+  send(res, 200, { scope, ...evolution({ tasks: units, people, overallLabel: companyLabel }) });
 });
 
 api.get('/api/dashboard', (req, res, { ctx }) => {

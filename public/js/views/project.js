@@ -9,6 +9,7 @@ import { ganttSection, bindGanttSections } from './gantt.js';
 import { calendarSection, bindCalendar } from './calendar-ui.js';
 import { recordsCard, bindRecordsCard } from './records.js';
 import { addPdfButtons } from '../section-pdf.js';
+import { evolutionSection, bindEvolution } from './evolution.js';
 
 export async function view({ params, query, setQuery, render, navigate }) {
   const [p, impactRank, recs] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
@@ -78,6 +79,8 @@ export async function view({ params, query, setQuery, render, navigate }) {
         </section>
       </div>
 
+      ${evolutionSection({ scope: 'projeto', id: p.id, sub: 'neste projeto' })}
+
       ${usedStages.length > 1 || (usedStages.length === 1 && !usedStages[0].is_default) ? html`<section class="card section">
         <div class="card-head"><h2>Andamento por classificação</h2><span class="sub">Grupo / Local / Etapa · toque para filtrar</span></div>
         <ul class="rows">${usedStages.map(s => html`<li><button type="button" class="row-link proj-row stage-row ${stage === s.id ? 'is-active' : ''}" data-stage="${stage === s.id ? '' : s.id}">
@@ -126,6 +129,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
+      bindEvolution(root);
       // Botão "PDF" em cada quadro: imprime só aquele visual
       addPdfButtons(root, { title: `${p.code} · ${p.name}`, sub: p.client });
       bindGanttSections(root, url => api(url));

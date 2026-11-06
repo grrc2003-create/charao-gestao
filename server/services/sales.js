@@ -3,7 +3,7 @@
 // Acesso pela seção "vendas". O contrato é criado na área de Contratos (liberação própria), aproveitando os dados.
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
-import { hasSection } from '../lib/permissions.js';
+import { hasSection, isAdmin } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { COMPANIES } from '../lib/companies.js';
 import { listSalesList, validSalesListId, addSalesListItem, SALES_LISTS } from './settings.js';
@@ -116,7 +116,8 @@ export function missingFor(o, kind) {
 const OPP_SELECT = `SELECT o.*, s.name AS stage_name, s.kind AS stage_kind, src.name AS source_name, lr.name AS lost_reason_name,
     pf.name AS profile_name, u.name AS owner_name, c.code AS contract_code,
     (SELECT COUNT(*) FROM sales_proposals p WHERE p.opportunity_id = o.id) AS proposals_count,
-    (SELECT COUNT(*) FROM sales_proposals p WHERE p.opportunity_id = o.id AND p.stored_name IS NOT NULL) AS files_count
+    (SELECT COUNT(*) FROM sales_proposals p WHERE p.opportunity_id = o.id AND p.stored_name IS NOT NULL) AS files_count,
+    (SELECT COUNT(*) FROM sales_notes n WHERE n.opportunity_id = o.id) AS notes_count
   FROM sales_opportunities o JOIN sales_stages s ON s.id = o.stage_id
   LEFT JOIN sales_sources src ON src.id = o.source_id LEFT JOIN sales_loss_reasons lr ON lr.id = o.lost_reason_id
   LEFT JOIN sales_profiles pf ON pf.id = o.profile_id LEFT JOIN users u ON u.id = o.owner_id LEFT JOIN contracts c ON c.id = o.contract_id`;
@@ -149,6 +150,7 @@ export function getOpportunity(ctx, id) {
     moves: all(`SELECT m.from_stage, m.to_stage, m.created_at, u.name AS user_name FROM sales_moves m LEFT JOIN users u ON u.id = m.user_id
       WHERE m.opportunity_id = ? ORDER BY m.id DESC`, id),
     missing_here: missingFor(o, o.stage_kind),
+    notes: notesOf(ctx, id),
     stages: listStages().map(s => ({ id: s.id, name: s.name, kind: s.kind })),
     lists: lists(),
     users: all(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`),
@@ -218,7 +220,6 @@ export function createOpportunity(ctx, body, ip) {
   const stages = listStages();
   const stage = body.stage_id ? stages.find(s => s.id === intOrNull(body.stage_id)) : stages.find(s => !['ganho', 'perdido'].includes(s.kind));
   if (!stage) throw badRequest('Coluna inválida.');
-  if (stage.kind === 'ganho') throw badRequest('Cadastre a oportunidade numa coluna de trabalho e mova-a para o fechamento depois.');
   const d = readFields({ company: 'charao', ...body });
   if (!d.client) throw badRequest('Informe o cliente.');
   return tx(() => {
@@ -233,8 +234,9 @@ export function createOpportunity(ctx, body, ip) {
     addProposals(ctx, id, body.proposals, o);
     const miss = missingFor(one('SELECT * FROM sales_opportunities WHERE id = ?', id), stage.kind);
     if (miss.length) throw missingError(miss, stage.name);
-    if (stage.kind === 'perdido') run(`UPDATE sales_opportunities SET closed_at = datetime('now') WHERE id = ?`, id);
+    if (stage.kind === 'perdido' || stage.kind === 'ganho') run(`UPDATE sales_opportunities SET closed_at = datetime('now') WHERE id = ?`, id);
     run('INSERT INTO sales_moves (opportunity_id, from_stage, to_stage, user_id) VALUES (?,?,?,?)', id, null, stage.name, ctx.user.id);
+    insertNote(ctx, id, stage, body.stage_note);
     audit(ctx.user.id, 'sales', id, 'Oportunidade cadastrada', { codigo: code, cliente: d.client, coluna: stage.name }, ip);
     return id;
   });
@@ -266,6 +268,7 @@ export function updateOpportunity(ctx, id, body, ip) {
       others.splice(pos, 0, id);
       others.forEach((oid, k) => run('UPDATE sales_opportunities SET sort_order = ? WHERE id = ?', k + 1, oid));
     }
+    insertNote(ctx, id, stage, body.stage_note);
     if (moving) {
       const closed = ['ganho', 'perdido'].includes(stage.kind);
       run(`UPDATE sales_opportunities SET stage_id = ?, stage_since = datetime('now'), closed_at = ${closed ? "COALESCE(closed_at, datetime('now'))" : 'NULL'}, updated_at = datetime('now') WHERE id = ?`, stage.id, id);
@@ -288,6 +291,7 @@ export function deleteOpportunity(ctx, id, ip) {
   tx(() => {
     run('DELETE FROM sales_proposals WHERE opportunity_id = ?', id);
     run('DELETE FROM sales_moves WHERE opportunity_id = ?', id);
+    run('DELETE FROM sales_notes WHERE opportunity_id = ?', id);
     run('DELETE FROM sales_opportunities WHERE id = ?', id);
     audit(ctx.user.id, 'sales', id, 'Oportunidade excluída', { codigo: o.code, cliente: o.client }, ip);
   });
@@ -361,4 +365,50 @@ export function linkContract(ctx, o, contractId, contractCode) {
     run('INSERT INTO sales_moves (opportunity_id, from_stage, to_stage, user_id) VALUES (?,?,?,?)', o.id, cur.name, won.name, ctx.user.id);
   }
   audit(ctx.user.id, 'sales', o.id, 'Contrato criado a partir da oportunidade', { codigo: o.code, contrato: contractCode });
+}
+
+// ---------- Observações por etapa ----------
+const canEditNote = (ctx, n) => n.created_by === ctx.user.id || isAdmin(ctx.user);
+function notesOf(ctx, oppId) {
+  return all(`SELECT n.*, u.name AS user_name, e.name AS editor_name FROM sales_notes n LEFT JOIN users u ON u.id = n.created_by
+    LEFT JOIN users e ON e.id = n.updated_by WHERE n.opportunity_id = ? ORDER BY n.created_at, n.id`, oppId)
+    .map(n => ({ id: n.id, stage_id: n.stage_id, stage_name: n.stage_name, body: n.body, user_name: n.user_name, created_at: n.created_at,
+      updated_at: n.updated_at, editor_name: n.editor_name, can_edit: canEditNote(ctx, n) }));
+}
+function insertNote(ctx, oppId, stage, text) {
+  const body = str(text, { max: 4000, label: 'Observação' });
+  if (!body) return null;
+  return Number(run('INSERT INTO sales_notes (opportunity_id, stage_id, stage_name, body, created_by) VALUES (?,?,?,?,?)', oppId, stage.id, stage.name, body, ctx.user.id).lastInsertRowid);
+}
+export function addNote(ctx, oppId, body, ip) {
+  requireSales(ctx.user);
+  const o = one('SELECT id, code, stage_id FROM sales_opportunities WHERE id = ?', oppId);
+  if (!o) throw notFound('Oportunidade não encontrada.');
+  const stage = one('SELECT id, name FROM sales_stages WHERE id = ?', intOrNull(body.stage_id) || o.stage_id);
+  if (!stage) throw badRequest('Etapa inválida.');
+  if (!str(body.body, { max: 4000, label: 'Observação' })) throw badRequest('Escreva a observação.');
+  const id = insertNote(ctx, oppId, stage, body.body);
+  audit(ctx.user.id, 'sales', oppId, 'Observação incluída', { codigo: o.code, etapa: stage.name }, ip);
+  return notesOf(ctx, oppId).find(n => n.id === id);
+}
+export function updateNote(ctx, id, body, ip) {
+  requireSales(ctx.user);
+  const n = one('SELECT n.*, o.code FROM sales_notes n JOIN sales_opportunities o ON o.id = n.opportunity_id WHERE n.id = ?', id);
+  if (!n) throw notFound('Observação não encontrada.');
+  if (!canEditNote(ctx, n)) throw forbidden('Somente quem escreveu (ou o administrador) altera a observação.');
+  const text = str(body.body, { max: 4000, label: 'Observação' });
+  if (!text) throw badRequest('Escreva a observação.');
+  if (text !== n.body) {
+    run(`UPDATE sales_notes SET body = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`, text, ctx.user.id, id);
+    audit(ctx.user.id, 'sales', n.opportunity_id, 'Observação editada', { codigo: n.code, etapa: n.stage_name }, ip);
+  }
+  return notesOf(ctx, n.opportunity_id).find(x => x.id === id);
+}
+export function deleteNote(ctx, id, ip) {
+  requireSales(ctx.user);
+  const n = one('SELECT n.*, o.code FROM sales_notes n JOIN sales_opportunities o ON o.id = n.opportunity_id WHERE n.id = ?', id);
+  if (!n) throw notFound('Observação não encontrada.');
+  if (!canEditNote(ctx, n)) throw forbidden('Somente quem escreveu (ou o administrador) exclui a observação.');
+  run('DELETE FROM sales_notes WHERE id = ?', id);
+  audit(ctx.user.id, 'sales', n.opportunity_id, 'Observação excluída', { codigo: n.code, etapa: n.stage_name }, ip);
 }

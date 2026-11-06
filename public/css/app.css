@@ -3889,3 +3889,51 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
   .sv-colrow .stage-count { display: none; }
   .sv-list-row { flex-wrap: wrap; }
 }
+
+/* Vendas: "+" em cada coluna, observações por etapa e ficha organizada pelas colunas */
+.sv-col-head { align-items: center; }
+.sv-col-add { width: 28px; height: 28px; flex: none; border-radius: 999px; background: var(--surface); border: 1px solid var(--line-strong); color: var(--k, var(--navy)); }
+.sv-col-add svg { width: 15px; height: 15px; }
+.sv-col-add:hover { background: var(--k, var(--navy)); color: #fff; border-color: var(--k, var(--navy)); }
+.sv-ncount { display: inline-flex; align-items: center; gap: 3px; align-self: flex-start; font-size: 11px; font-weight: 650; color: var(--ink-2); }
+.sv-ncount svg { width: 12px; height: 12px; }
+.sv-sub { font: 700 12px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; }
+.sv-steps { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+.sv-steps::-webkit-scrollbar { display: none; }
+.sv-step { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); font: 600 12.5px var(--font); color: var(--ink-2); cursor: pointer; }
+.sv-step b { font-size: 11px; color: #fff; background: var(--k); border-radius: 999px; padding: 0 6px; }
+.sv-step.is-done { border-color: var(--k); color: var(--k); }
+.sv-step.is-current { background: var(--k); border-color: var(--k); color: #fff; }
+.sv-step.is-current b { background: #fff; color: var(--k); }
+.sv-stageset { border-left: 4px solid var(--k, var(--line-strong)); scroll-margin-top: 80px; }
+.sv-stageset.is-current { background: var(--kb, transparent); }
+.sv-stageset legend { display: inline-flex; align-items: center; gap: 6px; }
+.sv-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--k); }
+.sv-here { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; text-transform: none; color: #fff; background: var(--k); border-radius: 999px; padding: 1px 8px; }
+.sv-hint-line { margin: 0; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.sv-hint-line svg { width: 15px; height: 15px; }
+.sv-notes { display: grid; gap: 8px; border-top: 1px dashed var(--line-strong); padding-top: 10px; }
+.sv-notes-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.sv-notes-head svg { width: 15px; height: 15px; color: var(--k, var(--muted)); }
+.sv-notes-n { font-size: 11px; font-weight: 700; color: #fff; background: var(--k, var(--steel)); border-radius: 999px; padding: 0 6px; }
+.sv-notes-n:empty { display: none; }
+.sv-note-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sv-note-list:empty { display: none; }
+.sv-note { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--k, var(--steel)); border-radius: var(--radius-sm); padding: 8px 10px; display: grid; gap: 6px; }
+.sv-note-body { white-space: pre-line; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.sv-note-meta { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; font-size: 11.5px; color: var(--muted); }
+.sv-note-act { display: inline-flex; align-items: center; gap: 4px; }
+.sv-note-act .icon-btn { width: 30px; height: 30px; }
+.sv-note-act svg { width: 14px; height: 14px; }
+.sv-note-edit { display: grid; gap: 6px; }
+.sv-note-edit-act { display: flex; justify-content: flex-end; gap: 6px; }
+.sv-note-add { display: flex; gap: 8px; align-items: flex-start; }
+.sv-note-add textarea { flex: 1; min-width: 0; min-height: 44px; }
+.sv-note-add .btn { flex: none; margin-top: 4px; }
+.sv-save-bar { position: sticky; bottom: 0; background: var(--surface); padding: 10px 0; border-top: 1px solid var(--line); z-index: 2; }
+@media (max-width: 760px) {
+  .sv-note-add { flex-direction: column; align-items: stretch; }
+  .sv-save-bar { bottom: 64px; }
+}
+[data-sv-sheet]:not(form) { display: grid; gap: 14px; }
+.sv-note:has(.sv-note-edit) .sv-note-act { display: none; }

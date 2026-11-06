@@ -86,7 +86,7 @@ function field(k, o, d, req) {
     return html`<div class="field">${lab}<textarea id="sv-${k}" name="${k}" rows="${k.endsWith('scope') ? 4 : 3}" maxlength="${k.endsWith('scope') ? 4000 : 3000}" ${r ? 'required' : ''}>${v}</textarea>${hint}</div>`;
   }
   if (k === 'proposal_value' || k === 'discount_pct') {
-    return html`<div class="field">${lab}<input id="sv-${k}" name="${k}" type="text" inputmode="decimal" class="ct-num" value="${numIn(o[k])}" placeholder="${k === 'discount_pct' ? '0' : '0,00'}" ${r ? 'required' : ''}>${hint}</div>`;
+    return html`<div class="field">${lab}<input id="sv-${k}" name="${k}" type="text" inputmode="decimal" class="ct-num" value="${k === 'proposal_value' && o[k] ? Number(o[k]).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : numIn(o[k])}" placeholder="${k === 'discount_pct' ? '0' : '0,00'}" ${r ? 'required' : ''}>${hint}</div>`;
   }
   if (k === 'proposal_file') {
     return html`<div class="field sv-file">${lab}<input id="sv-proposal_file" type="file" accept="application/pdf,.pdf,image/*" ${r ? 'required' : ''}>
@@ -182,7 +182,8 @@ async function moveFlow(o, stage, { position, d, navigate, done }) {
       body: html`<div class="sv-move-sheet" data-sv-sheet>
         <p class="muted" style="margin:0 0 4px">${stage.kind === 'perdido' ? html`Informe o motivo da perda de <b>${o.client}</b>. Os motivos são cadastrados em <b>Configurações</b> (e aqui mesmo, em “Novo motivo”).`
           : html`A coluna <b>${stage.name}</b> exige os campos abaixo para <b>${o.client}</b>.`}</p>
-        ${rows(keys, o, d, req)}</div>`,
+        ${rows(keys, o, d, req)}
+        <div class="field"><label for="sv-stage_note">Observação da etapa (${stage.name})</label><textarea id="sv-stage_note" name="stage_note" rows="2" maxlength="4000" placeholder="Opcional"></textarea></div></div>`,
       onSubmit: async (_data, form) => {
         checkRequired(form);
         const data = await readForm(form);
@@ -232,6 +233,7 @@ const card = (o, s) => {
       <div class="sv-card-top"><span class="mono sv-code">${o.code}</span>${coBadge(o.company)}</div>
       <b class="sv-client">${o.client}</b>
       ${o.title ? html`<span class="sv-title">${o.title}</span>` : ''}
+      ${o.notes_count ? html`<span class="sv-ncount" title="${o.notes_count} observação(ões)">${icon('note')}${o.notes_count}</span>` : ''}
       ${o.final_value ? html`<span class="sv-value">${money(o.final_value)}${o.discount_pct ? html`<small>−${pctTxt(o.discount_pct)}</small>` : ''}</span>` : ''}
       <div class="sv-tags">
         ${o.source_name ? html`<span class="sv-tag">${o.source_name}</span>` : ''}
@@ -287,7 +289,8 @@ export async function board({ state, query, setQuery, render, navigate }) {
           const same = s.name.toLocaleLowerCase('pt-BR') === s.kind_label.toLocaleLowerCase('pt-BR');
           return html`<section class="sv-col ${KIND_CLS[s.kind]}" data-stage="${s.id}" id="sv-col-${s.id}" aria-label="${s.name}">
             <header class="sv-col-head"><div class="sv-col-t"><b>${s.name}</b>${same ? '' : html`<small>${s.kind_label.replace(' (sem exigência extra)', '')}</small>`}</div>
-              <span class="sv-col-n">${list.length}</span></header>
+              <span class="sv-col-n">${list.length}</span>
+              <button type="button" class="icon-btn sv-col-add" data-new-in="${s.id}" aria-label="Nova oportunidade em ${s.name}" title="Nova oportunidade em ${s.name}">${icon('plus')}</button></header>
             <div class="sv-col-sum">${list.length ? money(sum(list)) : html`<span class="muted">—</span>`}</div>
             <ul class="sv-cards" data-stage="${s.id}">${list.map(o => card(o, s))}
               ${list.length ? '' : html`<li class="sv-empty">Arraste um cartão para cá</li>`}</ul>
@@ -356,36 +359,49 @@ export async function board({ state, query, setQuery, render, navigate }) {
       });
 
       root.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => root.querySelector(`#sv-col-${b.dataset.jump}`).scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })));
-      root.querySelector('#sv-new').addEventListener('click', () => newOpportunity(d, reload));
+      root.querySelector('#sv-new').addEventListener('click', () => newOpportunity(d, reload, d.stages.find(s => s.kind !== 'ganho' && s.kind !== 'perdido') || d.stages[0], navigate));
+      root.querySelectorAll('[data-new-in]').forEach(b => b.addEventListener('click', () => newOpportunity(d, reload, d.stages.find(s => s.id === Number(b.dataset.newIn)), navigate)));
       root.querySelector('#sv-cols').addEventListener('click', () => editColumns(d, reload));
     },
   };
 }
 
 // ---------- Nova oportunidade ----------
-async function newOpportunity(d, reload) {
-  const work = d.stages.filter(s => s.kind !== 'ganho' && s.kind !== 'perdido');
+const KIND_EXTRA = {
+  apresentacao: ['possible_scope'],
+  proposta: ['possible_scope', 'final_scope', 'proposal_value', 'discount_pct', 'proposal_file'],
+  negociacao: ['final_scope', 'proposal_value', 'discount_pct', 'proposal_file', 'profile_id', 'negotiation_notes'],
+  ganho: ['final_scope', 'proposal_value', 'discount_pct', 'proposal_file'],
+  perdido: ['lost_reason_id', 'lost_notes'],
+};
+async function newOpportunity(d, reload, stage, navigate) {
   const o = { company: 'charao' };
-  const req = requiredFor('prospeccao');
+  const req = requiredFor(stage.kind);
+  const extra = KIND_EXTRA[stage.kind] || [];
   const stop = sheetObserver(d);
   const r = await sheet({
-    title: 'Nova oportunidade',
+    title: `Nova oportunidade em “${stage.name}”`,
     wide: true,
     submitLabel: 'Cadastrar',
     body: html`<div data-sv-sheet>
-      ${rows(['company', 'client', 'client_doc', 'contact_name', 'phone', 'email', 'address', 'city', 'source_id', 'source_detail', 'title', 'owner_id'], o, { ...d, users: d.users }, req)}
-      ${work.length > 1 ? html`<div class="field"><label for="sv-stage">Coluna</label><select id="sv-stage" name="stage_id">${work.map(s => html`<option value="${s.id}">${s.name}</option>`)}</select>
-        <span class="hint">Colunas a partir de Proposta pedem escopo final, valor e proposta anexada: cadastre e mova depois.</span></div>` : ''}</div>`,
+      <p class="muted" style="margin:0 0 4px">O cartão entra direto na coluna <b>${stage.name}</b>${extra.length ? ' — por isso, além do cadastro, ela pede os campos marcados com *' : ''}.</p>
+      ${rows(BASE_FIELDS, o, d, req)}
+      ${extra.length ? html`<div class="sv-sub">${stage.name}</div>${rows(extra, o, d, req)}` : ''}
+      <div class="field"><label for="sv-stage_note">Observação da etapa (${stage.name})</label><textarea id="sv-stage_note" name="stage_note" rows="2" maxlength="4000" placeholder="Opcional"></textarea></div></div>`,
     onSubmit: async (_data, form) => {
       checkRequired(form);
       const data = await readForm(form);
-      const st = d.stages.find(s => s.id === Number(data.stage_id));
-      if (st && missingFor({ ...data, source_id: Number(data.source_id) || null }, st.kind).length) throw new Error(`A coluna ${st.name} exige mais dados: cadastre na primeira coluna e mova o cartão depois.`);
-      return api('/sales/opportunities', { method: 'POST', body: data });
+      return api('/sales/opportunities', { method: 'POST', body: { ...data, stage_id: stage.id } });
     },
   });
   stop();
-  if (r) { toast('Oportunidade cadastrada.'); reload(); }
+  if (!r) return;
+  toast('Oportunidade cadastrada.');
+  if (stage.kind === 'ganho') {
+    const opp = await api(`/sales/opportunities/${r.id}`);
+    await askContract(opp, d, navigate);
+  }
+  reload();
 }
 
 // ---------- Colunas ----------
@@ -434,6 +450,19 @@ document.addEventListener('click', e => {
 });
 
 // ---------- Ficha da oportunidade ----------
+// Organizada pelas colunas do funil: cada etapa mostra os seus campos (editáveis) e as observações feitas nela.
+const BASE_FIELDS = ['company', 'client', 'client_doc', 'contact_name', 'phone', 'email', 'address', 'city', 'source_id', 'source_detail', 'title', 'owner_id'];
+const noteItem = n => html`<li class="sv-note" data-note="${n.id}">
+  <div class="sv-note-body">${n.body}</div>
+  <div class="sv-note-meta"><span>${n.user_name || '—'} · ${fmtDateTime(n.created_at)}${n.updated_at ? html` · <i>editada${n.editor_name && n.editor_name !== n.user_name ? ` por ${n.editor_name}` : ''} em ${fmtDateTime(n.updated_at)}</i>` : ''}</span>
+    ${n.can_edit ? html`<span class="sv-note-act"><button type="button" class="btn btn-ghost btn-sm" data-note-edit="${n.id}">${icon('edit')}Editar</button>
+      <button type="button" class="icon-btn" data-note-del="${n.id}" aria-label="Excluir observação">${icon('trash')}</button></span>` : ''}</div></li>`;
+const notesBlock = (stageId, stageName, notes) => html`<div class="sv-notes" data-stage-notes="${stageId}">
+  <div class="sv-notes-head">${icon('note')}<b>Observações da etapa</b><span class="sv-notes-n">${notes.length || ''}</span></div>
+  <ul class="sv-note-list">${notes.map(noteItem)}</ul>
+  <div class="sv-note-add"><textarea rows="2" maxlength="4000" placeholder="Acrescentar observação em ${stageName}…" aria-label="Nova observação em ${stageName}"></textarea>
+    <button type="button" class="btn btn-ghost btn-sm" data-note-add="${stageId}">${icon('plus')}Adicionar</button></div></div>`;
+
 export async function view({ params, state, navigate, render }) {
   denied(state);
   const o = await api(`/sales/opportunities/${params.id}`);
@@ -441,7 +470,6 @@ export async function view({ params, state, navigate, render }) {
   const d = o;
   const req = requiredFor(o.stage_kind);
   const kind = o.stage_kind;
-  const lvl = LEVEL[kind];
   const showLost = kind === 'perdido' || o.lost_reason_id;
   const stageChip = html`<span class="sv-stage ${KIND_CLS[kind]}">${o.stage_name}</span>`;
   const canCreate = kind === 'ganho' && !o.contract_id;
@@ -449,6 +477,42 @@ export async function view({ params, state, navigate, render }) {
     <td class="num">${p.value ? money(p.value) : '—'}</td><td class="num">${p.discount_pct ? pctTxt(p.discount_pct) : '—'}</td><td class="num"><b>${p.final_value ? money(p.final_value) : '—'}</b></td>
     <td>${p.has_file ? html`<a href="/api/sales/files/${p.id}" target="_blank" rel="noopener">${icon('file')}${p.original_name || 'arquivo'}</a>` : html`<span class="muted">sem arquivo</span>`}${p.notes ? html`<div class="muted sv-pnote">${p.notes}</div>` : ''}</td>
     <td><button type="button" class="icon-btn" data-del-prop="${p.id}" aria-label="Excluir revisão R${String(p.rev).padStart(2, '0')}">${icon('trash')}</button></td></tr>`;
+  const proposalBlock = html`${rows(['final_scope', 'proposal_value', 'discount_pct'], o, d, req)}
+    <div class="sv-final">Valor final: <b id="sv-final">${money(o.final_value)}</b></div>
+    <div class="sv-props">
+      <div class="sv-props-head"><b class="${req.has('proposal_file') ? 'req' : ''}">Propostas e revisões</b>
+        <button type="button" class="btn btn-ghost btn-sm" id="sv-add-prop">${icon('plus')}${o.proposals.length ? 'Nova revisão' : 'Anexar proposta'}</button></div>
+      ${o.proposals.length ? html`<div class="table-wrap"><table class="data sv-ptable"><thead><tr><th>Rev.</th><th>Data</th><th class="num">Valor</th><th class="num">Desc.</th><th class="num">Final</th><th>Arquivo</th><th></th></tr></thead>
+        <tbody>${o.proposals.map(propRow)}</tbody></table></div>` : html`<p class="muted" style="margin:6px 0 0">Nenhuma proposta anexada.</p>`}
+      <span class="hint">Cada revisão guarda valor, desconto e arquivo; a mais recente passa a ser o valor da proposta.</span>
+    </div>`;
+  const fieldsOf = k => {
+    if (k === 'prospeccao') return rows(BASE_FIELDS, o, d, req);
+    if (k === 'apresentacao') return rows(['possible_scope'], o, d, req);
+    if (k === 'proposta') return proposalBlock;
+    if (k === 'negociacao') return rows(['profile_id', 'negotiation_notes'], o, d, req);
+    if (k === 'perdido') return showLost ? rows(['lost_reason_id', 'lost_notes'], o, d, req) : html`<p class="muted sv-hint-line">O motivo da perda é pedido ao mover a oportunidade para esta coluna.</p>`;
+    if (k === 'ganho') {
+      return o.contract_id ? html`<p class="sv-hint-line">${icon('contract')}Contrato <a href="#/contratos/${o.contract_id}"><b>${o.contract_code}</b></a> criado a partir desta oportunidade.</p>`
+        : html`<p class="muted sv-hint-line">Ao entrar nesta coluna, o sistema pergunta se cria o contrato com os dados da oportunidade.</p>`;
+    }
+    return '';
+  };
+  // Os campos de cada tipo ficam na primeira coluna daquele tipo; tipos sem coluna vão para "Outros dados"
+  const firstOfKind = new Map();
+  for (const s of o.stages) if (!firstOfKind.has(s.kind)) firstOfKind.set(s.kind, s.id);
+  const curIdx = o.stages.findIndex(s => s.id === o.stage_id);
+  const stageIds = new Set(o.stages.map(s => s.id));
+  const orphanKinds = ['prospeccao', 'apresentacao', 'proposta', 'negociacao'].filter(k => !firstOfKind.has(k)).concat(showLost && !firstOfKind.has('perdido') ? ['perdido'] : []);
+  const orphanNotes = o.notes.filter(n => !stageIds.has(n.stage_id));
+  const sections = o.stages.map((s, i) => {
+    const notes = o.notes.filter(n => n.stage_id === s.id);
+    const later = i > curIdx && !['perdido'].includes(s.kind) ? 'is-later' : '';
+    return html`<fieldset class="fieldset form sv-stageset ${KIND_CLS[s.kind]} ${s.id === o.stage_id ? 'is-current' : later}" id="sv-set-${s.id}">
+      <legend><span class="sv-dot"></span>${i + 1} · ${s.name}${s.id === o.stage_id ? html`<em class="sv-here">etapa atual</em>` : ''}</legend>
+      ${firstOfKind.get(s.kind) === s.id ? fieldsOf(s.kind) : ''}
+      ${notesBlock(s.id, s.name, notes)}</fieldset>`;
+  });
   return {
     title: `${o.code} · ${o.client}`,
     html: html`
@@ -459,39 +523,28 @@ export async function view({ params, state, navigate, render }) {
           ${canCreate ? html`<button type="button" class="btn btn-primary" id="sv-ct" ${o.can_contracts ? '' : 'aria-disabled="true"'} title="${o.can_contracts ? 'Abre o cadastro do contrato já preenchido' : 'Requer a liberação de Contratos'}">${icon('contract')}Criar contrato</button>` : ''}
           ${o.contract_id ? '' : html`<button type="button" class="icon-btn" id="sv-del" aria-label="Excluir oportunidade" title="Excluir oportunidade">${icon('trash')}</button>`}` })}
       ${o.missing_here.length ? html`<div class="sv-banner">${icon('alert')}<span>Para ficar em <b>${o.stage_name}</b> falta: ${o.missing_here.map(k => LABEL[k]).join(', ')}.</span></div>` : ''}
+      <nav class="sv-steps" aria-label="Etapas">${o.stages.map((s, i) => html`<button type="button" data-step="${s.id}" class="sv-step ${KIND_CLS[s.kind]} ${s.id === o.stage_id ? 'is-current' : i < curIdx ? 'is-done' : ''}">
+        <span>${s.name}</span>${o.notes.filter(n => n.stage_id === s.id).length ? html`<b>${o.notes.filter(n => n.stage_id === s.id).length}</b>` : ''}</button>`)}</nav>
       <div class="sv-detail">
         <form class="card card-pad form" id="sv-form" novalidate data-sv-sheet>
-          <fieldset class="fieldset form"><legend>1 · Prospecção — cliente e origem</legend>
-            ${rows(['company', 'client', 'client_doc', 'contact_name', 'phone', 'email', 'address', 'city', 'source_id', 'source_detail', 'title', 'owner_id'], o, d, req)}</fieldset>
-          <fieldset class="fieldset form ${lvl < 2 && !o.possible_scope ? 'is-later' : ''}"><legend>2 · Apresentação</legend>
-            ${rows(['possible_scope'], o, d, req)}</fieldset>
-          <fieldset class="fieldset form ${lvl < 3 && !o.final_scope && !o.proposals.length ? 'is-later' : ''}"><legend>3 · Proposta</legend>
-            ${rows(['final_scope', 'proposal_value', 'discount_pct'], o, d, req)}
-            <div class="sv-final">Valor final: <b id="sv-final">${money(o.final_value)}</b></div>
-            <div class="sv-props">
-              <div class="sv-props-head"><b class="${req.has('proposal_file') ? 'req' : ''}">Propostas e revisões</b>
-                <button type="button" class="btn btn-ghost btn-sm" id="sv-add-prop">${icon('plus')}${o.proposals.length ? 'Nova revisão' : 'Anexar proposta'}</button></div>
-              ${o.proposals.length ? html`<div class="table-wrap"><table class="data sv-ptable"><thead><tr><th>Rev.</th><th>Data</th><th class="num">Valor</th><th class="num">Desc.</th><th class="num">Final</th><th>Arquivo</th><th></th></tr></thead>
-                <tbody>${o.proposals.map(propRow)}</tbody></table></div>` : html`<p class="muted" style="margin:6px 0 0">Nenhuma proposta anexada.</p>`}
-              <span class="hint">Cada revisão guarda valor, desconto e arquivo; a mais recente passa a ser o valor da proposta.</span>
-            </div></fieldset>
-          <fieldset class="fieldset form ${lvl < 4 && !o.profile_id && !o.negotiation_notes ? 'is-later' : ''}"><legend>4 · Negociação</legend>
-            ${rows(['profile_id', 'negotiation_notes'], o, d, req)}</fieldset>
-          ${showLost ? html`<fieldset class="fieldset form sv-lostset"><legend>Contrato perdido</legend>${rows(['lost_reason_id', 'lost_notes'], o, d, req)}</fieldset>` : ''}
-          <fieldset class="fieldset form"><legend>Observações</legend>${rows(['notes'], o, d, req)}</fieldset>
+          ${sections}
+          ${orphanKinds.length ? html`<fieldset class="fieldset form"><legend>Outros dados</legend>${orphanKinds.map(k => fieldsOf(k))}</fieldset>` : ''}
+          ${orphanNotes.length ? html`<fieldset class="fieldset form"><legend>Observações de colunas excluídas</legend><ul class="sv-note-list">${orphanNotes.map(n => html`<li class="sv-note"><div class="sv-note-body">${n.body}</div><div class="sv-note-meta"><span>${n.stage_name} · ${n.user_name || '—'} · ${fmtDateTime(n.created_at)}</span></div></li>`)}</ul></fieldset>` : ''}
+          <fieldset class="fieldset form"><legend>Observações gerais</legend>${rows(['notes'], o, d, req)}</fieldset>
           <div class="form-error" hidden></div>
-          <div class="form-actions"><a class="btn btn-ghost" href="#/vendas">Voltar ao funil</a><button class="btn btn-primary" type="submit">${icon('check')}Salvar</button></div>
+          <div class="form-actions sv-save-bar"><a class="btn btn-ghost" href="#/vendas">Voltar ao funil</a><button class="btn btn-primary" type="submit">${icon('check')}Salvar dados</button></div>
         </form>
         <aside class="card sv-hist"><div class="card-head"><h2>${icon('history')}Histórico</h2></div>
           <ul class="sv-moves">${o.moves.map(m => html`<li><b>${m.from_stage ? html`${m.from_stage} → ${m.to_stage}` : html`Cadastrada em ${m.to_stage}`}</b><small>${fmtDateTime(m.created_at)}${m.user_name ? ` · ${m.user_name}` : ''}</small></li>`)}</ul>
           ${o.closed_at ? html`<p class="muted sv-closed">Encerrada em ${fmtDateTime(o.closed_at)}</p>` : ''}
         </aside>
       </div>`,
+
     mount(root) {
       const f = root.querySelector('#sv-form');
       bindListAdd(f, d);
       const reload = () => render();
-      const fin = () => { const v = parseNum(f.querySelector('#sv-proposal_value').value) || 0; const dc = parseNum(f.querySelector('#sv-discount_pct').value) || 0; root.querySelector('#sv-final').textContent = money(v * (1 - dc / 100)); };
+      const fin = () => { if (!f.querySelector('#sv-proposal_value')) return; const v = parseNum(f.querySelector('#sv-proposal_value').value) || 0; const dc = parseNum(f.querySelector('#sv-discount_pct').value) || 0; root.querySelector('#sv-final').textContent = money(v * (1 - dc / 100)); };
       f.addEventListener('input', e => { if (e.target.matches('#sv-proposal_value,#sv-discount_pct')) fin(); });
       f.addEventListener('submit', async e => {
         e.preventDefault();
@@ -504,7 +557,61 @@ export async function view({ params, state, navigate, render }) {
           reload();
         } catch (ex) { err.textContent = ex.message; err.hidden = false; }
       });
-      root.querySelector('#sv-add-prop').addEventListener('click', async () => {
+      root.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => root.querySelector(`#sv-set-${b.dataset.step}`).scrollIntoView({ behavior: 'smooth', block: 'start' })));
+      // Observações por etapa: gravam na hora, sem recarregar a ficha (não perde o que estiver sendo editado nos campos)
+      const recount = box => { const n = box.querySelectorAll('.sv-note[data-note]').length; box.querySelector('.sv-notes-n').textContent = n || ''; };
+      f.addEventListener('click', async e => {
+        const add = e.target.closest('[data-note-add]');
+        if (add) {
+          const box = add.closest('.sv-notes');
+          const ta = box.querySelector('.sv-note-add textarea');
+          if (!ta.value.trim()) return ta.focus();
+          add.disabled = true;
+          try {
+            const n = await api(`/sales/opportunities/${o.id}/notes`, { method: 'POST', body: { stage_id: Number(add.dataset.noteAdd), body: ta.value } });
+            box.querySelector('.sv-note-list').insertAdjacentHTML('beforeend', noteItem(n).toString());
+            ta.value = '';
+            recount(box);
+            toast('Observação incluída.');
+          } catch (ex) { toast(ex.message, 'err'); } finally { add.disabled = false; }
+          return;
+        }
+        const ed = e.target.closest('[data-note-edit]');
+        if (ed) {
+          const li = ed.closest('.sv-note');
+          if (li.querySelector('.sv-note-edit')) return;
+          const body = li.querySelector('.sv-note-body');
+          body.hidden = true;
+          body.insertAdjacentHTML('afterend', html`<div class="sv-note-edit"><textarea rows="3" maxlength="4000" aria-label="Editar observação">${body.textContent}</textarea>
+            <div class="sv-note-edit-act"><button type="button" class="btn btn-ghost btn-sm" data-note-cancel>Cancelar</button><button type="button" class="btn btn-primary btn-sm" data-note-save="${li.dataset.note}">Salvar observação</button></div></div>`.toString());
+          li.querySelector('.sv-note-edit textarea').focus();
+          return;
+        }
+        if (e.target.closest('[data-note-cancel]')) {
+          const li = e.target.closest('.sv-note');
+          li.querySelector('.sv-note-edit').remove();
+          li.querySelector('.sv-note-body').hidden = false;
+          return;
+        }
+        const sv = e.target.closest('[data-note-save]');
+        if (sv) {
+          const li = sv.closest('.sv-note');
+          sv.disabled = true;
+          try {
+            const n = await api(`/sales/notes/${sv.dataset.noteSave}`, { method: 'PUT', body: { body: li.querySelector('.sv-note-edit textarea').value } });
+            li.outerHTML = noteItem(n).toString();
+            toast('Observação atualizada.');
+          } catch (ex) { toast(ex.message, 'err'); sv.disabled = false; }
+          return;
+        }
+        const del = e.target.closest('[data-note-del]');
+        if (del) {
+          if (!(await confirmSheet('Excluir observação', 'A observação será excluída.', 'Excluir', true))) return;
+          const box = del.closest('.sv-notes');
+          try { await api(`/sales/notes/${del.dataset.noteDel}`, { method: 'DELETE' }); del.closest('.sv-note').remove(); recount(box); toast('Observação excluída.'); } catch (ex) { toast(ex.message, 'err'); }
+        }
+      });
+      root.querySelector('#sv-add-prop')?.addEventListener('click', async () => {
         const r = await sheet({
           title: o.proposals.length ? 'Nova revisão da proposta' : 'Anexar proposta',
           submitLabel: 'Salvar',

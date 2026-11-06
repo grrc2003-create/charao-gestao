@@ -3310,6 +3310,28 @@ async function main() {
   ok((await svSave(svSaved.filter(s => s.name !== 'Visita técnica').map(s => ({ id: s.id, name: s.name, kind: s.kind })))).status === 200, 'coluna vazia é excluída');
   ok((await svA('DELETE', `/sales/opportunities/${svId2}`)).status === 200, 'oportunidade sem contrato é excluída');
   ok((await svA('GET', '/settings/sales-lists/profile')).data.length >= 5, 'Configurações listam as avaliações do cliente');
+  // Cadastro direto na coluna e observações por etapa
+  const snStages = (await svA('GET', '/sales/board')).data.stages;
+  const snSt = k => snStages.find(x => x.kind === k);
+  const snPdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4\n% proposta ficticia 2\n').toString('base64');
+  ok((await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício C', address: 'Rua C, 1', source_id: svSrc, stage_id: snSt('proposta').id })).status === 400, 'cadastrar direto em Proposta exige os dados da proposta');
+  const snId = (await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício C', address: 'Rua C, 1', source_id: svSrc, stage_id: snSt('proposta').id,
+    final_scope: 'Escopo C', proposal_value: '5.000', proposals: [{ file: snPdf, name: 'proposta-c.pdf', value: '5.000' }], stage_note: 'Cliente pediu urgência' })).data.id;
+  let snO = (await svA('GET', `/sales/opportunities/${snId}`)).data;
+  ok(snO.stage_kind === 'proposta' && snO.proposal_value === 5000 && snO.notes.length === 1 && snO.notes[0].stage_id === snSt('proposta').id && snO.notes[0].body === 'Cliente pediu urgência', 'cadastrada direto em Proposta, com a observação da etapa');
+  const snNote = (await svA('POST', `/sales/opportunities/${snId}/notes`, { stage_id: snSt('prospeccao').id, body: 'Primeiro contato por telefone' })).data;
+  ok(snNote.stage_name === snSt('prospeccao').name && snNote.can_edit, 'observação incluída numa etapa anterior');
+  ok((await svA('POST', `/sales/opportunities/${snId}/notes`, { stage_id: snSt('prospeccao').id, body: '  ' })).status === 400, 'observação vazia é recusada');
+  const snEd = (await svA('PUT', `/sales/notes/${snNote.id}`, { body: 'Primeiro contato por telefone e e-mail' })).data;
+  ok(snEd.body === 'Primeiro contato por telefone e e-mail' && snEd.updated_at && snEd.editor_name, 'observação editada (registra quem e quando)');
+  snO = (await svA('PUT', `/sales/opportunities/${snId}`, { stage_id: snSt('negociacao').id, profile_id: svB.lists.profile[1].id, stage_note: 'Pediu 5% de desconto' })).data;
+  ok(snO.notes.some(n => n.stage_id === snSt('negociacao').id && n.body === 'Pediu 5% de desconto'), 'ao mover, a observação vai para a nova etapa');
+  ok((await svA('GET', '/sales/board')).data.opportunities.find(x => x.id === snId).notes_count === 3, 'o cartão conta as observações');
+  ok((await svA('DELETE', `/sales/notes/${snNote.id}`)).status === 200 && (await svA('GET', `/sales/opportunities/${snId}`)).data.notes.length === 2, 'observação excluída');
+  const snWon = (await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício D', address: 'Rua D, 2', source_id: svSrc, stage_id: snSt('ganho').id,
+    final_scope: 'Escopo D', proposal_value: 3000, proposals: [{ file: snPdf, name: 'proposta-d.pdf' }] }));
+  ok(snWon.status === 201 && (await svA('GET', `/sales/opportunities/${snWon.data.id}`)).data.closed_at, 'pode cadastrar direto em Contrato fechado (com os dados da proposta)');
+  ok((await svA('DELETE', `/sales/opportunities/${snId}`)).status === 200 && (await svA('DELETE', `/sales/opportunities/${snWon.data.id}`)).status === 200, 'oportunidades com observações são excluídas');
 
 }
 

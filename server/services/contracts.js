@@ -612,9 +612,18 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
     const c = code.get(m.contract_id);
     return { client: c?.client || '—', contract: c?.code, nf_date: m.nf_date, total: totalOf.get(m.id), received: m.status === 'recebida' ? (m.paid_amount ?? totalOf.get(m.id)) : 0 };
   });
+  // Lembrete: medições emitidas que ainda não foram faturadas e faturadas que ainda não foram recebidas (as mais antigas primeiro)
+  const sinceDays = d => (d ? Math.max(0, Math.round((Date.parse(ref) - Date.parse(String(d).slice(0, 10))) / 86400e3)) : null);
+  const openMeasurements = ms.filter(m => m.status === 'emitida' || m.status === 'faturada').map(m => {
+    const c = code.get(m.contract_id);
+    const since = m.status === 'faturada' ? m.nf_date : m.issued_at;
+    return { id: m.id, code: m.code, status: m.status, ref_month: m.ref_month, ref_label: monthLabel(m.ref_month), contract_id: m.contract_id, contract_code: c?.code, client: c?.client,
+      company: c?.company, total: totalOf.get(m.id), nf_number: m.nf_number || null, since: since ? String(since).slice(0, 10) : null, days: sinceDays(since) };
+  }).sort((a, b) => (a.since || '9999').localeCompare(b.since || '9999') || a.code.localeCompare(b.code));
   return {
     months,
     filter: { company, type },
+    open_measurements: openMeasurements,
     companies: Object.entries(COMPANIES).map(([key, c]) => ({ key, name: c.name, contracts: all0.filter(x => x.company === key).length })),
     types: all('SELECT id, name, active FROM contract_types ORDER BY sort_order, id').map(t => ({ ...t, contracts: all0.filter(x => x.type_id === t.id).length }))
       .filter(t => t.active || t.contracts).concat([{ id: 'sem', name: 'Sem tipo', contracts: all0.filter(x => !x.type_id).length }]),

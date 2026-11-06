@@ -3747,3 +3747,18 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .tm-day input:focus-visible + span { outline: 2px solid var(--navy); outline-offset: 2px; }
 .day-off-warn { margin-top: 6px; padding: 7px 10px; border-radius: 8px; background: #FFF4E5; border: 1px solid #F3C98B; color: #8A4B08; font-size: 12.5px; font-weight: 600; }
 .rec-tag.rec-off { background: #FFF4E5; color: #8A4B08; border-color: #F3C98B; }
+
+/* Contratos: lembrete das medições em aberto (abaixo dos cards) */
+.ct-open .card-head .sub { white-space: nowrap; }
+.ct-open-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.ct-open-g + .ct-open-g { border-left: 1px solid var(--line); }
+.ct-open-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 10px; padding: 10px 16px 6px; border-left: 4px solid var(--c, var(--navy)); }
+.ct-open-h b { font-size: 13.5px; }
+.ct-open-h span { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ct-open-bill { --c: #8E6CB0; }
+.ct-open-rec { --c: #C0392B; }
+.ct-open-row .row-title { gap: 8px; }
+.ct-open-v { flex: none; font-variant-numeric: tabular-nums; }
+.ct-open-late { color: #C0392B; font-weight: 650; }
+.ct-open-more summary { padding: 8px 16px 12px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--navy); }
+@media (max-width: 700px) { .ct-open-g + .ct-open-g { border-left: 0; border-top: 1px solid var(--line); } }

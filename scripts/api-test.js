@@ -1923,6 +1923,10 @@ async function main() {
   const dCoLus = (await fo('GET', '/contracts/dashboard?empresa=lus')).data;
   ok(dCoLus.contracts.length >= 2 && dCoLus.contracts.every(c => c.company === 'lus') && dCoLus.filter.company === 'lus', 'painel filtrado: só contratos da LuS');
   const dCoAll = (await fo('GET', '/contracts/dashboard')).data;
+  const omSum = (d, st) => Math.round(d.open_measurements.filter(m => m.status === st).reduce((s, m) => s + m.total, 0) * 100) / 100;
+  ok(dCoAll.open_measurements.every(m => m.status === 'emitida' || m.status === 'faturada') && omSum(dCoAll, 'emitida') === dCoAll.totals.to_bill && omSum(dCoAll, 'faturada') === dCoAll.totals.to_receive, 'medições em aberto: emitidas somam o aguardando faturamento e faturadas somam o a receber');
+  ok(dCoLus.open_measurements.every(m => m.company === 'lus'), 'medições em aberto seguem o filtro de empresa');
+  ok(dCoAll.open_measurements.every((m, i, a) => !i || (a[i - 1].since || '9999') <= (m.since || '9999')), 'medições em aberto: as mais antigas primeiro');
   ok(dCoAll.totals.contracts > dCoLus.totals.contracts && dCoLus.companies.find(c => c.key === 'lus').contracts === dCoLus.contracts.length, 'totais seguem o filtro; contagem por empresa sempre completa');
   const dTySem = (await fo('GET', '/contracts/dashboard?tipo=sem')).data;
   ok(dTySem.contracts.every(c => !c.type_id) && dTySem.contracts.some(c => c.id === ctLus), 'filtro "Sem tipo" para revisar');

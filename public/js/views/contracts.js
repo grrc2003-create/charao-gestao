@@ -324,6 +324,28 @@ function bindContractTable(root, state, onChange = () => {}) {
   apply();
 }
 
+// Lembrete logo abaixo dos cards: medições emitidas sem faturamento e faturadas sem recebimento
+const OPEN_SHOW = 6;
+function openMeasurementsCard(list) {
+  if (!list.length) return '';
+  const groups = [
+    ['emitida', 'Aguardando faturamento', 'emitida há', 'ct-open-bill'],
+    ['faturada', 'Faturadas, aguardando recebimento', 'faturada há', 'ct-open-rec'],
+  ].map(([st, title, since, cls]) => ({ st, title, since, cls, items: list.filter(m => m.status === st) })).filter(g => g.items.length);
+  const row = (m, g) => html`<li><a class="row-link ct-open-row" href="#/medicoes/${m.id}">
+    <div class="grow"><div class="row-title"><b class="mono">${m.code}</b><span class="truncate">${m.client || '—'}</span></div>
+      <div class="row-meta"><span>Referência ${m.ref_label}</span>${m.nf_number ? html`<span>NF ${m.nf_number}</span>` : ''}${m.days !== null ? html`<span class="${m.days > 30 ? 'ct-open-late' : ''}">${g.since} ${m.days} ${m.days === 1 ? 'dia' : 'dias'}</span>` : ''}</div></div>
+    <b class="ct-open-v">${money(m.total)}</b><span class="chev">${icon('chevron')}</span></a></li>`;
+  return html`<section class="card ct-open">
+    <div class="card-head"><h2>${icon('alert')}Medições em aberto</h2><span class="sub">${list.length} · ${money(list.reduce((s, m) => s + m.total, 0))} · lembrete</span></div>
+    <div class="ct-open-cols">${groups.map(g => html`<div class="ct-open-g ${g.cls}">
+      <div class="ct-open-h"><b>${g.title}</b><span>${g.items.length} · ${money(g.items.reduce((s, m) => s + m.total, 0))}</span></div>
+      <ul class="rows">${g.items.slice(0, OPEN_SHOW).map(m => row(m, g))}</ul>
+      ${g.items.length > OPEN_SHOW ? html`<details class="ct-open-more"><summary>Ver mais ${g.items.length - OPEN_SHOW}</summary><ul class="rows">${g.items.slice(OPEN_SHOW).map(m => row(m, g))}</ul></details>` : ''}
+    </div>`)}</div>
+  </section>`;
+}
+
 export async function list({ state, query, setQuery, render }) {
   denied(state);
   const months = query.get('meses') || '12';
@@ -387,6 +409,8 @@ export async function list({ state, query, setQuery, render }) {
             ['Saldo a medir', money(t.balance), t.drafts ? `${t.drafts} medição(ões) em rascunho` : 'contratos vigentes']]
             .map(([l, v, f]) => html`<div class="ct-tile"><span>${l}</span><b>${v}</b>${f ? html`<small>${f}</small>` : ''}</div>`)}
         </div>
+
+        ${openMeasurementsCard(d.open_measurements || [])}
 
         <section class="card ct-month">
           <div class="card-head"><h2>${icon('reports')}Faturamento mensal</h2>

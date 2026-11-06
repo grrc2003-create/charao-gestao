@@ -625,10 +625,13 @@ const itemRow = (i = {}) => html`<tr class="ct-item" data-id="${i.id || ''}">
 </tr>`;
 const parseNum = v => { const s = String(v ?? '').trim(); if (!s) return 0; const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : 0; };
 
-export async function form({ params, state, navigate }) {
+export async function form({ params, query, state, navigate }) {
   denied(state);
   const editing = !!params.id;
-  const [c, ctypes] = await Promise.all([editing ? api(`/contracts/${params.id}`) : { status: 'vigente', items: [{}], bulletin_prefix: '', company: 'charao' },
+  // Vindo de Vendas e Prospecção: os dados da oportunidade preenchem o cadastro
+  const oppId = !editing && state.meta.can.sales ? Number(query?.get('oportunidade')) || null : null;
+  const draft = oppId ? await api(`/sales/opportunities/${oppId}/contract-draft`).catch(ex => { toast(ex.message, 'warn'); return null; }) : null;
+  const [c, ctypes] = await Promise.all([editing ? api(`/contracts/${params.id}`) : { status: 'vigente', items: [{}], bulletin_prefix: '', company: 'charao', ...(draft || {}) },
     api('/settings/contract-types', { query: { all: '1' } }).catch(() => [])]);
   const projects = state.meta.projects || [];
   const opt = (val, label, cur) => html`<option value="${val}" ${String(cur ?? '') === String(val) ? 'selected' : ''}>${label}</option>`;
@@ -636,6 +639,7 @@ export async function form({ params, state, navigate }) {
     title: editing ? `Editar ${c.code}` : 'Novo contrato',
     html: html`
       ${pageHead({ back: { href: editing ? `#/contratos/${c.id}` : '#/contratos', label: editing ? c.code : 'Contratos' }, eyebrow: editing ? c.code : 'Código gerado automaticamente (CT-000)', title: editing ? 'Editar contrato' : 'Novo contrato' })}
+      ${draft ? html`<div class="ct-from-opp">${icon('sales')}<span>Dados trazidos da oportunidade <a href="#/vendas/${draft.opportunity_id}"><b>${draft.opportunity_code}</b></a>. Confira e complete os campos (prefixo do boletim, tipo, datas) antes de cadastrar: a oportunidade fica ligada ao contrato e vai para Contrato fechado.</span></div>` : ''}
       <form class="card card-pad form" id="ct-form" novalidate style="max-width:1000px">
         <fieldset class="fieldset form"><legend>Empresa e tipo</legend>
           <div class="segmented ct-company" role="radiogroup" aria-label="Empresa">
@@ -648,12 +652,12 @@ export async function form({ params, state, navigate }) {
         </fieldset>
         <fieldset class="fieldset form"><legend>Contrato</legend>
           <div class="form-row">
-            <div class="field"><label class="req" for="client">Cliente</label><input id="client" name="client" maxlength="160" required value="${c.client || ''}"></div>
-            <div class="field"><label for="client_doc">CNPJ/CPF do cliente</label><input id="client_doc" name="client_doc" maxlength="30" value="${c.client_doc || ''}"></div>
+            <div class="field"><label class="req" for="client">Cliente</label><input type="text" id="client" name="client" maxlength="160" required value="${c.client || ''}"></div>
+            <div class="field"><label for="client_doc">CNPJ/CPF do cliente</label><input type="text" id="client_doc" name="client_doc" maxlength="30" value="${c.client_doc || ''}"></div>
           </div>
           <div class="form-row">
-            <div class="field"><label class="req" for="title">Objeto</label><input id="title" name="title" maxlength="200" required value="${c.title || ''}" placeholder="Ex.: Gerenciamento de obra"></div>
-            <div class="field"><label for="number">Nº do contrato</label><input id="number" name="number" maxlength="60" value="${c.number || ''}"></div>
+            <div class="field"><label class="req" for="title">Objeto</label><input type="text" id="title" name="title" maxlength="200" required value="${c.title || ''}" placeholder="Ex.: Gerenciamento de obra"></div>
+            <div class="field"><label for="number">Nº do contrato</label><input type="text" id="number" name="number" maxlength="60" value="${c.number || ''}"></div>
           </div>
           <div class="field"><label for="scope">Escopo (aparece no boletim)</label><textarea id="scope" name="scope" rows="2" maxlength="2000">${c.scope || ''}</textarea></div>
           <div class="form-row form-row-3">
@@ -662,7 +666,7 @@ export async function form({ params, state, navigate }) {
             <div class="field"><label for="status">Situação</label><select id="status" name="status">${Object.entries(CT_STATUS).map(([k, l]) => opt(k, l, c.status))}</select></div>
           </div>
           <div class="form-row">
-            <div class="field"><label class="req" for="bulletin_prefix">Prefixo do boletim</label><input id="bulletin_prefix" name="bulletin_prefix" maxlength="10" required value="${c.bulletin_prefix || ''}" placeholder="Ex.: ORBE" style="text-transform:uppercase">
+            <div class="field"><label class="req" for="bulletin_prefix">Prefixo do boletim</label><input type="text" id="bulletin_prefix" name="bulletin_prefix" maxlength="10" required value="${c.bulletin_prefix || ''}" placeholder="Ex.: ORBE" style="text-transform:uppercase">
               <span class="hint">Numeração dos boletins: prefixo + sequência + ano (ex.: ORBE0036.26).</span></div>
             <div class="field"><label for="project_id">Obra/projeto relacionado</label><select id="project_id" name="project_id"><option value="">—</option>${projects.map(p => opt(p.id, `${p.code} · ${p.name}`, c.project_id))}</select></div>
           </div>
@@ -700,6 +704,7 @@ export async function form({ params, state, navigate }) {
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
+        if (draft) data.opportunity_id = draft.opportunity_id;
         data.items = [...tb.querySelectorAll('.ct-item')].map(tr => ({
           id: tr.dataset.id ? Number(tr.dataset.id) : null,
           description: tr.querySelector('[data-f=description]').value,
@@ -765,7 +770,7 @@ export async function view({ params, state, navigate }) {
       </section>
       ${c.scope || c.payment_info || c.notes ? html`<section class="card section"><div class="card-body"><dl class="kv">
         ${c.scope ? html`<dt>Escopo</dt><dd>${c.scope}</dd>` : ''}${c.payment_info ? html`<dt>Pagamento</dt><dd style="white-space:pre-line">${c.payment_info}</dd>` : ''}
-        ${c.project_code ? html`<dt>Obra</dt><dd><a href="#/projetos/${c.project_id}">${c.project_code} · ${c.project_name}</a></dd>` : ''}${c.notes ? html`<dt>Observações</dt><dd style="white-space:pre-line">${c.notes}</dd>` : ''}</dl></div></section>` : ''}`,
+        ${c.opportunity && state.meta.can.sales ? html`<dt>Origem</dt><dd><a href="#/vendas/${c.opportunity.id}">Oportunidade ${c.opportunity.code}</a></dd>` : ''}        ${c.project_code ? html`<dt>Obra</dt><dd><a href="#/projetos/${c.project_id}">${c.project_code} · ${c.project_name}</a></dd>` : ''}${c.notes ? html`<dt>Observações</dt><dd style="white-space:pre-line">${c.notes}</dd>` : ''}</dl></div></section>` : ''}`,
     mount(root) {
       root.querySelectorAll('tr[data-href]').forEach(tr => tr.addEventListener('click', () => (location.hash = tr.dataset.href)));
       root.querySelector('#new-m')?.addEventListener('click', async () => {

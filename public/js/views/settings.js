@@ -59,6 +59,10 @@ export async function view({ state, reloadMeta }) {
     api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar'), api('/settings/project-types', { query: { all: '1' } })]);
   const recTypes = await api('/settings/record-types', { query: { all: '1' } });
   const ctTypes = state.meta.can.contracts ? await api('/settings/contract-types', { query: { all: '1' } }).catch(() => null) : null;
+  const SALES_CARDS = [['source', 'Origens das oportunidades', 'De onde o cliente veio (indicação, site, Instagram…). Escolhida no cadastro da oportunidade.', 'Nova origem (ex.: Feira)'],
+    ['loss', 'Motivos de perda', 'Lista do “Contrato perdido”: o motivo é obrigatório e há um campo de observação para detalhar.', 'Novo motivo (ex.: Cliente desistiu)'],
+    ['profile', 'Avaliações do cliente (negociação)', 'Como o cliente se comporta para fechar (ex.: Duro na negociação, Tranquilo). Obrigatória na Negociação.', 'Nova avaliação (ex.: Indeciso)']];
+  const salesLists = state.meta.can.sales ? await Promise.all(SALES_CARDS.map(([k]) => api(`/settings/sales-lists/${k}`).catch(() => null))) : [];
 
   return {
     title: 'Configurações',
@@ -104,6 +108,19 @@ export async function view({ state, reloadMeta }) {
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos de contrato</button></div>
         </form>
       </section>` : ''}
+      ${salesLists.map((list, i) => (list ? html`<section class="card" id="sl-${SALES_CARDS[i][0]}-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('sales')}Vendas · ${SALES_CARDS[i][1]}</h2><span class="sub">${list.filter(t => t.active).length} ativo(s)</span></div>
+        <form class="card-body form" id="sl-${SALES_CARDS[i][0]}-form" novalidate>
+          <p class="muted" style="margin:0">${SALES_CARDS[i][2]} A ordem abaixo é a ordem de exibição. Itens em uso não podem ser excluídos — inative-os.</p>
+          <ul class="stage-list" id="sl-${SALES_CARDS[i][0]}-list">${list.map(t => typeItem(t, 'oportunidade(s)'))}</ul>
+          <div class="stage-add">
+            <input type="text" id="sl-${SALES_CARDS[i][0]}-new" maxlength="60" placeholder="${SALES_CARDS[i][3]}" aria-label="${SALES_CARDS[i][3]}">
+            <button type="button" class="btn btn-ghost" id="sl-${SALES_CARDS[i][0]}-add">${icon('plus')}Adicionar</button>
+          </div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
+        </form>
+      </section>` : ''))}
       <section class="card" id="rtypes-card" style="max-width:900px;margin-bottom:16px">
         <div class="card-head"><h2>${icon('note')}Tipos de registro do projeto</h2><span class="sub">${recTypes.filter(t => t.active).length} ativo(s)</span></div>
         <form class="card-body form" id="rtypes-form" novalidate>
@@ -306,6 +323,7 @@ export async function view({ state, reloadMeta }) {
       };
       bindTypes('#types-form', '#type-list', '#type-new', '#type-add', '/settings/project-types', 'projeto(s)', 'Tipos de projeto salvos.');
       bindTypes('#ctypes-form', '#ctype-list', '#ctype-new', '#ctype-add', '/settings/contract-types', 'contrato(s)', 'Tipos de contrato salvos.');
+      for (const [k, title] of SALES_CARDS) bindTypes(`#sl-${k}-form`, `#sl-${k}-list`, `#sl-${k}-new`, `#sl-${k}-add`, `/settings/sales-lists/${k}`, 'oportunidade(s)', `${title}: salvo.`);
       bindTemplates('#specs-form', '#spec-list', '#spec-add', 'specialty', '/settings/specialties', 'Modelos de especialidades salvos.');
       bindTemplates('#stage-tpl-form', '#stage-tpl-list', '#stage-tpl-add', 'stage', '/settings/stage-templates', 'Modelos de classificação salvos.');
       const gf = root.querySelector('#general-form');

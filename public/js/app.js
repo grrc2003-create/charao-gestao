@@ -33,6 +33,7 @@ import * as Audit from './views/audit.js';
 import * as Settings from './views/settings.js';
 import * as Recurrences from './views/recurrences.js';
 import * as Contracts from './views/contracts.js';
+import * as Sales from './views/sales.js';
 import * as BmImport from './views/bm-import.js';
 import * as Finance from './views/finance.js';
 import * as FinanceYear from './views/finance-year.js';
@@ -112,6 +113,8 @@ const routes = [
   ['/projetos/:id/registros/novo', Records.form],
   ['/projetos/:id/registros/:rid', Records.detail],
   ['/projetos/:id/registros/:rid/editar', Records.form],
+  ['/vendas', Sales.board],
+  ['/vendas/:id', Sales.view],
   ['/contratos', Contracts.list],
   ['/contratos/novo', Contracts.form],
   ['/contratos/cliente', Contracts.client],
@@ -182,6 +185,7 @@ function sectionOfPath(path) {
   if (path.startsWith('/relatorios') || path.startsWith('/imprimir/relatorio') || path.startsWith('/imprimir/campo')) return 'relatorios';
   if (path.startsWith('/contratos') || path.startsWith('/medicoes') || path.startsWith('/imprimir/medicao')) return 'contratos';
   if (path.startsWith('/financeiro')) return 'financeiro';
+  if (path.startsWith('/vendas')) return 'vendas';
   if (path.startsWith('/folha') || path.startsWith('/imprimir/folha')) return 'folha';
   if (path.startsWith('/equipe/cadastro')) return 'equipe|cadastro_usuarios';
   if (path.startsWith('/equipe') || path.startsWith('/imprimir/organograma')) return 'equipe';
@@ -190,7 +194,7 @@ function sectionOfPath(path) {
   if (path === '/configuracoes') return 'configuracoes';
   return null;
 }
-const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Financeiro', folha: 'Folha (Administrativa)', processos: 'Processos da Empresa (edição)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+const SECTION_NAME = { 'equipe|cadastro_usuarios': 'Cadastro da Equipe', equipe: 'Organograma e Férias', 'usuarios|cadastro_usuarios': 'Desempenho das pessoas', cadastro_usuarios: 'Cadastro da Equipe', dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios', contratos: 'Contratos', financeiro: 'Financeiro', folha: 'Folha (Administrativa)', processos: 'Processos da Empresa (edição)', auditoria: 'Auditoria', configuracoes: 'Configurações', vendas: 'Vendas e Prospecção' };
 
 export function navigate(path, { replace = false } = {}) {
   const h = '#' + path;
@@ -223,12 +227,13 @@ export async function reloadMeta() {
 }
 
 // Celular: barra inferior com até 5 botões de rótulo curto; o restante fica em "Mais"
-const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Folha (Administrativa)': 'Folha', 'Folha de Campo': 'Campo', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes' };
+const SHORT = { 'Meu painel': 'Painel', 'Visão da empresa': 'Empresa', 'Folha (Administrativa)': 'Folha', 'Folha de Campo': 'Campo', 'Processos da Empresa': 'Processos', 'Configurações': 'Ajustes', 'Vendas e Prospecção': 'Vendas' };
 function mobileNav() {
   const c = state.meta?.can || {};
   const all = [...navItems(),
     ...(c.field ? [['/campo', 'Folha de Campo', 'team']] : []),
     ...(showUsersNav() ? [USERS_NAV] : []),
+    ...(c.sales ? [['/vendas', 'Vendas e Prospecção', 'sales']] : []),
     ...(c.contracts ? [['/contratos', 'Contratos', 'contract']] : []),
     ...(c.finance ? [['/financeiro', 'Financeiro', 'wallet']] : []),
     ...(sec('folha') ? [['/folha', 'Folha (Administrativa)', 'users']] : []),
@@ -263,6 +268,7 @@ function shell() {
       <nav>${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
         ${state.meta?.can.field ? html`<a href="#/campo" data-nav="/campo">${icon('team')}<span>Folha de Campo</span></a>` : ''}
         <div class="sidebar-tag sidebar-group">Gestão da Empresa</div>
+        ${state.meta?.can.sales ? html`<a href="#/vendas" data-nav="/vendas">${icon('sales')}<span>Vendas e Prospecção</span></a>` : ''}
         ${state.meta?.can.contracts ? html`<a href="#/contratos" data-nav="/contratos">${icon('contract')}<span>Contratos</span></a>` : ''}
         ${state.meta?.can.finance ? html`<a href="#/financeiro" data-nav="/financeiro">${icon('wallet')}<span>Financeiro</span></a>` : ''}
         ${sec('folha') ? html`<a href="#/folha" data-nav="/folha">${icon('users')}<span>Folha (Administrativa)</span></a>` : ''}

@@ -9,6 +9,7 @@ import { defaultStageId } from './stages.js';
 import { validContractTypeId } from './settings.js';
 import { COMPANIES } from '../lib/companies.js';
 import { createFinanceTask, cancelOpenTask, financeAssigneeList } from './finance.js';
+import { checkOpportunityForContract, linkContract } from './sales.js';
 
 const addDaysIso = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
@@ -130,6 +131,7 @@ export function getContract(ctx, id) {
   const used = new Set(all('SELECT DISTINCT item_id FROM measurement_lines l JOIN measurements m ON m.id = l.measurement_id WHERE m.contract_id = ? AND l.quantity <> 0', id).map(r => r.item_id));
   return {
     ...c,
+    opportunity: one('SELECT id, code FROM sales_opportunities WHERE contract_id = ?', id) || null,
     items: items.map(i => {
       const mq = r8(measuredQty.get(i.id) || 0);
       return { ...i, value: r2(i.quantity * i.unit_price), measured_qty: mq, measured_value: r2(mq * i.unit_price), balance_qty: r8(i.quantity - mq), balance_value: r2((i.quantity - mq) * i.unit_price), used: used.has(i.id) };
@@ -191,6 +193,7 @@ function syncItems(contractId, items) {
 export function createContract(ctx, body, ip) {
   requireContracts(ctx.user);
   const { d, items } = readContract({ items: [], ...body });
+  const opp = checkOpportunityForContract(ctx, intOrNull(body.opportunity_id));
   return tx(() => {
     const n = one(`SELECT MAX(CAST(SUBSTR(code, 4) AS INTEGER)) AS n FROM contracts WHERE code LIKE 'CT-%'`)?.n || 0;
     const code = `CT-${String(n + 1).padStart(3, '0')}`;
@@ -198,7 +201,8 @@ export function createContract(ctx, body, ip) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`, code, d.client, d.client_doc, d.number, d.title, d.scope, d.project_id, d.start_date, d.end_date, d.bulletin_prefix, d.payment_info, d.notes, d.status, d.company, d.type_id, ctx.user.id);
     const id = Number(r.lastInsertRowid);
     syncItems(id, items);
-    audit(ctx.user.id, 'contract', id, 'Contrato cadastrado', { codigo: code, cliente: d.client, objeto: d.title, itens: items.length }, ip);
+    audit(ctx.user.id, 'contract', id, 'Contrato cadastrado', { codigo: code, cliente: d.client, objeto: d.title, itens: items.length, ...(opp ? { oportunidade: opp.code } : {}) }, ip);
+    if (opp) linkContract(ctx, opp, id, code);
     return id;
   });
 }

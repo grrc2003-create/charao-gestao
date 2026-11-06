@@ -70,6 +70,10 @@ export function saveReasons(ctx, input, ip) {
 const TYPE_LISTS = {
   project: { table: 'project_types', usage: 'SELECT COUNT(*) FROM projects p WHERE p.type_id = t.id', label: 'Tipo de projeto', plural: 'Tipos de projeto', unit: 'projeto(s)' },
   contract: { table: 'contract_types', usage: 'SELECT COUNT(*) FROM contracts c WHERE c.type_id = t.id', label: 'Tipo de contrato', plural: 'Tipos de contrato', unit: 'contrato(s)' },
+  // Vendas e Prospecção
+  source: { table: 'sales_sources', usage: 'SELECT COUNT(*) FROM sales_opportunities o WHERE o.source_id = t.id', label: 'Origem', plural: 'Origens das oportunidades', unit: 'oportunidade(s)' },
+  loss: { table: 'sales_loss_reasons', usage: 'SELECT COUNT(*) FROM sales_opportunities o WHERE o.lost_reason_id = t.id', label: 'Motivo de perda', plural: 'Motivos de perda', unit: 'oportunidade(s)' },
+  profile: { table: 'sales_profiles', usage: 'SELECT COUNT(*) FROM sales_opportunities o WHERE o.profile_id = t.id', label: 'Avaliação do cliente', plural: 'Avaliações do cliente', unit: 'oportunidade(s)' },
 };
 function listTypes(kind, { includeInactive = false } = {}) {
   const L = TYPE_LISTS[kind];
@@ -136,6 +140,24 @@ export const saveProjectTypes = (ctx, input, ip) => saveTypes('project', ctx, in
 export const listContractTypes = opts => listTypes('contract', opts);
 export const validContractTypeId = (v, current = null) => validTypeId('contract', v, current);
 export const saveContractTypes = (ctx, input, ip) => saveTypes('contract', ctx, input, ip);
+// Listas de Vendas (origem, motivo de perda, avaliação do cliente)
+export const SALES_LISTS = ['source', 'loss', 'profile'];
+export const listSalesList = (kind, opts) => listTypes(kind, opts);
+export const validSalesListId = (kind, v, current = null) => validTypeId(kind, v, current);
+export const saveSalesList = (kind, ctx, input, ip) => saveTypes(kind, ctx, input, ip);
+// Inclusão rápida (na própria oportunidade): reaproveita um item com o mesmo nome, reativando-o se estiver inativo
+export function addSalesListItem(kind, ctx, name, ip) {
+  const L = TYPE_LISTS[kind];
+  const n = String(name ?? '').replace(/s+/g, ' ').trim();
+  if (!n) throw badRequest('Informe o nome.');
+  if (n.length > 60) throw badRequest('O nome deve ter até 60 caracteres.');
+  const ex = one(`SELECT id, active FROM ${L.table} WHERE name = ? COLLATE NOCASE`, n);
+  if (ex) { if (!ex.active) run(`UPDATE ${L.table} SET active = 1, updated_at = datetime('now') WHERE id = ?`, ex.id); return ex.id; }
+  const order = (one(`SELECT MAX(sort_order) AS n FROM ${L.table}`)?.n || 0) + 1;
+  const id = Number(run(`INSERT INTO ${L.table} (name, sort_order) VALUES (?, ?)`, n, order).lastInsertRowid);
+  audit(ctx.user.id, 'settings', null, `${L.label} incluído(a)`, { nome: n }, ip);
+  return id;
+}
 
 // ---------- Configurações gerais (chave/valor) ----------
 const GENERAL = {

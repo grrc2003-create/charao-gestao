@@ -3259,6 +3259,58 @@ async function main() {
   rvDb.prepare("UPDATE tasks SET status = 'aberta', review_status = NULL, delivered_at = NULL WHERE id = ?").run(rvNoLeader);
   rvDb.close();
 
+  // ---------- Vendas e Prospecção ----------
+  console.log('\nVendas e Prospecção');
+  const svA = await login('ana@charao.eng.br');
+  const svB = (await svA('GET', '/sales/board')).data;
+  ok(svB.stages.length === 6 && svB.stages.map(s => s.kind).join(',') === 'prospeccao,apresentacao,proposta,negociacao,ganho,perdido', 'funil começa com as 6 colunas sugeridas');
+  ok(svB.lists.source.length >= 5 && svB.lists.loss.length >= 5 && svB.lists.profile.length >= 4, 'origens, motivos de perda e avaliações vêm pré-cadastrados');
+  const svSt = k => svB.stages.find(s => s.kind === k).id;
+  const svSrc = svB.lists.source[0].id;
+  ok((await login('felipe@charao.eng.br').then(c => c('GET', '/sales/board'))).status === 403, 'colaborador sem a seção não vê o funil');
+  ok((await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício A', company: 'lus', source_id: svSrc })).status === 400, 'prospecção exige endereço');
+  const svId = (await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício A', company: 'lus', address: 'Rua Teste, 100', city: 'Cidade Teste', source_id: svSrc, source_detail: 'Indicado por fulano', title: 'Reforma de escritório' })).data.id;
+  let svO = (await svA('GET', `/sales/opportunities/${svId}`)).data;
+  ok(/^OP-\d{3}$/.test(svO.code) && svO.stage_kind === 'prospeccao' && svO.company === 'lus' && svO.owner_id, `oportunidade cadastrada em Prospecção (${svO.code}, LuS, responsável = quem cadastrou)`);
+  ok((await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('apresentacao'), possible_scope: 'Projeto e obra' })).status === 200, 'vai para Apresentação com o escopo possível');
+  const svPdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4\n% proposta ficticia\n').toString('base64');
+  ok((await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('proposta'), final_scope: 'Escopo final' , proposal_value: '12.000,00' })).status === 400, 'Proposta exige o arquivo anexado');
+  svO = (await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('proposta'), final_scope: 'Escopo final fictício', proposal_value: '12.000,00', proposals: [{ file: svPdf, name: 'proposta.pdf', notes: 'Proposta inicial' }] })).data;
+  ok(svO.stage_kind === 'proposta' && svO.proposal_value === 12000 && svO.proposals.length === 1 && svO.proposals[0].has_file && svO.proposals[0].rev === 0, 'proposta anexada (R00) e valor gravado');
+  ok((await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('negociacao') })).status === 400, 'Negociação exige a avaliação do cliente');
+  svO = (await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('negociacao'), profile_id: svB.lists.profile[0].id, proposals: [{ value: '10.000', discount_pct: '10', notes: 'Revisão pedida pelo cliente' }] })).data;
+  ok(svO.stage_kind === 'negociacao' && svO.proposals.length === 2 && svO.proposals[1].rev === 1 && svO.final_value === 9000, `revisão R01 com desconto: valor final ${svO.final_value}`);
+  ok((await svA('PUT', `/sales/opportunities/${svId}`, { final_scope: '' })).status === 400, 'não deixa apagar um campo exigido pela coluna atual');
+  ok(svO.moves.length === 4, 'histórico registra as movimentações');
+  // Contrato a partir da oportunidade
+  const svDraft = (await svA('GET', `/sales/opportunities/${svId}/contract-draft`)).data;
+  ok(svDraft.client === 'Cliente Fictício A' && svDraft.company === 'lus' && svDraft.scope === 'Escopo final fictício' && svDraft.items[0].unit_price === 9000, 'rascunho do contrato aproveita cliente, empresa, escopo e valor final');
+  const svCt = await svA('POST', '/contracts', { ...svDraft, bulletin_prefix: 'TSTV', opportunity_id: svId });
+  ok(svCt.status === 201, 'contrato cadastrado a partir da oportunidade');
+  svO = (await svA('GET', `/sales/opportunities/${svId}`)).data;
+  ok(svO.contract_id === svCt.data.id && svO.stage_kind === 'ganho' && svO.closed_at, 'oportunidade ligada ao contrato e levada para Contrato fechado');
+  ok((await svA('GET', `/contracts/${svCt.data.id}`)).data.opportunity?.id === svId, 'o contrato mostra a oportunidade de origem');
+  ok((await svA('POST', '/contracts', { ...svDraft, bulletin_prefix: 'TSTW', opportunity_id: svId })).status === 400, 'a mesma oportunidade não gera dois contratos');
+  ok((await svA('DELETE', `/sales/opportunities/${svId}`)).status === 400, 'oportunidade com contrato não é excluída');
+  // Perda
+  const svId2 = (await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício B', address: 'Av. Teste, 5', source_id: svSrc })).data.id;
+  ok((await svA('PUT', `/sales/opportunities/${svId2}`, { stage_id: svSt('perdido') })).status === 400, 'Contrato perdido exige o motivo');
+  const svNewReason = (await svA('POST', '/sales/lists/loss', { name: 'Motivo fictício novo' })).data;
+  ok(svNewReason.id && svNewReason.list.some(t => t.name === 'Motivo fictício novo'), 'novo motivo de perda incluído pela própria oportunidade');
+  svO = (await svA('PUT', `/sales/opportunities/${svId2}`, { stage_id: svSt('perdido'), lost_reason_id: svNewReason.id, lost_notes: 'Detalhe fictício' })).data;
+  ok(svO.stage_kind === 'perdido' && svO.lost_reason_name === 'Motivo fictício novo' && svO.closed_at, 'perdida com motivo e observação');
+  // Colunas personalizadas
+  const svStages = (await svA('GET', '/sales/board')).data.stages;
+  const svSave = list => svA('PUT', '/sales/stages', { stages: list });
+  const svWith = [...svStages.slice(0, 2), { name: 'Visita técnica', kind: 'livre' }, ...svStages.slice(2)].map(s => ({ id: s.id || null, name: s.name, kind: s.kind }));
+  const svSaved = (await svSave(svWith)).data;
+  ok(svSaved.length === 7 && svSaved[2].name === 'Visita técnica' && svSaved[2].kind === 'livre', 'coluna personalizada criada na posição escolhida');
+  ok((await svSave(svSaved.filter(s => s.kind !== 'perdido').map(s => ({ id: s.id, name: s.name, kind: s.kind })))).status === 400, 'coluna com oportunidades não é excluída');
+  ok((await svSave(svSaved.map(s => (s.kind === 'perdido' ? { id: s.id, name: s.name, kind: 'proposta' } : { id: s.id, name: s.name, kind: s.kind })))).status === 400, 'não muda o tipo da coluna se as oportunidades não atendem');
+  ok((await svSave(svSaved.filter(s => s.name !== 'Visita técnica').map(s => ({ id: s.id, name: s.name, kind: s.kind })))).status === 200, 'coluna vazia é excluída');
+  ok((await svA('DELETE', `/sales/opportunities/${svId2}`)).status === 200, 'oportunidade sem contrato é excluída');
+  ok((await svA('GET', '/settings/sales-lists/profile')).data.length >= 5, 'Configurações listam as avaliações do cliente');
+
 }
 
 main()

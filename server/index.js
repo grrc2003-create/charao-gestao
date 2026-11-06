@@ -36,6 +36,7 @@ import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
 import * as Field from './services/field.js';
 import * as Reimb from './services/reimbursements.js';
+import * as Sales from './services/sales.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { countsInIndicators, rescheduleContributors, summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
@@ -289,6 +290,7 @@ api.get('/api/meta', (req, res, { ctx }) => {
       sections: [...sectionsOf(ctx.user)],
       manage_settings: canManageSettings(ctx.user),
       contracts: Contracts.canContracts(ctx.user),
+      sales: Sales.canSales(ctx.user),
       finance: Finance.canFinance(ctx.user),
       edit_processes: Processes.canEditProcesses(ctx.user),
       approve_processes: Processes.canApproveProcesses(ctx.user),
@@ -460,6 +462,20 @@ api.post('/api/finance/items/:id/unpay', (req, res, { ctx, params }) => send(res
 api.put('/api/finance/items/:id/amount', (req, res, { ctx, params, body }) => send(res, 200, Finance.setItemAmount(ctx, intOrNull(params.id), body, clientIp(req))));
 
 // ---------- Contratos (liberação por usuário) ----------
+// ---------- Vendas e Prospecção ----------
+api.get('/api/sales/board', (req, res, { ctx }) => send(res, 200, Sales.board(ctx)));
+api.put('/api/sales/stages', (req, res, { ctx, body }) => send(res, 200, Sales.saveStages(ctx, body.stages, clientIp(req))));
+api.post('/api/sales/opportunities', (req, res, { ctx, body }) => send(res, 201, { id: Sales.createOpportunity(ctx, body, clientIp(req)) }));
+api.get('/api/sales/opportunities/:id', (req, res, { ctx, params }) => send(res, 200, Sales.getOpportunity(ctx, intOrNull(params.id))));
+api.put('/api/sales/opportunities/:id', (req, res, { ctx, params, body }) => { Sales.updateOpportunity(ctx, intOrNull(params.id), body, clientIp(req)); send(res, 200, Sales.getOpportunity(ctx, intOrNull(params.id))); });
+api.delete('/api/sales/opportunities/:id', (req, res, { ctx, params }) => { Sales.deleteOpportunity(ctx, intOrNull(params.id), clientIp(req)); send(res, 200, { ok: true }); });
+api.get('/api/sales/opportunities/:id/contract-draft', (req, res, { ctx, params }) => send(res, 200, Sales.contractDraft(ctx, intOrNull(params.id))));
+api.delete('/api/sales/proposals/:id', (req, res, { ctx, params }) => { Sales.deleteProposal(ctx, intOrNull(params.id), clientIp(req)); send(res, 200, { ok: true }); });
+api.get('/api/sales/files/:id', (req, res, { ctx, params }) => sendFile(req, res, Sales.proposalFile(ctx, intOrNull(params.id))));
+api.post('/api/sales/lists/:kind', (req, res, { ctx, params, body }) => send(res, 201, Sales.addListItem(ctx, params.kind, body.name, clientIp(req))));
+api.get('/api/settings/sales-lists/:kind', (req, res, { ctx, params }) => { Sales.requireSales(ctx.user); if (!Settings.SALES_LISTS.includes(params.kind)) throw new HttpError(404, 'Lista inexistente.'); send(res, 200, Settings.listSalesList(params.kind, { includeInactive: true })); });
+api.put('/api/settings/sales-lists/:kind', (req, res, { ctx, params, body }) => { Sales.requireSales(ctx.user); if (!Settings.SALES_LISTS.includes(params.kind)) throw new HttpError(404, 'Lista inexistente.'); send(res, 200, Settings.saveSalesList(params.kind, ctx, body.types, clientIp(req))); });
+
 api.get('/api/contracts/dashboard', (req, res, { ctx, query }) => send(res, 200, Contracts.contractsDashboard(ctx, { months: query.get('meses'), company: query.get('empresa') || '', type: query.get('tipo') || '' })));
 api.get('/api/contracts', (req, res, { ctx }) => send(res, 200, Contracts.listContracts(ctx)));
 api.post('/api/contracts', (req, res, { ctx, body }) => send(res, 201, { id: Contracts.createContract(ctx, body, clientIp(req)) }));
@@ -658,7 +674,7 @@ api.post('/api/users/:id/password', (req, res, { ctx, params, body }) => {
 api.get('/api/audit', (req, res, { user }) => {
   requireSection(user, 'auditoria');
   // Registros de contratos só para quem tem a liberação
-  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance') && (hasSection(user, 'folha') || !['payroll', 'reimbursement'].includes(a.entity)) && (hasSection(user, 'folha_campo') || a.entity !== 'field')));
+  send(res, 200, listAudit().filter(a => (user.can_contracts || !['contract', 'measurement'].includes(a.entity)) && (user.can_finance || a.entity !== 'finance') && (hasSection(user, 'vendas') || a.entity !== 'sales') && (hasSection(user, 'folha') || !['payroll', 'reimbursement'].includes(a.entity)) && (hasSection(user, 'folha_campo') || a.entity !== 'field')));
 });
 
 // ---------- Tarefas recorrentes ----------

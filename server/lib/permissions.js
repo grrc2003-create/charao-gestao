@@ -149,13 +149,14 @@ export function canSeePersonalData(ctx, userId) {
 
 // ---------- Seções liberadas por usuário ----------
 // Gestão de Obras · Gestão da Empresa · Administração. Sem lista salva, vale o padrão do perfil.
-export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'equipe', 'cadastro_usuarios', 'processos', 'folha', 'folha_campo', 'auditoria', 'configuracoes'];
+export const SECTIONS = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios', 'contratos', 'financeiro', 'equipe', 'cadastro_usuarios', 'processos', 'folha', 'folha_campo', 'auditoria', 'configuracoes', 'vendas'];
 export const SECTION_LABEL = { dashboard: 'Visão da empresa', projetos: 'Projetos', tarefas: 'Tarefas', usuarios: 'Desempenho das pessoas', relatorios: 'Relatórios',
-  contratos: 'Contratos', financeiro: 'Financeiro', equipe: 'Organograma e Férias', cadastro_usuarios: 'Cadastro da Equipe', processos: 'Processos da Empresa (edição)', folha: 'Folha (Administrativa)', folha_campo: 'Folha de Campo (valores e fechamento)', auditoria: 'Auditoria', configuracoes: 'Configurações' };
+  contratos: 'Contratos', financeiro: 'Financeiro', equipe: 'Organograma e Férias', cadastro_usuarios: 'Cadastro da Equipe', processos: 'Processos da Empresa (edição)', folha: 'Folha (Administrativa)', folha_campo: 'Folha de Campo (valores e fechamento)', auditoria: 'Auditoria', configuracoes: 'Configurações', vendas: 'Vendas e Prospecção' };
 export function defaultSections(u) {
   const s = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios'];
   if (u.can_contracts) s.push('contratos');
   if (u.can_finance) s.push('financeiro');
+  if (isAdmin(u) || u.can_contracts) s.push('vendas');
   if (isAdmin(u)) s.push('equipe', 'cadastro_usuarios', 'processos', 'folha', 'folha_campo', 'auditoria');
   if (isAdmin(u) || isManagerRole(u)) s.push('configuracoes');
   if (isManagerRole(u)) s.push('processos'); // gestor e coordenador criam processos (publicação: administrador)
@@ -170,6 +171,7 @@ export function sectionsOf(u) {
   if (u.can_contracts) set.add('contratos'); else set.delete('contratos');
   if (u.can_finance) set.add('financeiro'); else set.delete('financeiro');
   if (isAdmin(u)) set.add('cadastro_usuarios'); // administrador nunca perde o cadastro de usuários
+  if (isAdmin(u)) set.add('vendas'); // seção nova: o administrador já começa com ela
   return set;
 }
 export const hasSection = (u, k) => sectionsOf(u).has(k);

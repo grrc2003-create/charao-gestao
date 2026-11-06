@@ -156,6 +156,8 @@ const ICONS = {
   shield: svg('<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>'),
   logout: svg('<path d="M15 4h4v16h-4M10 17l5-5-5-5M15 12H3"/>'),
   history: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>'),
+  move: svg('<path d="M5 9 2 12l3 3M19 9l3 3-3 3M2 12h20M9 5l3-3 3 3M9 19l3 3 3-3M12 2v20"/>'),
+  sales: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/><path d="M12 3v2M21 12h-2"/>'),
   wallet: svg('<path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 7V6a2 2 0 0 1 2-2h10v3"/><path d="M15 13.5h5"/><circle cx="16" cy="13.5" r=".6"/>'),
   contract: svg('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M12 10.5v8M14.6 12.3c-.3-.8-1.3-1.3-2.6-1.3-1.5 0-2.5.7-2.5 1.6 0 2.2 5.2 1 5.2 3.4 0 .9-1.1 1.6-2.6 1.6-1.4 0-2.4-.6-2.7-1.4"/>'),
   file: svg('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'),

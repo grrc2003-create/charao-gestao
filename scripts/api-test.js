@@ -1237,6 +1237,8 @@ async function main() {
   ok(kMv.code === 'ORBE0001.26' && kMv.period_start === '2026-01-01' && kMv.period_end === '2026-01-31' && kMv.status === 'rascunho', 'boletim numerado (ORBE0001.26) com o período do mês');
   ok((await kAnaC('POST', `/measurements/${kM1}/actions/issue`)).status === 400, 'não emite medição vazia');
   const kIt1 = kCt.items[0].id;
+  const dec8 = (await kAnaC('PUT', `/measurements/${kM1}`, { lines: { [kIt1]: '0,12345678' } })).data;
+  ok(dec8.rows[0].qty === 0.12345678 && dec8.rows[0].bal_qty === 11.87654322, 'quantidade medida aceita até 8 casas decimais');
   kMv = (await kAnaC('PUT', `/measurements/${kM1}`, { lines: { [kIt1]: 1 }, adjustments: [{ description: 'Desconto AMIL', amount: '-158,95' }] })).data;
   ok(kMv.totals.measured === 10000 && kMv.totals.adj === -158.95 && kMv.totals.to_bill === 9841.05 && kMv.rows[0].bal_qty === 11, `totais do boletim: medição 10.000, desconto −158,95, a faturar ${kMv.totals.to_bill}`);
   kMv = (await kAnaC('POST', `/measurements/${kM1}/actions/issue`)).data;

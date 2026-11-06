@@ -5,7 +5,7 @@ import { pageHead, kpi } from './shared.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 export const money = v => BRL.format(Number(v) || 0);
-const qtyFmt = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 4 });
+const qtyFmt = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 8 });
 export const qty = v => qtyFmt.format(Number(v) || 0);
 const pct = v => (v === null || v === undefined ? '—' : `${String(v).replace('.', ',')}%`);
 

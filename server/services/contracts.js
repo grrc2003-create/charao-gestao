@@ -44,6 +44,7 @@ export function requireContracts(user) {
 
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const r4 = v => Math.round((Number(v) || 0) * 10000) / 10000;
+const r8 = v => Math.round((Number(v) || 0) * 1e8) / 1e8; // quantidades: até 8 casas decimais
 // Número em formato brasileiro ("1.234,56") ou JS (1234.56)
 const num = (v, label, { min = -1e12 } = {}) => {
   if (v === '' || v === null || v === undefined) return 0;
@@ -130,8 +131,8 @@ export function getContract(ctx, id) {
   return {
     ...c,
     items: items.map(i => {
-      const mq = r4(measuredQty.get(i.id) || 0);
-      return { ...i, value: r2(i.quantity * i.unit_price), measured_qty: mq, measured_value: r2(mq * i.unit_price), balance_qty: r4(i.quantity - mq), balance_value: r2((i.quantity - mq) * i.unit_price), used: used.has(i.id) };
+      const mq = r8(measuredQty.get(i.id) || 0);
+      return { ...i, value: r2(i.quantity * i.unit_price), measured_qty: mq, measured_value: r2(mq * i.unit_price), balance_qty: r8(i.quantity - mq), balance_value: r2((i.quantity - mq) * i.unit_price), used: used.has(i.id) };
     }),
     measurements: measurementsOf(id).map(m => ({ ...m, ...measurementTotals(m, items) })),
     summary: contractSummary(c),
@@ -164,7 +165,7 @@ function readContract(body) {
     description: str(x?.description, { max: 300, required: true, label: `Descrição do item ${i + 1}` }),
     unit: str(x?.unit, { max: 12, label: 'Unidade' }) || 'vb',
     unit_price: r4(num(x?.unit_price, `Preço unitário do item ${i + 1}`, { min: 0 })),
-    quantity: r4(num(x?.quantity, `Quantidade do item ${i + 1}`, { min: 0 })),
+    quantity: r8(num(x?.quantity, `Quantidade do item ${i + 1}`, { min: 0 })),
     additive: x?.additive ? 1 : 0,
   }));
   if (!items.length && body.items !== undefined) throw badRequest('Cadastre ao menos um item na planilha contratual.');
@@ -270,16 +271,16 @@ export function getMeasurement(ctx, id) {
   const prevQty = new Map(prevIds.length ? all(`SELECT item_id, SUM(quantity) AS q FROM measurement_lines WHERE measurement_id IN (${inList(prevIds)}) GROUP BY item_id`, ...prevIds).map(r => [r.item_id, r.q]) : []);
   const curQty = new Map(all('SELECT item_id, quantity FROM measurement_lines WHERE measurement_id = ?', id).map(r => [r.item_id, r.quantity]));
   const rows = items.map(i => {
-    const pq = r4(prevQty.get(i.id) || 0);
-    const cq = r4(curQty.get(i.id) || 0);
-    const aq = r4(pq + cq);
+    const pq = r8(prevQty.get(i.id) || 0);
+    const cq = r8(curQty.get(i.id) || 0);
+    const aq = r8(pq + cq);
     return {
       item_id: i.id, seq: i.seq, description: i.description, unit: i.unit, unit_price: i.unit_price, additive: !!i.additive,
       contract_qty: i.quantity, contract_value: r2(i.quantity * i.unit_price),
       prev_qty: pq, prev_value: r2(pq * i.unit_price),
       qty: cq, value: r2(cq * i.unit_price),
       acc_qty: aq, acc_value: r2(aq * i.unit_price),
-      bal_qty: r4(i.quantity - aq), bal_value: r2((i.quantity - aq) * i.unit_price),
+      bal_qty: r8(i.quantity - aq), bal_value: r2((i.quantity - aq) * i.unit_price),
       exceeded: aq > i.quantity + 1e-9,
     };
   });
@@ -339,7 +340,7 @@ export function updateMeasurement(ctx, id, body, ip) {
   const lines = body.lines && typeof body.lines === 'object' ? Object.entries(body.lines).map(([k, v]) => {
     const itemId = intOrNull(k);
     if (!items.has(itemId)) throw badRequest('Item da medição inválido.');
-    return [itemId, r4(num(v, 'Quantidade medida'))];
+    return [itemId, r8(num(v, 'Quantidade medida'))];
   }) : null;
   const adjustments = Array.isArray(body.adjustments) ? body.adjustments.map((a, k) => ({
     seq: k + 1,
@@ -368,7 +369,7 @@ function readLinesAdjustments(m, body) {
   const lines = body.lines && typeof body.lines === 'object' ? Object.entries(body.lines).map(([k, v]) => {
     const itemId = intOrNull(k);
     if (!items.has(itemId)) throw badRequest('Item da medição inválido.');
-    return [itemId, r4(num(v, 'Quantidade medida'))];
+    return [itemId, r8(num(v, 'Quantidade medida'))];
   }) : null;
   const adjustments = Array.isArray(body.adjustments) ? body.adjustments.map((a, k) => ({
     seq: k + 1,

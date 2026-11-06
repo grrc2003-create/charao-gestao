@@ -328,14 +328,15 @@ function bindContractTable(root, state, onChange = () => {}) {
 const OPEN_SHOW = 6;
 // Na tela do contrato: as medições dele, no mesmo formato do painel
 const daysSince = d => (d ? Math.max(0, Math.round((Date.parse(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })) - Date.parse(String(d).slice(0, 10))) / 86400e3)) : null);
-const openOf = c => c.measurements.filter(m => m.status === 'emitida' || m.status === 'faturada').map(m => {
-  const since = m.status === 'faturada' ? m.nf_date : m.issued_at;
+const openOf = c => c.measurements.filter(m => m.status === 'rascunho' || m.status === 'emitida' || m.status === 'faturada').map(m => {
+  const since = m.status === 'faturada' ? m.nf_date : m.status === 'emitida' ? m.issued_at : m.created_at;
   return { id: m.id, code: m.code, status: m.status, ref_label: ym(m.ref_month), client: c.client, total: m.total, nf_number: m.nf_number || null, since: since ? String(since).slice(0, 10) : null, days: daysSince(since) };
 }).sort((a, b) => (a.since || '9999').localeCompare(b.since || '9999'));
-function openMeasurementsCard(list, { empty = 'Nenhuma medição emitida aguardando faturamento ou recebimento.' } = {}) {
+function openMeasurementsCard(list, { empty = 'Nenhuma medição em rascunho, aguardando faturamento ou recebimento.' } = {}) {
   if (!list.length) return html`<section class="card ct-open is-empty"><div class="card-head"><h2>${icon('check')}Medições em aberto</h2><span class="sub">lembrete</span></div>
     <div class="card-body muted">${empty}</div></section>`;
   const groups = [
+    ['rascunho', 'Em rascunho (não emitidas)', 'criada há', 'ct-open-draft'],
     ['emitida', 'Aguardando faturamento', 'emitida há', 'ct-open-bill'],
     ['faturada', 'Faturadas, aguardando recebimento', 'faturada há', 'ct-open-rec'],
   ].map(([st, title, since, cls]) => ({ st, title, since, cls, items: list.filter(m => m.status === st) })).filter(g => g.items.length);
@@ -747,7 +748,7 @@ export async function view({ params, state, navigate }) {
         ${kpi({ label: 'A receber', value: money(s.to_receive), color: '#C0392B' })}
         ${kpi({ label: 'Saldo a medir', value: money(s.balance), color: '#707E8B' })}
       </div>
-      <div class="section">${openMeasurementsCard(openOf(c), { empty: 'Nenhuma medição deste contrato aguardando faturamento ou recebimento.' })}</div>
+      <div class="section">${openMeasurementsCard(openOf(c), { empty: 'Nenhuma medição deste contrato em rascunho, aguardando faturamento ou recebimento.' })}</div>
       <section class="card section">
         <div class="card-head"><h2>${icon('file')}Medições (boletins)</h2><span class="sub">${c.measurements.length} medição(ões)</span></div>
         ${c.measurements.length ? html`<div class="table-wrap"><table class="data ct-table"><thead><tr><th>Boletim</th><th>Referência</th><th>Período</th><th class="num">A faturar</th><th>Situação</th><th>NF</th><th>Recebido</th></tr></thead>

@@ -3762,3 +3762,4 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .ct-open-late { color: #C0392B; font-weight: 650; }
 .ct-open-more summary { padding: 8px 16px 12px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--navy); }
 @media (max-width: 700px) { .ct-open-g + .ct-open-g { border-left: 0; border-top: 1px solid var(--line); } }
+.ct-open-draft { --c: #707E8B; }

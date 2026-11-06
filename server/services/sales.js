@@ -263,7 +263,9 @@ export function updateOpportunity(ctx, id, body, ip) {
     // Posição na coluna (arrastar): renumera a coluna de destino
     if (moving || body.position !== undefined) {
       const others = all('SELECT id FROM sales_opportunities WHERE stage_id = ? AND id <> ? ORDER BY sort_order, id', stage.id, id).map(r => r.id);
-      const pos = Math.max(0, Math.min(others.length, intOrNull(body.position) ?? others.length));
+      // posição 0 = topo da coluna (não é identificador; aceita 0)
+      const p = body.position === undefined || body.position === null || body.position === '' ? NaN : Number(body.position);
+      const pos = Number.isFinite(p) ? Math.max(0, Math.min(others.length, Math.trunc(p))) : others.length;
       others.splice(pos, 0, id);
       others.forEach((oid, k) => run('UPDATE sales_opportunities SET sort_order = ? WHERE id = ?', k + 1, oid));
     }

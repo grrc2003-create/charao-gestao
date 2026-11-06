@@ -3278,7 +3278,9 @@ async function main() {
   const svId = (await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício A', company: 'lus', address: 'Rua Teste, 100', city: 'Cidade Teste', source_id: svSrc, source_detail: 'Indicado por fulano', title: 'Reforma de escritório' })).data.id;
   let svO = (await svA('GET', `/sales/opportunities/${svId}`)).data;
   ok(/^OP-\d{3}$/.test(svO.code) && svO.stage_kind === 'prospeccao' && svO.company === 'lus' && svO.owner_id, `oportunidade cadastrada em Prospecção (${svO.code}, LuS, responsável = quem cadastrou)`);
-  ok((await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('apresentacao'), possible_scope: 'Projeto e obra' })).status === 200, 'vai para Apresentação com o escopo possível');
+  ok((await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('apresentacao'), possible_scope: 'Projeto e obra', position: 0 })).status === 200, 'vai para Apresentação com o escopo possível (solto no topo da coluna, posição 0)');
+  ok((await svA('GET', '/sales/board')).data.opportunities.filter(x => x.stage_id === svSt('apresentacao')).sort((a, b) => a.sort_order - b.sort_order)[0]?.id === svId, 'cartão fica no topo da coluna');
+  ok((await svA('PUT', `/sales/opportunities/${svId}`, { position: 0 })).status === 200, 'reordenar para o topo da mesma coluna');
   const svPdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4\n% proposta ficticia\n').toString('base64');
   ok((await svA('PUT', `/sales/opportunities/${svId}`, { stage_id: svSt('proposta'), final_scope: 'Escopo final' })).status === 400, 'Proposta exige o valor');
   const svNoFile = await svA('POST', '/sales/opportunities', { client: 'Cliente Fictício Sem Arquivo', address: 'Rua X, 9', source_id: svSrc, stage_id: svSt('proposta'), final_scope: 'Escopo X', proposal_value: '7.500,00' });

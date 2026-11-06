@@ -25,12 +25,27 @@ function taskLoad() {
   return new Map(rows.map(r => [r.assignee_id, r]));
 }
 
+// Jornada: dias da semana (0=domingo … 6=sábado) e turno
+const workOf = u => {
+  let days = null;
+  try { const a = JSON.parse(u.work_days || 'null'); days = Array.isArray(a) && a.length ? a : null; } catch { days = null; }
+  return { work_days: days, work_shift: u.work_shift || null };
+};
+function readWork(body) {
+  let days = null;
+  if (Array.isArray(body.work_days)) {
+    days = [...new Set(body.work_days.map(Number))].sort((a, b) => a - b);
+    if (!days.length) throw badRequest('Marque ao menos um dia de trabalho, ou deixe a pessoa seguindo o calendário da empresa.');
+    if (days.some(x => !Number.isInteger(x) || x < 0 || x > 6)) throw badRequest('Dia de trabalho inválido.');
+  } else if (body.work_days !== undefined && body.work_days !== null) throw badRequest('Dias de trabalho inválidos.');
+  return { work_days: days ? JSON.stringify(days) : null, work_shift: str(body.work_shift, { max: 80, label: 'Turno' }) || null };
+}
 function person(u, load, vac, ctx) {
   const l = load.get(u.id) || { open: 0, late: 0, review: 0 };
   return {
     id: u.id, name: u.name, job_title: u.job_title, department: u.department, responsibilities: u.responsibilities, role: u.role,
     is_external: u.is_external, company: u.company, login_enabled: u.login_enabled, active: u.active, manager_id: u.manager_id,
-    admission_date: u.admission_date, vacation_since: u.vacation_since, phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
+    admission_date: u.admission_date, vacation_since: u.vacation_since, ...workOf(u), phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
     email: isPlaceholderEmail(u.email) ? null : u.email,
     missing_function: missingFunction(u),
     load: { open: l.open || 0, late: l.late || 0, review: l.review || 0 },
@@ -131,6 +146,7 @@ function readMember(body, { creating, current }) {
     admission_date: date(body.admission_date, 'Data de admissão'),
     vacation_since: date(body.vacation_since, 'Férias controladas a partir de'),
     manager_id: intOrNull(body.manager_id),
+    ...readWork(body),
   };
   if (d.responsibilities && d.responsibilities.length < 10) throw badRequest('Detalhe as responsabilidades (o que a pessoa faz na empresa).');
   if (d.admission_date && d.admission_date > today()) throw badRequest('A data de admissão não pode ser futura.');
@@ -150,8 +166,8 @@ export function createMember(ctx, body, ip) {
     if (!m || !m.active || m.is_external) throw badRequest('Gestor inválido.');
   }
   const id = tx(() => {
-    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since)
-      VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since);
+    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since, work_days, work_shift)
+      VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.work_days, d.work_shift);
     const nid = Number(r.lastInsertRowid);
     audit(ctx.user.id, 'user', nid, 'Pessoa cadastrada na Gestão da Equipe (sem acesso ao sistema)', { nome: d.name, funcao: d.job_title }, ip);
     return nid;
@@ -172,13 +188,13 @@ export function updateMember(ctx, id, body, ip) {
   }
   assertNoManagerCycle(id, d.manager_id);
   tx(() => {
-    run(`UPDATE users SET job_title = ?, responsibilities = ?, department = ?, admission_date = ?, vacation_since = ?, manager_id = ?, updated_at = datetime('now') WHERE id = ?`,
-      d.job_title, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.manager_id, id);
+    run(`UPDATE users SET job_title = ?, responsibilities = ?, department = ?, admission_date = ?, vacation_since = ?, manager_id = ?, work_days = ?, work_shift = ?, updated_at = datetime('now') WHERE id = ?`,
+      d.job_title, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.manager_id, d.work_days, d.work_shift, id);
     if (!u.login_enabled) {
       const active = body.active === undefined ? u.active : body.active ? 1 : 0;
       run('UPDATE users SET name = ?, phone = ?, active = ? WHERE id = ?', d.name, d.phone, active, id);
     }
-    audit(ctx.user.id, 'user', id, 'Cadastro da equipe atualizado', { nome: d.name || u.name, funcao: d.job_title, setor: d.department, admissao: d.admission_date }, ip);
+    audit(ctx.user.id, 'user', id, 'Cadastro da equipe atualizado', { nome: d.name || u.name, funcao: d.job_title, setor: d.department, admissao: d.admission_date, jornada: d.work_days, turno: d.work_shift }, ip);
   });
   return getMember(ctx, id);
 }

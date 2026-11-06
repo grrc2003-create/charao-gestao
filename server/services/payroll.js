@@ -49,7 +49,7 @@ function parseSchedule(s) {
   for (const w of WEEK) out[w] = { vt: !!(o[w]?.vt), vr: !!(o[w]?.vr) };
   return out;
 }
-const PERSON_SQL = `SELECT p.*, u.name, u.job_title, u.active AS user_active, u.is_external
+const PERSON_SQL = `SELECT p.*, u.name, u.job_title, u.active AS user_active, u.is_external, u.work_shift
   FROM payroll_people p JOIN users u ON u.id = p.user_id`;
 const shapePerson = p => p && ({ ...p, schedule: parseSchedule(p.schedule), company_name: COMPANIES[p.company]?.name || p.company });
 
@@ -162,7 +162,7 @@ export function compute(month, entry, person, requests = []) {
 
 const personSnapshot = p => ({
   name: p.name, job_title: p.job_title, company: p.company, company_name: COMPANIES[p.company]?.name || p.company, kind: p.kind,
-  monthly_value: p.monthly_value, shift: p.shift, regime: p.regime, pix: p.pix, cost_center: p.cost_center, schedule: parseSchedule(p.schedule),
+  monthly_value: p.monthly_value, shift: p.shift || p.work_shift || null, regime: p.regime, pix: p.pix, cost_center: p.cost_center, schedule: parseSchedule(p.schedule),
 });
 
 const reqView = r => ({ id: r.id, expense_date: r.expense_date, amount: r.amount, description: r.description, files: r.files });

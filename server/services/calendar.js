@@ -200,12 +200,32 @@ export function vacationsOverlapping(userId, from, to) {
   return all(`SELECT start_date, end_date FROM vacations WHERE user_id = ? AND status = 'aprovada' AND start_date <= ? AND end_date >= ? ORDER BY start_date`, userId, to, from);
 }
 
-// Calendário da obra (e, se informado, das férias do responsável)
+// Dias da semana em que a pessoa trabalha (Cadastro da Equipe). Sem jornada informada: vale o calendário da empresa.
+export function personWorkDays(userId) {
+  if (!userId) return null;
+  try {
+    const a = JSON.parse(one('SELECT work_days FROM users WHERE id = ?', userId)?.work_days || 'null');
+    return Array.isArray(a) && a.length ? new Set(a.map(Number)) : null;
+  } catch { return null; }
+}
+// Calendário da obra (e, se informado, da pessoa: dias da jornada e férias). Feriados valem para todos.
 function calendarFor(projectId, from, to, userId = null) {
   const s = calendarSettings();
   const off = nonWorkingDays(projectId, from, to);
   const vac = vacationDays(userId, from, to);
-  return d => !weekendOff(d, s) && !off.has(d) && !vac.has(d);
+  const mine = personWorkDays(userId);
+  return d => (mine ? mine.has(dow(d)) : !weekendOff(d, s)) && !off.has(d) && !vac.has(d);
+}
+// Por que o dia não é de trabalho (para avisos): férias, feriado, folga da jornada ou fim de semana. Dia de trabalho: null.
+const ON_DAY = ['aos domingos', 'às segundas', 'às terças', 'às quartas', 'às quintas', 'às sextas', 'aos sábados'];
+export function dayOffReason(projectId, d, userId = null) {
+  if (!d) return null;
+  if (vacationDays(userId, d, d).has(d)) return { code: 'ferias', text: 'está de férias' };
+  const off = nonWorkingDays(projectId, d, d);
+  if (off.has(d)) return { code: 'feriado', text: `é feriado (${off.get(d).name})` };
+  const mine = personWorkDays(userId);
+  if (mine) return mine.has(dow(d)) ? null : { code: 'folga', text: `não trabalha ${ON_DAY[dow(d)]}` };
+  return weekendOff(d, calendarSettings()) ? { code: 'fim_de_semana', text: 'é fim de semana' } : null;
 }
 export function isWorkingDay(projectId, d, userId = null) { return calendarFor(projectId, d, d, userId)(d); }
 
@@ -262,13 +282,16 @@ export function planDates(ctx, projectId, q) {
   if (!due) {
     if (!days || days < 1 || days > 2000) throw badRequest('Informe a quantidade de dias (1 a 2000).');
     // O dia de início conta como o 1º dia
-    // Início dentro das férias do responsável: a contagem começa no primeiro dia útil depois delas
-    const base = !corridos && userId && vacationDays(userId, start, start).has(start) ? nextWorkingDay(projectId, start, userId) : start;
+    // Início nas férias ou na folga da jornada do responsável: a contagem começa no próximo dia em que ele trabalha
+    const startOff = userId ? dayOffReason(projectId, start, userId) : null;
+    const base = !corridos && startOff && (startOff.code === 'ferias' || startOff.code === 'folga') ? nextWorkingDay(projectId, start, userId) : start;
     due = corridos ? addDaysISO(start, days - 1) : addWorkingDays(projectId, base, days - 1, userId);
   }
   return {
     start, due,
     start_working: isWorkingDay(projectId, start, userId),
+    start_off: dayOffReason(projectId, start, userId),
+    due_off: dayOffReason(projectId, due, userId),
     vacations: vacationsOverlapping(userId, start, due),
     work_days: workingDaysBetween(projectId, start, due, userId),
     calendar_days: due >= start ? Math.round((Date.parse(due) - Date.parse(start)) / 86400e3) + 1 : null,

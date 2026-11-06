@@ -6,6 +6,7 @@ import { periodKey, periodInfo } from './periods.js';
 import { depLists, renderImpactPreview } from './deps-ui.js';
 import { pctBar, progressSheet, bindProgressSheet } from './progress-ui.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
+import { dayOffWarn } from '../dayoff.js';
 
 // Máximo de fotos por registro (cadastro da não conformidade e cada resposta: não conformidade ou correção) — igual ao servidor
 export const PHOTO_LIMIT = 3;
@@ -1176,6 +1177,23 @@ export function bindChecklist(root, t, ctx, refresh) {
     eiStart?.addEventListener('input', syncDays);
     // Prazo do item: prévia das sucessoras empurradas (adiar) ou da opção de puxá-las (antecipar)
     const eiEnd = document.querySelector('.sheet #ei-end');
+    // Término em dia em que o responsável do item não trabalha: aviso
+    if (eiEnd) {
+      const warn = document.createElement('div');
+      warn.className = 'day-off-warn';
+      warn.setAttribute('role', 'status');
+      warn.hidden = true;
+      eiEnd.closest('.field')?.appendChild(warn);
+      const who = document.querySelector('.sheet #ei-who');
+      const check = () => {
+        const uid = Number(who?.value) || it.assignee_id || t.assignee_id;
+        const name = who?.value ? who.selectedOptions[0]?.textContent.split('·')[0].trim() : (it.assignee_name || t.assignee_name);
+        dayOffWarn(warn, { projectId: t.project_id, date: eiEnd.value, userId: uid, name });
+      };
+      ['change', 'input'].forEach(ev => eiEnd.addEventListener(ev, check));
+      who?.addEventListener('change', check);
+      check();
+    }
     eiEnd?.addEventListener('change', () => {
       const box = document.querySelector('.sheet #ei-impact');
       if (it.due_date && eiEnd.value && eiEnd.value !== it.due_date) renderImpactPreview(box, t.id, eiEnd.value, { itemId: it.id }); else if (box) box.innerHTML = '';

@@ -2957,6 +2957,30 @@ async function main() {
   const trItem = (await trAna('GET', `/tasks/${trList.data.id}`)).data.checklist?.items?.[0];
   ok(trItem?.team?.[0]?.role === 'Gesseiro Teste' && trItem.team[0].qty === 2, 'e fica salva no item');
 
+  console.log('Jornada de trabalho da pessoa');
+  const jnAna = await login('ana@charao.eng.br');
+  const jnPut = (id, body) => jnAna('PUT', `/team/${id}`, body);
+  const jnBase = (await jnAna('GET', '/team/4')).data;
+  const jnKeep = { job_title: jnBase.job_title || 'Mestre de obras', responsibilities: jnBase.responsibilities || 'Coordena as equipes de campo da obra.', department: jnBase.department, admission_date: jnBase.admission_date, vacation_since: jnBase.vacation_since, manager_id: jnBase.manager_id };
+  ok((await jnPut(4, { ...jnKeep, work_days: [] })).status === 400 && (await jnPut(4, { ...jnKeep, work_days: [9] })).status === 400, 'dias vazios ou dia inválido são recusados');
+  const jnSet = await jnPut(4, { ...jnKeep, work_days: [2, 3, 4, 5, 6], work_shift: '07:00 às 16:00' });
+  ok(jnSet.status === 200 && jnSet.data.work_days.join() === '2,3,4,5,6' && jnSet.data.work_shift === '07:00 às 16:00' && jnSet.data.work_hours === undefined, 'grava dias e turno');
+  // 2099-03-02 é segunda; 2099-03-07 é sábado
+  const jnPd = async q => (await jnAna('GET', `/projects/1/plan-dates?${q}`)).data;
+  const jnMon = await jnPd('start=2099-03-02&due=2099-03-02&user=4');
+  ok(jnMon.due_off?.code === 'folga' && /segundas/.test(jnMon.due_off.text), 'segunda é folga para quem trabalha de terça a sábado');
+  ok((await jnPd('start=2099-03-07&due=2099-03-07&user=4')).due_off === null, 'sábado é dia de trabalho dele');
+  ok((await jnPd('start=2099-03-07&due=2099-03-07&user=5')).due_off?.code === 'fim_de_semana', 'para quem segue a empresa, sábado continua fim de semana');
+  ok((await jnPd('start=2099-03-02&days=5&user=4')).due === '2099-03-07', 'prazo em dias úteis conta só os dias de trabalho da pessoa');
+  ok((await jnPd('start=2099-03-02&days=5&user=5')).due === '2099-03-06', 'quem segue a empresa continua de segunda a sexta');
+  ok((await jnPd('start=2099-12-25&due=2099-12-25&user=4')).due_off?.code === 'feriado', 'feriado continua valendo');
+  const jnT = (await jnAna('POST', '/tasks', { project_id: 1, title: 'Prazo na folga', description: 'Teste', assignee_id: 4, proof_type: 'nenhuma', start_date: '2099-02-27', due_date: '2099-03-02' })).data;
+  ok(jnT.id && (await jnAna('GET', `/tasks/${jnT.id}`)).data.due_off?.code === 'folga', 'a tarefa mostra o aviso de prazo em dia sem trabalho, sem impedir o prazo');
+  ok((await jnAna('GET', `/tasks/${jnT.id}`)).data.work_days === 2, 'os dias úteis da tarefa seguem a jornada da pessoa (sexta e sábado; domingo e segunda não)');
+  ok((await jnAna('GET', '/team')).data.people.find(p => p.id === 4).work_shift === '07:00 às 16:00', 'a jornada aparece no organograma');
+  ok((await jnPut(4, { ...jnKeep, work_days: null, work_shift: '' })).data.work_days === null, 'volta a seguir o calendário da empresa');
+  ok((await jnPd('start=2099-03-02&due=2099-03-02&user=4')).due_off === null, 'e a segunda volta a ser dia de trabalho');
+
   console.log('Check-list: início real do item, sem mudar o planejado');
   const srT = (await fcAna('POST', '/tasks', { ...ctBase, title: 'CL início real', items: [
     { text: 'R1', start_date: '2099-03-02', due_date: '2099-03-06', team: [{ role: 'Pedreiro', days: 1 }] }, { text: 'R2', start_date: '2099-03-02', due_date: '2099-03-06' }, { text: 'R3' }, { text: 'R4', team: [{ role: 'Pedreiro', days: 1 }] }] })).data.id;

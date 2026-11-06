@@ -4,6 +4,7 @@ import { pageHead, projectOptions } from './shared.js';
 import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
 import { renderDraft, itemForm, bindItemForm, PHOTO_RULE, projectSpecialties, teamTotal, brl } from './checklist-ui.js';
 import { renderImpactPreview } from './deps-ui.js';
+import { dayOffWarn } from '../dayoff.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -196,6 +197,21 @@ export async function view({ params, query, state, navigate }) {
       f.assignee_id?.addEventListener('change', () => (qdDays?.value ? calc() : showSpan()));
       f.due_date.addEventListener('change', () => { if (document.activeElement === f.due_date) { if (qdDays) qdDays.value = ''; } showSpan(); });
       showSpan();
+      // Prazo em dia em que o responsável não trabalha: aviso (a data pode ser mantida)
+      const dueWarn = document.createElement('div');
+      dueWarn.className = 'day-off-warn';
+      dueWarn.setAttribute('role', 'status');
+      dueWarn.hidden = true;
+      f.due_date.closest('.field')?.appendChild(dueWarn);
+      const checkDue = () => {
+        const sel = f.assignee_id;
+        const opt = sel?.selectedOptions?.[0];
+        dayOffWarn(dueWarn, { projectId: f.project_id.value, date: f.due_date.value, userId: sel?.value || '', name: opt && sel.value ? opt.textContent.split('·')[0].trim() : '' });
+      };
+      ['change', 'input'].forEach(ev => f.due_date.addEventListener(ev, checkDue));
+      f.assignee_id?.addEventListener('change', checkDue);
+      f.project_id?.addEventListener('change', checkDue);
+      checkDue();
       // ---------- Datas pelas dependências (predecessora / sucessora) ----------
       const depBox = root.querySelector('#dep-dates');
       if (depBox) {

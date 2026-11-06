@@ -3735,3 +3735,15 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .pf-who > div { min-width: 0; }
 @media (max-width: 1100px) { .pf-nums { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); } }
 @media (max-width: 1400px) and (min-width: 1101px) { .pf-acts { flex-direction: column; align-items: stretch; } }
+
+/* Jornada de trabalho (Cadastro da Equipe) e aviso de dia sem trabalho */
+.tm-work { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 10px; }
+.tm-work legend { padding: 0 4px; }
+.tm-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.tm-day { position: relative; }
+.tm-day input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.tm-day span { display: inline-grid; place-items: center; min-width: 52px; min-height: 40px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); font-weight: 650; color: var(--ink-2); }
+.tm-day input:checked + span { background: var(--navy); border-color: var(--navy); color: #fff; }
+.tm-day input:focus-visible + span { outline: 2px solid var(--navy); outline-offset: 2px; }
+.day-off-warn { margin-top: 6px; padding: 7px 10px; border-radius: 8px; background: #FFF4E5; border: 1px solid #F3C98B; color: #8A4B08; font-size: 12.5px; font-weight: 600; }
+.rec-tag.rec-off { background: #FFF4E5; color: #8A4B08; border-color: #F3C98B; }

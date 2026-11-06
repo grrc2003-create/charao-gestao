@@ -8,7 +8,7 @@ import { taskHistory, audit } from './audit.js';
 import { saveImageFromDataUrl, deleteStored, copyStored, cleanFileName, isPdf } from './files.js';
 import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
-import { workingDaysBetween, vacationsOverlapping } from './calendar.js';
+import { workingDaysBetween, vacationsOverlapping, dayOffReason } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, applyPull, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask } from './finance.js';
 import { originOfTask, recordsOfTask } from './records.js';
@@ -358,6 +358,8 @@ export function getTask(ctx, id) {
     // Prazo: dias úteis (calendário da obra) e corridos entre o início e o término
     work_days: t.start_date && t.due_date ? workingDaysBetween(t.project_id, t.start_date, t.due_date, t.assignee_id) : null,
     assignee_vacations: vacationsOverlapping(t.assignee_id, t.start_date || t.due_date, t.due_date),
+    // Prazo em dia em que o responsável não trabalha (jornada, férias ou feriado): aviso na tela
+    due_off: t.due_date && t.status !== 'concluida' ? dayOffReason(t.project_id, t.due_date, t.assignee_id) : null,
     calendar_days: t.start_date && t.due_date && t.due_date >= t.start_date ? daysBetween(t.start_date, t.due_date) + 1 : null,
     dep_shift: shiftedOfTask(id),
     origin_record: originOfTask(ctx, t.origin_record_id),

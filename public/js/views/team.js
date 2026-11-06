@@ -12,6 +12,17 @@ const roleOf = p => (p.is_external ? 'Terceirizado' : ROLE[p.role] || '');
 const colorOf = p => (p.is_external ? '#8E44AD' : ROLE_COLOR[p.role] || '#5B6B7A');
 const dm = d => fmtDate(d).slice(0, 5);
 const av = p => { const u = avatarUrl(p.id); return u ? html`<img src="${u}" alt="" loading="lazy">` : initials(p.name); };
+// Jornada: dias da semana (0=domingo … 6=sábado) e turno
+const WD = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const daysText = days => {
+  if (!days?.length) return 'calendário da empresa';
+  const set = new Set(days);
+  if ([1, 2, 3, 4, 5].every(d => set.has(d)) && set.size === 5) return 'Seg a Sex';
+  if ([1, 2, 3, 4, 5, 6].every(d => set.has(d)) && set.size === 6) return 'Seg a Sáb';
+  return WD_ORDER.filter(d => set.has(d)).map(d => WD[d]).join(', ');
+};
+const workText = p => [daysText(p.work_days), p.work_shift].filter(Boolean).join(' · ');
 const sec = (state, k) => !state.meta.can.sections || state.meta.can.sections.includes(k);
 
 // ---------- Árvore ----------
@@ -74,6 +85,7 @@ function detailBody(p, data, state) {
       <dt>Função</dt><dd>${p.job_title || html`<span class="late">não informada</span>`}</dd>
       <dt>${p.is_external ? 'Líder' : 'Gestor'}</dt><dd>${mgr ? mgr.name : 'sem gestor (topo)'}</dd>
       ${p.admission_date ? html`<dt>Admissão</dt><dd>${fmtDate(p.admission_date)}</dd>` : ''}
+      <dt>Jornada</dt><dd>${workText(p)}</dd>
       ${p.email ? html`<dt>E-mail</dt><dd>${p.email}</dd>` : ''}${p.phone ? html`<dt>Telefone</dt><dd>${p.phone}</dd>` : ''}
       <dt>Tarefas</dt><dd>${p.load.open} em aberto · ${p.load.late} atrasada(s) · ${p.load.review} em conferência</dd>
       ${p.vacation ? html`<dt>Férias</dt><dd>${fmtDate(p.vacation.start_date)} a ${fmtDate(p.vacation.end_date)}${p.vacation.now ? ' (agora)' : ''}</dd>` : ''}
@@ -278,6 +290,12 @@ export async function form({ params, state, navigate }) {
         </div>
         ${!u.is_external ? html`<div class="field" style="max-width:420px"><label for="tm-vs">Férias controladas no sistema a partir de</label><input id="tm-vs" name="vacation_since" type="date" value="${u.vacation_since || ''}">
           <span class="hint">Períodos aquisitivos encerrados antes desta data são considerados quitados (férias já tiradas fora do sistema). Em branco: controla desde a admissão.</span></div>` : ''}
+        <fieldset class="field tm-work"><legend class="label">Jornada de trabalho</legend>
+          <label class="switch"><input type="checkbox" name="work_company" ${u.work_days?.length ? '' : 'checked'}>Segue o calendário da empresa</label>
+          <div class="tm-days" ${u.work_days?.length ? '' : 'hidden'} role="group" aria-label="Dias em que trabalha">${WD_ORDER.map(d => html`<label class="tm-day"><input type="checkbox" name="wd" value="${d}" ${u.work_days?.includes(d) ? 'checked' : ''}><span>${WD[d]}</span></label>`)}</div>
+          <div class="field" style="max-width:420px"><label for="tm-shift">Turno</label><input type="text" id="tm-shift" name="work_shift" maxlength="80" value="${u.work_shift || ''}" placeholder="Ex.: 08:00 às 12:00 e 13:00 às 17:00"></div>
+          <span class="hint">Os dias marcados valem para os prazos das tarefas e dos check-lists, os dias úteis, os indicadores e a folha. Feriados e férias continuam valendo. Ao colocar um prazo em dia em que a pessoa não trabalha, o sistema avisa.</span>
+        </fieldset>
         ${own ? html`<div class="form-row"><div class="field"><label for="tm-ph">Telefone</label><input type="tel" id="tm-ph" name="phone" maxlength="40" value="${u.phone || ''}"></div>
           ${!creating ? html`<div class="field"><span class="label">Situação</span><label class="switch"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}>Ativo</label></div>` : ''}</div>`
           : html`<div class="notice">${icon('info')}<span>Nome, e-mail, perfil, acesso e permissões desta pessoa: <a href="#/usuarios/${u.id}/editar">Acesso e permissões</a>.</span></div>`}
@@ -290,12 +308,17 @@ export async function form({ params, state, navigate }) {
       if (!creating) bindAvatarEditor(root, u, { self: u.id === state.user.id, after: () => ctx.render() });
       if (!creating) bindDeleteButton(root, u.id, () => navigate('/equipe/cadastro'));
       const f = root.querySelector('#tm-form');
+      const company = f.querySelector('[name=work_company]');
+      company.addEventListener('change', () => { f.querySelector('.tm-days').hidden = company.checked; });
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const err = f.querySelector('.form-error');
         err.hidden = true;
         const d = Object.fromEntries(new FormData(f));
         d.manager_id = d.manager_id ? Number(d.manager_id) : null;
+        d.work_days = company.checked ? null : [...f.querySelectorAll('[name=wd]:checked')].map(x => Number(x.value));
+        delete d.wd; delete d.work_company;
+        if (d.work_days && !d.work_days.length) { err.textContent = 'Marque os dias em que a pessoa trabalha, ou deixe seguindo o calendário da empresa.'; err.hidden = false; return; }
         if (own && !creating) d.active = !!f.querySelector('[name=active]')?.checked;
         if (!String(d.job_title || '').trim() || String(d.responsibilities || '').trim().length < 10) {
           err.textContent = 'Informe a função e detalhe as responsabilidades (o que a pessoa faz na empresa).';

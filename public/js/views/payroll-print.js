@@ -1,4 +1,4 @@
-// Recibos da Folha (A4): um demonstrativo por página, com o logo da empresa da pessoa.
+// Recibos da Folha (A4): um demonstrativo por página, no modelo da planilha, com o logo da empresa da pessoa.
 import { html, api, fmtDate } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { money, refLabel, refLong } from './payroll.js';
@@ -6,57 +6,77 @@ import { money, refLabel, refLong } from './payroll.js';
 const d2 = d => (d ? fmtDate(d) : '—');
 const short = d => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(2, 4)}` : '');
 
+// Logo do recibo: o da empresa da pessoa (só um). A Ludimila Siqueira usa a versão com o símbolo em cima.
+const RECEIPT_LOGO = { lus: '/assets/logo-lus.png' };
+const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+// Valor no estilo da planilha: "R$" à esquerda e o número à direita; zero vira "–"
+const cell = v => html`<td class="fdm-rs">R$</td><td class="fdm-v ${v < 0 ? 'fdm-neg' : ''}">${v ? money(v).replace(/^-?R\$\s?/, v < 0 ? '−' : '') : '–'}</td>`;
+
 function receipt(m, e) {
   const c = e.calc;
   const pro = e.kind === 'profissional';
   const co = m.companies[e.company] || m.companies.charao;
+  const logo = RECEIPT_LOGO[e.company] || co.logo;
   const per = `${short(m.benefit.start)} – ${short(m.benefit.end)}`;
+  // [descrição, detalhe (cinza), período, peso, valor]
   const lines = [
-    [pro ? 'Valor mensal — proporcional aos dias trabalhados' : 'Bolsa — proporcional aos dias trabalhados', `${short(c.start)} – ${short(c.end)}`, `${c.worked_days}/${c.business_days} dias`, c.base],
+    [pro ? 'Valor Mensal – Proporcional aos dias trabalhados' : 'Bolsa – Proporcional aos dias trabalhados', `${c.worked_days} de ${c.business_days} dias úteis`, `${short(c.start)} – ${short(c.end)}`, pct(c.worked_days, c.business_days), c.base],
     ...(pro ? [] : [
-      ['Vale transporte — adiantamento', per, `${c.vt_days} dias × 2 × ${money(m.vt_fare)}`, c.vt_base],
-      ...(c.ho_discount ? [['Desconto de VT — home office no mês anterior', '', `${c.ho_days} dia(s)`, -c.ho_discount]] : []),
-      ...(c.vt_adjust ? [['Vale transporte — diferença', '', '', c.vt_adjust]] : []),
-      ['Vale alimentação — adiantamento', per, `${c.vr_days} dias × ${money(m.vr_daily)}`, c.vr_base],
-      ...(c.vr_adjust ? [['Vale alimentação — diferença', '', '', c.vr_adjust]] : []),
+      ['Vale Transporte – Adiantamento', `${c.vt_days} dias × 2 × ${money(m.vt_fare)}`, per, '', c.vt_base],
+      ...(c.ho_discount ? [['Desconto de VT – home office no mês anterior', `${c.ho_days} dia(s)`, '', '', -c.ho_discount]] : []),
+      ...(c.vt_adjust ? [['Vale Transporte – diferença', '', '', '', c.vt_adjust]] : []),
+      ['Vale Alimentação – Adiantamento', `${c.vr_days} dias × ${money(m.vr_daily)}`, per, '', c.vr_base],
+      ...(c.vr_adjust ? [['Vale Alimentação – diferença', '', '', '', c.vr_adjust]] : []),
     ]),
-    ...(e.requests || []).map(r => [`Reembolso — ${r.description}`, short(r.expense_date), 'comprovante', r.amount]),
-    ...(c.reimb_manual || !(e.requests || []).length ? [['Outros — reembolso', e.reimbursement_note || '', '', c.reimb_manual ?? c.reimbursement]] : []),
+    ...(e.requests || []).map(r => [`Reembolso – ${r.description}`, 'comprovante', short(r.expense_date), '', r.amount]),
+    ...(c.reimb_manual || !(e.requests || []).length ? [['Outros', e.reimbursement_note || '', '', '', c.reimb_manual ?? c.reimbursement]] : []),
   ];
   const obs = [c.reimbursement ? `Reembolso: ${money(c.reimbursement)}${e.reimbursement_note ? ` (${e.reimbursement_note})` : ''}${(e.requests || []).length ? ` · ${e.requests.length} lançado(s) pela pessoa` : ''}` : '', e.notes || ''].filter(Boolean).join('\n');
-  return html`<article class="doc a4 pd-sheet rc-doc">
-    <header class="rc-head">
-      <img src="${co.logo}" alt="${co.name}" class="rc-logo">
-      <div class="rc-title"><div class="r-kicker">Demonstrativo de pagamento</div><h1>Folha ${refLabel(m.ref)}</h1><div class="muted">${co.name}</div></div>
+  return html`<article class="doc a4 pd-sheet rc-doc fdm-doc fdm-co-${m.companies[e.company] ? e.company : 'charao'}">
+    <header class="fdm-head">
+      <img src="${logo}" alt="${co.name}" class="fdm-logo">
+      <div class="fdm-title"><h1>DEMONSTRATIVO</h1><span>Folha ${refLabel(m.ref)} · ${co.name}</span></div>
+      <span class="fdm-spacer"></span>
     </header>
-    <div class="r-rule"></div>
-    <h3 class="r-h">Informações de contrato</h3>
-    <div class="rc-info">
-      <dl>
-        <dt>Colaborador</dt><dd><b>${e.name}</b></dd>
-        <dt>Função</dt><dd>${e.job_title || '—'}</dd>
-        <dt>Turno</dt><dd>${e.shift || '—'}</dd>
-        <dt>${pro ? 'Valor mensal' : 'Bolsa'}</dt><dd>${money(e.monthly_value)}</dd>
-        <dt>PIX</dt><dd>${e.pix || '—'}</dd>
-      </dl>
-      <dl>
-        <dt>Início</dt><dd>${d2(c.start)}</dd>
-        <dt>Fim</dt><dd>${d2(c.end)}</dd>
-        <dt>Faltas</dt><dd>${c.absences}</dd>
-        <dt>Dias em HO</dt><dd>${c.ho_days}</dd>
-        <dt>Dias trabalhados</dt><dd>${c.worked_days} de ${c.business_days} dias úteis</dd>
-      </dl>
+    <div class="fdm-top">
+      <table class="fdm-t fdm-info">
+        <thead><tr><th colspan="2">Informações de Contrato</th></tr></thead>
+        <tbody>
+          <tr><th>Colaborador</th><td><b>${e.name}</b></td></tr>
+          <tr><th>Turno</th><td>${e.shift || '—'}</td></tr>
+          <tr><th>Função</th><td>${e.job_title || '—'}</td></tr>
+          <tr><th>${pro ? 'Valor mensal' : 'Bolsa'}</th><td>${money(e.monthly_value)}</td></tr>
+          <tr><th>PIX</th><td>${e.pix || '—'}</td></tr>
+        </tbody>
+      </table>
+      <div class="fdm-side">
+        <table class="fdm-t fdm-dates">
+          <tbody>
+            <tr><th>INÍCIO</th><td>${d2(c.start)}</td></tr>
+            <tr><th>FIM</th><td>${d2(c.end)}</td></tr>
+            <tr><th>FALTAS</th><td>${c.absences || 0}</td></tr>
+            <tr><th>Dias em HO</th><td>${c.ho_days || 0}</td></tr>
+          </tbody>
+        </table>
+        <table class="fdm-t fdm-worked">
+          <thead><tr><th>DIAS TRABALHADOS</th></tr></thead>
+          <tbody><tr><td>${c.worked_days} ${c.worked_days === 1 ? 'Dia' : 'Dias'}</td></tr></tbody>
+        </table>
+      </div>
     </div>
-    <h3 class="r-h">Demonstrativo</h3>
-    <table class="r-table rc-table"><thead><tr><th>Descrição</th><th>Referência</th><th>Base</th><th class="num">Valor</th></tr></thead>
-      <tbody>${lines.map(([a, b, base, v]) => html`<tr><td>${a}</td><td class="small">${b}</td><td class="small">${base}</td><td class="num nowrap ${v < 0 ? 'rc-neg' : ''}">${money(v)}</td></tr>`)}</tbody>
-      <tfoot><tr><td colspan="3"><b>TOTAL</b></td><td class="num nowrap"><b>${money(c.total)}</b></td></tr></tfoot></table>
-    ${obs ? html`<h3 class="r-h">Observação</h3><p class="r-p pre">${obs}</p>` : ''}
-    <div class="rc-sign">
+    <table class="fdm-t fdm-lines">
+      <thead><tr><th class="fdm-desc" colspan="2">Demonstrativo</th><th class="fdm-peso">Peso</th><th colspan="2" class="fdm-sub">Subtotal</th></tr></thead>
+      <tbody>${lines.map(([desc, det, period, peso, v]) => html`<tr>
+        <td class="fdm-desc"><b>${desc}</b>${det ? html`<small>${det}</small>` : ''}</td>
+        <td class="fdm-per">${period}</td><td class="fdm-peso">${peso}</td>${cell(v)}</tr>`)}</tbody>
+    </table>
+    <table class="fdm-t fdm-total"><tbody><tr><th>TOTAL</th>${cell(c.total)}</tr></tbody></table>
+    <div class="fdm-obs"><b>Observação</b><div class="fdm-obs-box">${obs}</div></div>
+    <div class="fdm-sign">
       <div><span></span>${e.name}</div>
       <div><span></span>Data</div>
     </div>
-    <p class="muted small rc-foot">Pagamento referente à bolsa/valor de ${refLong(m.bolsa.start.slice(0, 7))} e ao adiantamento de VT/VR de ${refLong(m.ref)}${m.pay_date ? ` · pagamento previsto em ${d2(m.pay_date)}` : ''}${e.cost_center ? ` · Centro de custo ${e.cost_center}` : ''}.</p>
+    <p class="fdm-foot">Pagamento referente à bolsa/valor de ${refLong(m.bolsa.start.slice(0, 7))} e ao adiantamento de VT/VR de ${refLong(m.ref)}${m.pay_date ? ` · pagamento previsto em ${d2(m.pay_date)}` : ''}${e.cost_center ? ` · Centro de custo ${e.cost_center}` : ''}.</p>
   </article>`;
 }
 

@@ -618,3 +618,56 @@
 .pt-show summary { cursor: pointer; list-style-position: inside; }
 .pt-show-list { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; display: grid; gap: 8px; min-width: 250px; padding: 10px 12px; background: #fff; border: 1px solid var(--navy-100); border-radius: 8px; box-shadow: 0 6px 18px rgba(30, 44, 58, .16); }
 .pt-show-list label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* Recibo da Folha no modelo da planilha (tabelas com cabeçalho azul-claro) */
+.fdm-doc { font-size: 9.5pt; color: #111; }
+.fdm-head { display: grid; grid-template-columns: 52mm 1fr 52mm; align-items: center; gap: 4mm; margin-bottom: 7mm; }
+.fdm-logo { max-width: 50mm; max-height: 30mm; width: auto; height: auto; object-fit: contain; }
+.fdm-title { text-align: center; }
+.fdm-title h1 { margin: 0; font-size: 17pt; font-weight: 500; letter-spacing: .02em; color: #111; }
+.fdm-title span { display: block; margin-top: 2px; font-size: 8pt; color: #6E7A86; }
+.fdm-t { border-collapse: collapse; }
+.fdm-t th, .fdm-t td { border: 1px solid #1C2A38; padding: 1.2mm 2mm; }
+.fdm-t thead th { background: var(--fdm-h, #B7DEE8); font-weight: 700; text-align: center; }
+.fdm-top { display: grid; grid-template-columns: 1fr 50mm; gap: 8mm; align-items: start; margin-bottom: 8mm; }
+.fdm-info { width: 100%; }
+.fdm-info tbody th { width: 34%; background: var(--fdm-h, #B7DEE8); font-weight: 700; text-align: center; }
+.fdm-info tbody td { font-weight: 600; }
+.fdm-side { display: flex; flex-direction: column; gap: 4mm; }
+.fdm-dates { width: 100%; }
+.fdm-dates th { width: 50%; background: var(--fdm-h, #B7DEE8); font-weight: 700; text-align: center; }
+.fdm-dates td { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fdm-worked { width: 100%; }
+.fdm-worked td { text-align: center; font-weight: 600; }
+.fdm-lines { width: 100%; }
+.fdm-lines thead th { text-align: left; }
+.fdm-lines thead th.fdm-peso, .fdm-lines thead th.fdm-sub { text-align: center; }
+.fdm-lines td { border-left: 0; border-right: 0; }
+.fdm-lines td:first-child { border-left: 1px solid #1C2A38; }
+.fdm-lines td:last-child { border-right: 1px solid #1C2A38; }
+.fdm-lines .fdm-desc small { display: block; font-size: 7.5pt; color: #6E7A86; font-weight: 400; }
+.fdm-per { white-space: nowrap; font-weight: 600; }
+.fdm-peso { width: 16mm; text-align: center; font-weight: 600; }
+.fdm-rs { width: 7mm; border-left: 1px solid #1C2A38 !important; font-weight: 700; }
+.fdm-v { width: 24mm; text-align: right; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fdm-neg { color: #C0392B; }
+.fdm-total { margin: 5mm 0 2mm auto; width: 86mm; }
+.fdm-total th { background: var(--fdm-h, #B7DEE8); text-align: center; font-weight: 700; }
+.fdm-total .fdm-v { font-size: 10.5pt; }
+.fdm-obs b { display: block; margin-bottom: 1mm; }
+.fdm-obs-box { min-height: 42mm; border: 1px solid #1C2A38; padding: 2mm 3mm; white-space: pre-line; }
+.fdm-sign { display: grid; grid-template-columns: 2fr 1fr; gap: 12mm; margin-top: 16mm; font-size: 9pt; color: #46535F; }
+.fdm-sign span { display: block; border-top: 1px solid #46535F; margin-bottom: 1mm; }
+.fdm-foot { margin-top: 6mm; font-size: 7.5pt; color: #6E7A86; }
+@media screen and (max-width: 700px) {
+  .fdm-head { grid-template-columns: 1fr; justify-items: center; } .fdm-spacer { display: none; }
+  .fdm-top { grid-template-columns: 1fr; } .fdm-total { width: 100%; }
+  .fdm-lines { display: block; overflow-x: auto; }
+}
+/* Cabeçalho do demonstrativo sem divisões entre descrição, período e peso (só antes do subtotal) */
+.fdm-lines thead th { border-left: 0; border-right: 0; }
+.fdm-lines thead th:first-child { border-left: 1px solid #1C2A38; }
+.fdm-lines thead th:last-child { border-left: 1px solid #1C2A38; border-right: 1px solid #1C2A38; }
+/* Cor dos cabeçalhos pela empresa: Charão em laranja-claro; Ludimila Siqueira em azul-claro */
+.fdm-co-charao { --fdm-h: #FDDCC4; }
+.fdm-co-lus { --fdm-h: #B7DEE8; }

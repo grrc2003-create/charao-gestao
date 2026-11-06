@@ -3259,6 +3259,32 @@ async function main() {
   rvDb.prepare("UPDATE tasks SET status = 'aberta', review_status = NULL, delivered_at = NULL WHERE id = ?").run(rvNoLeader);
   rvDb.close();
 
+  // ---------- Folha de Campo: editar o período da folha aberta ----------
+  console.log('\nFolha de Campo: período');
+  {
+    const fpA = await login('ana@charao.eng.br');
+    const fpProj = (await fpA('GET', '/field/sheets')).data.projects?.[0];
+    const fpW = fpProj && (await fpA('POST', '/field/workers', { name: 'Diarista Fictício Período', kind: 'diarista', daily_rate: '150' })).data;
+    if (fpProj && fpW?.id) {
+      const fpS = (await fpA('POST', '/field/sheets', { project_id: fpProj.id, start_date: '2030-03-01', end_date: '2030-03-07' })).data;
+      await fpA('PUT', `/field/sheets/${fpS.id}`, { people: [{ worker_id: fpW.id, days: { '2030-03-02': 1, '2030-03-06': 1 } }] });
+      ok((await fpA('PUT', `/field/sheets/${fpS.id}/period`, { start_date: '2030-03-10', end_date: '2030-03-01' })).status === 400, 'período: fim antes do início é recusado');
+      ok((await fpA('PUT', `/field/sheets/${fpS.id}/period`, { start_date: '2030-03-01', end_date: '2030-04-15' })).status === 400, 'período: no máximo 31 dias');
+      let fpR = await fpA('PUT', `/field/sheets/${fpS.id}/period`, { start_date: '2030-02-26', end_date: '2030-03-08' });
+      ok(fpR.status === 200 && fpR.data.start_date === '2030-02-26' && fpR.data.end_date === '2030-03-08' && fpR.data.days.length === 11, 'período ampliado com a folha aberta');
+      ok(fpR.data.people.find(e => e.worker_id === fpW.id)?.days['2030-03-06'] === 1, 'diárias lançadas continuam nos mesmos dias');
+      fpR = await fpA('PUT', `/field/sheets/${fpS.id}/period`, { start_date: '2030-03-01', end_date: '2030-03-04' });
+      ok(fpR.status === 400 && /06\/03/.test(fpR.data.error || fpR.data.message || ''), 'reduzir o período sem confirmar é recusado e lista a diária que ficaria de fora');
+      fpR = await fpA('PUT', `/field/sheets/${fpS.id}/period`, { start_date: '2030-03-01', end_date: '2030-03-04', drop_outside: true });
+      const fpDays = fpR.data.people.find(e => e.worker_id === fpW.id)?.days || {};
+      ok(fpR.status === 200 && fpDays['2030-03-02'] === 1 && !fpDays['2030-03-06'], 'com confirmação, o período é reduzido e só a diária de fora sai');
+      await fpA('POST', `/field/sheets/${fpS.id}/close`, { pay_date: '2030-03-10' });
+      ok((await fpA('PUT', `/field/sheets/${fpS.id}/period`, { start_date: '2030-03-01', end_date: '2030-03-05' })).status === 400, 'folha fechada: período não pode ser alterado');
+      await fpA('POST', `/field/sheets/${fpS.id}/reopen`);
+      ok((await fpA('DELETE', `/field/sheets/${fpS.id}`)).status === 200, 'folha de teste do período excluída');
+    } else ok(false, 'período: obra/profissional de teste indisponível');
+  }
+
   // ---------- Vendas e Prospecção ----------
   console.log('\nVendas e Prospecção');
   const svA = await login('ana@charao.eng.br');

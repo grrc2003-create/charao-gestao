@@ -380,7 +380,7 @@ export async function view({ params, navigate, render }) {
         back: { href: `#/campo?obra=${s.project.id}`, label: 'Folha de Campo' },
         eyebrow: `${s.project.code} · ${s.project.name}`,
         title: html`Folha ${s.code} ${stTag(s.status)}`,
-        sub: html`${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}${s.status === 'fechada' ? ` · fechada por ${s.closed_by_name || '—'} em ${fmtDate(s.closed_at?.slice(0, 10))}` : ''}`,
+        sub: html`${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}${edit ? html` <button type="button" class="btn btn-ghost btn-sm fc-per-btn" data-period title="Alterar o início e o fim desta folha">${icon('edit')}Editar período</button>` : ''}${s.status === 'fechada' ? ` · fechada por ${s.closed_by_name || '—'} em ${fmtDate(s.closed_at?.slice(0, 10))}` : ''}`,
         actions: html`${mny && (s.people.length || s.contracts.length) ? html`<a class="btn btn-ghost" href="#/campo/recibos/${s.id}" title="Recibos para cada profissional assinar">${icon('print')}Recibos</a>` : ''}
           ${s.can.delete ? html`<button type="button" class="btn btn-ghost pf-danger" data-del>${icon('trash')}Excluir</button>` : ''}
           ${s.can.close ? html`<button type="button" class="btn btn-primary" data-close>${icon('check')}Fechar folha</button>` : ''}
@@ -601,6 +601,45 @@ export async function view({ params, navigate, render }) {
           onSubmit: f => api(`/field/sheets/${s.id}/close`, { method: 'POST', body: f }),
         });
         if (ok) { toast(ok.generated ? 'Folha fechada. Pagamento gerado no Financeiro.' : 'Folha fechada (sem valor a pagar pela empresa).'); render(); }
+      });
+      // Editar o período (só com a folha aberta). Salva antes o que estiver pendente.
+      root.querySelector('[data-period]')?.addEventListener('click', async () => {
+        try { if (dirty) await save(true); } catch (ex) { return toast(ex.message, 'error'); }
+        const cur = await api(`/field/sheets/${s.id}`);
+        const r = await sheet({
+          title: `Período da folha ${s.code}`,
+          body: html`<div class="form-row"><div class="field"><label class="req" for="fp-s">Início</label><input type="date" id="fp-s" name="start_date" required value="${cur.start_date}"></div>
+            <div class="field"><label class="req" for="fp-e">Fim</label><input type="date" id="fp-e" name="end_date" required value="${cur.end_date}"></div></div>
+            <span class="hint">Até 31 dias. As diárias lançadas continuam nos mesmos dias; se algum dia lançado ficar fora do novo período, o sistema pergunta antes de removê-lo.</span>`,
+          submitLabel: 'Salvar período',
+          async onSubmit(f) {
+            if (!f.start_date || !f.end_date) throw new Error('Informe o início e o fim do período.');
+            if (f.end_date < f.start_date) throw new Error('O fim não pode ser antes do início.');
+            return f;
+          },
+        });
+        if (!r) return;
+        if (r.start_date === cur.start_date && r.end_date === cur.end_date) return;
+        const out = cur.people.map(e => ({ name: e.name, days: Object.keys(e.days || {}).filter(d => Number(e.days[d]) && (d < r.start_date || d > r.end_date)).sort() })).filter(x => x.days.length);
+        let drop = false;
+        if (out.length) {
+          const n = out.reduce((a, x) => a + x.days.length, 0);
+          drop = await sheet({
+            title: 'Diárias fora do novo período',
+            danger: true,
+            submitLabel: 'Sim, alterar e remover',
+            body: html`<p class="muted" style="margin-top:0">Com o período ${fmtDate(r.start_date)} a ${fmtDate(r.end_date)}, ${n === 1 ? 'esta diária fica' : `estas ${n} diárias ficam`} de fora e ${n === 1 ? 'será removida' : 'serão removidas'} da folha:</p>
+              <ul class="fc-per-out">${out.map(x => html`<li><b>${x.name}</b> — ${x.days.map(dm).join(', ')}</li>`)}</ul>
+              <p class="muted">Quer continuar? Para manter essas diárias, cancele e escolha um período que inclua esses dias.</p>`,
+          }).then(x => x !== null);
+          if (!drop) return;
+        }
+        try {
+          await api(`/field/sheets/${s.id}/period`, { method: 'PUT', body: { ...r, drop_outside: drop } });
+          dirty = false;
+          toast(`Período alterado para ${fmtDate(r.start_date)} a ${fmtDate(r.end_date)}.`);
+          render();
+        } catch (ex) { toast(ex.message, 'error'); }
       });
       root.querySelector('[data-reopen]')?.addEventListener('click', async () => {
         if (!(await confirmSheet('Reabrir a folha', 'O pagamento pendente gerado por esta folha será removido do Financeiro e gerado de novo no próximo fechamento. Se já foi pago, desfaça o pagamento antes.', 'Reabrir', true))) return;

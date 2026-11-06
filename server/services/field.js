@@ -473,6 +473,41 @@ export function saveSheet(ctx, id, body, ip) {
   return getSheet(ctx, s.id);
 }
 
+// Altera o período (início/fim) da folha aberta. Diárias lançadas em dias que saem do período só são
+// removidas com confirmação explícita (drop_outside); sem ela, a alteração é recusada e lista o que seria perdido.
+export function setSheetPeriod(ctx, id, body, ip) {
+  const { s } = loadSheet(ctx, id);
+  openOnly(s);
+  const b = body || {};
+  const start = date(b.start_date, 'Início'), end = date(b.end_date, 'Fim');
+  if (!start || !end) throw badRequest('Informe o início e o fim do período.');
+  if (end < start) throw badRequest('O fim não pode ser antes do início.');
+  if (daysOf(start, end).length > MAX_DAYS) throw badRequest(`O período da folha pode ter no máximo ${MAX_DAYS} dias.`);
+  if (start === s.start_date && end === s.end_date) return getSheet(ctx, s.id);
+  const valid = new Set(daysOf(start, end));
+  const rows = all('SELECT e.id, e.days, w.name FROM field_sheet_people e JOIN field_workers w ON w.id = e.worker_id WHERE e.sheet_id = ?', s.id);
+  const outside = rows.map(r => {
+    const days = parseDays(r.days);
+    const out = Object.keys(days).filter(d => !valid.has(d) && Number(days[d])).sort();
+    return { ...r, parsed: days, out };
+  }).filter(r => r.out.length);
+  if (outside.length && b.drop_outside !== true) {
+    throw badRequest(`Há diárias fora do novo período: ${outside.map(r => `${r.name} (${r.out.map(dm).join(', ')})`).join('; ')}. Confirme a remoção delas para alterar o período.`);
+  }
+  tx(() => {
+    for (const r of outside) {
+      const keep = Object.fromEntries(Object.entries(r.parsed).filter(([d]) => valid.has(d)));
+      run('UPDATE field_sheet_people SET days = ? WHERE id = ?', JSON.stringify(keep), r.id);
+    }
+    run(`UPDATE field_sheets SET start_date = ?, end_date = ?, updated_at = datetime('now') WHERE id = ?`, start, end, s.id);
+  });
+  audit(ctx.user.id, 'field', s.id, 'Período da folha de campo alterado', {
+    folha: fcCode(s.seq), de: `${s.start_date} a ${s.end_date}`, para: `${start} a ${end}`,
+    ...(outside.length ? { diarias_removidas: outside.map(r => `${r.name}: ${r.out.join(', ')}`) } : {}),
+  }, ip);
+  return getSheet(ctx, s.id);
+}
+
 export function deleteSheet(ctx, id, ip) {
   const { s } = loadSheet(ctx, id);
   openOnly(s);

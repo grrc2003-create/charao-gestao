@@ -3937,3 +3937,8 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 }
 [data-sv-sheet]:not(form) { display: grid; gap: 14px; }
 .sv-note:has(.sv-note-edit) .sv-note-act { display: none; }
+
+/* Folha de Campo: editar período da folha aberta */
+.fc-per-btn { margin-left: 6px; vertical-align: middle; height: 28px; padding: 0 10px; font-size: 12.5px; }
+.fc-per-btn svg { width: 14px; height: 14px; }
+.fc-per-out { margin: 0 0 10px; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; }

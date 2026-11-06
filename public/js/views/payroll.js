@@ -25,6 +25,37 @@ const finOptions = (list, ref, selected) => {
 };
 const stTag = st => html`<span class="pf-st pf-st-${st}">${st === 'fechada' ? 'Fechada' : 'Aberta'}</span>`;
 
+// ---------- Pagamento: quem recebe, PIX e valor (copiar PIX / lista), como na Folha de Campo ----------
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+}
+// Só a chave (sem anotações como "(CPF)" ou "(celular)"), pronta para colar no app do banco
+const pixKey = v => String(v || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || String(v || '').trim();
+const payText = list => list.map(e => `${e.name} — ${money(e.calc.total)}${e.pix ? ` — PIX ${e.pix}` : ' — SEM PIX'}`).join('\n');
+const payBlock = (m, open) => {
+  const list = m.entries.filter(e => e.calc.total > 0.004);
+  if (!list.length) return '';
+  const sum = list.reduce((a, e) => a + e.calc.total, 0);
+  const noPix = list.filter(e => !e.pix).length;
+  return html`<section class="card section fp-card pf-paycard"><div class="card-head"><h2>${icon('wallet')}${open ? 'A pagar nesta folha' : 'Pagamentos desta folha'}</h2>
+      <span class="fp-tot">${list.length} · ${money(sum)}</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-copy="${payText(list)}" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista</button></div>
+    ${open || noPix ? html`<p class="fp-hint pf-payhint">${icon('info')}${[open ? 'Os valores ainda podem mudar até o fechamento.' : '', noPix ? `${noPix === 1 ? '1 pessoa está' : `${noPix} pessoas estão`} sem PIX no cadastro da folha.` : ''].filter(Boolean).join(' ')}</p>` : ''}
+    <ul class="fp-list">
+      <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Valor</span><span></span></li>
+      ${list.map(e => html`<li class="fp-row"><span class="fp-who"><b>${e.name}</b><small>${[e.job_title, e.company_name].filter(Boolean).join(' · ')}</small></span>
+        ${e.pix ? html`<span class="fp-pix"><span class="fp-pt">PIX</span><code>${e.pix}</code></span>`
+          : html`<span class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX — <a href="#/folha/pessoas/${e.person_id}">completar</a></span></span>`}
+        <strong class="fp-num fp-val">${money(e.calc.total)}</strong>
+        <span class="fp-copy">${e.pix ? html`<button type="button" class="btn btn-ghost btn-sm" data-copy="${pixKey(e.pix)}" data-copy-msg="PIX de ${e.name} copiado.">Copiar PIX</button>` : ''}</span></li>`)}
+      <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><strong class="fp-num fp-val">${money(sum)}</strong><span></span></li>
+    </ul></section>`;
+};
+
 // ---------- Folhas ----------
 export async function list({ navigate, render }) {
   const [data, pend] = await Promise.all([api('/payroll/months'), api('/reimbursements/pending')]);
@@ -144,6 +175,7 @@ export async function month({ params, render }) {
         <div><span>Reembolsos</span><b>${money(t.reimbursement)}</b></div>
         <div class="pf-kt"><span>Total da folha</span><b>${money(t.total)}</b></div>
       </div>
+      ${payBlock(m, open)}
       ${open && m.pending_reimbursements.length ? html`<section class="card section rb-pend"><div class="card-head"><h2>${icon('wallet')}Reembolsos lançados pelas pessoas</h2>
           <button type="button" class="btn btn-primary btn-sm" data-rb-all>${icon('check')}Incluir todos (${money(m.pending_reimbursements.reduce((s, r) => s + r.amount, 0))})</button></div>
         <ul class="rows">${m.pending_reimbursements.map(r => html`<li class="rb-row"><div class="grow"><div class="row-title">${r.user_name} · ${r.description}</div>
@@ -158,6 +190,7 @@ export async function month({ params, render }) {
       </section>
       <p class="muted pf-foot">Dias úteis pelo calendário da empresa (feriados de Configurações). VT/VR não contam os dias de férias aprovadas. Home office do mês anterior desconta o VT já adiantado (dias × 2 × passagem).</p>`,
     mount(root) {
+      root.querySelectorAll('.pf-paycard [data-copy]').forEach(b => b.addEventListener('click', async () => { await copyText(b.dataset.copy); toast(b.dataset.copyMsg || 'Copiado.'); }));
       root.querySelector('#pf-params')?.addEventListener('submit', async e => {
         e.preventDefault();
         try { await api(`/payroll/months/${m.id}`, { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast('Parâmetros salvos e valores recalculados.'); render(); } catch (ex) { toast(ex.message, 'error'); }

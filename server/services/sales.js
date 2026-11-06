@@ -106,7 +106,6 @@ export function missingFor(o, kind) {
   if (LEVEL[kind] >= 3) {
     if (!String(o.final_scope || '').trim()) miss.push('final_scope');
     if (!(o.proposal_value > 0)) miss.push('proposal_value');
-    if (!o.id || !one('SELECT 1 FROM sales_proposals WHERE opportunity_id = ? AND stored_name IS NOT NULL LIMIT 1', o.id)) miss.push('proposal_file');
   }
   if (kind === 'negociacao' && !o.profile_id) miss.push('profile_id');
   return miss;

@@ -156,7 +156,7 @@ export function defaultSections(u) {
   const s = ['dashboard', 'projetos', 'tarefas', 'usuarios', 'relatorios'];
   if (u.can_contracts) s.push('contratos');
   if (u.can_finance) s.push('financeiro');
-  if (isAdmin(u) || u.can_contracts) s.push('vendas');
+  if (isAdmin(u)) s.push('vendas'); // demais usuários: liberar em Cadastro da Equipe → Seções
   if (isAdmin(u)) s.push('equipe', 'cadastro_usuarios', 'processos', 'folha', 'folha_campo', 'auditoria');
   if (isAdmin(u) || isManagerRole(u)) s.push('configuracoes');
   if (isManagerRole(u)) s.push('processos'); // gestor e coordenador criam processos (publicação: administrador)

@@ -31,7 +31,6 @@ export function missingFor(o, kind) {
   if (LEVEL[kind] >= 3) {
     if (!String(o.final_scope || '').trim()) miss.push('final_scope');
     if (!(o.proposal_value > 0)) miss.push('proposal_value');
-    if (!o.files_count) miss.push('proposal_file');
   }
   if (kind === 'negociacao' && !o.profile_id) miss.push('profile_id');
   return miss;
@@ -40,7 +39,7 @@ const requiredFor = kind => {
   const r = new Set(['client', 'address', 'source_id', 'company']);
   if (kind === 'perdido') r.add('lost_reason_id');
   else {
-    if (LEVEL[kind] >= 3) ['final_scope', 'proposal_value', 'proposal_file'].forEach(k => r.add(k));
+    if (LEVEL[kind] >= 3) ['final_scope', 'proposal_value'].forEach(k => r.add(k));
     if (kind === 'negociacao') r.add('profile_id');
   }
   return r;
@@ -418,7 +417,7 @@ async function editColumns(d, reload) {
     wide: true,
     submitLabel: 'Salvar colunas',
     body: html`<p class="muted" style="margin:0 0 8px">Renomeie, reordene ou crie colunas. O <b>tipo de etapa</b> define o que é exigido ao entrar na coluna:
-        Prospecção (cliente, endereço, origem e empresa) · Apresentação (escopo possível, opcional) · Proposta (escopo final, valor e proposta anexada) ·
+        Prospecção (cliente, endereço, origem e empresa) · Apresentação (escopo possível, opcional) · Proposta (escopo final e valor; arquivo opcional) ·
         Negociação (avaliação do cliente) · Contrato fechado (pergunta se cria o contrato) · Contrato perdido (motivo). “Livre” não exige nada além do cadastro.</p>
       <ul class="sv-colist" id="sv-colist">${d.stages.map(row)}</ul>
       <button type="button" class="btn btn-ghost btn-sm" id="sv-col-add">${icon('plus')}Nova coluna</button>`,

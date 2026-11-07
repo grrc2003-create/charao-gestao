@@ -3,6 +3,7 @@
 import { html, api, icon, fmtDate, todayISO } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, batchBySize, isPdfFile } from '../ui.js';
 import { pageHead } from './shared.js';
+import { pixButton, bindPixButtons } from '../pix.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = v => BRL.format(Number(v) || 0);
@@ -422,8 +423,9 @@ export async function view({ params, navigate, render }) {
         const closed = s.status === 'fechada', finPaid = s.payment?.status === 'paga';
         const open = p => (p.worker_id ? { open: p.worker_id } : {});
         // Pago em parte: mostra o já pago e o que falta; "Pagar restante" abre a janela com o valor que falta
-        const act = p => (!closed ? open(p) : p.paid_at || finPaid ? { ...open(p), paidAt: p.paid_at || s.payment?.paid_date || '', lines: p.line, pays: p.payments }
-          : { ...open(p), canPay: true, lines: p.line, due: Math.max(0, p.amount - (p.paid_amount || 0)), paidSoFar: p.paid_amount || 0, pays: p.payments });
+        const rec = p => `#/campo/recibos/${s.id}?pessoa=${p.line}`;
+        const act = p => (!closed ? open(p) : p.paid_at || finPaid ? { ...open(p), paidAt: p.paid_at || s.payment?.paid_date || '', lines: p.line, pays: p.payments, rec: rec(p) }
+          : { ...open(p), canPay: true, lines: p.line, rec: p.paid_amount > 0.004 ? rec(p) : null, due: Math.max(0, p.amount - (p.paid_amount || 0)), paidSoFar: p.paid_amount || 0, pays: p.payments });
         const pend = closed ? list.filter(p => !p.paid_at && !finPaid) : [];
         const paidSum = closed ? list.reduce((a, p) => a + (p.paid_at || finPaid ? p.amount : Math.min(p.amount, p.paid_amount || 0)), 0) : 0;
         // Pessoas incluídas sem dia marcado (ou sem valor) também aparecem, com R$ 0,00 — tocam para lançar
@@ -1023,6 +1025,7 @@ function scoped(root) {
 }
 // Botões "Copiar" (PIX ou lista) em qualquer tela da Folha de Campo
 function bindCopy(root, signal) {
+  bindPixButtons(root, signal);
   root.addEventListener('click', async e => {
     const b = e.target.closest('[data-copy]');
     if (!b) return;
@@ -1039,10 +1042,12 @@ const payFiles = (pays = []) => {
   const files = pays.flatMap(x => x.files || []);
   return files.length ? html`<span class="fp-files">${files.map((f, i) => html`<a href="/api/field-pay-files/${f.id}" target="_blank" rel="noopener" title="${f.original_name || 'comprovante'}">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${files.length > 1 ? i + 1 : 'comprovante'}</a>`)}</span>` : '';
 };
-const paidTag = (d, lines, pays) => html`<span class="fp-paid">${icon('check')}Pago${d ? ` ${dm(d)}` : ''}${lines ? html` <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>` : ''}${payFiles(pays)}</span>`;
+// Recibo da pessoa com o comprovante do pagamento na página seguinte (um PDF só para enviar)
+const recLink = rec => (rec ? html`<a class="pf-reclink" href="${rec}" title="Recibo com o comprovante do pagamento, num PDF só para enviar à pessoa">${icon('print')}recibo + comprovante</a>` : '');
+const paidTag = (d, lines, pays, rec) => html`<span class="fp-paid">${icon('check')}Pago${d ? ` ${dm(d)}` : ''}${lines ? html` <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>` : ''}${payFiles(pays)}${recLink(rec)}</span>`;
 // paid: undefined = sem ação (folha aberta); lines = lançamentos a marcar; due/paidSoFar = pagamento parcial
-const actCell = (p, { lines, paidAt, canPay, due, paidSoFar = 0, pays } = {}) => html`<span class="fp-copy">${paidAt !== undefined && paidAt !== null ? paidTag(paidAt, lines, pays) : html`${copyOnly(p)}
-  ${paidSoFar > 0.004 ? html`<span class="fp-part">Pago ${money(paidSoFar)} · falta ${money(due)} <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>${payFiles(pays)}</span>` : ''}
+const actCell = (p, { lines, paidAt, canPay, due, paidSoFar = 0, pays, rec } = {}) => html`<span class="fp-copy">${paidAt !== undefined && paidAt !== null ? paidTag(paidAt, lines, pays, rec) : html`${copyOnly(p)}${pixButton({ name: p.name, pix: p.pix, pix_type: p.pix_type, amount: canPay ? due ?? p.amount : Math.max(0, (p.amount || 0) - paidSoFar), description: 'Folha de Campo' })}
+  ${paidSoFar > 0.004 ? html`<span class="fp-part">Pago ${money(paidSoFar)} · falta ${money(due)} <button type="button" class="fp-undo" data-unpay="${lines}">desfazer</button>${payFiles(pays)}${recLink(rec)}</span>` : ''}
   ${canPay ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${lines}" data-who="${p.name}" data-amt="${due ?? p.amount}" data-paid="${paidSoFar}">${icon('check')}${paidSoFar > 0.004 ? 'Pagar restante' : 'Marcar pago'}</button>` : ''}`}</span>`;
 const copyBtn = p => actCell(p);
 const payText = list => list.map(p => `${p.name} — ${money(p.amount)}${p.pix ? ` — PIX ${p.pix_type ? `(${p.pix_type}) ` : ''}${p.pix}` : ' — SEM PIX'}`).join('\n');
@@ -1126,7 +1131,7 @@ export async function paymentsView({ query, navigate, render }) {
   // Lançamento: a pagar (com o já pago, se parcial), pago (com comprovante) ou previsto; abaixo, o histórico dos pagamentos
   const payHist = i => (i.payments?.length ? html`<small class="fp-hist">${i.payments.map(x => html`<span>${dm(x.paid_date)} · ${money(x.amount)}${x.notes ? ` · ${x.notes}` : ''}${payFiles([x])}</span>`)}</small>` : '');
   const stTxt = i => (i.state === 'pending' ? html`<span class="fc-pay">A pagar${i.due_date ? ` ${fmtDate(i.due_date)}` : ''}</span>${i.paid_amount ? html`<span class="fp-part">pago ${money(i.paid_amount)} de ${money(i.total)} <button type="button" class="fp-undo" data-unpay="${i.line}">desfazer</button></span>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-pay="${i.line}" data-who="${i.code}" data-amt="${i.amount}" data-paid="${i.paid_amount || 0}">${i.paid_amount ? 'Pagar restante' : 'Marcar pago'}</button>${payHist(i)}`
-    : i.state === 'paid' ? html`${paidTag(i.paid_at, i.line, i.payments)}${payHist(i)}` : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
+    : i.state === 'paid' ? html`${paidTag(i.paid_at, i.line, i.payments, `#/campo/recibos/${i.sheet_id}?pessoa=${i.line}`)}${payHist(i)}` : html`<span class="fp-prev">Folha aberta (previsto)</span>`);
   return {
     title: 'Pagamentos · Folha de Campo',
     html: html`${pageHead({ eyebrow: 'Folha de Campo', title: 'Pagamentos', sub: 'Quem recebe, quanto e o PIX: o que já foi pago, o que está a pagar e o previsto de cada pessoa, em todas as folhas.',

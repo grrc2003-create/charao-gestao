@@ -4,6 +4,7 @@ import { html, api, icon, avatar, fmtDate, todayISO } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
 import { filesLinks, rejectSheet } from './reimb-ui.js';
+import { pixButton, bindPixButtons, PIX_TYPES } from '../pix.js';
 
 export const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 export const money = v => BRL.format(Number(v) || 0);
@@ -45,13 +46,15 @@ const due = e => Math.max(0, Math.round((e.calc.total - (e.paid_amount || 0)) * 
 const isPaid = e => e.paid_at !== null && e.paid_at !== undefined;
 const payNotes = (pays = []) => pays.filter(p => p.notes).map(p => p.notes).join(' · ');
 // Ações da pessoa: copiar PIX e, com a folha fechada, pagar / pago (com comprovante) / desfazer
-const payActs = (e, closed) => {
+const recLink = (m, e) => html`<a class="pf-reclink" href="#/imprimir/folha/${m.id}?pessoa=${e.id}" title="Recibo com o comprovante do pagamento, num PDF só para enviar à pessoa">${icon('print')}recibo + comprovante</a>`;
+const payActs = (m, e, closed) => {
   const copy = e.pix ? html`<button type="button" class="btn btn-ghost btn-sm" data-copy="${pixKey(e.pix)}" data-copy-msg="PIX de ${e.name} copiado.">Copiar PIX</button>` : '';
-  if (!closed) return html`<span class="fp-copy">${copy}</span>`;
-  if (isPaid(e)) return html`<span class="fp-copy"><span class="fp-paid" title="${payNotes(e.payments)}">${icon('check')}Pago${e.paid_at ? ` ${dm(e.paid_at)}` : ''} <button type="button" class="fp-undo" data-unpay="${e.id}">desfazer</button>${payFiles(e.payments)}</span></span>`;
+  const pixv = amt => pixButton({ name: e.name, pix: e.pix, pix_type: e.pix_type, amount: amt, description: `Folha ${refLabel(m.ref)}` });
+  if (!closed) return html`<span class="fp-copy">${copy}${pixv(e.calc.total)}</span>`;
+  if (isPaid(e)) return html`<span class="fp-copy"><span class="fp-paid" title="${payNotes(e.payments)}">${icon('check')}Pago${e.paid_at ? ` ${dm(e.paid_at)}` : ''} <button type="button" class="fp-undo" data-unpay="${e.id}">desfazer</button>${payFiles(e.payments)}${recLink(m, e)}</span></span>`;
   const part = (e.paid_amount || 0) > 0.004;
-  return html`<span class="fp-copy">${copy}
-    ${part ? html`<span class="fp-part">Pago ${money(e.paid_amount)} · falta ${money(due(e))} <button type="button" class="fp-undo" data-unpay="${e.id}">desfazer</button>${payFiles(e.payments)}</span>` : ''}
+  return html`<span class="fp-copy">${copy}${pixv(due(e))}
+    ${part ? html`<span class="fp-part">Pago ${money(e.paid_amount)} · falta ${money(due(e))} <button type="button" class="fp-undo" data-unpay="${e.id}">desfazer</button>${payFiles(e.payments)}${recLink(m, e)}</span>` : ''}
     <button type="button" class="btn btn-primary btn-sm" data-pay="${e.id}" data-who="${e.name}" data-amt="${due(e)}" data-paid="${e.paid_amount || 0}">${icon('check')}${part ? 'Pagar restante' : 'Marcar pago'}</button></span>`;
 };
 const payBlock = (m, open) => {
@@ -74,7 +77,7 @@ const payBlock = (m, open) => {
         ${e.pix ? html`<span class="fp-pix"><span class="fp-pt">PIX</span><code>${e.pix}</code></span>`
           : html`<span class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX — <a href="#/folha/pessoas/${e.person_id}">completar</a></span></span>`}
         <strong class="fp-num fp-val">${money(e.calc.total)}</strong>
-        ${payActs(e, closed)}</li>`)}
+        ${payActs(m, e, closed)}</li>`)}
       <li class="fp-row fp-foot"><span><b>Total</b>${closed ? html`<small>Pago ${money(paidSum)} · falta ${money(sum - paidSum)}</small>` : ''}</span><span></span><strong class="fp-num fp-val">${money(sum)}</strong>
         <span class="fp-copy">${pend.length > 1 ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${pend.map(e => e.id).join(',')}" data-who="Todos que faltam (${pend.length})" data-amt="${pend.reduce((a, e) => a + due(e), 0)}">${icon('check')}Marcar todos pagos</button>` : ''}</span></li>
     </ul></section>`;
@@ -253,6 +256,7 @@ export async function month({ params, render }) {
       <p class="muted pf-foot">Dias úteis pelo calendário da empresa (feriados de Configurações). VT/VR não contam os dias de férias aprovadas. Home office do mês anterior desconta o VT já adiantado (dias × 2 × passagem).</p>`,
     mount(root) {
       root.querySelectorAll('.pf-paycard [data-copy]').forEach(b => b.addEventListener('click', async () => { await copyText(b.dataset.copy); toast(b.dataset.copyMsg || 'Copiado.'); }));
+      const pc = root.querySelector('.pf-paycard'); if (pc) bindPixButtons(pc);
       root.querySelectorAll('.pf-paycard [data-pay]').forEach(b => b.addEventListener('click', () => askPaid(m, b.dataset.pay.split(',').map(Number), b.dataset.who, Number(b.dataset.amt) || 0, render, Number(b.dataset.paid) || 0)));
       root.querySelectorAll('.pf-paycard [data-unpay]').forEach(b => b.addEventListener('click', async () => {
         if (!(await confirmSheet('Desfazer pagamento', 'Volta a ficar a pagar e os comprovantes desse pagamento são apagados. Se o pagamento já estava baixado no Financeiro, ele volta a pendente.', 'Desfazer', true))) return;
@@ -381,6 +385,7 @@ export async function personForm({ params, navigate }) {
           <div class="field"><label for="pp-e">Término do contrato</label><input type="date" id="pp-e" name="end_date" value="${v.end_date || ''}"></div>
           <div class="field"><label for="pp-cc">Centro de custo</label><input type="text" id="pp-cc" name="cost_center" maxlength="80" value="${v.cost_center || ''}" placeholder="CEC00-100%"></div>
         </div>
+        <div class="field"><label for="pp-pt">Tipo do PIX</label><select id="pp-pt" name="pix_type"><option value="">—</option>${PIX_TYPES.map(t => html`<option ${v.pix_type === t ? 'selected' : ''}>${t}</option>`)}</select><span class="hint">Usado no PIX Copia e Cola com valor.</span></div>
         <div class="field"><label for="pp-p">PIX</label><input type="text" id="pp-p" name="pix" maxlength="120" value="${v.pix || ''}" placeholder="Chave PIX (celular, e-mail, CPF…)"></div>
         <fieldset class="fieldset form pp-sched" ${v.kind === 'profissional' ? 'hidden' : ''}><legend>Escala de benefícios (dias presenciais)</legend>
           <span class="hint">Marque em quais dias a pessoa recebe VT (2 passagens) e VR. O valor do mês = quantidade de cada dia útil do mês × valor.</span>

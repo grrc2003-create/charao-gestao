@@ -1744,6 +1744,12 @@ async function main() {
   const foP3 = (await fo('POST', '/payroll/people', { user_id: 7, kind: 'profissional', monthly_value: 3000, schedule: allVt })).data;
   ok(foP1.id && foP2.company_name.startsWith('Ludimila') && foP3.kind === 'profissional', 'pessoas incluídas na folha (empresa e tipo)');
   ok((await fo('POST', '/payroll/people', { user_id: 6, monthly_value: 1 })).status === 400, 'a mesma pessoa não entra duas vezes');
+  {
+    const t1 = (await fo('PUT', `/payroll/people/${foP2.id}`, { ...foP2, pix: '(51) 90000-0002', pix_type: 'Telefone' })).data;
+    const t2 = (await fo('PUT', `/payroll/people/${foP2.id}`, { ...foP2, pix: '(51) 90000-0002', pix_type: 'Qualquer' })).data;
+    ok(t1.pix_type === 'Telefone' && t2.pix_type === null, 'tipo da chave PIX salvo no cadastro da folha (só tipos válidos)');
+    await fo('PUT', `/payroll/people/${foP2.id}`, { ...foP2 });
+  }
   const foM = (await fo('POST', '/payroll/months', { ref: '2026-10', vt_fare: 5.9, vr_daily: 22 })).data;
   const foE = id => foM.entries.find(e => e.person_id === id);
   // Setembro/2026: 22 dias de seg a sex, menos o feriado de 7/9 = 21. Outubro/2026: 22, menos 12/10 = 21.

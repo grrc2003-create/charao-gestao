@@ -23,6 +23,7 @@ const WEEK = [1, 2, 3, 4, 5];
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const pad = n => String(n).padStart(2, '0');
 
+const PIX_TYPES = ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória'];
 export const canPayroll = user => hasSection(user, 'folha');
 const requirePayroll = ctx => requireSection(ctx.user, 'folha');
 
@@ -91,6 +92,7 @@ function readPerson(body, current = null) {
     regime: str(b.regime, { max: 40, label: 'Regime' }) || 'Mensalista',
     schedule: JSON.stringify(parseSchedule(b.schedule)),
     pix: str(b.pix, { max: 120, label: 'PIX' }),
+    pix_type: PIX_TYPES.includes(b.pix_type) ? b.pix_type : null,
     cost_center: str(b.cost_center, { max: 80, label: 'Centro de custo' }),
     start_date: date(b.start_date, 'Início do contrato'),
     end_date: date(b.end_date, 'Término do contrato'),
@@ -104,8 +106,8 @@ function readPerson(body, current = null) {
 export function createPerson(ctx, body, ip) {
   requirePayroll(ctx);
   const d = readPerson(body);
-  const id = Number(run(`INSERT INTO payroll_people (user_id, company, kind, monthly_value, shift, regime, schedule, pix, cost_center, start_date, end_date, notes, active, created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.user_id, d.company, d.kind, d.monthly_value, d.shift, d.regime, d.schedule, d.pix, d.cost_center, d.start_date, d.end_date, d.notes, d.active, ctx.user.id).lastInsertRowid);
+  const id = Number(run(`INSERT INTO payroll_people (user_id, company, kind, monthly_value, shift, regime, schedule, pix, pix_type, cost_center, start_date, end_date, notes, active, created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, d.user_id, d.company, d.kind, d.monthly_value, d.shift, d.regime, d.schedule, d.pix, d.pix_type, d.cost_center, d.start_date, d.end_date, d.notes, d.active, ctx.user.id).lastInsertRowid);
   audit(ctx.user.id, 'payroll', id, 'Pessoa incluída na folha', { pessoa: one('SELECT name FROM users WHERE id = ?', d.user_id)?.name }, ip);
   return getPerson(ctx, id);
 }
@@ -115,8 +117,8 @@ export function updatePerson(ctx, id, body, ip) {
   const cur = one('SELECT * FROM payroll_people WHERE id = ?', id);
   if (!cur) throw notFound('Pessoa não encontrada na folha.');
   const d = readPerson(body, cur);
-  run(`UPDATE payroll_people SET company=?, kind=?, monthly_value=?, shift=?, regime=?, schedule=?, pix=?, cost_center=?, start_date=?, end_date=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
-    d.company, d.kind, d.monthly_value, d.shift, d.regime, d.schedule, d.pix, d.cost_center, d.start_date, d.end_date, d.notes, d.active, id);
+  run(`UPDATE payroll_people SET company=?, kind=?, monthly_value=?, shift=?, regime=?, schedule=?, pix=?, pix_type=?, cost_center=?, start_date=?, end_date=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
+    d.company, d.kind, d.monthly_value, d.shift, d.regime, d.schedule, d.pix, d.pix_type, d.cost_center, d.start_date, d.end_date, d.notes, d.active, id);
   audit(ctx.user.id, 'payroll', id, 'Cadastro da folha atualizado', { pessoa: one('SELECT name FROM users WHERE id = ?', cur.user_id)?.name }, ip);
   return getPerson(ctx, id);
 }
@@ -163,7 +165,7 @@ export function compute(month, entry, person, requests = []) {
 
 const personSnapshot = p => ({
   name: p.name, job_title: p.job_title, company: p.company, company_name: COMPANIES[p.company]?.name || p.company, kind: p.kind,
-  monthly_value: p.monthly_value, shift: p.shift || p.work_shift || null, regime: p.regime, pix: p.pix, cost_center: p.cost_center, schedule: parseSchedule(p.schedule),
+  monthly_value: p.monthly_value, shift: p.shift || p.work_shift || null, regime: p.regime, pix: p.pix, pix_type: p.pix_type || null, cost_center: p.cost_center, schedule: parseSchedule(p.schedule),
 });
 
 const reqView = r => ({ id: r.id, expense_date: r.expense_date, amount: r.amount, description: r.description, files: r.files });

@@ -2,7 +2,7 @@
 // para assinar que recebeu a quantia. Valor em número e por extenso, referência (diárias/serviço ou empreitada),
 // obra, folha e período, forma de pagamento (PIX), local e data, assinatura com nome e CPF/CNPJ.
 // Opções na barra: data e local do recibo, valor (o que a empresa paga na folha ou o já pago) e quem entra.
-import { html, api, fmtDate, todayISO } from '../core.js';
+import { html, api, fmtDate, todayISO, icon } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -64,14 +64,18 @@ export async function view({ params, query, setQuery, render }) {
   const off = new Set((query.get('sem') || '').split(',').filter(Boolean));
   // Quem recebe na folha: pessoas (diárias) e empreitadas medidas
   const all = [
-    ...s.people.map(e => ({ line: `p${e.id}`, name: e.name, doc: e.doc, pix: e.pix, pix_type: e.pix_type, company: e.company, paid: e.paid_amount || 0,
+    ...s.people.map(e => ({ line: `p${e.id}`, name: e.name, doc: e.doc, pix: e.pix, pix_type: e.pix_type, company: e.company, paid: e.paid_amount || 0, payments: e.payments || [],
       ref: `${n2(e.diarias)} diária(s)${e.role ? ` de ${e.role.toLowerCase()}` : ''}${e.service ? `, serviço "${e.service}"` : ''}` })),
-    ...s.contracts.map(c => ({ line: `c${c.id}`, name: c.worker_name, doc: c.doc, pix: c.pix, pix_type: c.pix_type, company: c.company, paid: c.paid_amount || 0,
+    ...s.contracts.map(c => ({ line: `c${c.id}`, name: c.worker_name, doc: c.doc, pix: c.pix, pix_type: c.pix_type, company: c.company, paid: c.paid_amount || 0, payments: c.payments || [],
       ref: `empreitada "${c.service}" (${n2(c.pct)}% executado nesta folha)` })),
   ].map(x => ({ ...x, amount: modo === 'pago' ? Math.min(x.paid, x.company) : x.company })).filter(x => x.amount > 0.004);
-  const list = all.filter(x => !off.has(x.line));
+  // Recibo de uma pessoa (?pessoa=p12): só ela, com o comprovante do pagamento na página seguinte (desmarcável)
+  const only = query.get('pessoa') || '';
+  const list = only ? all.filter(x => x.line === only) : all.filter(x => !off.has(x.line));
+  const hasProof = list.some(x => x.payments.length);
+  const withProof = hasProof && (only ? query.get('comprovante') !== '0' : query.get('comprovante') === '1');
   const go = over => {
-    const q = { data, local, pag: pagador === COMPANY ? '' : pagador, pagdoc: pagDoc, logo: showLogo ? '' : '0', obs, valor: modo === 'pago' ? 'pago' : '', sem: [...off].join(','), ...over };
+    const q = { data, local, pag: pagador === COMPANY ? '' : pagador, pagdoc: pagDoc, logo: showLogo ? '' : '0', obs, valor: modo === 'pago' ? 'pago' : '', sem: [...off].join(','), pessoa: only, comprovante: query.get('comprovante') || '', ...over };
     try { localStorage.setItem(PREFS, JSON.stringify({ local: q.local, pag: q.pag, pagdoc: q.pagdoc, logo: q.logo, obs: q.obs })); } catch { /* sem armazenamento */ }
     setQuery(q); render();
   };
@@ -89,6 +93,22 @@ export async function view({ params, query, setQuery, render }) {
   </section>`;
   const pages = [];
   for (let i = 0; i < list.length; i += 2) pages.push(list.slice(i, i + 2));
+  const isImg = f => /^image\//.test(f.mime || '');
+  const proofPage = x => {
+    if (!x.payments.length) return '';
+    const files = x.payments.flatMap(p => (p.files || []).map(f => ({ ...f, paid_date: p.paid_date })));
+    const pdfs = files.filter(f => !isImg(f));
+    return html`<article class="doc a4 pd-proof">
+      <header class="pd-proof-head"><h1>Comprovante de pagamento</h1><span>${x.name} · ${s.project.code} · ${s.code} (${periodo})</span></header>
+      <table class="pd-proof-t"><thead><tr><th>Data</th><th>Valor pago</th><th>Observação</th></tr></thead>
+        <tbody>${x.payments.map(p => html`<tr><td>${fmtDate(p.paid_date)}</td><td>${money(p.amount)}</td><td>${p.notes || '—'}</td></tr>`)}</tbody>
+        <tfoot><tr><th>Total pago</th><th>${money(x.payments.reduce((a, p) => a + p.amount, 0))}</th><th>de ${money(x.company)}</th></tr></tfoot></table>
+      ${files.filter(isImg).map(f => html`<figure class="pd-proof-img"><img src="/api/field-pay-files/${f.id}" alt="Comprovante ${f.original_name || ''}"><figcaption>${f.original_name || 'comprovante'} · ${fmtDate(f.paid_date)}</figcaption></figure>`)}
+      ${pdfs.length ? html`<div class="pd-proof-pdf">${icon('file')}<div><b>Comprovante em PDF</b> (não entra na impressão: envie o arquivo junto):
+        ${pdfs.map(f => html`<a href="/api/field-pay-files/${f.id}" target="_blank" rel="noopener">${f.original_name || 'comprovante.pdf'}</a>`)}</div></div>` : ''}
+      ${!files.length ? html`<p class="muted">Pagamento registrado sem arquivo de comprovante.</p>` : ''}
+    </article>`;
+  };
   const extra = html`<details class="fr-opts rc-txt" ${pagador !== COMPANY || pagDoc || !showLogo || obs ? 'open' : ''}><summary>Texto do recibo</summary><div class="fr-optl">
       <label class="pt-opt">Quem paga <input type="text" id="rc-pag" value="${pagador}" maxlength="120" placeholder="${COMPANY}"></label>
       <label class="pt-opt">CPF/CNPJ de quem paga <input type="text" id="rc-pagdoc" value="${pagDoc}" maxlength="30" placeholder="opcional"></label>
@@ -99,12 +119,13 @@ export async function view({ params, query, setQuery, render }) {
     <label class="pt-opt">Data <input type="date" id="rc-data" value="${data}"></label>
     <label class="pt-opt">Local <input type="text" id="rc-local" value="${local}" placeholder="Cidade" maxlength="60"></label>
     <label class="pt-opt">Valor <select id="rc-valor"><option value="">O que a empresa paga na folha</option><option value="pago" ${modo === 'pago' ? 'selected' : ''}>Só o já pago</option></select></label>
-    <details class="fr-opts rc-who"><summary>Quem recebe (${list.length} de ${all.length})</summary><div class="fr-optl">${all.map(x => html`<label class="pt-opt"><input type="checkbox" data-rc="${x.line}" ${off.has(x.line) ? '' : 'checked'}>${x.name} · ${money(x.amount)}</label>`)}</div></details>`;
+    ${hasProof ? html`<label class="pt-opt"><input type="checkbox" id="rc-proof" ${withProof ? 'checked' : ''}>Incluir comprovante de pagamento</label>` : ''}
+    ${only ? html`<a class="btn btn-ghost btn-sm" href="#/campo/recibos/${s.id}">Recibos de todos</a>` : html`<details class="fr-opts rc-who"><summary>Quem recebe (${list.length} de ${all.length})</summary><div class="fr-optl">${all.map(x => html`<label class="pt-opt"><input type="checkbox" data-rc="${x.line}" ${off.has(x.line) ? '' : 'checked'}>${x.name} · ${money(x.amount)}</label>`)}</div></details>`}`;
   return {
     title: `Recibos ${s.project.code} ${s.code}`,
-    html: html`${printToolbar({ back: `#/campo/${s.id}`, title: `Recibos — ${s.project.code} · ${s.code} (${periodo})`, extra })}
+    html: html`${printToolbar({ back: `#/campo/${s.id}`, title: only && list[0] ? `Recibo — ${list[0].name} · ${s.project.code} · ${s.code}` : `Recibos — ${s.project.code} · ${s.code} (${periodo})`, extra })}
     <div class="doc-stage">${pages.length ? pages.map((pg, k) => html`<article class="doc a4 rc-doc">${pg.map((x, j) => html`${j ? html`<div class="rc-cut" aria-hidden="true"><span>✂ recortar</span></div>` : ''}${recibo(x, k * 2 + j)}`)}</article>`)
-      : html`<article class="doc a4 rc-doc"><p class="muted">${all.length ? 'Nenhum profissional escolhido.' : modo === 'pago' ? 'Ninguém com pagamento registrado nesta folha.' : 'Nenhum valor a pagar nesta folha.'}</p></article>`}</div>`,
+      : html`<article class="doc a4 rc-doc"><p class="muted">${all.length ? 'Nenhum profissional escolhido.' : modo === 'pago' ? 'Ninguém com pagamento registrado nesta folha.' : 'Nenhum valor a pagar nesta folha.'}</p></article>`}${withProof ? list.map(proofPage) : ''}</div>`,
     mount(root) {
       bindPrintToolbar(root);
       setPageFooter(`Recibos · ${s.project.code} · ${s.code}`);
@@ -116,6 +137,7 @@ export async function view({ params, query, setQuery, render }) {
       root.querySelector('#rc-obs').addEventListener('change', e => go({ obs: e.target.value.trim() }));
       root.querySelector('#rc-reset')?.addEventListener('click', () => go({ pag: '', pagdoc: '', logo: '', obs: '' }));
       root.querySelector('#rc-valor').addEventListener('change', e => go({ valor: e.target.value }));
+      root.querySelector('#rc-proof')?.addEventListener('change', e => go({ comprovante: e.target.checked ? (only ? '' : '1') : (only ? '0' : '') }));
       root.querySelectorAll('[data-rc]').forEach(c => c.addEventListener('change', () => {
         if (c.checked) off.delete(c.dataset.rc); else off.add(c.dataset.rc);
         go({ sem: [...off].join(',') });

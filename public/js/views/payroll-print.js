@@ -1,5 +1,5 @@
 // Recibos da Folha (A4): um demonstrativo por página, no modelo da planilha, com o logo da empresa da pessoa.
-import { html, api, fmtDate } from '../core.js';
+import { html, api, fmtDate, icon } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { money, refLabel, refLong } from './payroll.js';
 
@@ -80,17 +80,43 @@ function receipt(m, e) {
   </article>`;
 }
 
+// Comprovante(s) do pagamento registrado na folha, na página seguinte ao recibo: sai tudo num PDF só para enviar à pessoa
+const isImg = f => /^image\//.test(f.mime || '');
+function proofPage(m, e) {
+  const pays = e.payments || [];
+  if (!pays.length) return '';
+  const files = pays.flatMap(p => (p.files || []).map(f => ({ ...f, paid_date: p.paid_date })));
+  const pdfs = files.filter(f => !isImg(f));
+  return html`<article class="doc a4 pd-sheet pd-proof">
+    <header class="pd-proof-head"><h1>Comprovante de pagamento</h1><span>${e.name} · Folha ${refLabel(m.ref)}</span></header>
+    <table class="pd-proof-t"><thead><tr><th>Data</th><th>Valor pago</th><th>Observação</th></tr></thead>
+      <tbody>${pays.map(p => html`<tr><td>${d2(p.paid_date)}</td><td>${money(p.amount)}</td><td>${p.notes || '—'}</td></tr>`)}</tbody>
+      <tfoot><tr><th>Total pago</th><th>${money(pays.reduce((a, p) => a + p.amount, 0))}</th><th>de ${money(e.calc.total)}</th></tr></tfoot></table>
+    ${files.filter(isImg).map(f => html`<figure class="pd-proof-img"><img src="/api/payroll-pay-files/${f.id}" alt="Comprovante ${f.original_name || ''}"><figcaption>${f.original_name || 'comprovante'} · ${d2(f.paid_date)}</figcaption></figure>`)}
+    ${pdfs.length ? html`<div class="pd-proof-pdf">${icon('file')}<div><b>Comprovante em PDF</b> (não entra na impressão: envie o arquivo junto):
+      ${pdfs.map(f => html`<a href="/api/payroll-pay-files/${f.id}" target="_blank" rel="noopener">${f.original_name || 'comprovante.pdf'}</a>`)}</div></div>` : ''}
+    ${!files.length ? html`<p class="muted">Pagamento registrado sem arquivo de comprovante.</p>` : ''}
+  </article>`;
+}
+
 export async function view({ params, query }) {
   const m = await api(`/payroll/months/${params.id}`);
   const only = Number(query.get('pessoa')) || null;
   const list = only ? m.entries.filter(e => e.id === only) : m.entries;
   if (!list.length) throw new Error('Nenhum recibo para imprimir.');
   setPageFooter(`Folha ${refLabel(m.ref)} · Demonstrativo de pagamento`);
+  const hasProof = list.some(e => (e.payments || []).length);
+  // Recibo de uma pessoa: o comprovante entra por padrão; recibos de todos: só se pedir (?comprovante=1)
+  const withProof = hasProof && (only ? query.get('comprovante') !== '0' : query.get('comprovante') === '1');
   return {
     title: `Recibos · Folha ${refLabel(m.ref)}`,
-    html: html`${printToolbar({ back: `#/folha/${m.id}`, title: only ? `Recibo · ${list[0].name}` : `Recibos · Folha ${refLabel(m.ref)} (${list.length})` })}
-      <div class="doc-stage pd-stage">${list.map(e => receipt(m, e))}</div>
+    html: html`${printToolbar({ back: `#/folha/${m.id}`, title: only ? `Recibo · ${list[0].name}` : `Recibos · Folha ${refLabel(m.ref)} (${list.length})`,
+        extra: hasProof ? html`<label class="pd-proof-opt"><input type="checkbox" id="pd-proof-on" ${withProof ? 'checked' : ''}>Incluir comprovante de pagamento</label>` : '' })}
+      <div class="doc-stage pd-stage ${withProof ? '' : 'pd-noproof'}" id="pd-stage">${list.map(e => html`${receipt(m, e)}${proofPage(m, e)}`)}</div>
       ${m.status === 'aberta' ? html`<p class="no-print muted" style="text-align:center">Folha aberta: os valores ainda podem mudar até o fechamento.</p>` : ''}`,
-    mount: bindPrintToolbar,
+    mount(root) {
+      bindPrintToolbar(root);
+      root.querySelector('#pd-proof-on')?.addEventListener('change', e => root.querySelector('#pd-stage').classList.toggle('pd-noproof', !e.target.checked));
+    },
   };
 }

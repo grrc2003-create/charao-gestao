@@ -3945,3 +3945,9 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 
 /* Folha (Administrativa): quadro de pagamento com PIX */
 .pf-payhint { margin: 0; }
+.pf-reclink { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--navy); white-space: nowrap; }
+.pf-reclink svg { width: 13px; height: 13px; }
+
+/* PIX Copia e Cola com valor */
+.px-code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; word-break: break-all; background: var(--navy-50); }
+.px-err { color: #A93226; font-weight: 600; }

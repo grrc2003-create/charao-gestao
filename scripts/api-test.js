@@ -1769,6 +1769,31 @@ async function main() {
   const foRe = (await fo('POST', `/payroll/months/${foM.id}/reopen`)).data;
   ok(foRe.status === 'aberta' && !(await fo('GET', '/finance/obligations')).data.some(o => o.title === 'Folha 10/2026 — Camila Rocha') && foRe.entries.find(e => e.person_id === foP1.id).calc.base === 1085.71, 'reabrir remove os pagamentos pendentes e volta a calcular com os dados atuais');
   ok((await fo('POST', '/payroll/months', { ref: '2026-10' })).status === 400, 'uma folha por mês');
+  // Pagamentos registrados na própria folha (valor, data, comprovante), como na Folha de Campo
+  {
+    const pg = (await fo('POST', `/payroll/months/${foM.id}/close`)).data;
+    const pgE = pg.entries.find(e => e.person_id === foP1.id);
+    const pgDue = pgE.calc.total;
+    const pgItem = async () => (await fo('GET', `/finance/obligations/${pgE.obligation_id}`)).data.items[0];
+    ok((await fo('POST', `/payroll/months/${foRe.id}/paid`, { entries: [pgE.id], paid_date: '2099-01-01' })).status === 400, 'pagamento: data futura recusada');
+    let pr = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: [pgE.id], amount: 500, paid_date: '2026-10-05', notes: 'Primeira parte', files: [{ data: tinyPng(), name: 'comprovante.png' }] })).data;
+    let pe = pr.entries.find(e => e.id === pgE.id);
+    ok(pr.partial === 1 && pe.paid_amount === 500 && !pe.paid_at && pe.payments.length === 1 && pe.payments[0].files.length === 1 && (await pgItem()).status !== 'paga', 'pagamento parcial com comprovante: o restante continua a pagar');
+    ok((await fetch(`${BASE}/api/payroll-pay-files/${pe.payments[0].files[0].id}`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } })).status === 200, 'comprovante abre para quem tem a Folha');
+    ok((await prFel('GET', `/payroll-pay-files/${pe.payments[0].files[0].id}`)).status === 403, 'comprovante não abre sem a seção Folha');
+    pr = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: [pgE.id], paid_date: '2026-10-06' })).data;
+    pe = pr.entries.find(e => e.id === pgE.id);
+    ok(pe.paid_at === '2026-10-06' && Math.abs(pe.paid_amount - pgDue) < 0.01 && (await pgItem()).status === 'paga', 'pagar o restante: pessoa paga e o pagamento dela baixado no Financeiro');
+    ok((await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: [pgE.id] })).status === 400, 'não paga duas vezes');
+    ok((await fo('POST', `/payroll/months/${foM.id}/reopen`)).status === 400, 'com pagamentos registrados na folha, ela não reabre');
+    const others = pr.entries.filter(e => e.calc.total > 0 && e.id !== pgE.id);
+    pr = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: others.map(e => e.id), paid_date: '2026-10-06' })).data;
+    ok(pr.entries.filter(e => e.calc.total > 0).every(e => e.paid_at), 'marcar todos pagos de uma vez');
+    pr = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: pr.entries.filter(e => e.calc.total > 0).map(e => e.id), paid: false })).data;
+    ok(pr.entries.every(e => !e.paid_at && !e.paid_amount && !e.payments.length) && (await pgItem()).status === 'pendente', 'desfazer: volta a pagar, apaga os comprovantes e o Financeiro volta a pendente');
+    ok((await fo('POST', `/payroll/months/${foM.id}/reopen`)).data.status === 'aberta', 'sem pagamentos, a folha reabre');
+    ok((await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: [pgE.id] })).status === 400, 'folha aberta: não marca pagamento');
+  }
   // Folha pré-lançada em Tarefas financeiras (valor estimado, corrigido no fechamento)
   const ffOb = (await fo('POST', '/finance/obligations', { title: 'Folha estagiários', category: 'Folha de pagamento', amount: 4000, variable: true, repeat_last: true, frequency: 'mensal', due_day: 5, start_month: '2026-11' })).data;
   const ffObD = (await fo('GET', `/finance/obligations/${ffOb.id || ffOb}`)).data;
@@ -1790,6 +1815,15 @@ async function main() {
   ok((await fo('POST', '/payroll/months', { ref: '2027-03', finance_item_id: ffNov.id })).status === 400 && (await fo('PUT', `/payroll/months/${ffOther.id}`, { finance_item_id: ffNov.id })).status === 400, 'duas folhas não podem usar a mesma folha pré-lançada');
   await fo('DELETE', `/payroll/months/${ffOther.id}`);
   ok(ffClosed.corrected && ffClosed.generated === 0 && ffClosed.entries.every(e => !e.obligation_id) && ffItem.amount_expected === ffClosed.totals.total && ffItem.estimated === 0, 'fechar corrige o valor da folha pré-lançada (sem pagamentos por pessoa)');
+  {
+    const due = ffClosed.entries.filter(e => e.calc.total > 0);
+    let r = (await fo('POST', `/payroll/months/${ffM.id}/paid`, { entries: [due[0].id], paid_date: '2026-11-05' })).data;
+    ok((await fo('GET', `/finance/items/${ffNov.id}`)).data.status !== 'paga', 'folha pré-lançada: com uma pessoa paga, a parcela segue pendente');
+    r = (await fo('POST', `/payroll/months/${ffM.id}/paid`, { entries: due.slice(1).map(e => e.id), paid_date: '2026-11-05' })).data;
+    ok((await fo('GET', `/finance/items/${ffNov.id}`)).data.status === 'paga', 'folha pré-lançada: todos pagos baixa a parcela no Financeiro');
+    r = (await fo('POST', `/payroll/months/${ffM.id}/paid`, { entries: due.map(e => e.id), paid: false })).data;
+    ok((await fo('GET', `/finance/items/${ffNov.id}`)).data.status === 'pendente' && r.entries.every(e => !e.paid_at), 'desfazer volta a parcela pré-lançada a pendente');
+  }
   const ffRe = (await fo('POST', `/payroll/months/${ffM.id}/reopen`)).data;
   const ffItem2 = (await fo('GET', `/finance/items/${ffNov.id}`)).data;
   ok(ffRe.status === 'aberta' && ffItem2.amount_expected === 4200 && ffItem2.estimated === 1, 'reabrir volta a parcela ao valor estimado');

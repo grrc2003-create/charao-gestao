@@ -11,7 +11,8 @@ import { badRequest, notFound, str, date, intOrNull } from '../lib/http.js';
 import { requireSection, hasSection } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { workingDaysList } from './calendar.js';
-import { createObligationInternal, obligationPaid, removeObligationInternal, setItemAmountInternal } from './finance.js';
+import { createObligationInternal, obligationPaid, removeObligationInternal, setItemAmountInternal, payItemInternal, unpayItemInternal } from './finance.js';
+import { saveImageFromDataUrl, cleanFileName, deleteStored } from './files.js';
 import { today } from './metrics.js';
 import { entryReimbursements, pendingReimbursements, releaseByEntries } from './reimbursements.js';
 
@@ -169,7 +170,8 @@ const reqView = r => ({ id: r.id, expense_date: r.expense_date, amount: r.amount
 function entryView(month, e) {
   if (month.status === 'fechada' && e.snapshot) {
     const s = JSON.parse(e.snapshot);
-    return { id: e.id, person_id: e.person_id, ...s.person, calc: s.calc, input: s.input, requests: s.requests || [], reimbursement_note: e.reimbursement_note, notes: e.notes, obligation_id: e.obligation_id };
+    return { id: e.id, person_id: e.person_id, ...s.person, calc: s.calc, input: s.input, requests: s.requests || [], reimbursement_note: e.reimbursement_note, notes: e.notes, obligation_id: e.obligation_id,
+      ...payState(month, e, s.calc?.total || 0) };
   }
   const p = one(`${PERSON_SQL} WHERE p.id = ?`, e.person_id);
   const requests = entryReimbursements(e.id).map(reqView);
@@ -413,6 +415,8 @@ export function reopenMonth(ctx, id, ip) {
   const m = loadMonth(id);
   if (m.status !== 'fechada') throw badRequest('A folha já está aberta.');
   const rows = all('SELECT * FROM payroll_entries WHERE month_id = ?', m.id);
+  if (rows.some(e => e.paid_at) || one('SELECT 1 FROM payroll_payments p JOIN payroll_entries e ON e.id = p.entry_id WHERE e.month_id = ? LIMIT 1', m.id))
+    throw badRequest('Há pagamentos registrados nesta folha. Desfaça os pagamentos antes de reabrir.');
   if (rows.some(e => e.obligation_id && obligationPaid(e.obligation_id))) throw badRequest('Há pagamento registrado no Financeiro para esta folha. Desfaça o pagamento antes de reabrir.');
   const linked = m.finance_item_id ? one('SELECT * FROM finance_items WHERE id = ?', m.finance_item_id) : null;
   if (linked?.status === 'paga') throw badRequest('A folha pré-lançada já foi paga no Financeiro. Desfaça o pagamento antes de reabrir.');
@@ -434,4 +438,113 @@ export function deleteMonth(ctx, id, ip) {
   run('DELETE FROM payroll_months WHERE id = ?', m.id);
   audit(ctx.user.id, 'payroll', m.id, 'Folha excluída', { mes: m.ref }, ip);
   return { ok: true };
+}
+
+// ---------- Pagamentos por pessoa (folha fechada): valor, data, observação e comprovante ----------
+// Como na Folha de Campo. Pessoa paga = soma dos pagamentos cobre o total dela. O Financeiro acompanha:
+//  · um pagamento por pessoa: a parcela da pessoa é baixada quando ela fica paga (e volta a pendente ao desfazer);
+//  · folha pré-lançada (um valor só): baixada quando todos ficam pagos.
+const PAY_EPS = 0.005;
+const itemOfObligation = ob => (ob ? one('SELECT id, status, paid_date FROM finance_items WHERE obligation_id = ? ORDER BY id LIMIT 1', ob) : null);
+const linkedItem = m => (m.finance_item_id ? one('SELECT id, status, paid_date FROM finance_items WHERE id = ?', m.finance_item_id) : null);
+function entryPayments(entryId) {
+  const rows = all(`SELECT p.amount, p.paid_date, p.batch_id, b.notes FROM payroll_payments p JOIN payroll_pay_batches b ON b.id = p.batch_id WHERE p.entry_id = ? ORDER BY p.paid_date, p.id`, entryId);
+  return rows.map(r => ({ batch_id: r.batch_id, amount: r.amount, paid_date: r.paid_date, notes: r.notes,
+    files: all('SELECT id, mime, original_name FROM payroll_pay_files WHERE batch_id = ? ORDER BY id', r.batch_id) }));
+}
+// Situação do pagamento da pessoa: registrado aqui, ou pago direto no Financeiro
+function payState(month, e, total) {
+  if (month.status !== 'fechada') return {};
+  const payments = entryPayments(e.id);
+  const sum = r2(payments.reduce((a, p) => a + p.amount, 0));
+  const fin = e.obligation_id ? itemOfObligation(e.obligation_id) : linkedItem(month);
+  const finPaid = fin?.status === 'paga';
+  const paidAt = e.paid_at || (finPaid && total > PAY_EPS ? fin.paid_date || '' : null);
+  return { paid_at: paidAt, paid_amount: paidAt !== null && !payments.length ? total : sum, payments, fin_paid: finPaid };
+}
+function syncFinance(m, userId, changed) {
+  const rows = all('SELECT * FROM payroll_entries WHERE month_id = ?', m.id);
+  const total = e => (e.snapshot ? JSON.parse(e.snapshot).calc?.total || 0 : 0);
+  const linked = linkedItem(m);
+  if (linked) {
+    const due = rows.filter(e => total(e) > PAY_EPS);
+    const allPaid = due.length && due.every(e => e.paid_at);
+    if (allPaid && linked.status !== 'paga') payItemInternal(linked.id, userId, due.map(e => e.paid_at).sort().pop(), 'todos marcados como pagos na Folha (Administrativa)');
+    if (!allPaid && linked.status === 'paga') unpayItemInternal(linked.id, userId, 'Pagamento desfeito na Folha (Administrativa)');
+    return;
+  }
+  // Só as pessoas alteradas agora: parcelas pagas direto no Financeiro continuam como estão
+  for (const e of rows.filter(x => changed.has(x.id))) {
+    const it = itemOfObligation(e.obligation_id);
+    if (!it) continue;
+    if (e.paid_at && it.status !== 'paga') payItemInternal(it.id, userId, e.paid_at, 'marcado como pago na Folha (Administrativa)');
+    if (!e.paid_at && it.status === 'paga') unpayItemInternal(it.id, userId, 'Pagamento desfeito na Folha (Administrativa)');
+  }
+}
+export function markPaid(ctx, monthId, body, ip) {
+  requirePayroll(ctx);
+  const m = loadMonth(monthId);
+  if (m.status !== 'fechada') throw badRequest('Feche a folha antes de marcar pagamentos (os valores ainda podem mudar).');
+  const b = body || {};
+  const ids = [...new Set((Array.isArray(b.entries) ? b.entries : []).map(Number))];
+  if (!ids.length) throw badRequest('Escolha quem foi pago.');
+  const paid = b.paid !== false;
+  const pd = paid ? date(b.paid_date, 'Data do pagamento') || today() : null;
+  if (pd && pd > today()) throw badRequest('A data do pagamento não pode ser no futuro.');
+  const files = paid && Array.isArray(b.files) ? b.files.slice(0, 10) : [];
+  let partial = 0, total = 0;
+  const names = [];
+  tx(() => {
+    let batch = null;
+    if (paid) {
+      batch = Number(run('INSERT INTO payroll_pay_batches (month_id, paid_date, total, notes, created_by) VALUES (?,?,?,?,?)', m.id, pd, 0, str(b.notes, { max: 500, label: 'Observação do pagamento' }), ctx.user.id).lastInsertRowid);
+      for (const f of files) {
+        const saved = saveImageFromDataUrl(f?.data);
+        run('INSERT INTO payroll_pay_files (batch_id, stored_name, mime, size, original_name, uploaded_by) VALUES (?,?,?,?,?,?)', batch, saved.stored_name, saved.mime, saved.size, cleanFileName(f.name), ctx.user.id);
+      }
+    }
+    const removed = new Set();
+    for (const id of ids) {
+      const e = one('SELECT * FROM payroll_entries WHERE id = ? AND month_id = ?', id, m.id);
+      if (!e) throw notFound('Pessoa não encontrada nesta folha.');
+      const v = entryView(m, e);
+      names.push(v.name);
+      if (!paid) {
+        const fin = e.obligation_id ? itemOfObligation(e.obligation_id) : linkedItem(m);
+        if (!e.paid_at && fin?.status === 'paga' && !e.obligation_id) {
+          // Folha pré-lançada paga direto no Financeiro: desfazer um vale para a folha toda (os demais ficam marcados como pagos)
+          run('UPDATE payroll_entries SET paid_at = ?, paid_by = ? WHERE month_id = ? AND paid_at IS NULL AND id <> ?', fin.paid_date || today(), ctx.user.id, m.id, e.id);
+        }
+        for (const r of all('SELECT DISTINCT batch_id FROM payroll_payments WHERE entry_id = ?', e.id)) removed.add(r.batch_id);
+        run('DELETE FROM payroll_payments WHERE entry_id = ?', e.id);
+        run('UPDATE payroll_entries SET paid_at = NULL, paid_by = NULL WHERE id = ?', e.id);
+        if (e.obligation_id && fin?.status === 'paga') unpayItemInternal(fin.id, ctx.user.id, 'Pagamento desfeito na Folha (Administrativa)');
+      } else {
+        const due = r2(Math.max(0, v.calc.total) - (v.paid_amount || 0));
+        if (due <= PAY_EPS && v.paid_at !== null && v.paid_at !== undefined) throw badRequest(`${v.name} já está pago(a) nesta folha.`);
+        const amount = ids.length === 1 && b.amount !== undefined && b.amount !== '' ? Number(String(b.amount).replace(',', '.')) : due;
+        if (!Number.isFinite(amount) || !(amount > 0) || amount > 1e9) throw badRequest('Informe o valor pago.');
+        run('INSERT INTO payroll_payments (batch_id, entry_id, amount, paid_date, created_by) VALUES (?,?,?,?,?)', batch, e.id, r2(amount), pd, ctx.user.id);
+        total = r2(total + amount);
+        if (amount + PAY_EPS >= due) run('UPDATE payroll_entries SET paid_at = ?, paid_by = ? WHERE id = ?', pd, ctx.user.id, e.id);
+        else partial++;
+      }
+    }
+    if (batch) run('UPDATE payroll_pay_batches SET total = ? WHERE id = ?', total, batch);
+    for (const id of removed) {
+      if (one('SELECT 1 FROM payroll_payments WHERE batch_id = ?', id)) continue;
+      for (const f of all('SELECT stored_name FROM payroll_pay_files WHERE batch_id = ?', id)) deleteStored(f.stored_name);
+      run('DELETE FROM payroll_pay_batches WHERE id = ?', id);
+    }
+    syncFinance(m, ctx.user.id, new Set(ids));
+  });
+  audit(ctx.user.id, 'payroll', m.id, paid ? (partial ? 'Pagamento parcial registrado (Folha)' : 'Pagamento marcado (Folha)') : 'Pagamento desfeito (Folha)',
+    { mes: m.ref, pessoas: names, data: pd || undefined, valor: paid ? total : undefined, comprovantes: files.length || undefined }, ip);
+  return { ...getMonth(ctx, m.id), partial, paid_total: total };
+}
+export function payFileForUser(ctx, fileId) {
+  requirePayroll(ctx);
+  const f = one('SELECT * FROM payroll_pay_files WHERE id = ?', fileId);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  return f;
 }

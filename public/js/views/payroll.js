@@ -1,7 +1,7 @@
 // Folha (Administrativa): folhas do mês, pessoas da folha, lançamentos (faltas, home office, diferenças, reembolso),
 // fechamento (gera os pagamentos no Financeiro) e recibos.
-import { html, api, icon, avatar, fmtDate } from '../core.js';
-import { toast, sheet, confirmSheet } from '../ui.js';
+import { html, api, icon, avatar, fmtDate, todayISO } from '../core.js';
+import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
 import { filesLinks, rejectSheet } from './reimb-ui.js';
 
@@ -36,25 +36,87 @@ async function copyText(text) {
 // Só a chave (sem anotações como "(CPF)" ou "(celular)"), pronta para colar no app do banco
 const pixKey = v => String(v || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || String(v || '').trim();
 const payText = list => list.map(e => `${e.name} — ${money(e.calc.total)}${e.pix ? ` — PIX ${e.pix}` : ' — SEM PIX'}`).join('\n');
+// Comprovantes dos pagamentos registrados (links pequenos)
+const payFiles = (pays = []) => {
+  const files = pays.flatMap(x => x.files || []);
+  return files.length ? html`<span class="fp-files">${files.map((f, i) => html`<a href="/api/payroll-pay-files/${f.id}" target="_blank" rel="noopener" title="${f.original_name || 'comprovante'}">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${files.length > 1 ? i + 1 : 'comprovante'}</a>`)}</span>` : '';
+};
+const due = e => Math.max(0, Math.round((e.calc.total - (e.paid_amount || 0)) * 100) / 100);
+const isPaid = e => e.paid_at !== null && e.paid_at !== undefined;
+const payNotes = (pays = []) => pays.filter(p => p.notes).map(p => p.notes).join(' · ');
+// Ações da pessoa: copiar PIX e, com a folha fechada, pagar / pago (com comprovante) / desfazer
+const payActs = (e, closed) => {
+  const copy = e.pix ? html`<button type="button" class="btn btn-ghost btn-sm" data-copy="${pixKey(e.pix)}" data-copy-msg="PIX de ${e.name} copiado.">Copiar PIX</button>` : '';
+  if (!closed) return html`<span class="fp-copy">${copy}</span>`;
+  if (isPaid(e)) return html`<span class="fp-copy"><span class="fp-paid" title="${payNotes(e.payments)}">${icon('check')}Pago${e.paid_at ? ` ${dm(e.paid_at)}` : ''} <button type="button" class="fp-undo" data-unpay="${e.id}">desfazer</button>${payFiles(e.payments)}</span></span>`;
+  const part = (e.paid_amount || 0) > 0.004;
+  return html`<span class="fp-copy">${copy}
+    ${part ? html`<span class="fp-part">Pago ${money(e.paid_amount)} · falta ${money(due(e))} <button type="button" class="fp-undo" data-unpay="${e.id}">desfazer</button>${payFiles(e.payments)}</span>` : ''}
+    <button type="button" class="btn btn-primary btn-sm" data-pay="${e.id}" data-who="${e.name}" data-amt="${due(e)}" data-paid="${e.paid_amount || 0}">${icon('check')}${part ? 'Pagar restante' : 'Marcar pago'}</button></span>`;
+};
 const payBlock = (m, open) => {
   const list = m.entries.filter(e => e.calc.total > 0.004);
   if (!list.length) return '';
+  const closed = !open;
   const sum = list.reduce((a, e) => a + e.calc.total, 0);
   const noPix = list.filter(e => !e.pix).length;
+  const pend = closed ? list.filter(e => !isPaid(e)) : [];
+  const paidSum = closed ? list.reduce((a, e) => a + (isPaid(e) ? e.calc.total : Math.min(e.calc.total, e.paid_amount || 0)), 0) : 0;
+  const hint = [open ? 'Os valores ainda podem mudar: feche a folha para marcar os pagamentos e anexar os comprovantes.' : '',
+    noPix ? `${noPix === 1 ? '1 pessoa está' : `${noPix} pessoas estão`} sem PIX no cadastro da folha.` : ''].filter(Boolean).join(' ');
   return html`<section class="card section fp-card pf-paycard"><div class="card-head"><h2>${icon('wallet')}${open ? 'A pagar nesta folha' : 'Pagamentos desta folha'}</h2>
       <span class="fp-tot">${list.length} · ${money(sum)}</span>
-      <button type="button" class="btn btn-ghost btn-sm" data-copy="${payText(list)}" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista</button></div>
-    ${open || noPix ? html`<p class="fp-hint pf-payhint">${icon('info')}${[open ? 'Os valores ainda podem mudar até o fechamento.' : '', noPix ? `${noPix === 1 ? '1 pessoa está' : `${noPix} pessoas estão`} sem PIX no cadastro da folha.` : ''].filter(Boolean).join(' ')}</p>` : ''}
+      <button type="button" class="btn btn-ghost btn-sm" data-copy="${payText(closed ? (pend.length ? pend : list) : list)}" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}${closed && pend.length && pend.length < list.length ? 'Copiar lista a pagar' : 'Copiar lista'}</button></div>
+    ${hint ? html`<p class="fp-hint pf-payhint">${icon('info')}${hint}</p>` : ''}
     <ul class="fp-list">
       <li class="fp-row fp-head"><span>Quem recebe</span><span>PIX</span><span class="fp-num">Valor</span><span></span></li>
-      ${list.map(e => html`<li class="fp-row"><span class="fp-who"><b>${e.name}</b><small>${[e.job_title, e.company_name].filter(Boolean).join(' · ')}</small></span>
+      ${list.map(e => html`<li class="fp-row ${closed && isPaid(e) ? 'fp-isPaid' : ''}"><span class="fp-who"><b>${e.name}</b><small>${[e.job_title, e.company_name].filter(Boolean).join(' · ')}</small></span>
         ${e.pix ? html`<span class="fp-pix"><span class="fp-pt">PIX</span><code>${e.pix}</code></span>`
           : html`<span class="fp-pix fp-nopix">${icon('alert')}<span>Sem PIX — <a href="#/folha/pessoas/${e.person_id}">completar</a></span></span>`}
         <strong class="fp-num fp-val">${money(e.calc.total)}</strong>
-        <span class="fp-copy">${e.pix ? html`<button type="button" class="btn btn-ghost btn-sm" data-copy="${pixKey(e.pix)}" data-copy-msg="PIX de ${e.name} copiado.">Copiar PIX</button>` : ''}</span></li>`)}
-      <li class="fp-row fp-foot"><span><b>Total</b></span><span></span><strong class="fp-num fp-val">${money(sum)}</strong><span></span></li>
+        ${payActs(e, closed)}</li>`)}
+      <li class="fp-row fp-foot"><span><b>Total</b>${closed ? html`<small>Pago ${money(paidSum)} · falta ${money(sum - paidSum)}</small>` : ''}</span><span></span><strong class="fp-num fp-val">${money(sum)}</strong>
+        <span class="fp-copy">${pend.length > 1 ? html`<button type="button" class="btn btn-primary btn-sm" data-pay="${pend.map(e => e.id).join(',')}" data-who="Todos que faltam (${pend.length})" data-amt="${pend.reduce((a, e) => a + due(e), 0)}">${icon('check')}Marcar todos pagos</button>` : ''}</span></li>
     </ul></section>`;
 };
+// Registrar pagamento: valor (uma pessoa: pode ser parcial), data, observação e comprovante (foto ou PDF)
+async function askPaid(m, ids, who, dueAmt, done, paidSoFar = 0) {
+  const single = ids.length === 1;
+  const num = v => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+  const p = sheet({
+    title: paidSoFar > 0.004 ? 'Pagar o restante' : 'Registrar pagamento',
+    body: html`<p class="muted" style="margin-top:0"><b>${who}</b> · ${single ? (paidSoFar > 0.004 ? `falta ${money(dueAmt)} (já pago ${money(paidSoFar)})` : `a pagar ${money(dueAmt)}`) : `total ${money(dueAmt)}`}</p>
+      ${single ? html`<div class="field"><label class="req" for="mp-v">Quanto pagou</label><input type="number" step="0.01" min="0.01" id="mp-v" name="amount" required value="${(Math.round(dueAmt * 100) / 100).toFixed(2)}"></div>
+        <div class="fm-live" id="mp-live"></div>`
+        : html`<p class="hint">Cada um recebe o valor que falta. Para pagar parte de alguém, use o botão da própria pessoa.</p>`}
+      <div class="field"><label class="req" for="mp-d">Data do pagamento</label><input type="date" id="mp-d" name="paid_date" required value="${todayISO()}" max="${todayISO()}"></div>
+      <div class="field"><label for="mp-n">Observação</label><input type="text" id="mp-n" name="notes" maxlength="500" placeholder="Ex.: PIX enviado pelo banco da empresa"></div>
+      <div class="field"><label for="mp-f">Comprovante (foto ou PDF, opcional)</label><input type="file" id="mp-f" accept="image/*,application/pdf,.pdf" multiple></div>
+      <span class="hint">${m.finance_item ? 'Quando todos da folha estiverem pagos, a folha pré-lançada é baixada no Financeiro automaticamente.' : 'O pagamento da pessoa no Financeiro é baixado automaticamente quando ela fica paga.'}</span>`,
+    submitLabel: 'Registrar pagamento',
+    async onSubmit(f, form) {
+      const files = await readAttachments(form.querySelector('#mp-f').files || []);
+      const body = { entries: ids, paid: true, paid_date: f.paid_date, notes: f.notes, files };
+      if (single) {
+        const v = num(f.amount);
+        if (!(v > 0)) throw new Error('Informe quanto pagou.');
+        body.amount = v;
+      }
+      return api(`/payroll/months/${m.id}/paid`, { method: 'POST', body });
+    },
+  });
+  // Mostra na hora se o pagamento é parcial (o restante segue a pagar) ou se passou do valor
+  const v = document.getElementById('mp-v'), live = document.getElementById('mp-live');
+  const upd = () => {
+    if (!live) return;
+    const x = num(v.value), rest = Math.round((dueAmt - x) * 100) / 100;
+    live.innerHTML = (rest > 0.004 ? html`<span>Pagamento <b>parcial</b>: continua a pagar <b>${money(rest)}</b></span>`
+      : rest < -0.004 ? html`<span class="fc-warn">Pagou <b>${money(-rest)}</b> a mais do que o valor a pagar</span>` : html`<span>Quita o valor a pagar</span>`).toString();
+  };
+  v?.addEventListener('input', upd); upd();
+  const r = await p;
+  if (r) { toast(r.partial ? 'Pagamento parcial registrado. O restante continua a pagar.' : 'Pagamento registrado.'); done(); }
+}
 
 // ---------- Folhas ----------
 export async function list({ navigate, render }) {
@@ -191,6 +253,11 @@ export async function month({ params, render }) {
       <p class="muted pf-foot">Dias úteis pelo calendário da empresa (feriados de Configurações). VT/VR não contam os dias de férias aprovadas. Home office do mês anterior desconta o VT já adiantado (dias × 2 × passagem).</p>`,
     mount(root) {
       root.querySelectorAll('.pf-paycard [data-copy]').forEach(b => b.addEventListener('click', async () => { await copyText(b.dataset.copy); toast(b.dataset.copyMsg || 'Copiado.'); }));
+      root.querySelectorAll('.pf-paycard [data-pay]').forEach(b => b.addEventListener('click', () => askPaid(m, b.dataset.pay.split(',').map(Number), b.dataset.who, Number(b.dataset.amt) || 0, render, Number(b.dataset.paid) || 0)));
+      root.querySelectorAll('.pf-paycard [data-unpay]').forEach(b => b.addEventListener('click', async () => {
+        if (!(await confirmSheet('Desfazer pagamento', 'Volta a ficar a pagar e os comprovantes desse pagamento são apagados. Se o pagamento já estava baixado no Financeiro, ele volta a pendente.', 'Desfazer', true))) return;
+        try { await api(`/payroll/months/${m.id}/paid`, { method: 'POST', body: { entries: [Number(b.dataset.unpay)], paid: false } }); toast('Pagamento desfeito.'); render(); } catch (ex) { toast(ex.message, 'error'); }
+      }));
       root.querySelector('#pf-params')?.addEventListener('submit', async e => {
         e.preventDefault();
         try { await api(`/payroll/months/${m.id}`, { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast('Parâmetros salvos e valores recalculados.'); render(); } catch (ex) { toast(ex.message, 'error'); }
@@ -216,7 +283,7 @@ export async function month({ params, render }) {
         try { const r = await api(`/payroll/months/${m.id}/close`, { method: 'POST' }); toast(r.corrected ? 'Folha fechada. Valor corrigido no Financeiro.' : `Folha fechada. ${r.generated} pagamento(s) gerado(s).`); render(); } catch (ex) { toast(ex.message, 'error'); }
       });
       root.querySelector('[data-reopen]')?.addEventListener('click', async () => {
-        if (!(await confirmSheet('Reabrir a folha', m.finance_item ? 'A folha pré-lançada no Financeiro volta ao valor estimado e será corrigida de novo no próximo fechamento. Se já foi paga, desfaça o pagamento antes.' : 'Os pagamentos pendentes gerados por esta folha serão removidos do Financeiro e voltarão a ser gerados no próximo fechamento. Se algum já foi pago, desfaça o pagamento antes.', 'Reabrir', true))) return;
+        if (!(await confirmSheet('Reabrir a folha', m.finance_item ? 'A folha pré-lançada no Financeiro volta ao valor estimado e será corrigida de novo no próximo fechamento. Se já foi paga, desfaça o pagamento antes.' : 'Os pagamentos pendentes gerados por esta folha serão removidos do Financeiro e voltarão a ser gerados no próximo fechamento. Se algum já foi pago (aqui ou no Financeiro), desfaça o pagamento antes.', 'Reabrir', true))) return;
         try { await api(`/payroll/months/${m.id}/reopen`, { method: 'POST' }); toast('Folha reaberta.'); render(); } catch (ex) { toast(ex.message, 'error'); }
       });
     },

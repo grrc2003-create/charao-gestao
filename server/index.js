@@ -374,6 +374,8 @@ api.delete('/api/payroll/months/:id', (req, res, { ctx, params }) => send(res, 2
 api.post('/api/payroll/months/:id/people', (req, res, { ctx, params, body }) => send(res, 200, Payroll.addPeopleToMonth(ctx, intOrNull(params.id), body)));
 api.post('/api/payroll/months/:id/close', (req, res, { ctx, params }) => send(res, 200, Payroll.closeMonth(ctx, intOrNull(params.id), clientIp(req))));
 api.post('/api/payroll/months/:id/reopen', (req, res, { ctx, params }) => send(res, 200, Payroll.reopenMonth(ctx, intOrNull(params.id), clientIp(req))));
+api.post('/api/payroll/months/:id/paid', (req, res, { ctx, params, body }) => send(res, 200, Payroll.markPaid(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/payroll-pay-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Payroll.payFileForUser(ctx, intOrNull(params.id))));
 api.put('/api/payroll/entries/:id', (req, res, { ctx, params, body }) => send(res, 200, Payroll.updateEntry(ctx, intOrNull(params.id), body, clientIp(req))));
 api.delete('/api/payroll/entries/:id', (req, res, { ctx, params }) => send(res, 200, Payroll.removeEntry(ctx, intOrNull(params.id))));
 // ---------- Reembolsos (Meu painel → Folha) ----------

@@ -13,6 +13,20 @@ const pct = (n, t) => (t ? Math.round((n / t) * 100) : 0);
 const bar = (o, total) => html`<div class="qt-bar" role="img" aria-label="${BUCKETS.map(([k, l]) => `${l}: ${o[k]}`).join(', ')}">${BUCKETS.map(([k, , c]) => (o[k] ? html`<span class="${c}" style="width:${pct(o[k], total)}%"></span>` : ''))}</div>`;
 const legend = html`<div class="qt-leg">${BUCKETS.map(([, l, c]) => html`<span><i class="${c}"></i>${l === '3 ou mais' ? '3+' : l === 'Nenhuma' ? 'nenhuma' : l.split(' ')[0]}</span>`)}</div>`;
 
+// Indicador de cotações (fileira de indicadores do projeto): situação, faixas de propostas e solicitações
+export function quotesKpi(s) {
+  if (!s?.items) return { value: 'Não iniciada', foot: html`<div class="qk-st qk-none">Nenhum item cadastrado</div><div class="qk-l">Toque para cadastrar os itens ou importar a planilha</div>` };
+  const b = s.buckets, rq = s.requests;
+  const falta = s.items - b.tres;
+  const st = !falta ? ['qk-ok', 'Meta atingida em todos os itens'] : !rq.total ? ['qk-none', 'Sem solicitações enviadas'] : rq.vencida || s.no_request ? ['qk-warn', `Em andamento · faltam ${falta} ${falta === 1 ? 'item' : 'itens'}`] : ['qk-run', `Em andamento · faltam ${falta} ${falta === 1 ? 'item' : 'itens'}`];
+  return {
+    value: html`${b.tres}<small> de ${s.items} ${s.items === 1 ? 'item' : 'itens'} com 3+</small>`,
+    foot: html`<div class="qk-st ${st[0]}">${st[1]}</div>${bar(b, s.items)}
+      <div class="qk-l qk-leg">${BUCKETS.map(([k, l, c]) => html`<span><i class="${c}"></i>${l === '3 ou mais' ? '3+' : l === 'Nenhuma' ? 'sem' : l.split(' ')[0]} <b>${b[k]}</b></span>`)}</div>
+      <div class="qk-l">${rq.total} solicitaç${rq.total === 1 ? 'ão' : 'ões'} · ${rq.recebida} recebida(s) · ${rq.enviada} aguardando${rq.vencida ? html` · <b class="qk-late">${rq.vencida} vencida(s)</b>` : ''}${s.no_request ? html` · <b class="qk-late">${s.no_request} item(ns) sem solicitação</b>` : ''}</div>`,
+  };
+}
+
 // Card de status (tela do projeto e topo do mapa)
 export function quotesCard(s, projectId, { link = true } = {}) {
   if (!s) return '';

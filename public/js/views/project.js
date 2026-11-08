@@ -1,5 +1,5 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
-import { quotesCard } from './quotes.js';
+import { quotesCard, quotesKpi } from './quotes.js';
 import { evaluateAlerts, alertMap, alertsBanner, alertsSheet } from './project-alerts.js';
 import { fold, bindFolds, pageHead, kpi, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
@@ -68,8 +68,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
             : html`<p class="muted" style="margin:6px 0 0;font-size:12.5px">${p.schedule.rescheduled_tasks ? `${p.schedule.rescheduled_tasks} tarefa(s) reagendada(s), sem mudar o fim do projeto.` : 'Nenhum reagendamento mudou o fim do projeto.'}</p>`}</div></section>` : ''}
       ${alertsBanner(alerts, alertConf, alertConf?.can_edit)}
       ${kpiBlock(p.summary, { alerts: alertsBy })}
-      ${execKpis(p.summary, { alerts: alertsBy, extra: qOk ? kpi({ alert: qWorst, label: 'Cotações com 3+ propostas', value: qPct === null ? '—' : `${qPct}%`, href: `#/projetos/${p.id}/cotacoes`, color: '#3B6D11',
-        foot: quotes.items ? `${quotes.buckets.tres} de ${quotes.items} itens · ${quotes.buckets.nenhuma} sem proposta${quotes.requests.vencida ? ` · ${quotes.requests.vencida} solicitação(ões) vencida(s)` : ''}` : 'nenhum item cadastrado ainda' }) : '' })}
+      ${execKpis(p.summary, { alerts: alertsBy, extra: qOk ? kpi({ alert: qWorst, label: `Cotações${qPct === null ? '' : ` · ${qPct}% com 3+ propostas`}`, ...quotesKpi(quotes), href: `#/projetos/${p.id}/cotacoes`, color: '#3B6D11' }) : '' })}
       ${qOk ? quotesCard(quotes, p.id) : ''}
       ${recs ? fold('registros', rs ? `${plural(rs.total, 'registro', 'registros')} · ${plural(rs.vigentes, 'definição vigente', 'definições vigentes')}${rs.open ? ` · ${plural(rs.open, 'pendência', 'pendências')}` : ''}` : '', rs?.late ? `${plural(rs.late, 'pendência atrasada', 'pendências atrasadas')}` : '', recordsCard(recs)) : ''}
       ${fold('checklists', `${plural(clOpen.length, 'check-list em andamento', 'check-lists em andamento')} · ${(p.checklists || []).length - clOpen.length} concluído(s)`, [clNc ? `${clNc} NC em aberto` : '', clLate ? `${plural(clLate, 'atrasado', 'atrasados')}` : ''].filter(Boolean).join(' · '), checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` }))}

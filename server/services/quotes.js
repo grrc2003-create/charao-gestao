@@ -403,7 +403,8 @@ export function importApply(ctx, projectId, body, ip) {
 const SIT = (o, r) => (o.price !== null ? 'RECEBIDO' : o.status === 'declinou' ? 'DECLINOU' : o.status === 'recebida' ? 'SEM PREÇO NO ITEM' : r.overdue ? 'ENVIADO (PRAZO VENCIDO)' : 'ENVIADO');
 export function mapData(ctx, projectId) {
   const d = projectQuotes(ctx, projectId);
-  const p = one('SELECT code, name, client, location FROM projects WHERE id = ?', d.project.id);
+  const p = one('SELECT code, name, client, location, municipio, uf FROM projects WHERE id = ?', d.project.id);
+  p.address = [p.location, p.municipio && p.uf ? `${p.municipio}/${p.uf}` : p.uf].filter(Boolean).join(' · ');
   const reqById = new Map(d.requests.map(r => [r.id, r]));
   const disciplines = [...new Set(d.items.map(i => i.discipline))].map(name => {
     const items = d.items.filter(i => i.discipline === name).map(it => {
@@ -412,7 +413,7 @@ export function mapData(ctx, projectId) {
         const r = reqById.get(o.request_id);
         const files = r.files.filter(f => f.kind === 'proposta').map(f => f.original_name || 'proposta').join(', ');
         return { name: o.supplier_name, cnpj: r.supplier_cnpj, phone: r.supplier_phone, file: files, obs: [r.conditions, r.valid_until ? `validade ${fmtD(r.valid_until)}` : ''].filter(Boolean).join(' · '),
-          address: r.supplier_address, status: SIT(o, r), sent: o.sent_date, received: o.price !== null ? r.received_date : null, price: o.price, revision: o.revision };
+          address: r.supplier_address, status: SIT(o, r), situation: `${SIT(o, r)}${o.price !== null && r.received_date ? ` ${fmtD(r.received_date)}` : SIT(o, r) === 'ENVIADO' && o.sent_date ? ` ${fmtD(o.sent_date)}` : ''}`, sent: o.sent_date, received: o.price !== null ? r.received_date : null, price: o.price, revision: o.revision };
       });
       return { ...it, offers };
     });
@@ -421,40 +422,61 @@ export function mapData(ctx, projectId) {
   });
   return { project: p, today: today(), target: TARGET, summary: d.summary, disciplines };
 }
-const ROWS = [['NOME', 'name'], ['CNPJ', 'cnpj'], ['TELEFONE', 'phone'], ['NOME DO ARQUIVO', 'file'], ['OBSERVAÇÃO', 'obs'], ['ENDEREÇO', 'address'], ['SOLICITAÇÃO DE PREÇO', 'status'], ['DATA DE ENVIO', 'sent'], ['DATA DE RECEBIMENTO', 'received']];
+// Bloco de cada item, igual ao mapa original: PREÇO + 7 linhas de dados do fornecedor
+const ROWS = [['NOME', 'name'], ['CNPJ', 'cnpj'], ['TELEFONE', 'phone'], ['NOME DO ARQUIVO', 'file'], ['OBSERVAÇÃO', 'obs'], ['ENDEREÇO', 'address'], ['SOLICITAÇÃO DE PREÇO', 'situation']];
 const colL = i => { let s = ''; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
 const sheetName = (n, used) => { let b = String(n).replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 28) || 'Disciplina'; let k = b, i = 2; while (used.has(k.toUpperCase())) k = `${b.slice(0, 25)} ${i++}`; used.add(k.toUpperCase()); return k; };
+// Cabeçalho do documento (linhas 1–9): título grande à esquerda; à direita a faixa azul com o projeto, cliente, endereço e data
+function docHead(m, title, nCols, rightCols = 3) {
+  const rows = Array.from({ length: 9 }, () => Array(nCols).fill(null));
+  const R = nCols - rightCols;
+  rows[0][0] = { v: title, s: 12 };
+  const right = [[{ v: `${m.project.code} · ${m.project.name}`.toUpperCase(), s: 13 }], [{ v: 'Cliente:', s: 15 }], [{ v: m.project.client || '—', s: 14 }],
+    [{ v: 'Endereço:', s: 15 }], [{ v: m.project.address || '—', s: 14 }], [{ v: 'Data do documento:', s: 15 }], [{ v: fmtD(m.today), s: 14 }]];
+  right.forEach(([c], i) => { rows[i + 1][R] = c; if (c.s === 13) for (let k = R + 1; k < nCols; k++) rows[i + 1][k] = { v: null, s: 13 }; });
+  const merges = [`A1:${colL(R - 1)}9`, ...right.map((_, i) => `${colL(R)}${i + 2}:${colL(nCols - 1)}${i + 2}`)];
+  return { rows, merges, heights: { 1: 20 } };
+}
 export function exportXlsx(ctx, projectId) {
   const m = mapData(ctx, projectId);
   const used = new Set(['RESUMO']);
-  const head = [`${m.project.code} · ${m.project.name}`, m.project.client ? `Cliente: ${m.project.client}` : null, `Data do documento: ${fmtD(m.today)}`];
-  const resumo = { name: 'Resumo', widths: [34, 10, 12, 12, 12, 14, 16], rowStyles: { 0: 4, 5: 1 }, rows: [
-    ['MAPA DE COTAÇÕES — RESUMO'], ...head.filter(Boolean).map(t => [t]), [],
-    ['DISCIPLINA', 'ITENS', '3 OU MAIS', '2 PROPOSTAS', '1 PROPOSTA', 'NENHUMA', 'SEM SOLICITAÇÃO'],
-    ...m.disciplines.map(x => [x.name, x.items.length, x.summary.buckets.tres, x.summary.buckets.dois, x.summary.buckets.um, x.summary.buckets.nenhuma, x.summary.no_request]),
-    [{ v: 'TOTAL', s: 5 }, { v: m.summary.items, s: 5 }, { v: m.summary.buckets.tres, s: 5 }, { v: m.summary.buckets.dois, s: 5 }, { v: m.summary.buckets.um, s: 5 }, { v: m.summary.buckets.nenhuma, s: 5 }, { v: m.summary.no_request, s: 5 }],
-    [], [`Meta: ${m.target} propostas por item · solicitações: ${m.summary.requests.total} enviadas, ${m.summary.requests.recebida} recebidas, ${m.summary.requests.enviada} aguardando (${m.summary.requests.vencida} com prazo vencido), ${m.summary.requests.declinou} declinaram`],
-  ] };
-  // ajusta a linha do cabeçalho da tabela do resumo (depende de quantas linhas de cabeçalho houve)
-  resumo.rowStyles = { 0: 4, [head.filter(Boolean).length + 2]: 1 };
+  const S = m.summary;
+  const pf = (n, t) => (t ? Math.round((n / t) * 1000) / 1000 : null);
+  // Resumo no mesmo visual
+  const rh = docHead(m, 'MAPA DE COTAÇÕES — RESUMO', 8);
+  const resumo = { name: 'Resumo', widths: [30, 10, 13, 13, 13, 13, 16, 16], gridlines: false, landscape: true, merges: rh.merges, heights: rh.heights,
+    rows: [...rh.rows,
+      ['DISCIPLINA', 'ITENS', '3 OU MAIS', '2 PROPOSTAS', '1 PROPOSTA', 'NENHUMA', 'SEM SOLICITAÇÃO', '% COM 3 OU MAIS'].map(v => ({ v, s: 16 })),
+      ...m.disciplines.map(x => [{ v: x.name, s: 24 }, ...[x.items.length, x.summary.buckets.tres, x.summary.buckets.dois, x.summary.buckets.um, x.summary.buckets.nenhuma, x.summary.no_request].map(v => ({ v, s: 22 })), { v: pf(x.summary.buckets.tres, x.items.length), s: 25 }]),
+      ['TOTAL', S.items, S.buckets.tres, S.buckets.dois, S.buckets.um, S.buckets.nenhuma, S.no_request].map(v => ({ v, s: 23 })).concat({ v: pf(S.buckets.tres, S.items), s: 26 }),
+      [], [{ v: `Meta: ${m.target} propostas por item · solicitações: ${S.requests.total} enviadas, ${S.requests.recebida} recebidas, ${S.requests.enviada} aguardando (${S.requests.vencida} com prazo vencido), ${S.requests.declinou} declinaram`, s: 14 }]] };
   const sheets = [resumo];
   for (const x of m.disciplines) {
     const n = x.cols;
-    const top = [[`PLANILHA COTAÇÃO - ${x.name.toUpperCase()}`], ...head.filter(Boolean).map(t => [t]),
-      [`Itens: ${x.items.length} · com 3 ou mais: ${x.summary.buckets.tres} · com 2: ${x.summary.buckets.dois} · com 1: ${x.summary.buckets.um} · sem proposta: ${x.summary.buckets.nenhuma}`], []];
-    const hr = top.length;
-    const merges = [];
-    const rows = [...top, ['CÓD ORÇ', 'LOCAL', 'DESCRIÇÃO', 'QTDE.', 'UND', 'DADOS', 'VALOR MEDIANO', ...Array.from({ length: n }, (_, k) => `EMPRESA ${String(k + 1).padStart(2, '0')}`), 'OBSERVAÇÃO']];
+    const nCols = 8 + n + 2; // A–H, empresas, OBSERVAÇÃO, CURVA
+    const h = docHead(m, 'PLANILHA COTAÇÃO', nCols);
+    const merges = [...h.merges];
+    const rows = [...h.rows, ['CÓD ORÇ', 'CATEGORIA', 'LOCAL', 'DESCRIÇÃO', 'QTDE.', 'UND', 'DADOS', 'VALOR MEDIANO', ...Array.from({ length: n }, (_, k) => `EMPRESA ${String(k + 1).padStart(2, '0')}`), 'OBSERVAÇÃO', 'CURVA'].map(v => ({ v, s: 16 }))];
+    const firstCo = colL(8), lastCo = colL(7 + n);
+    const MERGED = [0, 1, 2, 3, 4, 5, 7, 8 + n, 9 + n];
     for (const it of x.items) {
-      const pad = arr => [...arr, ...Array(Math.max(0, n - arr.length)).fill(null)];
-      // Bloco do item: CÓD ORÇ, LOCAL, DESCRIÇÃO, QTDE., UND, VALOR MEDIANO e OBSERVAÇÃO mesclados na vertical (como no mapa original)
       const r0 = rows.length + 1, r1 = r0 + ROWS.length;
-      for (const c of [0, 1, 2, 3, 4, 6, 7 + n]) merges.push(`${colL(c)}${r0}:${colL(c)}${r1}`);
-      rows.push([{ v: it.code, s: 9 }, { v: it.location, s: 9 }, { v: it.description, s: 9 }, { v: it.qty, s: 10 }, { v: it.unit, s: 9 }, { v: 'PREÇO', s: 7 }, { v: it.median, s: 10 },
-        ...pad(it.offers.map(o => ({ v: o.price, s: 8 }))).map(v => v ?? { v: null, s: 8 }), { v: [it.abc ? `Curva ${it.abc}` : '', it.notes].filter(Boolean).join(' · ') || null, s: 9 }]);
-      for (const [label, key] of ROWS) rows.push([null, null, null, null, null, { v: label, s: 5 }, null, ...pad(it.offers.map(o => (key === 'sent' || key === 'received' ? (o[key] ? fmtD(o[key]) : null) : o[key] || null))), null]);
+      for (const c of MERGED) merges.push(`${colL(c)}${r0}:${colL(c)}${r1}`);
+      const off = k => it.offers[k];
+      const range = `${firstCo}${r0}:${lastCo}${r0}`;
+      rows.push([{ v: it.code, s: 17 }, { v: x.name.toUpperCase(), s: 17 }, { v: it.location, s: 17 }, { v: it.description, s: 17 }, { v: it.qty, s: 17 }, { v: it.unit, s: 17 },
+        { v: 'PREÇO', s: 19 }, { f: `IF(COUNT(${range})=0,"",MEDIAN(${range}))`, v: it.median ?? undefined, s: 21 },
+        ...Array.from({ length: n }, (_, k) => ({ v: off(k)?.price ?? null, s: 20 })), { v: it.notes, s: 17 }, { v: it.abc, s: 17 }]);
+      for (const [label, key] of ROWS) {
+        const r = Array(nCols).fill(null);
+        for (const c of MERGED) r[c] = { v: null, s: 22 };
+        r[6] = { v: label, s: 18 };
+        for (let k = 0; k < n; k++) r[8 + k] = { v: off(k)?.[key] || null, s: 22 };
+        rows.push(r);
+      }
     }
-    sheets.push({ name: sheetName(x.name, used), widths: [14, 16, 42, 9, 8, 22, 16, ...Array(n).fill(26), 30], rowStyles: { 0: 4, [hr]: 1 }, rows, merges });
+    sheets.push({ name: sheetName(x.name, used), widths: [12, 14, 14, 60, 8, 7, 20, 16, ...Array(n).fill(24), 22, 8], gridlines: false, freezeRows: 10, printTitleRows: 10, landscape: true,
+      heights: h.heights, rows, merges });
   }
   return { buffer: writeXlsx(sheets), filename: `Mapa de cotações - ${m.project.code}.xlsx` };
 }

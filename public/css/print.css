@@ -702,26 +702,29 @@
 .pd-proof-pdfpg { break-inside: auto; page-break-inside: auto; }
 
 /* Mapa de cotações (A4 paisagem) */
-.qp-doc { width: 297mm; min-height: 210mm; padding: 9mm 9mm 11mm; font-size: 7.6pt; page: paisagem; background: #fff; color: #1f2d3d; }
+/* Mapa de cotações (PDF): mesmo modelo da planilha "PLANILHA COTAÇÃO" — Calibri, linhas finas, tudo centralizado */
+.qp-doc { width: 297mm; min-height: 210mm; padding: 8mm 8mm 10mm; font: 7.4pt/1.25 Calibri, Carlito, 'Segoe UI', Arial, sans-serif; page: paisagem; background: #fff; color: #000; }
 .qp-stage { display: flex; flex-direction: column; align-items: center; gap: 18px; }
-.qp-head { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid #1f2d3d; padding-bottom: 5px; margin-bottom: 8px; }
-.qp-head b { display: block; font-size: 13pt; }
-.qp-head span { font-size: 8.5pt; color: #444; }
-.qp-meta { display: grid; justify-items: end; font-size: 8pt; }
-.qp-h { font-size: 10.5pt; margin: 4px 0; text-transform: uppercase; letter-spacing: .02em; }
-.qp-note { margin: 2px 0 6px; font-size: 8pt; color: #444; }
+.qp-head { display: grid; grid-template-columns: 1fr 74mm; align-items: center; gap: 10px; margin-bottom: 6px; }
+.qp-title { text-align: center; font-size: 22pt; font-weight: 700; letter-spacing: .01em; }
+.qp-title small { display: block; font-size: 9pt; font-weight: 400; letter-spacing: 0; color: #333; }
+.qp-meta { font-size: 7.6pt; display: grid; gap: 1px; }
+.qp-meta .qp-proj { background: #003366; color: #fff; font-weight: 700; text-align: center; padding: 3px 6px; margin-bottom: 2px; text-transform: uppercase; }
+.qp-meta b { display: block; margin-top: 1px; }
 .qp-t { width: 100%; border-collapse: collapse; }
-.qp-t th, .qp-t td { border: 0.5pt solid #b9c3cd; padding: 2px 4px; vertical-align: top; overflow-wrap: anywhere; }
-.qp-t thead th { background: #2a3d50; color: #fff; font-weight: 700; text-align: left; font-size: 7.2pt; }
-.qp-res td, .qp-res th { text-align: center; } .qp-res td:first-child, .qp-res th:first-child { text-align: left; }
-.qp-res tfoot th { background: #eef2f6; }
+.qp-t th, .qp-t td { border: 0.5pt dotted #555; padding: 1.5px 3px; text-align: center; vertical-align: middle; overflow-wrap: break-word; }
+.qp-t thead th { background: #d9d9d9; color: #000; font-weight: 400; font-size: 7.2pt; }
+.qp-res td:first-child { text-align: left; }
+.qp-res tfoot th { background: #d9d9d9; font-weight: 700; }
+.qp-note { margin: 6px 0 0; font-size: 7.6pt; }
 .qp-map { table-layout: fixed; }
-.qp-map .qp-c { width: 14mm; } .qp-map .qp-desc { width: 44mm; } .qp-map .qp-n { width: 25mm; text-align: right; } .qp-map th.qp-n:nth-of-type(4) { width: 12mm; } .qp-map .qp-lab { width: 34mm; font-weight: 700; }
-.qp-map .qp-price td.qp-n { white-space: nowrap; }
-.qp-map td.qp-n { text-align: right; font-variant-numeric: tabular-nums; }
-.qp-price td { background: #eef2f6; }
-.qp-desc small { display: block; color: #555; font-weight: 400; }
+.qp-map .w-cod { width: 15mm; } .qp-map .w-cat { width: 21mm; } .qp-map .w-loc { width: 15mm; } .qp-map .w-qtd { width: 9mm; } .qp-map .w-und { width: 8mm; }
+.qp-map .w-dad { width: 29mm; } .qp-map .w-med { width: 20mm; } .qp-map .w-obs { width: 18mm; } .qp-map .w-cur { width: 9mm; }
+.qp-map td.qp-lab { text-align: right; white-space: nowrap; }
+.qp-map .qp-price td { border-top: 0.9pt solid #000; }
+.qp-map .qp-pr { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qp-map .qp-med { color: #e00000; font-weight: 700; white-space: nowrap; }
+.qp-map td.qp-m { border-top: 0.9pt solid #000; }
 .qp-item { break-inside: avoid; }
-.qp-st-ok { color: #1f6b41; font-weight: 700; } .qp-st-late { color: #a32d2d; font-weight: 700; }
+.qp-st-late { color: #a32d2d; font-weight: 700; }
 @media print { .qp-doc { width: auto; min-height: 0; padding: 0; } .qp-break { break-before: page; } .qp-stage { display: block; } }
-.qp-map td.qp-m { vertical-align: middle; background: #eef2f6; }

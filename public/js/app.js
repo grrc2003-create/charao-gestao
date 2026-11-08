@@ -17,6 +17,7 @@ import * as PlanningImport from './views/planning-import.js';
 import * as Project from './views/project.js';
 import * as Quotes from './views/quotes.js';
 import * as QuotesPrint from './views/quotes-print.js';
+import * as MasterList from './views/master-list.js';
 import * as DepMap from './views/dep-map.js';
 import * as ChecklistPlan from './views/checklist-plan.js';
 import * as Tasks from './views/tasks.js';
@@ -82,6 +83,8 @@ const routes = [
   ['/projetos/:id/importar', PlanningImport.importPage],
   ['/projetos/:id/vinculos', DepMap.view],
   ['/projetos/:id/cotacoes', Quotes.view],
+  ['/projetos/:id/lista-mestra', MasterList.view],
+  ['/imprimir/lista-mestra/:id', MasterList.printView, { print: true }],
   ['/prazos/tarefas', DeadlineTasks.view],
   ['/tarefas', Tasks.view],
   ['/tarefas/nova', TaskForm.view],
@@ -181,6 +184,7 @@ const homePath = () => (state.meta?.can.home === 'empresa' && sec('dashboard') ?
 function sectionOfPath(path) {
   if (path === '/' || path === '/painel') return null;
   if (path === '/empresa') return 'dashboard';
+  if (path.startsWith('/imprimir/lista-mestra')) return 'projetos';
   if (path.startsWith('/projetos') || path.startsWith('/imprimir/ata') || path.startsWith('/imprimir/historia')) return 'projetos';
   if (path === '/tarefas' || path === '/tarefas/nova' || path.startsWith('/recorrencias')) return 'tarefas';
   if (/^\/usuarios\/\d+$/.test(path)) return Number(path.split('/')[2]) === state.user?.id ? null : 'usuarios|cadastro_usuarios';

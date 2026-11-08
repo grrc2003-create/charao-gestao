@@ -1696,12 +1696,14 @@ async function main() {
   const prFelSecs = (await prFel('GET', '/meta')).data.can.sections;
   const prFelSis = prList.items.filter(i => i.code.startsWith('SIS-'));
   const prExp = prSis.filter(i => !i.section || i.section.split('|').some(k => prFelSecs.includes(k)));
-  ok(prFelSis.length === prExp.length && prFelSis.length < 24 && !prFelSis.some(i => i.code === 'SIS-12' && !prFelSecs.includes('contratos')), 'tutoriais aparecem só para quem tem acesso à seção correspondente');
+  ok(prFelSis.length === prExp.length && prFelSis.length < 25 && !prFelSis.some(i => i.code === 'SIS-12' && !prFelSecs.includes('contratos')), 'tutoriais aparecem só para quem tem acesso à seção correspondente');
   ok(prFelSecs.includes('contratos') || (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-12').id}`)).status === 404, 'sem a seção, o tutorial não abre nem pelo endereço');
   const prSis5 = (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-05').id}`)).data;
-  ok(prSis.length === 24 && prSis.every(i => i.status === 'publicado' && i.area.startsWith('Sistema · ')) && prSis5.content.related_items.some(r => r.code === 'SIS-06') && prSis5.versions.length === 2, 'tutoriais do sistema: 24 processos SIS publicados, com relacionados (SIS-05 na versão 2)');
+  ok(prSis.length === 25 && prSis.every(i => i.status === 'publicado' && i.area.startsWith('Sistema · ')) && prSis5.content.related_items.some(r => r.code === 'SIS-06') && prSis5.versions.length === 2, 'tutoriais do sistema: 25 processos SIS publicados, com relacionados (SIS-05 na versão 2)');
   const prSis20 = (await prAna('GET', `/processes/${prSis.find(i => i.code === 'SIS-20').id}`)).data;
   ok(prSis20.content.section === 'projetos' && prSis20.content.steps.length === 9 && prSis20.content.steps.some(st => st.control && st.back_to === 4) && prSis20.content.related_items.some(r => r.code === 'PRC-05') && /Evidência do envio/.test(JSON.stringify(prSis20.content)), 'tutorial de cotações (SIS-20): passo a passo do preenchimento, ponto de controle da meta e relacionados');
+  const prSis25 = (await prAna('GET', `/processes/${prSis.find(i => i.code === 'SIS-25').id}`)).data;
+  ok(prSis25.content.section === 'projetos' && prSis25.content.steps.length === 7 && prSis25.content.steps.some(st => st.control && st.back_to === 4) && prSis25.content.related_items.some(r => r.code === 'SIS-18') && prSis25.versions.length === 1, 'tutorial da Lista Mestra (SIS-25): passo a passo, ponto de controle do motivo e relacionados');
   ok(['SIS-21', 'SIS-22', 'SIS-23', 'SIS-24'].every(c => prSis.some(i => i.code === c)) && prSis.find(i => i.code === 'SIS-13').title.startsWith('Financeiro: lista do mês'), 'novos tutoriais (Vendas, Folha de Campo, Folha Administrativa, Ausência) e Financeiro atualizado');
   ok((await prAna('GET', '/meta')).data.can.edit_processes && !(await prFel('GET', '/meta')).data.can.edit_processes, 'edição de processos: administrador sim, colaborador não');
   const prRdo = (await prFel('GET', '/processes/1')).data;
@@ -1731,7 +1733,7 @@ async function main() {
   ok((await prAna('POST', `/processes/${prNew.id}/restaurar`)).data.status === 'publicado', 'processo restaurado');
   const prDel = (await prAna('POST', '/processes', { ...prBody, title: 'Rascunho descartável' })).data;
   ok((await prAna('DELETE', `/processes/${prDel.id}`)).status === 200 && (await prAna('GET', `/processes/${prDel.id}`)).status === 404, 'rascunho nunca publicado pode ser excluído');
-  ok((await prAna('GET', '/processes/manual')).data.processes.length === 33, 'manual completo com os processos publicados (8 PRC, 24 SIS e o novo)');
+  ok((await prAna('GET', '/processes/manual')).data.processes.length === 34, 'manual completo com os processos publicados (8 PRC, 25 SIS e o novo)');
   // Aprovação: gestor/coordenador criam e enviam; só o administrador publica
   const prJu = await login('juliana@charao.eng.br');
   const prJuMeta = (await prJu('GET', '/meta')).data.can;
@@ -3590,6 +3592,76 @@ async function main() {
     final_scope: 'Escopo D', proposal_value: 3000, proposals: [{ file: snPdf, name: 'proposta-d.pdf' }] }));
   ok(snWon.status === 201 && (await svA('GET', `/sales/opportunities/${snWon.data.id}`)).data.closed_at, 'pode cadastrar direto em Contrato fechado (com os dados da proposta)');
   ok((await svA('DELETE', `/sales/opportunities/${snId}`)).status === 200 && (await svA('DELETE', `/sales/opportunities/${snWon.data.id}`)).status === 200, 'oportunidades com observações são excluídas');
+
+  // ---------- Lista Mestra de projetos ----------
+  console.log('\nLista Mestra');
+  {
+    const mA = await login('ana@charao.eng.br');
+    const mOff = (await mA('GET', '/master-list?project=1')).data;
+    ok(mOff.enabled === false && !mOff.items.length, 'Lista Mestra só existe no projeto marcado no cadastro (como as cotações)');
+    ok((await mA('POST', '/master-list/items', { project_id: 1, type_id: (await mA('GET', '/settings/master-list-types')).data[0].id })).status === 400, 'projeto sem a opção não recebe itens na Lista Mestra');
+    ok((await mA('PUT', '/projects/1', { has_master_list: 1 })).status === 200 && (await mA('GET', '/projects/1')).data.has_master_list === 1, 'cadastro do projeto: "Este projeto terá Lista Mestra" marcado');
+    const mL = (await mA('GET', '/master-list?project=1')).data;
+    const mT = mL.today;
+    const mAdd = n => { const d = new Date(`${mT}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const mArq = mL.types.find(t => t.name === 'Arquitetura');
+    const mEst = mL.types.find(t => t.name === 'Estrutural');
+    ok(mL.types.length >= 9 && mArq.stages.length === 7 && mEst.stages.length === 5 && mL.reasons.includes('Aprovações e licenças'), 'tipos de projeto com etapas e motivos de alteração cadastrados');
+    ok(mL.enabled && mL.project.can_edit && mL.can_manage_types && mL.projects.every(p => p.kind !== 'interno'), 'projeto marcado: administrador inclui e mantém os tipos (áreas internas ficam de fora)');
+    const mInt = (await mA('GET', '/projects')).data;
+    const mIntId = (Array.isArray(mInt) ? mInt : mInt.projects || []).find(p => p.kind === 'interno')?.id;
+    if (mIntId) {
+      await mA('PUT', `/projects/${mIntId}`, { has_master_list: 1 });
+      ok((await mA('GET', `/projects/${mIntId}`)).data.has_master_list === 0 && (await mA('POST', '/master-list/items', { project_id: mIntId, type_id: mArq.id })).status === 400, 'área interna não tem Lista Mestra');
+    }
+    const mI = (await mA('POST', '/master-list/items', { project_id: 1, type_id: mArq.id, designer: 'Escritório Fictício', revision: 'R00',
+      stages: mArq.stages.map((s, i) => ({ stage_id: s.id, planned_date: mAdd(-30 + i * 10) })) }));
+    ok(mI.status === 201 && mI.data.stages.every(s => s.base_date === s.planned_date) && mI.data.current.name === 'Levantamento de dados', 'projeto incluído: a primeira previsão vira a data base');
+    ok(mI.data.status === 'atrasado' && mI.data.late === 3, 'etapas com previsão vencida e não concluídas deixam o projeto atrasado');
+    ok((await mA('POST', '/master-list/items', { project_id: 1, type_id: mArq.id })).status === 400, 'o mesmo projeto não se repete na obra (use o complemento)');
+    const mId = mI.data.id;
+    const mSt = mI.data.stages;
+    const mPut = b => mA('PUT', `/master-list/items/${mId}/stages`, b);
+    let r = await mPut({ stages: mSt.map((s, i) => ({ stage_id: s.id, planned_date: s.planned_date, done_date: i < 3 ? mAdd(-31 + i * 10) : null })) });
+    ok(r.status === 200 && r.data.current.name === 'Projeto legal (aprovação)' && r.data.done_count === 3 && r.data.status === 'em_dia', 'datas realizadas concluem as etapas e avançam a etapa atual (sem exigir motivo)');
+    ok((await mPut({ stages: [{ stage_id: mSt[0].id, planned_date: mSt[0].planned_date, done_date: mAdd(2) }] })).status === 400, 'data realizada não pode ser futura');
+    const mShift = mSt.map((s, i) => ({ stage_id: s.id, planned_date: i >= 3 ? mAdd(-30 + i * 10 + 15) : s.planned_date, done_date: i < 3 ? mAdd(-31 + i * 10) : null, auto: i > 3 }));
+    ok((await mPut({ stages: mShift })).status === 400, 'mudar uma previsão já existente exige o motivo');
+    ok((await mPut({ stages: mShift, reason: 'Aprovações e licenças' })).status === 400, 'e a explicação do porquê');
+    ok((await mPut({ stages: mShift, reason: 'Motivo inventado', explanation: 'x' })).status === 400, 'motivo precisa ser da lista');
+    r = await mPut({ stages: mShift, reason: 'Aprovações e licenças', explanation: 'Prefeitura pediu complementação (teste)' });
+    ok(r.status === 200 && r.data.current.shift === 15 && r.data.finish.shift === 15 && r.data.stages[3].base_date === mSt[3].base_date && r.data.changes === 1 && r.data.last_change.reason === 'Aprovações e licenças',
+      'previsão alterada: base mantida, desvio de +15 dias, conta 1 alteração (as deslocadas junto não contam)');
+    const mH = (await mA('GET', `/master-list/items/${mId}/history`)).data.changes;
+    ok(mH.filter(c => c.kind === 'previsto' && c.old_date).length === 4 && mH.filter(c => c.cascade).length === 3 && mH.some(c => c.kind === 'cadastro') && mH.find(c => !c.cascade && c.reason).explanation.includes('Prefeitura'),
+      'histórico: alteração principal com motivo e explicação, etapas deslocadas junto e o cadastro');
+    r = await mPut({ stages: r.data.stages.map(s => ({ stage_id: s.id, planned_date: s.planned_date, done_date: s.done_date })), rebaseline: true, reason: 'Escopo / aditivo', explanation: 'Aditivo assinado (teste)' });
+    ok(r.status === 200 && r.data.stages.every(s => !s.planned_date || s.base_date === s.planned_date) && r.data.current.shift === 0, 'nova linha de base (gestor/administrador) zera o desvio e fica registrada');
+    const mSum = (await mA('GET', '/master-list?project=1')).data;
+    ok(mSum.items.length === 1 && mSum.summary.reasons.some(x => x.reason === 'Aprovações e licenças') && mSum.summary.by_stage.length === 1, 'resumo da obra: motivos das alterações e etapa atual');
+    // permissões: colaborador sem ser responsável da obra não altera
+    const mF = await login('felipe@charao.eng.br');
+    const mFl = await mF('GET', '/master-list?project=1');
+    ok((mFl.status === 200 && !mFl.data.can_manage_types) || mFl.status === 404, 'colaborador consulta a Lista Mestra, mas não mantém os tipos');
+    const mFi = mFl.data.items?.find(i => i.id === mId);
+    if (mFi) {
+      ok(!mFi.can_edit && (await mF('PUT', `/master-list/items/${mId}/stages`, { stages: [] })).status === 403, 'colaborador (não responsável da obra) não altera as datas');
+    }
+    ok((await mF('PUT', '/settings/master-list-types', { types: [] })).status === 403, 'colaborador não altera os tipos e etapas');
+    // tipos e etapas editáveis depois
+    const mTy = (await mA('GET', '/settings/master-list-types')).data;
+    let mSave = await mA('PUT', '/settings/master-list-types', { types: mTy.map(t => (t.id === mArq.id ? { ...t, stages: t.stages.slice(1) } : t)) });
+    ok(mSave.status === 400, 'etapa com datas não pode ser excluída (inative)');
+    mSave = await mA('PUT', '/settings/master-list-types', { types: [...mTy.map(t => (t.id === mArq.id ? { ...t, stages: [...t.stages.map((s, i) => (i === 1 ? { ...s, name: 'Estudo preliminar (EP)' } : s)), { name: 'As built', active: true }] } : t)), { name: 'Paisagismo', stages: [{ name: 'Estudo' }, { name: 'Executivo' }] }] });
+    ok(mSave.status === 200 && mSave.data.find(t => t.name === 'Paisagismo')?.stages.length === 2, 'tipo novo com etapas cadastrado');
+    const mAfter = (await mA('GET', `/master-list/items/${mId}/history`)).data.item;
+    ok(mAfter.stages.length === 8 && mAfter.stages[1].name === 'Estudo preliminar (EP)' && mAfter.stages[1].done_date && !mAfter.stages[7].planned_date, 'renomear e incluir etapas vale para os projetos existentes, sem perder as datas');
+    ok((await mA('PUT', '/settings/master-list-types', { types: mSave.data.filter(t => t.id !== mArq.id) })).status === 400, 'tipo em uso não pode ser excluído');
+    const mX = await fetch(BASE + '/api/master-list/export.xlsx?project=1', { headers: { Cookie: await cookieOf('ana@charao.eng.br'), 'X-Requested-With': 'charao-app' } });
+    ok(mX.status === 200 && /spreadsheetml/.test(mX.headers.get('content-type')) && (await mX.arrayBuffer()).byteLength > 2000, 'Excel da Lista Mestra (lista, etapas e histórico)');
+    ok((await mA('PUT', `/master-list/items/${mId}`, { type_id: mEst.id })).status === 400, 'com datas registradas o tipo não pode ser trocado');
+    ok((await mA('DELETE', `/master-list/items/${mId}`)).status === 200 && !(await mA('GET', '/master-list?project=1')).data.items.length, 'projeto excluído da Lista Mestra');
+  }
 
 }
 

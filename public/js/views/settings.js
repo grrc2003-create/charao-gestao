@@ -3,6 +3,7 @@ import { html, api, icon } from '../core.js';
 import { REC_ICONS, recBadge } from './record-icons.js';
 import { toast } from '../ui.js';
 import { pageHead } from './shared.js';
+import { typesSection, bindTypesSection } from './master-list.js';
 
 const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' : 'is-inactive'}" data-id="${r.id || ''}">
   <span class="stage-move"><button type="button" class="icon-btn" data-move="-1" aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-move="1" aria-label="Mover para baixo">▼</button></span>
@@ -53,11 +54,12 @@ const tplItem = t => html`<li class="spec-tpl" data-id="${t.id || ''}">
   <textarea rows="${Math.min(Math.max((t.items || []).length, 4), 12)}" data-items aria-label="Itens do modelo (um por linha)" placeholder="${t.kind === 'stage' ? 'Uma classificação por linha&#10;Fundação&#10;Estrutura&#10;Bloco A' : 'Uma especialidade por linha&#10;Pintura&#10;Revestimento&#10;Elétrica'}">${(t.items || []).join('\n')}</textarea>
 </li>`;
 
-export async function view({ state, reloadMeta }) {
+export async function view({ state, reloadMeta, query }) {
   if (!state.meta.can.manage_settings) throw new Error('Apenas gestores e administradores acessam as configurações.');
   const [reasons, general, templates, stageTpls, cal, types] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
     api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar'), api('/settings/project-types', { query: { all: '1' } })]);
   const recTypes = await api('/settings/record-types', { query: { all: '1' } });
+  const mlTypes = await api('/settings/master-list-types').catch(() => null);
   const ctTypes = state.meta.can.contracts ? await api('/settings/contract-types', { query: { all: '1' } }).catch(() => null) : null;
   const SALES_CARDS = [['source', 'Origens das oportunidades', 'De onde o cliente veio (indicação, site, Instagram…). Escolhida no cadastro da oportunidade.', 'Nova origem (ex.: Feira)'],
     ['loss', 'Motivos de perda', 'Lista do “Contrato perdido”: o motivo é obrigatório e há um campo de observação para detalhar.', 'Novo motivo (ex.: Cliente desistiu)'],
@@ -94,6 +96,7 @@ export async function view({ state, reloadMeta }) {
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos</button></div>
         </form>
       </section>
+      ${mlTypes ? typesSection(mlTypes) : ''}
       ${ctTypes ? html`<section class="card" id="ctypes-card" style="max-width:900px;margin-bottom:16px">
         <div class="card-head"><h2>${icon('contract')}Tipos de contrato</h2><span class="sub">${ctTypes.filter(t => t.active).length} ativo(s)</span></div>
         <form class="card-body form" id="ctypes-form" novalidate>
@@ -321,6 +324,8 @@ export async function view({ state, reloadMeta }) {
           } catch (ex) { terr.textContent = ex.message; terr.hidden = false; }
         });
       };
+      bindTypesSection(root);
+      if (query?.get('sec') === 'lista-mestra') setTimeout(() => root.querySelector('#ml-types-card')?.scrollIntoView({ block: 'start' }), 60);
       bindTypes('#types-form', '#type-list', '#type-new', '#type-add', '/settings/project-types', 'projeto(s)', 'Tipos de projeto salvos.');
       bindTypes('#ctypes-form', '#ctype-list', '#ctype-new', '#ctype-add', '/settings/contract-types', 'contrato(s)', 'Tipos de contrato salvos.');
       for (const [k, title] of SALES_CARDS) bindTypes(`#sl-${k}-form`, `#sl-${k}-list`, `#sl-${k}-new`, `#sl-${k}-add`, `/settings/sales-lists/${k}`, 'oportunidade(s)', `${title}: salvo.`);

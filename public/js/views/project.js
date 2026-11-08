@@ -1,5 +1,6 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
 import { quotesCard, quotesKpi } from './quotes.js';
+import { projectCard as masterListCard, bindItems as bindMasterList } from './master-list.js';
 import { evaluateAlerts, alertMap, alertsBanner, alertsSheet } from './project-alerts.js';
 import { fold, bindFolds, pageHead, kpi, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
@@ -14,8 +15,9 @@ import { addPdfButtons } from '../section-pdf.js';
 import { evolutionSection, bindEvolution } from './evolution.js';
 
 export async function view({ params, query, setQuery, render, navigate }) {
-  const [p, impactRank, recs, quotes, alertConf] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
-    api(`/projects/${params.id}/records`).catch(() => null), api(`/projects/${params.id}/quotes/summary`).catch(() => null), api(`/projects/${params.id}/alerts`).catch(() => ({ alerts: [] }))]);
+  const [p, impactRank, recs, quotes, alertConf, ml] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
+    api(`/projects/${params.id}/records`).catch(() => null), api(`/projects/${params.id}/quotes/summary`).catch(() => null), api(`/projects/${params.id}/alerts`).catch(() => ({ alerts: [] })),
+    api('/master-list', { query: { project: params.id } }).catch(() => null)]);
   // Alertas dos indicadores (limites definidos neste projeto)
   const alerts = evaluateAlerts(p, quotes, alertConf);
   const alertsBy = alertMap(alerts);
@@ -70,6 +72,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
       ${kpiBlock(p.summary, { alerts: alertsBy })}
       ${execKpis(p.summary, { alerts: alertsBy, extra: qOk ? kpi({ alert: qWorst, label: `Cotações${qPct === null ? '' : ` · ${qPct}% com 3+ propostas`}`, ...quotesKpi(quotes), href: `#/projetos/${p.id}/cotacoes`, color: '#3B6D11' }) : '' })}
       ${qOk ? quotesCard(quotes, p.id) : ''}
+      ${p.kind !== 'interno' && ml ? fold('listamestra', ml.items.length ? `Lista Mestra: ${plural(ml.summary.total, 'projeto', 'projetos')}${ml.summary.alterados ? ` · ${ml.summary.alterados} com alteração` : ''}` : 'Lista Mestra: nenhum projeto', ml.summary.atrasado ? plural(ml.summary.atrasado, 'projeto atrasado', 'projetos atrasados') : '', masterListCard(ml, p.id)) : ''}
       ${recs ? fold('registros', rs ? `${plural(rs.total, 'registro', 'registros')} · ${plural(rs.vigentes, 'definição vigente', 'definições vigentes')}${rs.open ? ` · ${plural(rs.open, 'pendência', 'pendências')}` : ''}` : '', rs?.late ? `${plural(rs.late, 'pendência atrasada', 'pendências atrasadas')}` : '', recordsCard(recs)) : ''}
       ${fold('checklists', `${plural(clOpen.length, 'check-list em andamento', 'check-lists em andamento')} · ${(p.checklists || []).length - clOpen.length} concluído(s)`, [clNc ? `${clNc} NC em aberto` : '', clLate ? `${plural(clLate, 'atrasado', 'atrasados')}` : ''].filter(Boolean).join(' · '), checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` }))}
 
@@ -148,6 +151,8 @@ export async function view({ params, query, setQuery, render, navigate }) {
       ${p.can_create_task ? html`<a class="fab" href="#/tarefas/nova?projeto=${p.id}" aria-label="Nova tarefa">${icon('plus')}</a>` : ''}`,
     mount(root) {
       bindCommon(root);
+      const mlCard = root.querySelector('#ml-card');
+      if (mlCard) bindMasterList(mlCard, ml, () => render());
       bindEvolution(root);
       // Botão "PDF" em cada quadro: imprime só aquele visual
       addPdfButtons(root, { title: `${p.code} · ${p.name}`, sub: p.client });

@@ -34,6 +34,7 @@ import * as Team from './services/team.js';
 import * as Vacations from './services/vacations.js';
 import * as Absences from './services/absences.js';
 import * as Quotes from './services/quotes.js';
+import * as MasterList from './services/master-list.js';
 import * as ProjectAlerts from './services/project-alerts.js';
 import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
@@ -399,6 +400,17 @@ api.get('/api/projects/:id/quotes', (req, res, { ctx, params }) => send(res, 200
 api.get('/api/projects/:id/quotes/map', (req, res, { ctx, params }) => send(res, 200, Quotes.mapData(ctx, intOrNull(params.id))));
 api.get('/api/projects/:id/quotes/export.xlsx', (req, res, { ctx, params }) => { const x = Quotes.exportXlsx(ctx, intOrNull(params.id)); send(res, 200, x.buffer, {
   'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="mapa-de-cotacoes.xlsx"; filename*=UTF-8''${encodeURIComponent(x.filename)}` }); });
+// Lista Mestra de projetos (disciplinas de cada obra: etapas, datas e histórico de alterações)
+api.get('/api/master-list', (req, res, { ctx, query }) => send(res, 200, MasterList.list(ctx, { projectId: intOrNull(query.get('project')), withHistory: query.get('history') === '1' })));
+api.get('/api/master-list/export.xlsx', (req, res, { ctx, query }) => { const x = MasterList.exportXlsx(ctx, { projectId: intOrNull(query.get('project')) }); send(res, 200, x.buffer, {
+  'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="lista-mestra.xlsx"; filename*=UTF-8''${encodeURIComponent(x.filename)}` }); });
+api.post('/api/master-list/items', (req, res, { ctx, body }) => send(res, 201, MasterList.saveItem(ctx, null, body, clientIp(req))));
+api.put('/api/master-list/items/:id', (req, res, { ctx, params, body }) => send(res, 200, MasterList.saveItem(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/master-list/items/:id', (req, res, { ctx, params }) => send(res, 200, MasterList.deleteItem(ctx, intOrNull(params.id), clientIp(req))));
+api.put('/api/master-list/items/:id/stages', (req, res, { ctx, params, body }) => send(res, 200, MasterList.updateStages(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/master-list/items/:id/history', (req, res, { ctx, params }) => send(res, 200, MasterList.history(ctx, intOrNull(params.id))));
+api.get('/api/settings/master-list-types', (req, res) => send(res, 200, MasterList.listTypes({ includeInactive: true })));
+api.put('/api/settings/master-list-types', (req, res, { ctx, body }) => send(res, 200, MasterList.saveTypes(ctx, body.types, clientIp(req))));
 api.get('/api/projects/:id/quotes/summary', (req, res, { ctx, params }) => send(res, 200, Quotes.quotesSummary(ctx, intOrNull(params.id))));
 api.post('/api/projects/:id/quotes/items', (req, res, { ctx, params, body }) => send(res, 201, Quotes.saveItem(ctx, intOrNull(params.id), null, body, clientIp(req))));
 api.put('/api/projects/:id/quotes/items/:item', (req, res, { ctx, params, body }) => send(res, 200, Quotes.saveItem(ctx, intOrNull(params.id), intOrNull(params.item), body, clientIp(req))));

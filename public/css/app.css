@@ -4007,3 +4007,11 @@ button.ck-ask:hover { background: #ffefc2; }
 .ab-list li small { display: block; color: var(--muted); font-size: 12px; }
 .ab-st { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; align-items: center; }
 .pf-auto { color: var(--muted); font-size: 11px; font-weight: 500; }
+
+/* Férias/ausência: tarefa no período → novo prazo ou manter com explicação */
+.vs-rs-opts { display: grid; gap: 6px; min-width: 260px; }
+.vs-rs-opt { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; }
+.vs-rs-opt input[type=date], .vs-rs-opt input[type=text] { flex: 1; min-width: 140px; height: 34px; }
+.vs-ap-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.vs-ap-row input { height: 32px; }
+@media (max-width: 760px) { .vs-rs-opts { min-width: 0; width: 100%; } }

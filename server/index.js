@@ -389,6 +389,7 @@ api.post('/api/reimbursements/:id/release', (req, res, { ctx, params }) => send(
 api.post('/api/reimbursements/:id/reject', (req, res, { ctx, params, body }) => send(res, 200, Reimb.rejectReimbursement(ctx, intOrNull(params.id), body, clientIp(req))));
 api.get('/api/reimbursement-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Reimb.reimbursementFileForUser(ctx, intOrNull(params.id))));
 api.get('/api/absences/me', (req, res, { ctx }) => send(res, 200, Absences.myAbsences(ctx)));
+api.post('/api/absences/preview', (req, res, { ctx, body }) => send(res, 200, Absences.previewAbsence(ctx, body)));
 api.post('/api/absences', (req, res, { ctx, body }) => send(res, 201, Absences.requestAbsence(ctx, body, clientIp(req))));
 api.post('/api/absences/:id/:action', (req, res, { ctx, params, body }) => send(res, 200, Absences.absenceAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 api.get('/api/vacations/me', (req, res, { ctx }) => send(res, 200, Vacations.myVacations(ctx)));

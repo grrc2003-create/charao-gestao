@@ -11,6 +11,28 @@ export const vacPill = s => (s && VAC_ST[s] ? html`<span class="rg-st" style="--
 export const reqPill = s => html`<span class="rg-st" style="--c:${REQ_ST[s][1]}">${REQ_ST[s][0]}</span>`;
 const dm = d => fmtDate(d).slice(0, 5);
 
+// Tarefas com entrega no período (férias ou ausência): novo prazo OU manter o prazo explicando (acordado com o líder)
+export function conflictBlock(list, { keep = new Map(), what = 'nas férias', when = 'o gestor aprovar' } = {}) {
+  if (!list.length) return '';
+  return html`<div class="vs-conf-head">${icon('reschedule')}<span><b>${list.length} tarefa(s) com entrega ${what}.</b> Para cada uma, proponha um <b>novo prazo</b> ou <b>mantenha o prazo explicando</b> como fica (ex.: entrego antes, outra pessoa cobre). Vale quando ${when}.</span></div>
+    <ul class="vs-conf-list">${list.map(t => { const k = keep.get(String(t.id)) || {}; const mode = k.mode || 'date'; return html`<li data-rs-row="${t.id}"><div class="grow"><b class="mono">${t.code}</b> ${t.title}<small>${t.project_code || ''} · prazo atual ${fmtDate(t.due_date)}</small></div>
+      <div class="vs-rs-opts">
+        <label class="vs-rs-opt"><input type="radio" name="rsm_${t.id}" value="date" ${mode === 'date' ? 'checked' : ''}>Novo prazo <input type="date" data-rs-task="${t.id}" value="${k.date || t.suggested || ''}"></label>
+        <label class="vs-rs-opt"><input type="radio" name="rsm_${t.id}" value="keep" ${mode === 'keep' ? 'checked' : ''}>Manter o prazo <input type="text" data-rs-why="${t.id}" maxlength="500" placeholder="Explique: ex. entrego antes" value="${k.why || ''}"></label>
+      </div></li>`; })}</ul>`;
+}
+export const readConflicts = root => [...root.querySelectorAll('[data-rs-row]')].map(li => {
+  const id = Number(li.dataset.rsRow);
+  const mode = li.querySelector(`input[name="rsm_${id}"]:checked`)?.value || 'date';
+  return mode === 'keep' ? { task_id: id, explanation: li.querySelector('[data-rs-why]').value.trim() } : { task_id: id, new_due: li.querySelector('[data-rs-task]').value };
+});
+const keepConflicts = root => new Map([...root.querySelectorAll('[data-rs-row]')].map(li => { const id = li.dataset.rsRow; return [id, { mode: li.querySelector(`input[name="rsm_${id}"]:checked`)?.value, date: li.querySelector('[data-rs-task]').value, why: li.querySelector('[data-rs-why]').value }]; }));
+const proposalText = r => (r.new_due === r.old_due ? html`prazo mantido (${dm(r.old_due)}) — “${r.explanation || ''}”` : html`${dm(r.old_due)} → <b>${dm(r.new_due)}</b>${r.explanation ? ` — “${r.explanation}”` : ''}`);
+export const proposalsBox = (items, applied) => (items?.length ? html`<div class="vac-rs"><b>Tarefas no período (${applied ? 'aplicado' : 'vale ao aprovar'}):</b>${items.map(r => html`<span><span class="mono">${r.code}</span> ${r.title}: ${proposalText(r)}</span>`)}</div>` : '');
+export const newConflictsBox = list => (list?.length ? html`<div class="vac-rs is-new"><b>Tarefas novas com entrega no período — novo prazo ou explicação para aprovar:</b>${list.map(c => html`<span class="vs-ap-row"><span class="mono">${c.code}</span> ${c.title} (${dm(c.due_date)})
+  <input type="date" data-ap-rs="${c.id}" value="${c.suggested}" aria-label="Novo prazo"><input type="text" data-ap-why="${c.id}" maxlength="500" placeholder="ou explique para manter o prazo" aria-label="Explicação"></span>`)}</div>` : '');
+export const readApprovalConflicts = li => [...li.querySelectorAll('[data-ap-rs]')].map(i => { const id = Number(i.dataset.apRs); const why = li.querySelector(`[data-ap-why="${id}"]`)?.value.trim(); return why ? { task_id: id, explanation: why } : { task_id: id, new_due: i.value }; });
+
 // Solicitar (própria pessoa) ou lançar (gestor/RH) férias, com prévia das regras
 export async function vacationSheet({ people = null, userId = null, title = 'Solicitar férias', mode = null } = {}) {
   const p = sheet({
@@ -28,8 +50,8 @@ export async function vacationSheet({ people = null, userId = null, title = 'Sol
       <p class="hint" style="margin:0" id="vs-rules">${mode && mode !== 'clt' ? '' : 'Regras: até 3 partes por período aquisitivo (uma com 14 dias ou mais, as demais com 5 ou mais) e início fora dos 2 dias antes de feriado ou domingo.'}</p>`,
     submitLabel: people ? 'Lançar férias' : 'Enviar solicitação',
     onSubmit: (d, form) => {
-      const reschedules = [...form.querySelectorAll('[data-rs-task]')].map(i => ({ task_id: Number(i.dataset.rsTask), new_due: i.value }));
-      for (const k of Object.keys(d)) if (k.startsWith('rs_')) delete d[k];
+      const reschedules = readConflicts(form);
+      for (const k of Object.keys(d)) if (k.startsWith('rs_') || k.startsWith('rsm_')) delete d[k];
       return api('/vacations', { method: 'POST', body: { ...d, user_id: d.user_id ? Number(d.user_id) : userId, days: Number(d.days), reschedules } });
     },
   });
@@ -51,16 +73,14 @@ export async function vacationSheet({ people = null, userId = null, title = 'Sol
             saldo depois: <b>${r.period.balance_after} dia(s)</b>${r.period.concession_end ? html` · gozar até ${fmtDate(r.period.concession_end)}` : ''}</span></div>
           ${r.warnings.map(w => html`<div class="vs-warn">${icon('alert')}<span>${w}</span></div>`)}`
         : html`<div class="vs-err">${icon('x')}<span>${r.error}</span></div>`).toString();
-      // Entregas dentro das férias: proponha o novo prazo de cada uma (aplicado quando o gestor aprovar)
-      const keep = new Map([...conf.querySelectorAll('[data-rs-task]')].map(i => [i.dataset.rsTask, i.value]));
+      // Entregas dentro do período: novo prazo ou explicação de cada uma (vale quando o líder aprovar)
+      const keep = keepConflicts(conf);
       const list = r.ok ? r.conflicts || [] : [];
       conf.hidden = !list.length;
-      conf.innerHTML = list.length ? html`<div class="vs-conf-head">${icon('reschedule')}<span><b>${list.length} tarefa(s) com entrega nas férias.</b> Proponha o novo prazo de cada uma — o reagendamento só vale quando ${people ? 'as férias forem lançadas' : 'o gestor aprovar as férias'}.</span></div>
-        <ul class="vs-conf-list">${list.map(t => html`<li><div class="grow"><b class="mono">${t.code}</b> ${t.title}<small>${t.project_code} · prazo atual ${fmtDate(t.due_date)}</small></div>
-          <label class="vs-nd"><span>Novo prazo</span><input type="date" name="rs_${t.id}" data-rs-task="${t.id}" value="${keep.get(String(t.id)) || t.suggested}" required></label></li>`)}</ul>`.toString() : '';
+      conf.innerHTML = conflictBlock(list, { keep, what: `n${r.mode === 'estagio' ? 'o recesso' : 'as férias'}`, when: people ? 'for lançado' : 'o gestor aprovar' }).toString();
     } catch (e) { prev.textContent = e.message; }
   };
-  form.addEventListener('change', e => { if (!e.target.matches('[data-rs-task]')) refresh(); });
+  form.addEventListener('change', e => { if (!e.target.closest('[data-rs-row]')) refresh(); });
   const res = await p;
   if (res) toast(res.status === 'aprovada' ? 'Lançado.' : 'Solicitação enviada ao gestor.');
   return res;
@@ -70,14 +90,14 @@ export async function vacationSheet({ people = null, userId = null, title = 'Sol
 export function approvalsList(items) {
   return html`<ul class="rows">${items.map(v => html`<li class="vac-appr"><div class="grow"><div class="row-title">${v.user_name}</div>
     <div class="row-meta"><span><b>${fmtDate(v.start_date)} a ${fmtDate(v.end_date)}</b> · ${v.days} dias</span>${v.note ? html`<span>“${v.note}”</span>` : ''}<span>pedido por ${v.requested_by_name}</span></div>
-    ${v.reschedules?.length ? html`<div class="vac-rs"><b>Reagendamentos propostos (aplicados ao aprovar):</b>${v.reschedules.map(r => html`<span><span class="mono">${r.code}</span> ${r.title}: ${dm(r.old_due)} → <b>${dm(r.new_due)}</b></span>`)}</div>` : ''}
-    ${v.new_conflicts?.length ? html`<div class="vac-rs is-new"><b>Tarefas novas com entrega nas férias — informe o novo prazo para aprovar:</b>${v.new_conflicts.map(c => html`<label><span class="mono">${c.code}</span> ${c.title} (${dm(c.due_date)}) <input type="date" data-ap-rs="${c.id}" value="${c.suggested}"></label>`)}</div>` : ''}</div>
+    ${proposalsBox(v.reschedules, false)}
+    ${newConflictsBox(v.new_conflicts)}</div>
     <div class="vac-appr-acts"><button type="button" class="btn btn-success btn-sm" data-vapprove="${v.id}">${icon('check')}Aprovar</button>
       <button type="button" class="btn btn-ghost btn-sm" data-vreject="${v.id}">Recusar</button></div></li>`)}</ul>`;
 }
 export function bindApprovals(root, after) {
   root.querySelectorAll('[data-vapprove]').forEach(b => b.addEventListener('click', async () => {
-    const reschedules = [...b.closest('li').querySelectorAll('[data-ap-rs]')].map(i => ({ task_id: Number(i.dataset.apRs), new_due: i.value }));
+    const reschedules = readApprovalConflicts(b.closest('li'));
     try { await api(`/vacations/${b.dataset.vapprove}/approve`, { method: 'POST', body: { reschedules } }); toast(reschedules.length || b.closest('li').querySelector('.vac-rs') ? 'Férias aprovadas e prazos reagendados.' : 'Férias aprovadas.'); after(); } catch (e) { toast(e.message, 'err'); }
   }));
   root.querySelectorAll('[data-vreject]').forEach(b => b.addEventListener('click', async () => {
@@ -94,7 +114,7 @@ export function periodsTable(d) {
       <td class="num">${p.used}</td><td class="num">${p.pending}</td><td class="num"><b>${p.acquired || p.right !== undefined ? p.balance : '—'}</b></td><td>${vacPill(p.status === 'concluido' ? 'concluido' : p.status)}</td></tr>`)}</tbody></table></div>` : ''}
     ${d.requests.length ? html`<ul class="rows" style="margin-top:10px">${d.requests.map(v => html`<li><div class="row-link"><div class="grow"><div class="row-title">${fmtDate(v.start_date)} a ${fmtDate(v.end_date)} · ${v.days} dias</div>
       <div class="row-meta"><span>pedido por ${v.requested_by_name}</span>${v.decided_by_name ? html`<span>${v.status === 'aprovada' ? 'aprovado' : v.status === 'recusada' ? 'recusado' : 'cancelado'} por ${v.decided_by_name}</span>` : ''}${v.decision_note ? html`<span>“${v.decision_note}”</span>` : ''}
-        ${v.reschedules?.length ? html`<span>${v.reschedules.length} tarefa(s) ${v.status === 'aprovada' ? 'reagendada(s)' : 'com reagendamento proposto'}: ${v.reschedules.map(r => `${r.code} → ${dm(r.new_due)}`).join(', ')}</span>` : ''}</div></div>
+        ${v.reschedules?.length ? html`<span>${v.reschedules.length} tarefa(s) no período: ${v.reschedules.map(r => (r.new_due === r.old_due ? `${r.code} prazo mantido` : `${r.code} → ${dm(r.new_due)}`)).join(', ')}</span>` : ''}</div></div>
       ${reqPill(v.status)}${['solicitada', 'aprovada'].includes(v.status) && v.end_date >= todayISO() ? html`<button type="button" class="icon-btn" data-vcancel="${v.id}" title="Cancelar" aria-label="Cancelar férias">✕</button>` : ''}</div></li>`)}</ul>`
       : html`<p class="muted">Nenhuma férias registrada.</p>`}`;
 }

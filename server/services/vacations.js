@@ -5,7 +5,7 @@
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/http.js';
 import { isAdmin, hasSection, teamIds } from '../lib/permissions.js';
-import { audit } from './audit.js';
+import { audit, taskHistory } from './audit.js';
 import { today, daysBetween } from './metrics.js';
 import { nationalHolidays, nextWorkingDay } from './calendar.js';
 import { updateTask } from './tasks.js';
@@ -232,34 +232,48 @@ export function conflictsOf(userId, start, end) {
     .map(t => ({ ...t, suggested: nextWorkingDay(t.project_id, addDays(end, 1), userId) }));
 }
 
-// Lê e valida os novos prazos propostos: um para cada tarefa em conflito, fora do período das férias
-function readProposals(conflicts, input, start, end) {
-  const map = new Map((Array.isArray(input) ? input : []).map(x => [intOrNull(x?.task_id), x?.new_due]));
+// Tarefas com entrega no período (férias ou ausência): para cada uma, um novo prazo fora do período OU a explicação de
+// por que o prazo se mantém (ex.: entrega antes, outra pessoa cobre). Tudo é acordado com o líder: vale quando ele aprova.
+export function readProposals(conflicts, input, start, end, label = 'as férias') {
+  const map = new Map((Array.isArray(input) ? input : []).map(x => [intOrNull(x?.task_id), x]));
   const missing = [];
   const out = [];
   for (const t of conflicts) {
-    const nd = map.get(t.id) ? date(map.get(t.id), `Novo prazo de ${t.code}`) : null;
+    const x = map.get(t.id) || {};
+    const explanation = String(x.explanation ?? '').trim().slice(0, 500) || null;
+    const nd = x.new_due ? date(x.new_due, `Novo prazo de ${t.code}`) : null;
+    if (explanation && (!nd || nd === t.due_date)) {
+      if (explanation.length < 5) throw badRequest(`Explique melhor por que o prazo de ${t.code} se mantém.`);
+      out.push({ task_id: t.id, old_due: t.due_date, new_due: t.due_date, explanation });
+      continue;
+    }
     if (!nd) { missing.push(t.code); continue; }
-    if (nd >= start && nd <= end) throw badRequest(`O novo prazo de ${t.code} (${fmtD(nd)}) cai dentro das férias. Escolha uma data antes de ${fmtD(start)} ou depois de ${fmtD(end)}.`);
+    if (nd >= start && nd <= end) throw badRequest(`O novo prazo de ${t.code} (${fmtD(nd)}) cai dentro d${label}. Escolha uma data antes de ${fmtD(start)} ou depois de ${fmtD(end)}, ou mantenha o prazo explicando o motivo.`);
     if (nd < today()) throw badRequest(`O novo prazo de ${t.code} não pode ser no passado.`);
     if (t.start_date && nd < t.start_date) throw badRequest(`O novo prazo de ${t.code} é anterior ao início previsto da tarefa (${fmtD(t.start_date)}).`);
-    out.push({ task_id: t.id, old_due: t.due_date, new_due: nd });
+    out.push({ task_id: t.id, old_due: t.due_date, new_due: nd, explanation });
   }
-  if (missing.length) throw badRequest(`Há ${missing.length} tarefa(s) com entrega nas férias: ${missing.join(', ')}. Proponha o novo prazo de cada uma para solicitar este período.`);
+  if (missing.length) throw badRequest(`Há ${missing.length} tarefa(s) com entrega n${label}: ${missing.join(', ')}. Para cada uma, proponha um novo prazo ou explique por que o prazo se mantém (acordado com o líder).`);
   return out;
 }
 
-// Aplica os reagendamentos (na aprovação): justificativa "Férias do responsável"
-function applyProposals(ctx, v, t, list) {
-  const reason = one(`SELECT id FROM reschedule_reasons WHERE name = 'Férias do responsável' COLLATE NOCASE`)
+// Aplica (na aprovação): novo prazo com a justificativa do tipo, ou registra no histórico o prazo mantido e o motivo
+export function applyProposals(ctx, v, t, list, { reasonName = 'Férias do responsável', what = 'Férias', table = 'vacation_reschedules', key = 'vacation_id' } = {}) {
+  const reason = one('SELECT id FROM reschedule_reasons WHERE name = ? COLLATE NOCASE', reasonName)
+    || one(`SELECT id FROM reschedule_reasons WHERE name = 'Férias do responsável' COLLATE NOCASE`)
     || one('SELECT id FROM reschedule_reasons WHERE active = 1 ORDER BY sort_order LIMIT 1');
   const requester = one('SELECT name FROM users WHERE id = ?', v.requested_by)?.name || t.name;
+  const period = v.start_date === v.end_date ? fmtD(v.start_date) : `${fmtD(v.start_date)} a ${fmtD(v.end_date)}`;
   for (const r of list) {
     const task = one('SELECT id, due_date, cancelled_at, status FROM tasks WHERE id = ?', r.task_id);
-    if (!task || task.cancelled_at || !['aberta', 'em_andamento'].includes(task.status) || task.due_date === r.new_due) continue;
-    updateTask(ctx, r.task_id, { due_date: r.new_due, reschedule_reason_id: reason.id,
-      reschedule_note: `Férias de ${t.name} de ${fmtD(v.start_date)} a ${fmtD(v.end_date)} · proposto por ${requester}, aprovado por ${ctx.user.name}` }, { trusted: true });
-    run('UPDATE vacation_reschedules SET applied = 1 WHERE vacation_id = ? AND task_id = ?', v.id, r.task_id);
+    if (!task || task.cancelled_at || !['aberta', 'em_andamento'].includes(task.status)) continue;
+    if (r.new_due === task.due_date) {
+      taskHistory(r.task_id, ctx.user.id, 'Prazo mantido (acordado com o líder)', `${what} de ${t.name} em ${period} · ${r.explanation || 'sem explicação'} · proposto por ${requester}, aprovado por ${ctx.user.name}`);
+    } else {
+      updateTask(ctx, r.task_id, { due_date: r.new_due, reschedule_reason_id: reason.id,
+        reschedule_note: `${what} de ${t.name} em ${period}${r.explanation ? ` · ${r.explanation}` : ''} · proposto por ${requester}, aprovado por ${ctx.user.name}` }, { trusted: true });
+    }
+    run(`UPDATE ${table} SET applied = 1 WHERE ${key} = ? AND task_id = ?`, v.id, r.task_id);
   }
 }
 
@@ -295,7 +309,7 @@ export function requestVacation(ctx, body, ip) {
       VALUES (?,?,?,?,?,?,?,?,?,?)`, t.id, c.period.start, c.start_date, c.end_date, c.days, status, note, ctx.user.id,
       status === 'aprovada' ? ctx.user.id : null, status === 'aprovada' ? new Date().toISOString().replace('T', ' ').slice(0, 19) : null);
     const vid = Number(r.lastInsertRowid);
-    for (const x of proposals) run('INSERT INTO vacation_reschedules (vacation_id, task_id, old_due, new_due) VALUES (?,?,?,?)', vid, x.task_id, x.old_due, x.new_due);
+    for (const x of proposals) run('INSERT INTO vacation_reschedules (vacation_id, task_id, old_due, new_due, explanation) VALUES (?,?,?,?,?)', vid, x.task_id, x.old_due, x.new_due, x.explanation || null);
     if (status === 'aprovada') applyProposals(ctx, { id: vid, start_date: c.start_date, end_date: c.end_date, requested_by: ctx.user.id }, t, proposals);
     audit(ctx.user.id, 'vacation', vid, status === 'aprovada' ? 'Férias lançadas' : 'Férias solicitadas',
       { pessoa: t.name, periodo: `${fmtD(c.start_date)} a ${fmtD(c.end_date)}`, dias: c.days, reagendamentos: proposals.length }, ip);
@@ -319,13 +333,13 @@ export function vacationAction(ctx, id, action, body = {}, ip) {
       if (action === 'approve') {
         check(t, v.start_date, v.days, { allowPast: true, excludeId: v.id });
         // Propostas da pessoa (o gestor pode ajustar ou completar, ex.: tarefa criada depois do pedido)
-        const saved = all('SELECT task_id, new_due FROM vacation_reschedules WHERE vacation_id = ?', v.id);
-        const given = new Map((Array.isArray(body.reschedules) ? body.reschedules : []).map(x => [intOrNull(x?.task_id), x?.new_due]));
-        const merged = saved.map(x => ({ task_id: x.task_id, new_due: given.get(x.task_id) || x.new_due }));
-        for (const [tid, nd] of given) if (tid && !merged.some(x => x.task_id === tid)) merged.push({ task_id: tid, new_due: nd });
+        const saved = all('SELECT task_id, new_due, explanation FROM vacation_reschedules WHERE vacation_id = ?', v.id);
+        const given = new Map((Array.isArray(body.reschedules) ? body.reschedules : []).map(x => [intOrNull(x?.task_id), x]));
+        const merged = saved.map(x => (given.get(x.task_id) ? { task_id: x.task_id, ...given.get(x.task_id) } : x));
+        for (const [tid, g] of given) if (tid && !merged.some(x => x.task_id === tid)) merged.push({ ...g, task_id: tid });
         const proposals = readProposals(conflictsOf(t.id, v.start_date, v.end_date), merged, v.start_date, v.end_date);
-        for (const x of proposals) run(`INSERT INTO vacation_reschedules (vacation_id, task_id, old_due, new_due) VALUES (?,?,?,?)
-          ON CONFLICT (vacation_id, task_id) DO UPDATE SET new_due = excluded.new_due`, v.id, x.task_id, x.old_due, x.new_due);
+        for (const x of proposals) run(`INSERT INTO vacation_reschedules (vacation_id, task_id, old_due, new_due, explanation) VALUES (?,?,?,?,?)
+          ON CONFLICT (vacation_id, task_id) DO UPDATE SET new_due = excluded.new_due, explanation = excluded.explanation`, v.id, x.task_id, x.old_due, x.new_due, x.explanation || null);
         applyProposals(ctx, v, t, proposals);
       }
       run(`UPDATE vacations SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -347,7 +361,7 @@ export function vacationAction(ctx, id, action, body = {}, ip) {
 
 function withProposals(rows) {
   for (const v of rows) {
-    v.reschedules = all(`SELECT r.task_id, r.old_due, r.new_due, r.applied, t.code, t.title FROM vacation_reschedules r JOIN tasks t ON t.id = r.task_id WHERE r.vacation_id = ? ORDER BY r.old_due`, v.id);
+    v.reschedules = all(`SELECT r.task_id, r.old_due, r.new_due, r.explanation, r.applied, t.code, t.title FROM vacation_reschedules r JOIN tasks t ON t.id = r.task_id WHERE r.vacation_id = ? ORDER BY r.old_due`, v.id);
     if (v.status === 'solicitada') {
       const have = new Set(v.reschedules.map(x => x.task_id));
       v.new_conflicts = conflictsOf(v.user_id, v.start_date, v.end_date).filter(c => !have.has(c.id));

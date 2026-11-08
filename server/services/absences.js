@@ -6,7 +6,7 @@ import { badRequest, forbidden, notFound, str, date, intOrNull, oneOf } from '..
 import { isAdmin, hasSection, teamIds } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
-import { canApprove } from './vacations.js';
+import { canApprove, conflictsOf, readProposals, applyProposals } from './vacations.js';
 
 const fmtD = d => (d ? d.split('-').reverse().join('/') : '—');
 const lastDayNextMonth = d => { const [y, m] = d.split('-').map(Number); return new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10); };
@@ -22,6 +22,25 @@ function targetOf(id) {
   if (!t) throw notFound('Pessoa não encontrada.');
   if (t.is_external) throw badRequest('A ausência combinada vale só para a equipe interna.');
   return t;
+}
+
+const APPLY = { reasonName: 'Ausência do responsável', what: 'Ausência', table: 'absence_reschedules', key: 'absence_id' };
+// Tarefas da pessoa com entrega no dia da ausência (precisam de novo prazo ou explicação)
+export function previewAbsence(ctx, body) {
+  const t = targetOf(intOrNull(body?.user_id) || ctx.user.id);
+  if (t.id !== ctx.user.id && !canApprove(ctx, t)) throw forbidden('Você não pode lançar ausências desta pessoa.');
+  const off = date(body?.off_date, 'Dia da ausência');
+  return { conflicts: off ? conflictsOf(t.id, off, off) : [] };
+}
+function withReschedules(rows) {
+  for (const a of rows) {
+    a.reschedules = all(`SELECT r.task_id, r.old_due, r.new_due, r.explanation, r.applied, t.code, t.title FROM absence_reschedules r JOIN tasks t ON t.id = r.task_id WHERE r.absence_id = ? ORDER BY r.old_due`, a.id);
+    if (a.status === 'solicitada') {
+      const have = new Set(a.reschedules.map(x => x.task_id));
+      a.new_conflicts = conflictsOf(a.user_id, a.off_date, a.off_date).filter(c => !have.has(c.id));
+    }
+  }
+  return rows;
 }
 
 // Quem o usuário pode lançar (a própria pessoa não entra: ela solicita)
@@ -55,12 +74,18 @@ export function requestAbsence(ctx, body, ip) {
   if (one(`SELECT 1 FROM vacations WHERE user_id = ? AND status IN ('solicitada','aprovada') AND start_date <= ? AND end_date >= ?`, t.id, off, off)) throw badRequest(`${fmtD(off)} já está dentro de férias/recesso de ${t.name.split(' ')[0]}.`);
   const note = str(b.note, { max: 1000, label: 'Combinado / motivo' });
   const status = approver && (!self || isAdmin(ctx.user)) ? 'aprovada' : 'solicitada';
-  const id = Number(run(`INSERT INTO absences (user_id, kind, off_date, makeup_date, status, makeup_status, note, requested_by, decided_by, decided_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`, t.id, kind, off, makeup, status, kind === 'reposicao' ? 'pendente' : null, note, ctx.user.id,
-    status === 'aprovada' ? ctx.user.id : null, status === 'aprovada' ? nowSql() : null).lastInsertRowid);
+  const proposals = readProposals(conflictsOf(t.id, off, off), b.reschedules, off, off, 'a ausência');
+  const id = tx(() => {
+    const nid = Number(run(`INSERT INTO absences (user_id, kind, off_date, makeup_date, status, makeup_status, note, requested_by, decided_by, decided_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`, t.id, kind, off, makeup, status, kind === 'reposicao' ? 'pendente' : null, note, ctx.user.id,
+      status === 'aprovada' ? ctx.user.id : null, status === 'aprovada' ? nowSql() : null).lastInsertRowid);
+    for (const x of proposals) run('INSERT INTO absence_reschedules (absence_id, task_id, old_due, new_due, explanation) VALUES (?,?,?,?,?)', nid, x.task_id, x.old_due, x.new_due, x.explanation || null);
+    if (status === 'aprovada') applyProposals(ctx, { id: nid, start_date: off, end_date: off, requested_by: ctx.user.id }, t, proposals, APPLY);
+    return nid;
+  });
   audit(ctx.user.id, 'absence', id, status === 'aprovada' ? 'Ausência combinada lançada' : 'Ausência combinada solicitada',
-    { pessoa: t.name, tipo: kind === 'reposicao' ? 'falta com reposição' : 'falta descontada', dia: fmtD(off), reposicao: makeup ? fmtD(makeup) : undefined }, ip);
-  return { id, status };
+    { pessoa: t.name, tipo: kind === 'reposicao' ? 'falta com reposição' : 'falta descontada', dia: fmtD(off), reposicao: makeup ? fmtD(makeup) : undefined, tarefas: proposals.length || undefined }, ip);
+  return { id, status, reschedules: proposals.length };
 }
 
 export function absenceAction(ctx, id, action, body = {}, ip) {
@@ -75,6 +100,19 @@ export function absenceAction(ctx, id, action, body = {}, ip) {
   if (action === 'approve' || action === 'reject') {
     if (!approver) throw forbidden('Você não pode decidir as ausências desta pessoa.');
     if (a.status !== 'solicitada') throw badRequest('Esta ausência não está aguardando aprovação.');
+    if (action === 'approve') {
+      // Propostas da pessoa (o líder pode ajustar ou completar, ex.: tarefa criada depois do pedido)
+      const saved = all('SELECT task_id, new_due, explanation FROM absence_reschedules WHERE absence_id = ?', a.id);
+      const given = new Map((Array.isArray(body.reschedules) ? body.reschedules : []).map(x => [intOrNull(x?.task_id), x]));
+      const merged = saved.map(x => (given.get(x.task_id) ? { task_id: x.task_id, ...given.get(x.task_id) } : x));
+      for (const [tid, g] of given) if (tid && !merged.some(x => x.task_id === tid)) merged.push({ ...g, task_id: tid });
+      const proposals = readProposals(conflictsOf(t.id, a.off_date, a.off_date), merged, a.off_date, a.off_date, 'a ausência');
+      tx(() => {
+        for (const x of proposals) run(`INSERT INTO absence_reschedules (absence_id, task_id, old_due, new_due, explanation) VALUES (?,?,?,?,?)
+          ON CONFLICT (absence_id, task_id) DO UPDATE SET new_due = excluded.new_due, explanation = excluded.explanation`, a.id, x.task_id, x.old_due, x.new_due, x.explanation || null);
+        applyProposals(ctx, { id: a.id, start_date: a.off_date, end_date: a.off_date, requested_by: a.requested_by }, t, proposals, APPLY);
+      });
+    }
     run(`UPDATE absences SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, updated_at = datetime('now') WHERE id = ?`, action === 'approve' ? 'aprovada' : 'recusada', ctx.user.id, now, note, id);
     label = action === 'approve' ? 'Ausência combinada aprovada' : 'Ausência combinada recusada';
   } else if (action === 'cancel') {
@@ -101,10 +139,10 @@ export function absenceAction(ctx, id, action, body = {}, ip) {
 
 // Meu painel: minhas ausências, as que aguardam minha aprovação e as reposições a conferir
 export function myAbsences(ctx) {
-  const mine = all(`${SQL} WHERE a.user_id = ? ORDER BY a.off_date DESC LIMIT 30`, ctx.user.id);
+  const mine = withReschedules(all(`${SQL} WHERE a.user_id = ? ORDER BY a.off_date DESC LIMIT 30`, ctx.user.id));
   const canFor = new Map();
   const ok = a => { if (!canFor.has(a.user_id)) canFor.set(a.user_id, a.user_id !== ctx.user.id && canApprove(ctx, one('SELECT * FROM users WHERE id = ?', a.user_id))); return canFor.get(a.user_id); };
-  const approvals = all(`${SQL} WHERE a.status = 'solicitada' ORDER BY a.off_date`).filter(ok);
+  const approvals = withReschedules(all(`${SQL} WHERE a.status = 'solicitada' ORDER BY a.off_date`).filter(ok));
   const checks = all(`${SQL} WHERE a.status = 'aprovada' AND a.kind = 'reposicao' AND a.makeup_status = 'pendente' AND a.makeup_date <= ? ORDER BY a.makeup_date`, today()).filter(ok);
   const upcoming = all(`${SQL} WHERE a.status = 'aprovada' AND (a.off_date >= ? OR (a.kind = 'reposicao' AND a.makeup_status = 'pendente')) ORDER BY a.off_date`, today()).filter(ok);
   return { mine, approvals, checks, upcoming, people: absencePeople(ctx) };

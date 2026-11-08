@@ -1696,10 +1696,13 @@ async function main() {
   const prFelSecs = (await prFel('GET', '/meta')).data.can.sections;
   const prFelSis = prList.items.filter(i => i.code.startsWith('SIS-'));
   const prExp = prSis.filter(i => !i.section || i.section.split('|').some(k => prFelSecs.includes(k)));
-  ok(prFelSis.length === prExp.length && prFelSis.length < 19 && !prFelSis.some(i => i.code === 'SIS-12' && !prFelSecs.includes('contratos')), 'tutoriais aparecem só para quem tem acesso à seção correspondente');
+  ok(prFelSis.length === prExp.length && prFelSis.length < 24 && !prFelSis.some(i => i.code === 'SIS-12' && !prFelSecs.includes('contratos')), 'tutoriais aparecem só para quem tem acesso à seção correspondente');
   ok(prFelSecs.includes('contratos') || (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-12').id}`)).status === 404, 'sem a seção, o tutorial não abre nem pelo endereço');
   const prSis5 = (await prFel('GET', `/processes/${prSis.find(i => i.code === 'SIS-05').id}`)).data;
-  ok(prSis.length === 19 && prSis.every(i => i.status === 'publicado' && i.area.startsWith('Sistema · ')) && prSis5.content.related_items.some(r => r.code === 'SIS-06') && prSis5.versions.length === 1, 'tutoriais do sistema: 19 processos SIS publicados, com relacionados');
+  ok(prSis.length === 24 && prSis.every(i => i.status === 'publicado' && i.area.startsWith('Sistema · ')) && prSis5.content.related_items.some(r => r.code === 'SIS-06') && prSis5.versions.length === 2, 'tutoriais do sistema: 24 processos SIS publicados, com relacionados (SIS-05 na versão 2)');
+  const prSis20 = (await prAna('GET', `/processes/${prSis.find(i => i.code === 'SIS-20').id}`)).data;
+  ok(prSis20.content.section === 'projetos' && prSis20.content.steps.length === 9 && prSis20.content.steps.some(st => st.control && st.back_to === 4) && prSis20.content.related_items.some(r => r.code === 'PRC-05') && /Evidência do envio/.test(JSON.stringify(prSis20.content)), 'tutorial de cotações (SIS-20): passo a passo do preenchimento, ponto de controle da meta e relacionados');
+  ok(['SIS-21', 'SIS-22', 'SIS-23', 'SIS-24'].every(c => prSis.some(i => i.code === c)) && prSis.find(i => i.code === 'SIS-13').title.startsWith('Financeiro: lista do mês'), 'novos tutoriais (Vendas, Folha de Campo, Folha Administrativa, Ausência) e Financeiro atualizado');
   ok((await prAna('GET', '/meta')).data.can.edit_processes && !(await prFel('GET', '/meta')).data.can.edit_processes, 'edição de processos: administrador sim, colaborador não');
   const prRdo = (await prFel('GET', '/processes/1')).data;
   ok(prRdo.content.steps.length === 5 && prRdo.content.steps[2].control && prRdo.content.steps[2].back_to === 1 && prRdo.content.links[0].kind === 'video', 'ficha do RDO com etapas, ponto de controle, retorno e vídeo');
@@ -1728,7 +1731,7 @@ async function main() {
   ok((await prAna('POST', `/processes/${prNew.id}/restaurar`)).data.status === 'publicado', 'processo restaurado');
   const prDel = (await prAna('POST', '/processes', { ...prBody, title: 'Rascunho descartável' })).data;
   ok((await prAna('DELETE', `/processes/${prDel.id}`)).status === 200 && (await prAna('GET', `/processes/${prDel.id}`)).status === 404, 'rascunho nunca publicado pode ser excluído');
-  ok((await prAna('GET', '/processes/manual')).data.processes.length === 28, 'manual completo com os processos publicados');
+  ok((await prAna('GET', '/processes/manual')).data.processes.length === 33, 'manual completo com os processos publicados (8 PRC, 24 SIS e o novo)');
   // Aprovação: gestor/coordenador criam e enviam; só o administrador publica
   const prJu = await login('juliana@charao.eng.br');
   const prJuMeta = (await prJu('GET', '/meta')).data.can;

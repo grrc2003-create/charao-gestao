@@ -3412,7 +3412,9 @@ async function main() {
     const qP = 1;
     const ymd = d => d.toISOString().slice(0, 10);
     const qToday = ymd(new Date(Date.now() - 3 * 3600e3));
-    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 0, 'projeto sem itens: resumo vazio');
+    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.enabled === false && (await qA('GET', `/projects/${qP}/quotes`)).status === 400, 'cotações só existem no projeto marcado no cadastro');
+    ok((await qA('PUT', `/projects/${qP}`, { has_quotes: 1 })).status === 200 && (await qA('GET', `/projects/${qP}`)).data.has_quotes === 1, 'cadastro do projeto: "Este projeto terá cotações" marcado');
+    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.enabled === true && (await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 0, 'projeto marcado sem itens: resumo vazio');
     const qS1 = (await qA('POST', '/suppliers', { name: 'Fornecedor Fictício Alfa', cnpj: '00.000.000/0001-01', disciplines: 'Climatização, Elétrica' })).data;
     const qS2 = (await qA('POST', '/suppliers', { name: 'Fornecedor Fictício Beta' })).data;
     const qS3 = (await qA('POST', '/suppliers', { name: 'Fornecedor Fictício Gama' })).data;
@@ -3484,6 +3486,8 @@ async function main() {
     for (const it of qM2.items) await qA('DELETE', `/projects/${qP}/quotes/items/${it.id}`);
     for (const r of qM2.requests) await qA('DELETE', `/quote-requests/${r.id}`);
     ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 0, 'itens e solicitações de teste excluídos');
+    await qA('PUT', `/projects/${qP}`, { has_quotes: 0 });
+    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.enabled === false && (await qA('POST', `/projects/${qP}/quotes/items`, { discipline: 'X', description: 'Y' })).status === 400, 'desmarcado: a área some e não aceita itens');
   }
 
   // ---------- Vendas e Prospecção ----------

@@ -154,6 +154,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <div class="field"><label for="actual_end_date">Término real</label><input id="actual_end_date" name="actual_end_date" type="date" value="${v.actual_end_date || ''}"></div>
           </div>
           <label class="pr-se-check obra-only" ${isInt ? 'hidden' : ''}><input type="checkbox" name="field_control" value="1" ${v.field_control ? 'checked' : ''}> Controle de folha de campo</label>
+          <label class="pr-se-check"><input type="checkbox" name="has_quotes" value="1" ${v.has_quotes ? 'checked' : ''}> Este projeto terá cotações</label>
+          <span class="hint">Marcado, o projeto ganha o <b>mapa de cotações</b> (itens, solicitações de proposta com evidência, propostas e exportação). Desmarcado, a área some do projeto, mas nada do que já foi lançado é apagado.</span>
           <span class="hint obra-only" ${isInt ? 'hidden' : ''}>Marcado, a obra aparece na <b>Folha de Campo</b> (diárias, empreitadas, medição do terceiro e pagamentos). Desmarcado, ela some da Folha de Campo, mas nada do que já foi lançado é apagado.</span>
         </fieldset>
         <fieldset class="fieldset form"><legend>Classificação das tarefas (Grupo/Local/Etapa)</legend>
@@ -296,6 +298,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         const data = Object.fromEntries(new FormData(f));
         data.member_ids = [...f.querySelectorAll('[name=member]:checked:not(:disabled)')].map(c => Number(c.value));
         data.field_control = f.querySelector('[name=field_control]')?.checked ? 1 : 0;
+        data.has_quotes = f.querySelector('[name=has_quotes]')?.checked ? 1 : 0;
         data.stages = [...f.querySelectorAll('.stage-item:not(.stage-default)')].map(li => ({ id: li.dataset.id ? Number(li.dataset.id) : null, name: li.querySelector('input').value }));
         delete data.member;
         err.hidden = true;

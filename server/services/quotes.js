@@ -23,9 +23,10 @@ const num = (v, label) => {
 };
 const median = arr => { if (!arr.length) return null; const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return r2(s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2); };
 
-function project(ctx, projectId, { edit = false } = {}) {
-  const p = one('SELECT id, code, name, client, kind FROM projects WHERE id = ?', projectId);
+function project(ctx, projectId, { edit = false, any = false } = {}) {
+  const p = one('SELECT id, code, name, client, kind, has_quotes FROM projects WHERE id = ?', projectId);
   if (!p || !canAccessProject(ctx.user, p.id, ctx.projects)) throw notFound('Projeto não encontrado.');
+  if (!any && !p.has_quotes) throw badRequest('Este projeto não tem cotações. Para usar, marque "Este projeto terá cotações" no cadastro do projeto.');
   if (edit && ctx.user.is_external) throw forbidden('Terceirizados não alteram as cotações.');
   return p;
 }
@@ -143,10 +144,11 @@ export function projectQuotes(ctx, projectId) {
     can_edit: !ctx.user.is_external, today: today() };
 }
 export function quotesSummary(ctx, projectId) {
-  const p = project(ctx, projectId);
-  if (!one('SELECT 1 FROM quote_items WHERE project_id = ? LIMIT 1', p.id)) return { items: 0 };
+  const p = project(ctx, projectId, { any: true });
+  if (!p.has_quotes) return { enabled: false, items: 0 };
+  if (!one('SELECT 1 FROM quote_items WHERE project_id = ? LIMIT 1', p.id)) return { enabled: true, items: 0 };
   const { items, requests } = loadMap(p.id);
-  return summarize(items, requests);
+  return { enabled: true, ...summarize(items, requests) };
 }
 
 // ---------- Itens ----------
@@ -281,7 +283,7 @@ export function deleteRequest(ctx, id, ip) {
 export function quoteFileForUser(ctx, fileId) {
   const f = one('SELECT f.*, r.project_id FROM quote_files f JOIN quote_requests r ON r.id = f.request_id WHERE f.id = ?', fileId);
   if (!f) throw notFound('Arquivo não encontrado.');
-  project(ctx, f.project_id);
+  project(ctx, f.project_id, { any: true });
   return f;
 }
 

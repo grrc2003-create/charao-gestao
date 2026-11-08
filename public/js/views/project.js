@@ -41,7 +41,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
           <a class="btn btn-ghost" href="#/imprimir/relatorio?type=projeto&id=${p.id}&level=detalhado">${icon('print')}Relatório</a>
           <a class="btn btn-ghost" href="#/imprimir/historia/${p.id}">${icon('history')}História</a>
           <a class="btn btn-ghost" href="#/projetos/${p.id}/vinculos">${icon('share')}Mapa de vínculos</a>
-          ${quotes ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/cotacoes">${icon('file')}Cotações</a>` : ''}
+          ${quotes?.enabled ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/cotacoes">${icon('file')}Cotações</a>` : ''}
           ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar">${icon('file')}Importar planejamento</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
@@ -52,7 +52,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
             : html`<p class="muted" style="margin:6px 0 0;font-size:12.5px">${p.schedule.rescheduled_tasks ? `${p.schedule.rescheduled_tasks} tarefa(s) reagendada(s), sem mudar o fim do projeto.` : 'Nenhum reagendamento mudou o fim do projeto.'}</p>`}</div></section>` : ''}
       ${kpiBlock(p.summary)}
       ${execKpis(p.summary)}
-      ${quotes?.items ? quotesCard(quotes, p.id) : ''}
+      ${quotes?.enabled && quotes.items ? quotesCard(quotes, p.id) : ''}
       ${recs ? recordsCard(recs) : ''}
       ${checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` })}
 

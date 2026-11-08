@@ -1,5 +1,5 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
-import { pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, stackBar, STATUS_COLOR, execInline } from './shared.js';
+import { fold, bindFolds, nOf, checklistFold, pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, stackBar, STATUS_COLOR, execInline } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
@@ -73,6 +73,12 @@ export async function view({ state }) {
       ${statusBadge(t.eff_status, { short: true })}</a></li>`;
   };
 
+  // listas recolhidas: resumo e sinal no cabeçalho
+  const myCl = d.my_checklist || [];
+  const myClPend = myCl.reduce((n, c) => n + (c.pending || 0), 0);
+  const clF = checklistFold(d.checklists || []);
+  const rkLate = ranking.filter(x => x.stats?.late).length;
+  const impEnd = impactRank.slice(0, 5).filter(r => r.project_end_days > 0).length;
   return {
     title: 'Dashboard',
     html: html`
@@ -82,15 +88,15 @@ export async function view({ state }) {
         sub: `${plural(d.projects.filter(p => p.status === 'em_andamento').length, 'obra ativa', 'obras ativas')} · ${plural(s.total, 'tarefa visível', 'tarefas visíveis')} para o seu perfil${d.checklist_items ? ` (inclui ${d.checklist_items} ${d.checklist_items === 1 ? 'item' : 'itens'} de check-list, contados como subtarefas)` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/painel">${icon('user')}Meu painel</a>${state.meta.can.contracts ? html`<a class="btn btn-ghost" href="#/contratos">${icon('contract')}Contratos</a>` : ''}${state.meta.can.finance ? html`<a class="btn btn-ghost" href="#/financeiro">${icon('wallet')}Financeiro</a>` : ''}<a class="btn btn-ghost" href="#/relatorios">${icon('reports')}Relatórios</a><a class="btn btn-accent" href="#/tarefas/nova">${icon('plus')}Nova tarefa</a>`,
       })}
-      ${d.my_checklist?.length ? html`<section class="card section cl-alert">
+      ${myCl.length ? fold('meus-cl', nOf(myCl.length, 'check-list', 'check-lists'), myClPend ? nOf(myClPend, 'item pendente', 'itens pendentes') : '', html`<section class="card section cl-alert">
         <div class="card-head"><h2>${icon('checklist')} Itens de check-list para você</h2><a class="sub" href="#/tarefas?tipo=checklist&assignee=me">Ver check-lists</a></div>
         <ul class="rows">${d.my_checklist.map(c => html`<li><a class="row-link" href="#/tarefas/${c.id}">
           <div class="grow"><div class="row-title"><span class="mono muted" style="font-size:12px">${c.code}</span> ${c.title}</div>
             <div class="row-meta"><span>${c.project_code} · ${c.project_name}</span>${c.due_date ? html`<span>${icon('calendar')} ${c.due_date.split('-').reverse().join('/')}</span>` : ''}</div></div>
           <span class="pill pill-orange">${c.pending} ${c.pending === 1 ? 'item pendente' : 'itens pendentes'}</span><span class="chev">${icon('chevron')}</span></a></li>`)}</ul>
-      </section>` : ''}
+      </section>`) : ''}
       ${kpiBlock(s, { linkBase: '#/tarefas' })}
-      ${checklistSection(d.checklists || [])}
+      ${fold('checklists', clF.sum, clF.flag, checklistSection(d.checklists || []))}
 
       <div class="grid grid-dash section">
         <section class="card dash-left">
@@ -112,12 +118,12 @@ export async function view({ state }) {
 
       ${evolutionSection({ scope: 'empresa' })}
 
-      <section class="card section">
+      ${fold('desempenho', nOf(ranking.length, 'pessoa', 'pessoas'), rkLate ? nOf(rkLate, 'pessoa com atraso', 'pessoas com atraso') : '', html`<section class="card section">
         <div class="card-head"><h2>${icon('team')}Desempenho por usuário</h2><span class="sub">ordenado por entregas no prazo</span></div>
         ${ranking.length ? html`<ul class="rows">${ranking.map(userRankRow)}</ul>` : html`<div class="card-body muted">Sem dados de usuários para o seu perfil.</div>`}
-      </section>
+      </section>`)}
 
-      ${impactRankingSection(impactRank.slice(0, 5))}
+      ${fold('impacto', nOf(impactRank.slice(0, 5).length, 'tarefa causou atrasos em outras', 'tarefas causaram atrasos em outras'), impEnd ? `${impEnd} ${impEnd === 1 ? 'empurrou' : 'empurraram'} o fim de projeto` : '', impactRankingSection(impactRank.slice(0, 5)))}
       ${deadlineSection(s, d.trend, {
         link: { scope: 'empresa' },
         distBy: d.dist_by,
@@ -147,21 +153,21 @@ export async function view({ state }) {
         </div></div></section>` : ''}
 
       <div class="grid grid-3 section">
-        <section class="card">
+        ${fold('atrasos', d.late.length ? 'as mais críticas primeiro' : 'nenhuma atrasada', d.late.length ? nOf(d.late.length, 'atrasada', 'atrasadas') : '', html`<section class="card">
           <div class="card-head"><h2>${icon('alert')}Atrasos críticos</h2><a class="sub" href="#/tarefas?status=atrasada">Ver todas</a></div>
           ${d.late.length ? html`<ul class="rows">${d.late.map(taskMini)}</ul>` : html`<div class="card-body muted">Nenhuma tarefa atrasada. 👍</div>`}
-        </section>
-        <section class="card">
+        </section>`)}
+        ${fold('proximos', d.upcoming.length ? nOf(d.upcoming.length, 'tarefa vencendo', 'tarefas vencendo') : 'nada vencendo', '', html`<section class="card">
           <div class="card-head"><h2>${icon('calendar')}Próximos 7 dias</h2><a class="sub" href="#/tarefas?due=7d">Ver todas</a></div>
           ${d.upcoming.length ? html`<ul class="rows">${d.upcoming.map(taskMini)}</ul>` : html`<div class="card-body muted">Nada vencendo nos próximos dias.</div>`}
-        </section>
-        <section class="card">
+        </section>`)}
+        ${fold('atividade', nOf(d.activity.length, 'registro', 'registros'), '', html`<section class="card">
           <div class="card-head"><h2>${icon('history')}Atividade recente</h2></div>
           <div class="card-body"><ul class="timeline">${d.activity.map(a => html`<li>
             <div class="act"><a href="#/tarefas/${a.task_id}">${a.code}</a> · ${a.action}</div>
             <div class="det truncate">${a.title}</div>
             <div class="who">${a.user_name || 'Sistema'} · ${fmtDateTime(a.created_at)}</div></li>`)}</ul></div>
-        </section>
+        </section>`)}
       </div>
       <a class="fab" href="#/tarefas/nova" aria-label="Nova tarefa">${icon('plus')}</a>`,
     mount: root => {
@@ -169,6 +175,7 @@ export async function view({ state }) {
       bindCommon(root);
       bindChecklistCards(root);
       bindEvolution(root);
+      bindFolds(root, 'empresa');
     },
   };
 }

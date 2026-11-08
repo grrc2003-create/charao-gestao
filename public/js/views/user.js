@@ -1,7 +1,7 @@
 // Tela individual do usuário: indicadores, comportamento operacional, tarefas próprias e visão da equipe.
 import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct, roleLabel } from '../core.js';
 import { ganttSection, bindGanttSections } from './gantt.js';
-import { pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR, execKpis } from './shared.js';
+import { fold, bindFolds, nOf, checklistFold, pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR, execKpis } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
@@ -48,8 +48,8 @@ export async function view({ params, query, setQuery, render, state, panel = fal
         ${kpi({ label: 'Em conferência', value: d.team_summary.review, color: STATUS_COLOR.aguardando_conferencia })}
         ${kpi({ label: 'Entregas no prazo', value: fmtPct(d.team_summary.on_time_pct), color: STATUS_COLOR.concluida })}
       </div>
-      <section class="card"><div class="card-head"><h2>Integrantes</h2><span class="sub">as tarefas são de responsabilidade de cada integrante</span></div>
-        <ul class="rows">${[...d.team].sort((a, b) => (b.stats.on_time_pct ?? -1) - (a.stats.on_time_pct ?? -1)).map((m, i) => userRankRow({ ...m }, i))}</ul></section>
+      ${fold('integrantes', nOf(d.team.length, 'integrante', 'integrantes'), d.team.filter(m => m.stats?.late).length ? nOf(d.team.filter(m => m.stats?.late).length, 'com atraso', 'com atraso') : '', html`<section class="card"><div class="card-head"><h2>Integrantes</h2><span class="sub">as tarefas são de responsabilidade de cada integrante</span></div>
+        <ul class="rows">${[...d.team].sort((a, b) => (b.stats.on_time_pct ?? -1) - (a.stats.on_time_pct ?? -1)).map((m, i) => userRankRow({ ...m }, i))}</ul></section>`)}
       <div class="page-head section" style="margin-bottom:10px"><div><h2>Tarefas da equipe</h2><p>${d.team_tasks.length} tarefa(s)</p></div>
         <div class="page-actions"><a class="btn btn-ghost" href="#/imprimir/relatorio?type=equipe&id=${u.id}&level=detalhado">${icon('print')}Relatório da equipe</a></div></div>
       <div class="result-count"><span></span>${orgControl(org)}</div>
@@ -103,12 +103,12 @@ export async function view({ params, query, setQuery, render, state, panel = fal
 
       ${evolutionSection({ scope: 'usuario', id: u.id, sub: `${u.name.split(' ')[0]} comparado com a empresa` })}
 
-      ${d.impact ? html`<section class="card section dep-user-impact"><div class="card-head"><h2>${icon('alert')}Impacto dos atrasos em outras tarefas</h2>
+      ${d.impact ? fold('impacto', `${nOf(d.impact.causes, 'tarefa atrasou', 'tarefas atrasaram')} · ${d.impact.tasks} impactada(s)`, d.impact.days ? `${d.impact.days} dia(s)-tarefa` : '', html`<section class="card section dep-user-impact"><div class="card-head"><h2>${icon('alert')}Impacto dos atrasos em outras tarefas</h2>
           <span class="sub">${d.impact.causes} tarefa(s) que atrasaram · ${d.impact.tasks} impactada(s) · <b>${d.impact.days} dia(s)-tarefa</b></span></div>
         <ul class="rows">${d.impact.list.map(x => html`<li><a class="row-link" href="#/tarefas/${x.id}"><div class="grow"><div class="row-title"><span class="mono">${x.code}</span> ${x.title}</div>
           <div class="row-meta"><span>${x.tasks} tarefa(s) empurrada(s)</span></div></div><b>${x.days} d</b></a></li>`)}</ul>
-        <div class="card-body muted" style="font-size:12.5px">Quando uma tarefa desta pessoa atrasou, as tarefas que dependiam dela foram empurradas (sem penalizá-las). Dias-tarefa = soma dos dias empurrados.</div></section>` : ''}
-      ${checklistSection(d.checklists || [], { title: `Check-lists de ${u.name.split(' ')[0]}`, linkAll: '' })}
+        <div class="card-body muted" style="font-size:12.5px">Quando uma tarefa desta pessoa atrasou, as tarefas que dependiam dela foram empurradas (sem penalizá-las). Dias-tarefa = soma dos dias empurrados.</div></section>`) : ''}
+      ${(() => { const f = checklistFold(d.checklists || []); return fold('checklists', f.sum, f.flag, checklistSection(d.checklists || [], { title: `Check-lists de ${u.name.split(' ')[0]}`, linkAll: '' })); })()}
       ${ganttSection({ id: `u${u.id}`, url: `/gantt?user=${u.id}`, showProject: true, groupBy: 'project', sub: `tarefas atribuídas a ${u.name.split(' ')[0]}, por projeto` })}
 
       <div class="grid grid-dash section">
@@ -142,6 +142,7 @@ export async function view({ params, query, setQuery, render, state, panel = fal
       bindEvolution(root);
       bindGanttSections(root, url => api(url));
       bindChecklistCards(root);
+      bindFolds(root, `u${u.id}`);
       bindWeekPlan(root, { d, user: u, meta: state.meta, week, render,
         setWeek: w => setQuery({ tab, status: st, org, semana: w }) });
       root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { setQuery({ tab: b.dataset.tab, semana: week }); render(); }));

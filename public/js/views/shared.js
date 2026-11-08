@@ -345,3 +345,41 @@ export function scheduleLine(p) {
   const endTitle = endCls ? `${endCls === 'is-late' ? 'Atrasada' : 'Antecipada'} em relação ao prazo original das tarefas (${fmtDate(sc.end_original)})` : '';
   return html`<span class="sch-dates" title="Início e fim pelas tarefas e subtarefas">${icon('calendar')} ${fmtDate(start)} → <b class="sch-end ${endCls}" title="${endTitle}">${fmtDate(end)}</b></span>${planned}${eff}`;
 }
+
+// Listas recolhidas (padrão de todas as telas): o cabeçalho diz o que há dentro e sinaliza o que é importante; um clique abre.
+// fold(chave, resumo, sinal, conteúdo) envolve um card com .card-head; bindFolds(root, escopo) liga e lembra o estado na sessão.
+export const fold = (key, sum, flag, content) => (content && String(content).trim() ? html`<div class="pf-wrap" data-fold="${key}" data-fold-sum="${sum}" data-fold-flag="${flag || ''}">${content}</div>` : '');
+export const nOf = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+// resumo padrão de um bloco de check-lists
+export function checklistFold(list = []) {
+  const open = list.filter(c => c.eff_status !== 'concluida');
+  const nc = open.reduce((n, c) => n + (c.nc_open || 0), 0);
+  const late = open.filter(c => c.eff_status === 'atrasada').length;
+  return {
+    sum: `${nOf(open.length, 'check-list em andamento', 'check-lists em andamento')}${list.length - open.length ? ` · ${list.length - open.length} concluído(s)` : ''}`,
+    flag: [nc ? `${nc} NC em aberto` : '', late ? nOf(late, 'atrasado', 'atrasados') : ''].filter(Boolean).join(' · '),
+  };
+}
+export function bindFolds(root, scope) {
+  const SK = k => `charao-fold-${scope}-${k}`;
+  root.querySelectorAll('[data-fold]').forEach(w => {
+    const card = w.firstElementChild;
+    const head = card?.querySelector(':scope > .card-head');
+    if (!card || !head || card.classList.contains('fold-card')) return;
+    card.classList.add('fold-card');
+    const key = w.dataset.fold;
+    let open = false;
+    try { open = sessionStorage.getItem(SK(key)) === '1'; } catch { /* sem armazenamento */ }
+    const info = document.createElement('span');
+    info.className = 'fold-info';
+    const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    info.innerHTML = `${w.dataset.foldFlag ? `<span class="fold-flag">${esc(w.dataset.foldFlag)}</span>` : ''}<span class="fold-sum">${esc(w.dataset.foldSum)}</span><span class="fold-chev" aria-hidden="true"></span>`;
+    head.querySelector('h2')?.after(info);
+    head.setAttribute('role', 'button');
+    head.tabIndex = 0;
+    const set = v => { open = v; card.classList.toggle('is-open', open); head.setAttribute('aria-expanded', String(open)); try { sessionStorage.setItem(SK(key), open ? '1' : '0'); } catch { /* sem armazenamento */ } };
+    set(open);
+    head.addEventListener('click', e => { if (e.target.closest('a,button,select,input')) return; set(!open); });
+    head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); set(!open); } });
+  });
+}

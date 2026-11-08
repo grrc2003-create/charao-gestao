@@ -1,7 +1,7 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
 import { quotesCard } from './quotes.js';
 import { evaluateAlerts, alertMap, alertsBanner, alertsSheet } from './project-alerts.js';
-import { pageHead, kpi, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
+import { fold, bindFolds, pageHead, kpi, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
@@ -12,31 +12,6 @@ import { calendarSheet } from './calendar-ui.js';
 import { recordsCard, bindRecordsCard } from './records.js';
 import { addPdfButtons } from '../section-pdf.js';
 import { evolutionSection, bindEvolution } from './evolution.js';
-
-// Listas da página do projeto ficam recolhidas: o cabeçalho diz o que há dentro e sinaliza o que é importante; um clique abre
-const fold = (key, sum, flag, content) => (content && String(content).trim() ? html`<div class="pf-wrap" data-fold="${key}" data-fold-sum="${sum}" data-fold-flag="${flag || ''}">${content}</div>` : '');
-function bindFolds(root, projectId) {
-  const SK = k => `charao-fold-${projectId}-${k}`;
-  root.querySelectorAll('[data-fold]').forEach(w => {
-    const card = w.firstElementChild;
-    const head = card?.querySelector(':scope > .card-head');
-    if (!card || !head) return;
-    card.classList.add('fold-card');
-    const key = w.dataset.fold;
-    let open = false;
-    try { open = sessionStorage.getItem(SK(key)) === '1'; } catch { /* sem armazenamento */ }
-    const info = document.createElement('span');
-    info.className = 'fold-info';
-    info.innerHTML = `${w.dataset.foldFlag ? `<span class="fold-flag">${w.dataset.foldFlag}</span>` : ''}<span class="fold-sum">${w.dataset.foldSum}</span><span class="fold-chev" aria-hidden="true"></span>`;
-    head.querySelector('h2')?.after(info);
-    head.setAttribute('role', 'button');
-    head.tabIndex = 0;
-    const set = v => { open = v; card.classList.toggle('is-open', open); head.setAttribute('aria-expanded', String(open)); try { sessionStorage.setItem(SK(key), open ? '1' : '0'); } catch { /* sem armazenamento */ } };
-    set(open);
-    head.addEventListener('click', e => { if (e.target.closest('a,button,select,input')) return; set(!open); });
-    head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); set(!open); } });
-  });
-}
 
 export async function view({ params, query, setQuery, render, navigate }) {
   const [p, impactRank, recs, quotes, alertConf] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
@@ -181,7 +156,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
       root.querySelector('[data-cal-open]')?.addEventListener('click', () => calendarSheet(p));
       if (recs) bindRecordsCard(root, recs, navigate);
       bindChecklistCards(root);
-      bindFolds(root, p.id);
+      bindFolds(root, `p${p.id}`);
       root.querySelectorAll('[data-pa-edit]').forEach(b => b.addEventListener('click', () => alertsSheet(p, quotes, alertConf, () => render())));
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {

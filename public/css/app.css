@@ -4119,3 +4119,10 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
   .fold-card > .card-head > .fold-info .fold-sum { flex: 1 1 auto; }
   .fold-flag { white-space: normal; }
 }
+
+/* Listas recolhidas em grades: o card fechado não estica ao lado de um aberto */
+.pf-wrap { min-width: 0; }
+.grid > .pf-wrap > .fold-card { height: auto; }
+/* cards estreitos (grade de 3 ou lado a lado): o resumo desce para a própria linha */
+.grid-3 .fold-card > .card-head > .fold-info, .grid-dash .fold-card > .card-head > .fold-info { flex: 1 1 100%; order: 5; margin: 2px 0 0; }
+.grid-3 .fold-card > .card-head > h2, .grid-dash .fold-card > .card-head > h2 { flex: 1 1 auto; }

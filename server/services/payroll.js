@@ -15,6 +15,7 @@ import { createObligationInternal, obligationPaid, removeObligationInternal, set
 import { saveImageFromDataUrl, cleanFileName, deleteStored } from './files.js';
 import { today } from './metrics.js';
 import { entryReimbursements, pendingReimbursements, releaseByEntries } from './reimbursements.js';
+import { discountedAbsences } from './absences.js';
 
 export { COMPANIES } from '../lib/companies.js';
 import { COMPANIES } from '../lib/companies.js';
@@ -131,7 +132,10 @@ export function compute(month, entry, person, requests = []) {
   const end = entry.end_date || minD(bolsa.end, person.end_date);
   const business = workingDaysList(null, bolsa.start, bolsa.end).length;
   const periodDays = start && end && end >= start ? workingDaysList(null, start, end).length : 0;
-  const absences = Math.max(0, Number(entry.absences) || 0);
+  // Faltas: as lançadas na folha + as ausências combinadas descontadas (falta descontada ou reposição não cumprida)
+  const absManual = Math.max(0, Number(entry.absences) || 0);
+  const absAuto = person.user_id && start && end && end >= start ? discountedAbsences(person.user_id, start, end) : [];
+  const absences = absManual + absAuto.length;
   const worked = Math.max(0, periodDays - absences);
   const base = business ? r2((Number(person.monthly_value) || 0) * worked / business) : 0;
   const schedule = parseSchedule(person.schedule);
@@ -156,7 +160,7 @@ export function compute(month, entry, person, requests = []) {
   const reimbRequests = r2(requests.reduce((s, r) => s + (Number(r.amount) || 0), 0));
   const reimbursement = r2(reimbManual + reimbRequests);
   return {
-    start, end, business_days: business, period_days: periodDays, absences, worked_days: worked, ho_days: ho,
+    start, end, business_days: business, period_days: periodDays, absences, absences_manual: absManual, absences_auto: absAuto.map(x => ({ id: x.id, kind: x.kind, off_date: x.off_date, makeup_date: x.makeup_date })), worked_days: worked, ho_days: ho,
     weight: business ? r2(worked / business) : 0,
     base, vt_days: vtDays, vr_days: vrDays, per_weekday: perWeekday, vt_base: vtBase, ho_discount: hoDiscount, vt_adjust: vtAdjust, vt,
     vr_base: vrBase, vr_adjust: vrAdjust, vr, reimbursement, reimb_manual: reimbManual, reimb_requests: reimbRequests, total: r2(base + vt + vr + reimbursement),

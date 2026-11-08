@@ -3999,3 +3999,11 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 }
 button.ck-ask { border: 1px dashed #c9a94a; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 650; }
 button.ck-ask:hover { background: #ffefc2; }
+
+/* Ausências combinadas (Meu painel) */
+.ab-body { display: grid; gap: 10px; }
+.ab-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ab-list li { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; font-size: 13.5px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.ab-list li small { display: block; color: var(--muted); font-size: 12px; }
+.ab-st { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; align-items: center; }
+.pf-auto { color: var(--muted); font-size: 11px; font-weight: 500; }

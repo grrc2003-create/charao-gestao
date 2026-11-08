@@ -23,9 +23,56 @@ function addMonths(d, n) {
 }
 const LIVE = `status IN ('solicitada','aprovada')`;
 
+// ---------- Regras por vínculo (Cadastro da Equipe) ----------
+// CLT (ou sem vínculo informado): regras da CLT. PJ: férias do acordo. Estagiário: recesso.
+// PJ e estagiário: 30 dias a cada 12 meses, proporcionais (2,5 dias por mês completo), em partes livres (1 dia ou mais),
+// podendo tirar antes de completar os 12 meses o que já foi proporcionalmente adquirido; o estagiário pode antecipar
+// até 5 dias além do saldo (descontados dos meses seguintes).
+export const modeOf = u => (u?.employment === 'pj' ? 'pj' : u?.employment === 'estagio' ? 'estagio' : 'clt');
+const ADVANCE = { pj: 0, estagio: 5 };
+export const LABEL = { clt: 'Férias', pj: 'Férias (acordo PJ)', estagio: 'Recesso' };
+export const RULES = {
+  clt: 'Regras da CLT: até 3 partes por período aquisitivo (uma com 14 dias ou mais, as demais com 5 ou mais) e início fora dos 2 dias antes de feriado ou domingo.',
+  pj: 'Férias do acordo PJ: 30 dias a cada 12 meses de contrato, em partes livres (a partir de 1 dia), até o proporcional já adquirido (2,5 dias por mês completo).',
+  estagio: 'Recesso do estágio: 30 dias a cada 12 meses, em partes livres (a partir de 1 dia), proporcional ao tempo de estágio (2,5 dias por mês completo). Pode antecipar até 5 dias além do saldo, descontados dos meses seguintes.',
+};
+// Meses completos desde o início do período (até 12)
+function monthsDone(start, ref) { let k = 0; while (k < 12 && addMonths(start, k + 1) <= addDays(ref, 1)) k++; return k; }
+// Saldo corrido (PJ / estagiário): direito acumulado até hoje − dias pedidos ou aprovados
+function flexState(u, ref = today(), excludeId = null) {
+  const periods = [];
+  let right = 0;
+  for (let k = 0; k < 80; k++) {
+    const start = addMonths(u.admission_date, 12 * k);
+    if (start > ref) break;
+    const end = addDays(addMonths(u.admission_date, 12 * (k + 1)), -1);
+    const quitado = u.vacation_since && end < u.vacation_since;
+    const acquired = end < ref;
+    const r = quitado ? 0 : acquired ? DIREITO : Math.floor(monthsDone(start, ref) * 2.5);
+    right += r;
+    periods.push({ start, end, acquired, right: r, quitado });
+  }
+  const vac = all(`SELECT * FROM vacations WHERE user_id = ? AND ${LIVE} AND id <> ? ORDER BY start_date`, u.id, excludeId || 0);
+  const used = vac.filter(v => v.status === 'aprovada').reduce((n, v) => n + v.days, 0);
+  const pending = vac.filter(v => v.status === 'solicitada').reduce((n, v) => n + v.days, 0);
+  return { periods, right, used, pending, available: right - used - pending, vac };
+}
+function flexPeriods(u, ref = today()) {
+  const st = flexState(u, ref);
+  return st.periods.map(p => {
+    const list = st.vac.filter(v => v.period_start === p.start);
+    const used = list.filter(v => v.status === 'aprovada').reduce((n, v) => n + v.days, 0);
+    const pending = list.filter(v => v.status === 'solicitada').reduce((n, v) => n + v.days, 0);
+    const balance = p.right - used - pending;
+    return { start: p.start, end: p.end, concession_end: null, acquired: p.acquired, right: p.right, used, pending, balance,
+      status: p.quitado && !list.length ? 'quitado' : !p.acquired ? (balance > 0 ? 'disponivel' : 'em_aquisicao') : balance > 0 ? 'disponivel' : 'concluido', fractions: list.length };
+  });
+}
+
 // Períodos aquisitivos (do mais antigo ao atual), com saldo e situação
 export function periodsOf(u, ref = today()) {
   if (!u?.admission_date) return [];
+  if (modeOf(u) !== 'clt') return flexPeriods(u, ref);
   const vac = all(`SELECT * FROM vacations WHERE user_id = ? AND ${LIVE} ORDER BY start_date`, u.id);
   const out = [];
   for (let k = 0; k < 80; k++) {
@@ -53,7 +100,13 @@ export function periodsOf(u, ref = today()) {
 // Resumo para listas e painéis
 export function vacationSummary(u, ref = today()) {
   if (u.is_external) return null;
-  if (!u.admission_date) return { status: 'sem_admissao', available: 0 };
+  const mode = modeOf(u);
+  if (!u.admission_date) return { status: 'sem_admissao', available: 0, mode, label: LABEL[mode], rules: RULES[mode] };
+  if (mode !== 'clt') {
+    const st = flexState(u, ref);
+    return { status: st.available > 0 ? 'disponivel' : st.right ? 'concluido' : 'em_aquisicao', available: st.available, deadline: null, next_right: null,
+      mode, label: LABEL[mode], rules: RULES[mode], advance: ADVANCE[mode], accrued: st.right, used: st.used, pending: st.pending };
+  }
   const ps = periodsOf(u, ref);
   const open = ps.filter(p => p.acquired && p.balance > 0);
   const worst = open.find(p => p.status === 'vencida') || open.find(p => p.status === 'vencendo') || open[0] || null;
@@ -63,6 +116,7 @@ export function vacationSummary(u, ref = today()) {
     available: open.reduce((n, p) => n + p.balance, 0),
     deadline: worst?.concession_end || null,
     next_right: cur ? addDays(cur.end, 1) : null,
+    mode, label: LABEL[mode], rules: RULES[mode],
   };
 }
 
@@ -83,6 +137,7 @@ function check(target, startIn, daysIn, { allowPast = false, excludeId = null } 
   if (!target.admission_date) throw badRequest(`Informe a data de admissão de ${target.name} no Cadastro da Equipe para calcular as férias.`);
   const start = date(startIn, 'Início das férias');
   if (!start) throw badRequest('Informe o início das férias.');
+  if (modeOf(target) !== 'clt') return checkFlex(target, start, daysIn, { allowPast, excludeId });
   const days = Number(daysIn);
   if (!Number.isInteger(days) || days < 5 || days > DIREITO) throw badRequest('Cada período de férias deve ter entre 5 e 30 dias.');
   const ref = today();
@@ -137,6 +192,38 @@ function check(target, startIn, daysIn, { allowPast = false, excludeId = null } 
   throw badRequest(ps.length ? 'Não há saldo de férias disponível.' : `${target.name.split(' ')[0]} ainda não completou um período aquisitivo${cur ? `: o direito começa em ${fmtD(addDays(cur.end, 1))}` : ''}.`);
 }
 
+// PJ / estagiário: partes livres, até o saldo proporcional (estagiário: até 5 dias antecipados)
+function checkFlex(target, start, daysIn, { allowPast = false, excludeId = null } = {}) {
+  const mode = modeOf(target), label = LABEL[mode];
+  const days = Number(daysIn);
+  if (!Number.isInteger(days) || days < 1 || days > DIREITO) throw badRequest(`${label}: escolha de 1 a 30 dias.`);
+  const ref = today();
+  if (!allowPast && start < ref) throw badRequest(`O início não pode ser no passado.`);
+  const end = addDays(start, days - 1);
+  const clash = one(`SELECT start_date, end_date FROM vacations WHERE user_id = ? AND ${LIVE} AND id <> ? AND start_date <= ? AND end_date >= ?`, target.id, excludeId || 0, end, start);
+  if (clash) throw badRequest(`Já existe ${label.toLowerCase()} de ${fmtD(clash.start_date)} a ${fmtD(clash.end_date)} neste intervalo.`);
+  const st = flexState(target, ref, excludeId);
+  const limit = st.available + ADVANCE[mode];
+  if (days > limit) {
+    throw badRequest(st.available > 0 || ADVANCE[mode]
+      ? `Saldo de ${label.toLowerCase()}: ${st.available} dia(s)${ADVANCE[mode] ? ` (pode antecipar até ${ADVANCE[mode]} além do saldo: no máximo ${Math.max(0, limit)} dia(s) agora)` : ''}.`
+      : `${target.name.split(' ')[0]} ainda não tem dias de ${label.toLowerCase()} adquiridos (2,5 dias por mês completo de contrato).`);
+  }
+  // Período do contrato em que o pedido cai (para o histórico)
+  const per = [...st.periods].reverse().find(p => p.start <= start) || st.periods[0];
+  if (!per) throw badRequest(`O início é anterior à admissão de ${target.name.split(' ')[0]}.`);
+  const after = st.available - days;
+  const warnings = [];
+  if (after < 0) warnings.push(`Antecipa ${-after} dia(s) de ${label.toLowerCase()} além do saldo: serão descontados dos próximos meses.`);
+  if (target.manager_id) {
+    const mates = all(`SELECT u.name, v.start_date, v.end_date FROM vacations v JOIN users u ON u.id = v.user_id
+      WHERE u.manager_id = ? AND u.id <> ? AND v.${LIVE} AND v.start_date <= ? AND v.end_date >= ?`, target.manager_id, target.id, end, start);
+    if (mates.length) warnings.push(`Também estarão ausentes no período: ${mates.map(m => `${m.name} (${fmtD(m.start_date).slice(0, 5)}–${fmtD(m.end_date).slice(0, 5)})`).join(', ')}.`);
+  }
+  return { start_date: start, end_date: end, days, mode, label, period: { start: per.start, end: per.end, concession_end: null, balance_after: after }, warnings,
+    conflicts: conflictsOf(target.id, start, end) };
+}
+
 // Tarefas da pessoa com entrega (prazo) dentro das férias: precisam de novo prazo proposto
 export function conflictsOf(userId, start, end) {
   return all(`SELECT t.id, t.code, t.title, t.due_date, t.start_date, t.project_id, p.code AS project_code FROM tasks t JOIN projects p ON p.id = t.project_id
@@ -187,9 +274,9 @@ export function previewVacation(ctx, body) {
   const self = t.id === ctx.user.id;
   if (!self && !canApprove(ctx, t)) throw forbidden('Você não pode lançar férias desta pessoa.');
   try {
-    return { ok: true, ...check(t, body.start_date, body.days, { allowPast: !self || isAdmin(ctx.user) }) };
+    return { ok: true, mode: modeOf(t), label: LABEL[modeOf(t)], rules: RULES[modeOf(t)], ...check(t, body.start_date, body.days, { allowPast: !self || isAdmin(ctx.user) }) };
   } catch (e) {
-    if (e.status === 400) return { ok: false, error: e.message };
+    if (e.status === 400) return { ok: false, error: e.message, mode: modeOf(t), label: LABEL[modeOf(t)], rules: RULES[modeOf(t)] };
     throw e;
   }
 }
@@ -277,7 +364,7 @@ export function userVacations(ctx, userId) {
   if (!t) throw notFound('Pessoa não encontrada.');
   if (t.id !== ctx.user.id && !canApprove(ctx, t)) throw forbidden('Você não pode ver as férias desta pessoa.');
   return {
-    user: { id: t.id, name: t.name, job_title: t.job_title, admission_date: t.admission_date, is_external: t.is_external },
+    user: { id: t.id, name: t.name, job_title: t.job_title, admission_date: t.admission_date, is_external: t.is_external, employment: t.employment || null },
     summary: vacationSummary(t), periods: periodsOf(t).reverse(),
     requests: withProposals(all(`${REQ_SQL} WHERE v.user_id = ? ORDER BY v.start_date DESC`, t.id)),
     can_launch: canApprove(ctx, t),

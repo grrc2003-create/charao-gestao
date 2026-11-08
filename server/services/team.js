@@ -45,7 +45,7 @@ function person(u, load, vac, ctx) {
   return {
     id: u.id, name: u.name, job_title: u.job_title, department: u.department, responsibilities: u.responsibilities, role: u.role,
     is_external: u.is_external, company: u.company, login_enabled: u.login_enabled, active: u.active, manager_id: u.manager_id,
-    admission_date: u.admission_date, vacation_since: u.vacation_since, ...workOf(u), phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
+    admission_date: u.admission_date, vacation_since: u.vacation_since, ...workOf(u), employment: u.employment || null, employment_suggested: u.employment ? null : suggestedEmployment(u.id), phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
     email: isPlaceholderEmail(u.email) ? null : u.email,
     missing_function: missingFunction(u),
     load: { open: l.open || 0, late: l.late || 0, review: l.review || 0 },
@@ -138,6 +138,14 @@ export function getMember(ctx, id) {
   return { ...person(u, taskLoad(), vacationFlags(), ctx), manager_name: u.manager_id ? one('SELECT name FROM users WHERE id = ?', u.manager_id)?.name : null };
 }
 
+// Vínculo (CLT, PJ, Estagiário): define as regras de férias. Sem vínculo: sugere pelo tipo da pessoa na Folha (não grava sozinho)
+const EMPLOYMENT = ['clt', 'pj', 'estagio'];
+function suggestedEmployment(userId) {
+  try {
+    const k = one('SELECT kind FROM payroll_people WHERE user_id = ?', userId)?.kind;
+    return k === 'estagio' ? 'estagio' : k === 'profissional' ? 'pj' : null;
+  } catch { return null; }
+}
 function readMember(body, { creating, current }) {
   const d = {
     job_title: str(body.job_title, { max: 120, required: true, label: 'Função' }),
@@ -147,7 +155,9 @@ function readMember(body, { creating, current }) {
     vacation_since: date(body.vacation_since, 'Férias controladas a partir de'),
     manager_id: intOrNull(body.manager_id),
     ...readWork(body),
+    employment: body.employment === undefined ? current?.employment ?? null : EMPLOYMENT.includes(body.employment) ? body.employment : null,
   };
+  if (body.employment && !EMPLOYMENT.includes(body.employment)) throw badRequest('Vínculo inválido (CLT, PJ ou Estagiário).');
   if (d.responsibilities && d.responsibilities.length < 10) throw badRequest('Detalhe as responsabilidades (o que a pessoa faz na empresa).');
   if (d.admission_date && d.admission_date > today()) throw badRequest('A data de admissão não pode ser futura.');
   // Nome, telefone e situação: só de quem não tem acesso ao sistema (os demais são mantidos no Cadastro de usuários)
@@ -166,8 +176,8 @@ export function createMember(ctx, body, ip) {
     if (!m || !m.active || m.is_external) throw badRequest('Gestor inválido.');
   }
   const id = tx(() => {
-    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since, work_days, work_shift)
-      VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.work_days, d.work_shift);
+    const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since, work_days, work_shift, employment)
+      VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.work_days, d.work_shift, d.employment);
     const nid = Number(r.lastInsertRowid);
     audit(ctx.user.id, 'user', nid, 'Pessoa cadastrada na Gestão da Equipe (sem acesso ao sistema)', { nome: d.name, funcao: d.job_title }, ip);
     return nid;
@@ -188,13 +198,13 @@ export function updateMember(ctx, id, body, ip) {
   }
   assertNoManagerCycle(id, d.manager_id);
   tx(() => {
-    run(`UPDATE users SET job_title = ?, responsibilities = ?, department = ?, admission_date = ?, vacation_since = ?, manager_id = ?, work_days = ?, work_shift = ?, updated_at = datetime('now') WHERE id = ?`,
-      d.job_title, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.manager_id, d.work_days, d.work_shift, id);
+    run(`UPDATE users SET job_title = ?, responsibilities = ?, department = ?, admission_date = ?, vacation_since = ?, manager_id = ?, work_days = ?, work_shift = ?, employment = ?, updated_at = datetime('now') WHERE id = ?`,
+      d.job_title, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.manager_id, d.work_days, d.work_shift, d.employment, id);
     if (!u.login_enabled) {
       const active = body.active === undefined ? u.active : body.active ? 1 : 0;
       run('UPDATE users SET name = ?, phone = ?, active = ? WHERE id = ?', d.name, d.phone, active, id);
     }
-    audit(ctx.user.id, 'user', id, 'Cadastro da equipe atualizado', { nome: d.name || u.name, funcao: d.job_title, setor: d.department, admissao: d.admission_date, jornada: d.work_days, turno: d.work_shift }, ip);
+    audit(ctx.user.id, 'user', id, 'Cadastro da equipe atualizado', { nome: d.name || u.name, funcao: d.job_title, setor: d.department, admissao: d.admission_date, vinculo: d.employment, jornada: d.work_days, turno: d.work_shift }, ip);
   });
   return getMember(ctx, id);
 }

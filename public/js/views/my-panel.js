@@ -7,6 +7,7 @@ import { deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { weekPlanSection, bindWeekPlan } from './week-plan.js';
 import { myVacationCard, bindMyVacationCard } from './vacation-ui.js';
+import { myAbsenceCard, bindAbsenceCard } from './absence-ui.js';
 import { myReimbCard, bindMyReimbCard } from './reimb-ui.js';
 import { evolutionSection, bindEvolution } from './evolution.js';
 
@@ -14,7 +15,7 @@ const dec = v => String(v ?? '—').replace('.', ',');
 
 export async function view({ state, query, setQuery, render }) {
   const me = state.user;
-  const [d, vac, reimb, rq] = await Promise.all([api(`/users/${me.id}`), api('/vacations/me').catch(() => null), api('/reimbursements/me').catch(() => null), api('/review-queue').catch(() => [])]);
+  const [d, vac, reimb, rq, abs] = await Promise.all([api(`/users/${me.id}`), api('/vacations/me').catch(() => null), api('/reimbursements/me').catch(() => null), api('/review-queue').catch(() => []), me.is_external ? null : api('/absences/me').catch(() => null)]);
   const s = d.stats;
   const first = me.name.split(' ')[0];
   const can = state.meta.can;
@@ -131,7 +132,8 @@ export async function view({ state, query, setQuery, render }) {
       ${(() => {
         // Férias (e aprovações) à esquerda, reembolsos à direita: sem colunas vazias
         const vacCards = vac ? myVacationCard(vac, me, { bare: true }) : '';
-        const left = vacCards ? html`<div class="panel-stack">${vacCards}</div>` : '';
+        const absCards = abs ? myAbsenceCard(abs) : '';
+        const left = vacCards || absCards ? html`<div class="panel-stack">${vacCards}${absCards}</div>` : '';
         const right = reimb ? myReimbCard(reimb, { bare: true }) : '';
         return left || right ? html`<div class="grid grid-dash section ${left && right ? '' : 'grid-one'}">${left}${right}</div>` : '';
       })()}
@@ -142,6 +144,7 @@ export async function view({ state, query, setQuery, render }) {
       bindEvolution(root);
       bindChecklistCards(root);
       if (vac) bindMyVacationCard(root, vac, render);
+      if (abs) bindAbsenceCard(root, abs, vac?.summary?.mode, render);
       if (reimb) bindMyReimbCard(root, render);
       bindWeekPlan(root, { d, user: d.user, meta: state.meta, week, render, setWeek: w => setQuery({ semana: w }) });
       // Conferência rápida: aprovar (um toque) ou devolver (com o motivo), sem abrir a tarefa

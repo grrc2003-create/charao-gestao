@@ -85,6 +85,7 @@ function detailBody(p, data, state) {
       <dt>Função</dt><dd>${p.job_title || html`<span class="late">não informada</span>`}</dd>
       <dt>${p.is_external ? 'Líder' : 'Gestor'}</dt><dd>${mgr ? mgr.name : 'sem gestor (topo)'}</dd>
       ${p.admission_date ? html`<dt>Admissão</dt><dd>${fmtDate(p.admission_date)}</dd>` : ''}
+      ${p.employment ? html`<dt>Vínculo</dt><dd>${{ clt: 'CLT', pj: 'PJ', estagio: 'Estagiário' }[p.employment]}</dd>` : ''}
       <dt>Jornada</dt><dd>${workText(p)}</dd>
       ${p.email ? html`<dt>E-mail</dt><dd>${p.email}</dd>` : ''}${p.phone ? html`<dt>Telefone</dt><dd>${p.phone}</dd>` : ''}
       <dt>Tarefas</dt><dd>${p.load.open} em aberto · ${p.load.late} atrasada(s) · ${p.load.review} em conferência</dd>
@@ -239,7 +240,7 @@ export async function list({ query, setQuery, state }) {
           <span class="org-av" style="--c:${colorOf(p)}">${av(p)}</span>
           <div class="grow"><div class="row-title">${p.name}</div>
             <div class="row-meta"><span class="${p.missing_function ? 'late' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</span><span>${roleOf(p)}</span>
-              ${p.manager_name ? html`<span>${p.is_external ? 'Líder' : 'Gestor'}: ${p.manager_name}</span>` : ''}${p.admission_date ? html`<span>admissão ${fmtDate(p.admission_date)}</span>` : ''}</div></div>
+              ${p.manager_name ? html`<span>${p.is_external ? 'Líder' : 'Gestor'}: ${p.manager_name}</span>` : ''}${p.admission_date ? html`<span>admissão ${fmtDate(p.admission_date)}</span>` : ''}${p.employment ? html`<span>${{ clt: 'CLT', pj: 'PJ', estagio: 'Estagiário' }[p.employment]}</span>` : ''}</div></div>
           <div class="tm-pills">${!p.login_enabled ? html`<span class="org-tag">Sem acesso</span>` : html`<span class="org-tag">${roleOf(p)}</span>`}${p.vacation_summary && p.vacation_summary.status !== 'concluido' && p.vacation_summary.status !== 'disponivel' ? vacPill(p.vacation_summary.status) : ''}</div>
           <span class="chev">${icon('chevron')}</span></a></li>`)}</ul></section>`)}
       ${!shown.length ? html`<p class="muted">Ninguém neste filtro.</p>` : ''}`,
@@ -288,6 +289,10 @@ export async function form({ params, state, navigate }) {
           ${!u.is_external ? html`<div class="field"><label for="tm-adm">Data de admissão</label><input id="tm-adm" name="admission_date" type="date" value="${u.admission_date || ''}">
             <span class="hint">Base dos períodos de férias.</span></div>` : ''}
         </div>
+        ${!u.is_external ? (() => { const cur = u.employment || u.employment_suggested || ''; return html`<div class="field" style="max-width:420px"><label for="tm-emp">Vínculo</label><select id="tm-emp" name="employment">
+            <option value="" ${cur ? '' : 'selected'}>Não informado (vale a regra da CLT)</option>
+            ${[['clt', 'CLT'], ['pj', 'PJ'], ['estagio', 'Estagiário']].map(([k, l]) => html`<option value="${k}" ${cur === k ? 'selected' : ''}>${l}</option>`)}</select>
+          <span class="hint">${!u.employment && u.employment_suggested ? html`<b>Sugerido pela Folha</b> (${u.employment_suggested === 'estagio' ? 'estágio' : 'profissional'}): confira e salve. ` : ''}Define as férias: CLT pelas regras da CLT; PJ pelo acordo (30 dias a cada 12 meses, proporcional, em partes livres); Estagiário pelo recesso (proporcional, em partes livres, podendo antecipar até 5 dias).</span></div>`; })() : ''}
         ${!u.is_external ? html`<div class="field" style="max-width:420px"><label for="tm-vs">Férias controladas no sistema a partir de</label><input id="tm-vs" name="vacation_since" type="date" value="${u.vacation_since || ''}">
           <span class="hint">Períodos aquisitivos encerrados antes desta data são considerados quitados (férias já tiradas fora do sistema). Em branco: controla desde a admissão.</span></div>` : ''}
         <fieldset class="field tm-work"><legend class="label">Jornada de trabalho</legend>

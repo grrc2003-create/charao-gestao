@@ -194,7 +194,7 @@ export async function month({ params, render }) {
       <div class="pf-who">${avatar(e.name, 'sm')}<div><b>${e.name}</b><small>${e.job_title || ''}${e.kind === 'profissional' ? ' · Profissional' : ''} · ${e.company_name}</small></div></div>
       <dl class="pf-nums">
         <div><dt>Dias</dt><dd>${c.worked_days}/${c.business_days}</dd></div>
-        <div><dt>Faltas</dt><dd>${c.absences || '—'}</dd></div>
+        <div><dt>Faltas</dt><dd title="${c.absences_auto?.length ? `${c.absences_auto.length} de ausência(s) combinada(s) descontada(s)` : ''}">${c.absences || '—'}${c.absences_auto?.length ? html`<small class="pf-auto"> (${c.absences_auto.length} comb.)</small>` : ''}</dd></div>
         <div><dt>HO</dt><dd>${c.ho_days || '—'}</dd></div>
         <div><dt>${e.kind === 'profissional' ? 'Valor' : 'Bolsa'}</dt><dd>${money(c.base)}</dd></div>
         <div><dt>VT</dt><dd>${money(c.vt)}</dd></div>
@@ -305,7 +305,7 @@ function entrySheet(m, e, render) {
         <div class="field"><label for="le-e">Fim no mês da bolsa</label><input type="date" id="le-e" name="end_date" min="${m.bolsa.start}" max="${m.bolsa.end}" value="${i.end_date || c.end || ''}"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label for="le-f">Faltas (dias)</label><input type="number" id="le-f" name="absences" min="0" max="31" value="${i.absences || 0}"><span class="hint">Descontam da ${pro ? 'remuneração' : 'bolsa'} proporcional.</span></div>
+        <div class="field"><label for="le-f">Faltas (dias)</label><input type="number" id="le-f" name="absences" min="0" max="31" value="${i.absences || 0}"><span class="hint">Descontam da ${pro ? 'remuneração' : 'bolsa'} proporcional.${c.absences_auto?.length ? ` Além destas, ${c.absences_auto.length} ausência(s) combinada(s) já entram sozinhas: ${c.absences_auto.map(a => (a.kind === 'reposicao' ? `reposição não cumprida (falta em ${a.off_date.split('-').reverse().join('/')})` : `falta descontada em ${a.off_date.split('-').reverse().join('/')}`)).join(', ')}.` : ''}</span></div>
         ${pro ? '' : html`<div class="field"><label for="le-h">Dias em home office</label><input type="number" id="le-h" name="ho_days" min="0" max="31" value="${i.ho_days || 0}"><span class="hint">Descontam o VT já adiantado.</span></div>`}
       </div>
       ${pro ? '' : html`<div class="form-row">

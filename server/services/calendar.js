@@ -194,6 +194,13 @@ export function vacationDays(userId, from, to) {
   }
   return set;
 }
+// Ausências combinadas aprovadas (falta com reposição ou descontada): a pessoa não trabalha nesses dias
+export function absenceDays(userId, from, to) {
+  const set = new Set();
+  if (!userId) return set;
+  try { for (const a of all(`SELECT off_date FROM absences WHERE user_id = ? AND status = 'aprovada' AND off_date BETWEEN ? AND ?`, userId, from, to)) set.add(a.off_date); } catch { /* antes da migração */ }
+  return set;
+}
 // Férias aprovadas que cruzam o intervalo (para avisos)
 export function vacationsOverlapping(userId, from, to) {
   if (!userId || !from || !to) return [];
@@ -213,14 +220,16 @@ function calendarFor(projectId, from, to, userId = null) {
   const s = calendarSettings();
   const off = nonWorkingDays(projectId, from, to);
   const vac = vacationDays(userId, from, to);
+  const abs = absenceDays(userId, from, to);
   const mine = personWorkDays(userId);
-  return d => (mine ? mine.has(dow(d)) : !weekendOff(d, s)) && !off.has(d) && !vac.has(d);
+  return d => (mine ? mine.has(dow(d)) : !weekendOff(d, s)) && !off.has(d) && !vac.has(d) && !abs.has(d);
 }
 // Por que o dia não é de trabalho (para avisos): férias, feriado, folga da jornada ou fim de semana. Dia de trabalho: null.
 const ON_DAY = ['aos domingos', 'às segundas', 'às terças', 'às quartas', 'às quintas', 'às sextas', 'aos sábados'];
 export function dayOffReason(projectId, d, userId = null) {
   if (!d) return null;
   if (vacationDays(userId, d, d).has(d)) return { code: 'ferias', text: 'está de férias' };
+  if (absenceDays(userId, d, d).has(d)) return { code: 'ausencia', text: 'tem ausência combinada' };
   const off = nonWorkingDays(projectId, d, d);
   if (off.has(d)) return { code: 'feriado', text: `é feriado (${off.get(d).name})` };
   const mine = personWorkDays(userId);

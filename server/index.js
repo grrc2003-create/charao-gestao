@@ -32,6 +32,7 @@ import * as Records from './services/records.js';
 import { projectHistory } from './services/history.js';
 import * as Team from './services/team.js';
 import * as Vacations from './services/vacations.js';
+import * as Absences from './services/absences.js';
 import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
 import * as Field from './services/field.js';
@@ -387,6 +388,9 @@ api.post('/api/reimbursements/:id/include', (req, res, { ctx, params, body }) =>
 api.post('/api/reimbursements/:id/release', (req, res, { ctx, params }) => send(res, 200, Payroll.getMonth(ctx, Reimb.releaseReimbursement(ctx, intOrNull(params.id), clientIp(req)))));
 api.post('/api/reimbursements/:id/reject', (req, res, { ctx, params, body }) => send(res, 200, Reimb.rejectReimbursement(ctx, intOrNull(params.id), body, clientIp(req))));
 api.get('/api/reimbursement-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Reimb.reimbursementFileForUser(ctx, intOrNull(params.id))));
+api.get('/api/absences/me', (req, res, { ctx }) => send(res, 200, Absences.myAbsences(ctx)));
+api.post('/api/absences', (req, res, { ctx, body }) => send(res, 201, Absences.requestAbsence(ctx, body, clientIp(req))));
+api.post('/api/absences/:id/:action', (req, res, { ctx, params, body }) => send(res, 200, Absences.absenceAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 api.get('/api/vacations/me', (req, res, { ctx }) => send(res, 200, Vacations.myVacations(ctx)));
 api.get('/api/vacations/overview', (req, res, { ctx, query }) => send(res, 200, Vacations.vacationsOverview(ctx, query.get('ano'))));
 api.get('/api/vacations/user/:id', (req, res, { ctx, params }) => send(res, 200, Vacations.userVacations(ctx, intOrNull(params.id))));

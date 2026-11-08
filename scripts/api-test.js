@@ -3339,6 +3339,53 @@ async function main() {
     } else ok(false, 'período: obra/profissional de teste indisponível');
   }
 
+  // ---------- Vínculo (CLT, PJ, Estagiário): férias por vínculo e ausência combinada ----------
+  console.log('\nVínculo e ausência combinada');
+  {
+    const vA = await login('ana@charao.eng.br');
+    const ymd = d => d.toISOString().slice(0, 10);
+    const ago = n => ymd(new Date(Date.now() - n * 86400e3));
+    const fut = n => ymd(new Date(Date.now() + n * 86400e3));
+    const pj = (await vA('POST', '/team', { name: 'PJ Fictício', job_title: 'Projetista', responsibilities: 'Desenvolve projetos executivos e compatibilização.', admission_date: ago(130), employment: 'pj' })).data;
+    ok(pj.employment === 'pj', 'vínculo PJ salvo no Cadastro da Equipe');
+    ok((await vA('POST', '/team', { name: 'Vínculo inválido', job_title: 'Teste', responsibilities: 'Responsabilidades de teste.', employment: 'outro' })).status === 400, 'vínculo inválido é recusado');
+    let vu = (await vA('GET', `/vacations/user/${pj.id}`)).data;
+    ok(vu.summary.mode === 'pj' && vu.summary.available === 10, `PJ: proporcional — 4 meses completos = 10 dias (${vu.summary.available})`);
+    ok(!(await vA('POST', '/vacations/preview', { user_id: pj.id, start_date: fut(10), days: 11 })).data.ok, 'PJ: não passa do proporcional já adquirido');
+    const pv1 = (await vA('POST', '/vacations/preview', { user_id: pj.id, start_date: fut(10), days: 1 })).data;
+    ok(pv1.ok && pv1.mode === 'pj' && pv1.period.balance_after === 9, 'PJ: pode tirar 1 dia (partes livres), antes de completar 12 meses');
+    ok((await vA('POST', '/vacations', { user_id: pj.id, start_date: fut(10), days: 3 })).status === 201, 'PJ: férias do acordo lançadas pelo gestor');
+    vu = (await vA('GET', `/vacations/user/${pj.id}`)).data;
+    ok(vu.summary.available === 7 && vu.periods.some(p => p.right === 10), 'PJ: saldo desconta o que foi tirado');
+    const es = (await vA('POST', '/team', { name: 'Estagiária Fictícia', job_title: 'Estagiária de engenharia', responsibilities: 'Apoio ao planejamento e às medições de obra.', admission_date: ago(40), employment: 'estagio' })).data;
+    const esV = (await vA('GET', `/vacations/user/${es.id}`)).data.summary;
+    ok(esV.mode === 'estagio' && esV.label === 'Recesso' && esV.available === 2 && esV.advance === 5, 'Estagiário: recesso proporcional (1 mês = 2 dias) e pode antecipar até 5');
+    const esP = (await vA('POST', '/vacations/preview', { user_id: es.id, start_date: fut(15), days: 7 })).data;
+    ok(esP.ok && esP.period.balance_after === -5 && esP.warnings.some(w => /Antecipa 5/.test(w)), 'Estagiário: antecipa até 5 dias além do saldo (aviso de desconto nos próximos meses)');
+    ok(!(await vA('POST', '/vacations/preview', { user_id: es.id, start_date: fut(15), days: 8 })).data.ok, 'Estagiário: não antecipa mais que 5 dias');
+    const vMar = await login('marcos@charao.eng.br');
+    ok(!(await vMar('POST', '/vacations/preview', { start_date: fut(40), days: 1 })).data.ok, 'CLT (sem vínculo informado): continua a regra da CLT (mínimo 5 dias)');
+    // Ausência combinada
+    ok((await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5) })).status === 400, 'falta com reposição exige o dia da reposição');
+    ok(/fim do mês seguinte/.test((await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5), makeup_date: fut(80) })).data.error || ''), 'a reposição é até o fim do mês seguinte à falta');
+    ok((await vMar('POST', '/absences', { kind: 'reposicao', off_date: ago(2), makeup_date: fut(3) })).status === 400, 'a pessoa não combina ausência no passado');
+    const ab = await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5), makeup_date: fut(8), note: 'Consulta médica' });
+    ok(ab.status === 201 && ab.data.status === 'solicitada', 'a pessoa combina a ausência (aguarda o gestor)');
+    ok((await vMar('POST', `/absences/${ab.data.id}/approve`, {})).status === 403, 'a própria pessoa não aprova');
+    ok((await vMar('POST', '/absences', { kind: 'descontada', off_date: fut(5) })).status === 400, 'não combina duas ausências no mesmo dia');
+    ok((await vA('GET', '/absences/me')).data.approvals.some(a => a.id === ab.data.id), 'aparece para o gestor aprovar');
+    ok((await vA('POST', `/absences/${ab.data.id}/approve`, {})).status === 200, 'gestor aprova o combinado');
+    ok((await vA('POST', `/absences/${ab.data.id}/makeup_done`, {})).status === 400, 'reposição só é conferida a partir do dia combinado');
+    ok((await vMar('POST', `/absences/${ab.data.id}/cancel`, {})).status === 403 && (await vA('POST', `/absences/${ab.data.id}/cancel`, {})).status === 200, 'aprovada: só o gestor cancela');
+    const ab2 = (await vA('POST', '/absences', { user_id: es.id, kind: 'reposicao', off_date: ago(3), makeup_date: ago(1) })).data;
+    ok(ab2.status === 'aprovada', 'lançada pelo gestor já fica aprovada');
+    ok((await vA('GET', '/absences/me')).data.checks.some(a => a.id === ab2.id), 'reposição com data passada aparece para conferir');
+    ok((await vA('POST', `/absences/${ab2.id}/makeup_missed`, {})).status === 200 && !(await vA('GET', '/absences/me')).data.checks.some(a => a.id === ab2.id), 'reposição não cumprida: sai da conferência (vira falta descontada)');
+    const ab3 = (await vA('POST', '/absences', { user_id: pj.id, kind: 'descontada', off_date: fut(20) })).data;
+    ok(ab3.status === 'aprovada', 'falta descontada lançada pelo gestor');
+    ok((await vA('POST', '/absences', { user_id: pj.id, kind: 'descontada', off_date: fut(10) })).status === 400, 'não lança ausência dentro de férias/recesso já lançados');
+  }
+
   // ---------- Vendas e Prospecção ----------
   console.log('\nVendas e Prospecção');
   const svA = await login('ana@charao.eng.br');

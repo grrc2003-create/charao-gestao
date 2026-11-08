@@ -15,7 +15,7 @@ import { insertTask, validateAssignee } from './tasks.js';
 import { readXlsxSheets, serialToDate } from '../lib/xlsx.js';
 import { audit, taskHistory } from './audit.js';
 import { today } from './metrics.js';
-import { requireFinance, monthsOf, ensureItemInternal, coverage, markState, syncZero, controlStart, conferenceDate, limitReader } from './finance.js';
+import { requireFinance, monthsOf, ensureItemInternal, coverage, markState, syncZero, controlStart, conferenceDate, limitReader, syncMonthTasks } from './finance.js';
 
 const SOURCE = 'maiscontrole';
 const API_URL = () => process.env.MAISCONTROLE_URL || 'https://api-clientes.maiscontroleerp.com.br/data-exports/pagamentos';
@@ -841,6 +841,7 @@ export function sync(ctx, ip, { resetManualPlans = false } = {}) {
         }
       }
     }
+    syncMonthTasks(uid);
     audit(uid, 'finance', null, 'Sincronização com o Mais Controle', { ...stats, recalculou_previsto: resetManualPlans || undefined }, ip);
   });
   return stats;

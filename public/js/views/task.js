@@ -8,12 +8,15 @@ import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } fr
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 import { recordPickItem, pickSheet, chooseType, recStatus } from './records.js';
 import { recBadge } from './record-icons.js';
+import { monthChecksSection, bindChecks } from './finance-checks.js';
 
 const relDue = t => t.eff_status === 'atrasada' ? `${t.days_late} dia(s) de atraso`
   : t.days_to_due === 0 ? 'Vence hoje' : t.days_to_due === 1 ? 'Vence amanhã' : `Faltam ${t.days_to_due} dias`;
 
 export async function view(ctx) {
   const t = await api(`/tasks/${ctx.params.id}`);
+  // Lista do mês do Financeiro: os checks das despesas
+  if (t.finance_month) t._fin = await api(`/finance/month-tasks/${t.id}`).catch(() => null);
   // Check-list: equipe do projeto para atribuir itens (só para quem gerencia os itens)
   if (t.checklist?.can_manage_items) {
     t._team = await api(`/projects/${t.project_id}/assignees`).catch(() => []);
@@ -214,7 +217,7 @@ function build(t, ctx) {
             }
             return html`<div class="fact fact-wide fact-progress"><div class="k">${icon('clock')}Avanço</div><div class="v"><span class="pg-line">${pctBar(pct)}<b>${pct}%</b>
               ${can.progress ? html`<button type="button" class="btn btn-ghost btn-sm" data-act="progress">Atualizar</button>` : ''}</span>
-              <small>${done ? (t.eff_status === 'concluida' ? 'Concluída' : 'Entregue, aguardando conferência') : t.checklist ? 'Média dos itens (resolvido = 100%)' : can.auto_from_subtasks ? 'Média das subtarefas (concluída = 100%)' : 'Informado pelo responsável'}</small></div></div>`;
+              <small>${done ? (t.eff_status === 'concluida' ? 'Concluída' : 'Entregue, aguardando conferência') : t.checklist ? 'Média dos itens (resolvido = 100%)' : can.auto_from_subtasks ? 'Média das subtarefas (concluída = 100%)' : t.finance_month ? 'Pelos checks da lista do mês (vai ter = ½)' : 'Informado pelo responsável'}</small></div></div>`;
           })()}
           ${t.checklist ? html`<div class="fact fact-wide"><div class="k">${icon('checklist')}Check-list</div><div class="v">${t.checklist.summary.total} itens · ${t.checklist.summary.pct}% respondido<small>${PHOTO_RULE[t.checklist.photo_rule]}</small></div></div>`
             : html`<div class="fact fact-wide"><div class="k">${icon('shield')}Comprovação exigida</div><div class="v">${proof.icon} ${proof.label}</div></div>`}
@@ -253,6 +256,7 @@ function build(t, ctx) {
           <span class="right muted" style="font-size:12px">por ${t.creator_name}</span></header>
         ${reqBody}</section>`}
 
+      ${t._fin ? monthChecksSection(t._fin) : ''}
       ${depsBlock(t, !!can.edit)}
 
       ${t.checklist ? checklistSection(t, { reviewBox: reviewBox(), reviewActions, can }) : html`<section class="card block block-exec" aria-labelledby="blk-exec">
@@ -326,6 +330,7 @@ const recSecOk = ctx => !ctx.state?.meta?.can.sections || ctx.state.meta.can.sec
 
 function mount(root, t, ctx) {
   bindDoneToggle(root);
+  if (t._fin) { const ck = root.querySelector('.ck-card'); if (ck) bindChecks(ck, t._fin.items, () => ctx.render()); }
   const refresh = updated => {
     if (t._team && !updated._team) { updated._team = t._team; updated._groups = t._groups; }
     if (t._specs && !updated._specs) { updated._specs = t._specs; updated._specsOwn = t._specsOwn; }

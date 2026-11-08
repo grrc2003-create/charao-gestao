@@ -10,7 +10,7 @@ import { resolveStage } from './stages.js';
 import { activeReason, getSetting } from './settings.js';
 import { workingDaysBetween, vacationsOverlapping, dayOffReason } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, applyPull, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
-import { syncFromTask } from './finance.js';
+import { syncFromTask, monthTaskOf } from './finance.js';
 import { originOfTask, recordsOfTask } from './records.js';
 import { readItems, insertItems, teamForCopy, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
@@ -351,7 +351,8 @@ export function getTask(ctx, id) {
     reschedules: entries,
     chronic_min: chronicMin,
     parent_visible: !!(parent && canSeeTask(ctx, parent)),
-    can: permissionsFor(ctx, t), proof_check: proofCheck(t, files),
+    can: (() => { const c = permissionsFor(ctx, t); return monthTaskOf(id) ? { ...c, execute: false, start: false, progress: false, submit: false, review: false, reopen: false, conclude_directly: false } : c; })(), proof_check: proofCheck(t, files),
+    finance_month: !!monthTaskOf(id),
     dependencies: taskDependencies(ctx, id),
     neighbors: neighborsOf(ctx, t),
     impact: impactOfTask(id),
@@ -932,6 +933,10 @@ export function transition(ctx, id, action, body = {}) {
         causeOldDue: t.due_date, causeNewDue: finish, sources: [{ key: `t:${id}`, finish }], projectEndBefore: endBefore });
     }
   };
+  // Lista do mês do Financeiro: conclui sozinha quando todos os checks estão resolvidos (e reabre quando algum volta)
+  if (['submit', 'approve', 'conclude', 'reopen', 'return'].includes(action) && monthTaskOf(id)) {
+    throw badRequest('Esta é a lista do mês do Financeiro: ela avança com os checks e conclui sozinha quando todas as despesas estiverem resolvidas (pagas ou sem despesa no mês).');
+  }
   tx(() => {
     switch (action) {
       case 'start':

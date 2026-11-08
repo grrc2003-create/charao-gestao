@@ -42,11 +42,10 @@ export async function view({ state, query, setQuery, render }) {
   const al = wk?.alerts || { accounts: [], categories: [] };
   // Criar tarefa? As parcelas não criam tarefa sozinhas: aqui a pessoa decide
   const sugCard = !sug.length ? '' : html`<section class="card section fs-card">
-      <div class="card-head"><h2>${icon('plus')}Criar tarefas?</h2><span class="sub">${sug.length} parcela(s) do mês anterior, atual e próximo sem tarefa</span></div>
-      <div class="card-body"><p class="muted" style="margin:0">As parcelas não criam mais tarefa sozinhas (nem quando o Mais Controle atualiza). Escolha quais viram tarefa no Financeiro; “Não criar” não pergunta de novo. Tarefa excluída também não volta.</p></div>
-      <ul class="fs-list">${sug.map(i => html`<li data-fs="${i.id}"><span><b>${i.title} — ${i.month_label}</b><small>${i.category} · vence ${fmtDate(i.conf_date)} · tarefa até ${fmtDate(i.task_due)} · previsto ${money(i.amount_expected)}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></span>
-        <span class="fs-acts"><button type="button" class="btn btn-primary btn-sm" data-fs-yes="${i.id}">${icon('plus')}Criar</button><button type="button" class="btn btn-ghost btn-sm" data-fs-no="${i.id}">Não criar</button></span></li>`)}</ul>
-      ${sug.length > 1 ? html`<div class="fs-all"><button type="button" class="btn btn-primary btn-sm" data-fs-all="1">Criar todas (${sug.length})</button><button type="button" class="btn btn-ghost btn-sm" data-fs-all="0">Não criar nenhuma</button></div>` : ''}
+      <div class="card-head"><h2>${icon('plus')}Criar a lista do mês?</h2><span class="sub">${sug.length} lista(s) do mês anterior, atual e próximo sem tarefa</span></div>
+      <div class="card-body"><p class="muted" style="margin:0">As despesas não viram mais uma tarefa cada. Cada responsável tem <b>uma tarefa por mês</b> (“Contas do mês”), do dia 1º ao último dia, com um check por despesa: <b>vai ter</b> / <b>não vai ter</b> / <b>pago</b>. A tarefa avança com os checks e só conclui com todos resolvidos. Tarefas antigas ainda abertas dessas despesas são convertidas em checks.</p></div>
+      <ul class="fs-list">${sug.map((g, k) => html`<li data-fs="${k}"><span><b>${g.title}</b><small>${g.count} despesa(s) · ${g.open} a resolver · previsto ${money(g.expected)} · de ${fmtDate(g.start)} a ${fmtDate(g.due)}${g.legacy_open ? ` · ${g.legacy_open} tarefa(s) antiga(s) aberta(s) viram checks` : ''}</small></span>
+        <span class="fs-acts"><button type="button" class="btn btn-primary btn-sm" data-fs-yes="${k}">${icon('plus')}Sim, criar</button><button type="button" class="btn btn-ghost btn-sm" data-fs-no="${k}">Não</button></span></li>`)}</ul>
     </section>`;
   const weekCard = !wk ? '' : html`<section class="card section fw-card">
       <div class="card-head"><h2>${icon('alert')}Contas da semana</h2><span class="sub">até ${fmtDate(wk.week_end)}${wk.data_until ? ` · Mais Controle até ${fmtDate(wk.data_until)}` : ''}</span></div>
@@ -245,18 +244,18 @@ export async function view({ state, query, setQuery, render }) {
         });
         if (res) { toast(res.saved === 'paid' ? 'Real lançado.' : res.saved === 'none' ? 'Marcado como não ocorrido no mês.' : 'Previsto atualizado.'); reload(); }
       };
-      // Criar tarefa? (uma parcela ou todas)
-      const answer = async (ids, create, btn) => {
+      // Criar a lista do mês? (Sim/Não por lista; sem padrão)
+      const answer = async (k, create, btn) => {
         if (btn) btn.disabled = true;
+        const g = sug[k];
         try {
-          const r = await api('/finance/task-suggestions', { method: 'POST', body: { ids, create } });
-          toast(create ? `${r.count} tarefa(s) criada(s) no Financeiro.` : `${r.count} parcela(s) ficam sem tarefa.`);
+          const r = await api('/finance/task-suggestions', { method: 'POST', body: { groups: [{ ref_month: g.ref_month, assignee_id: g.assignee_id }], create } });
+          toast(create ? `Tarefa "${g.title}" criada${r.converted ? ` · ${r.converted} tarefa(s) antiga(s) convertida(s) em checks` : ''}.` : 'Esta lista fica sem tarefa (não pergunta de novo).');
           render();
         } catch (ex) { toast(ex.message, 'error'); if (btn) btn.disabled = false; }
       };
-      root.querySelectorAll('[data-fs-yes]').forEach(b => b.addEventListener('click', () => answer([Number(b.dataset.fsYes)], true, b)));
-      root.querySelectorAll('[data-fs-no]').forEach(b => b.addEventListener('click', () => answer([Number(b.dataset.fsNo)], false, b)));
-      root.querySelectorAll('[data-fs-all]').forEach(b => b.addEventListener('click', () => answer(sug.map(i => i.id), b.dataset.fsAll === '1', b)));
+      root.querySelectorAll('[data-fs-yes]').forEach(b => b.addEventListener('click', () => answer(Number(b.dataset.fsYes), true, b)));
+      root.querySelectorAll('[data-fs-no]').forEach(b => b.addEventListener('click', () => answer(Number(b.dataset.fsNo), false, b)));
       root.querySelectorAll('.fy-card, [data-fy-mob]').forEach(el => el.addEventListener('click', onCell));
       // Custos de Projetos pagos pela Empresa / Gastos dos clientes por obra: lançamentos do mês
       const onCost = async e => {

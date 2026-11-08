@@ -96,7 +96,8 @@ export function previousAmount(obligationId, ref) {
   return it ? r2(it.status === 'paga' && it.paid_amount ? it.paid_amount : it.amount_expected) : null; // real 0 (não ocorreu) não vira previsão
 }
 
-function createItem(o, ref, userId, { noTask = false } = {}) {
+// Nova parcela não cria tarefa própria: entra como check na lista do mês (tarefa "Contas do mês" do responsável)
+function createItem(o, ref, userId, { noTask = true } = {}) {
   const area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId());
   const due = dueOf(ref, o.due_day);
   // Previsto do mês ajustado no Planejamento anual tem prioridade
@@ -124,34 +125,201 @@ function itemTask(o, it, userId, area = one('SELECT * FROM projects WHERE id = ?
   return taskId;
 }
 
-// ---------- Criar tarefa? As parcelas não criam tarefa sozinhas: o sistema pergunta (mês passado, atual e próximo) ----------
+// ---------- Lista do mês: uma tarefa "Contas do mês" por mês e responsável; cada despesa é um check ----------
+// Estados do check (derivados da parcela): a confirmar → vai ter → pago; ou não vai ter (real R$ 0).
+// "Paguei" (aguardando o Mais Controle) já conta como pago. Avanço: resolvido = 1, vai ter = ½.
+const MONTH_STAGE = 'Contas do mês';
+const CONVERT_REASON = 'Convertida em check da lista "Contas do mês"';
+export function itemCheckState(it) {
+  if (it.status === 'paga') return it.paid_amount !== null && it.paid_amount !== undefined && Number(it.paid_amount) === 0 ? 'nao_vai_ter' : 'pago';
+  if (it.marked_paid_at) return 'pago_aguardando';
+  if (it.confirmed_at || it.justify_kind === 'vai_ocorrer') return 'vai_ter';
+  return 'a_confirmar';
+}
+const CHECK_WEIGHT = { pago: 1, pago_aguardando: 1, nao_vai_ter: 1, vai_ter: 0.5, a_confirmar: 0 };
+const resolved = st => CHECK_WEIGHT[st] === 1;
+// Despesas do mês (sem as de previsto zero ainda pendentes: nada esperado)
+function monthItems(ym) {
+  return all(`SELECT i.*, o.title, o.category, o.payee, o.variable, o.assignee_id, u.name AS assignee_name
+    FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id LEFT JOIN users u ON u.id = o.assignee_id
+    WHERE i.ref_month = ? AND NOT (i.status = 'pendente' AND i.amount_expected = 0) ORDER BY i.due_date, o.title`, ym).map(i => ({ ...i, check: itemCheckState(i), key: i.assignee_id || 0 }));
+}
+const checkSummary = list => {
+  const c = { total: list.length, a_confirmar: 0, vai_ter: 0, pago: 0, nao_vai_ter: 0 };
+  for (const i of list) c[i.check === 'pago_aguardando' ? 'pago' : i.check]++;
+  c.resolved = c.pago + c.nao_vai_ter;
+  c.pct = list.length ? Math.round((list.reduce((a, i) => a + CHECK_WEIGHT[i.check], 0) / list.length) * 100) : 0;
+  return c;
+};
+const monthTaskTitle = (ym, name) => `Contas do mês — ${monthLabel(ym)}${name ? ` — ${name}` : ' — sem responsável'}`;
+const monthTaskDescription = (ym, c) => [`Lista do mês ${monthLabel(ym)}: ${c.resolved} de ${c.total} resolvido(s) · ${c.a_confirmar} a confirmar · ${c.vai_ter} vai(ão) ter (a pagar) · ${c.pago} pago(s) · ${c.nao_vai_ter} não vai(ão) ter.`,
+  'Marque em cada despesa se vai ter ou não neste mês e registre os pagamentos. A tarefa avança com os checks e conclui sozinha quando todos estiverem resolvidos (pagos ou sem despesa no mês).'].join('\n');
+
+// Acerta avanço, situação e descrição de uma tarefa "Contas do mês"
+function refreshMonthTask(mt, userId) {
+  const t = mt.task_id && one('SELECT * FROM tasks WHERE id = ?', mt.task_id);
+  if (!t || t.cancelled_at) return;
+  const list = monthItems(mt.ref_month).filter(i => i.key === mt.assignee_key);
+  const c = checkSummary(list);
+  const done = list.length > 0 && list.every(i => resolved(i.check));
+  const now = new Date().toISOString();
+  run('UPDATE tasks SET description = ?, progress_pct = ?, updated_at = ? WHERE id = ?', monthTaskDescription(mt.ref_month, c), done ? 100 : c.pct, now, t.id);
+  if (done && t.status !== 'concluida') {
+    run(`UPDATE tasks SET status = 'concluida', started_at = COALESCE(started_at, ?), delivered_at = ?, completed_at = ?, review_status = 'aprovada', reviewed_by = ?, reviewed_at = ? WHERE id = ?`, now, now, now, userId, now, t.id);
+    taskHistory(t.id, userId, 'Tarefa concluída', `Todos os ${c.total} checks da lista do mês resolvidos`);
+  } else if (!done && t.status === 'concluida') {
+    run(`UPDATE tasks SET status = ?, delivered_at = NULL, completed_at = NULL, review_status = NULL, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?`, c.pct > 0 ? 'em_andamento' : 'aberta', t.id);
+    taskHistory(t.id, userId, 'Tarefa reaberta', 'Um check da lista do mês voltou a pendente');
+  } else if (!done && ['aberta', 'em_andamento'].includes(t.status)) {
+    const st = c.pct > 0 ? 'em_andamento' : 'aberta';
+    if (st !== t.status) run(`UPDATE tasks SET status = ?, started_at = CASE WHEN ? = 'em_andamento' THEN COALESCE(started_at, ?) ELSE started_at END WHERE id = ?`, st, st, now, t.id);
+  }
+}
+// Recalcula todas as tarefas "Contas do mês" (chamado depois de qualquer mudança nas despesas)
+export function syncMonthTasks(userId = null) {
+  let rows = [];
+  try { rows = all('SELECT * FROM finance_month_tasks WHERE task_id IS NOT NULL'); } catch { return; } // antes da migração
+  for (const mt of rows) refreshMonthTask(mt, userId);
+}
+export const monthTaskOf = taskId => { try { return one('SELECT * FROM finance_month_tasks WHERE task_id = ?', taskId) || null; } catch { return null; } };
+
+// Pergunta (Sim/Não, sem padrão): criar a tarefa "Contas do mês" de cada responsável (mês passado, atual e próximo)
 export function taskSuggestions(ctx) {
   requireFinance(ctx.user);
   const cur = today().slice(0, 7);
   try {
-    return all(`SELECT i.id, i.ref_month, i.due_date, i.amount_expected, o.id AS obligation_id, o.title, o.category, u.name AS assignee_name
-      FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id LEFT JOIN users u ON u.id = o.assignee_id
-      WHERE i.task_id IS NULL AND i.task_skip = 0 AND i.status = 'pendente' AND i.amount_expected > 0 AND o.active = 1 AND i.ref_month BETWEEN ? AND ?
-      ORDER BY i.due_date, o.title`, [addMonths(cur, -1), cutoff()].sort().at(-1), addMonths(cur, 1))
-      .map(i => ({ ...i, month_label: monthLabel(i.ref_month), conf_date: conferenceDate(i), task_due: financeTaskDue(financeAreaId(), conferenceDate(i)) }));
+    const out = [];
+    for (const ym of [addMonths(cur, -1), cur, addMonths(cur, 1)]) {
+      if (ym < cutoff()) continue;
+      const have = new Set(all('SELECT assignee_key FROM finance_month_tasks WHERE ref_month = ?', ym).map(r => r.assignee_key));
+      const groups = new Map();
+      for (const i of monthItems(ym)) { if (!groups.has(i.key)) groups.set(i.key, []); groups.get(i.key).push(i); }
+      for (const [key, list] of groups) {
+        if (have.has(key)) continue;
+        const c = checkSummary(list);
+        if (ym < cur && c.resolved === c.total) continue; // mês passado já resolvido: nada a acompanhar
+        const legacy = list.filter(i => i.task_id && one('SELECT 1 FROM tasks WHERE id = ? AND cancelled_at IS NULL AND status <> \'concluida\'', i.task_id)).length;
+        out.push({ ref_month: ym, month_label: monthLabel(ym), assignee_id: key || null, assignee_name: list[0].assignee_name || null, title: monthTaskTitle(ym, list[0].assignee_name),
+          count: c.total, open: c.total - c.resolved, expected: r2(list.reduce((a, i) => a + i.amount_expected, 0)), legacy_open: legacy, start: `${ym}-01`, due: dueOf(ym, 31) });
+      }
+    }
+    return out;
   } catch { return []; } // antes da migração
+}
+function createMonthTask(ym, key, userId) {
+  const area = one('SELECT * FROM projects WHERE id = ?', financeAreaId() || ensureFinanceArea() || financeAreaId());
+  const list = monthItems(ym).filter(i => i.key === key);
+  if (!list.length) throw badRequest('Não há despesas deste responsável no mês.');
+  const assignee = key && one('SELECT id FROM users WHERE id = ? AND active = 1 AND can_finance = 1', key) ? key : null;
+  const taskId = insertTask({
+    project: area,
+    data: { task_type: 'tarefa', title: monthTaskTitle(ym, list[0].assignee_name), description: monthTaskDescription(ym, checkSummary(list)), field_summary: null, notes: null,
+      due_date: dueOf(ym, 31), start_date: `${ym}-01`, priority: 'media', proof_type: 'nenhuma', assignee_id: assignee },
+    stageInput: stageFor(area.id, MONTH_STAGE),
+    creatorId: userId,
+  });
+  run(`INSERT INTO finance_month_tasks (ref_month, assignee_key, task_id, skipped, created_by) VALUES (?,?,?,0,?)
+    ON CONFLICT(ref_month, assignee_key) DO UPDATE SET task_id = excluded.task_id, skipped = 0`, ym, key, taskId, userId);
+  // As tarefas antigas (uma por despesa) viram checks: as abertas são encerradas; todas ficam no histórico da parcela
+  const now = new Date().toISOString();
+  let converted = 0;
+  for (const i of list) {
+    if (!i.task_id) continue;
+    const old = one('SELECT id, status, cancelled_at, code FROM tasks WHERE id = ?', i.task_id);
+    if (old && !old.cancelled_at && old.status !== 'concluida') {
+      run('UPDATE tasks SET cancelled_at = ?, cancelled_by = ?, cancel_reason = ?, updated_at = ? WHERE id = ?', now, userId, CONVERT_REASON, now, old.id);
+      taskHistory(old.id, userId, 'Tarefa cancelada', CONVERT_REASON);
+      converted++;
+    }
+    run('UPDATE finance_items SET legacy_task_id = task_id, task_id = NULL WHERE id = ?', i.id);
+  }
+  taskHistory(taskId, userId, 'Lista do mês criada', `${list.length} despesa(s) como checks${converted ? ` · ${converted} tarefa(s) antiga(s) convertida(s)` : ''}`);
+  refreshMonthTask({ ref_month: ym, assignee_key: key, task_id: taskId }, userId);
+  return { taskId, converted };
 }
 export function answerTaskSuggestions(ctx, body, ip) {
   requireFinance(ctx.user);
-  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(Number).filter(n => Number.isInteger(n) && n > 0))];
-  if (!ids.length) throw badRequest('Escolha as parcelas.');
-  const create = body.create === true || body.create === 'true' || body.create === 1;
-  let n = 0;
+  const groups = (Array.isArray(body.groups) ? body.groups : []).map(g => ({ ym: /^\d{4}-\d{2}$/.test(String(g?.ref_month || '')) ? g.ref_month : null, key: Number(g?.assignee_id) || 0 })).filter(g => g.ym);
+  if (!groups.length) throw badRequest('Escolha as listas do mês.');
+  if (body.create !== true && body.create !== false) throw badRequest('Responda Sim ou Não.');
+  const create = body.create === true;
+  let n = 0, converted = 0;
   tx(() => {
-    for (const id of ids) {
-      const it = one('SELECT * FROM finance_items WHERE id = ? AND task_id IS NULL', id);
-      if (!it) continue;
-      if (create) { itemTask(one('SELECT * FROM finance_obligations WHERE id = ?', it.obligation_id), it, ctx.user.id); n++; }
-      else { run('UPDATE finance_items SET task_skip = 1 WHERE id = ?', id); n++; }
+    for (const g of groups) {
+      if (one('SELECT 1 FROM finance_month_tasks WHERE ref_month = ? AND assignee_key = ?', g.ym, g.key)) continue;
+      if (create) { const r = createMonthTask(g.ym, g.key, ctx.user.id); converted += r.converted; }
+      else run('INSERT INTO finance_month_tasks (ref_month, assignee_key, task_id, skipped, created_by) VALUES (?,?,NULL,1,?)', g.ym, g.key, ctx.user.id);
+      n++;
     }
   });
-  audit(ctx.user.id, 'finance', null, create ? 'Tarefas financeiras criadas (pergunta do sistema)' : 'Parcelas sem tarefa (respondido: não criar)', { parcelas: n }, ip);
-  return { ok: true, count: n };
+  audit(ctx.user.id, 'finance', null, create ? 'Tarefas "Contas do mês" criadas (pergunta do sistema)' : 'Listas do mês sem tarefa (respondido: não criar)', { listas: n, tarefas_convertidas: converted || undefined }, ip);
+  return { ok: true, count: n, converted };
+}
+
+// Check "vai ter" (com o valor do mês, se informado) / desfazer; "não vai ter" (motivo opcional)
+export function confirmItem(ctx, id, body, ip) {
+  const it = loadItem(ctx, id);
+  if (it.status === 'paga') throw badRequest('Esta despesa já está resolvida (paga ou sem despesa no mês). Desfaça antes.');
+  const hasAmount = body?.amount !== undefined && body?.amount !== null && body?.amount !== '';
+  const amount = hasAmount ? r2(num(body.amount, 'Valor do mês')) : null;
+  if (hasAmount && !(amount > 0)) throw badRequest('Valor do mês inválido. Se não vai ter a despesa, use "Não vai ter".');
+  tx(() => {
+    run('UPDATE finance_items SET confirmed_at = ?, confirmed_by = ? WHERE id = ?', new Date().toISOString(), ctx.user.id, id);
+    if (hasAmount && amount !== r2(it.amount_expected)) {
+      run('UPDATE finance_items SET amount_expected = ?, estimated = 0 WHERE id = ?', amount, id);
+      keepManualPlan(it.obligation_id, it.ref_month, amount, ctx.user.id);
+    }
+    audit(ctx.user.id, 'finance', it.obligation_id, 'Despesa confirmada no mês (vai ter)', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: hasAmount ? amount : it.amount_expected }, ip);
+    syncMonthTasks(ctx.user.id);
+  });
+  return getItem(ctx, id);
+}
+export function unconfirmItem(ctx, id, ip) {
+  const it = loadItem(ctx, id);
+  if (it.status === 'paga') throw badRequest('Esta despesa já está resolvida. Desfaça o pagamento antes.');
+  tx(() => {
+    run('UPDATE finance_items SET confirmed_at = NULL, confirmed_by = NULL WHERE id = ?', id);
+    audit(ctx.user.id, 'finance', it.obligation_id, 'Confirmação da despesa desfeita (volta a confirmar)', { parcela: `${it.title} ${monthLabel(it.ref_month)}` }, ip);
+    syncMonthTasks(ctx.user.id);
+  });
+  return getItem(ctx, id);
+}
+export function skipItem(ctx, id, body, ip) {
+  const it = loadItem(ctx, id);
+  if (it.status === 'paga') throw badRequest('Esta despesa já está resolvida.');
+  const reason = str(body?.reason, { max: 500, label: 'Motivo' });
+  tx(() => {
+    run('UPDATE finance_items SET justify_kind = ?, justify_reason = ?, justified_at = ?, justified_by = ?, marked_paid_at = NULL, marked_amount = NULL WHERE id = ?', 'nao_ocorre', reason, new Date().toISOString(), ctx.user.id, id);
+    payItem(ctx, id, { paid_date: today(), paid_amount: 0, notes: `Não vai ter neste mês${reason ? `: ${reason}` : ''}` }, ip);
+  });
+  return getItem(ctx, id);
+}
+
+// Lista do mês de uma tarefa "Contas do mês" (tela da tarefa)
+export function monthChecklist(ctx, taskId) {
+  requireFinance(ctx.user);
+  const mt = monthTaskOf(taskId);
+  if (!mt) throw notFound('Esta tarefa não é uma lista do mês do Financeiro.');
+  const list = monthItems(mt.ref_month).filter(i => i.key === mt.assignee_key);
+  const files = new Map();
+  for (const i of list) {
+    const tid = i.task_id || i.legacy_task_id;
+    files.set(i.id, [...(tid ? all(`SELECT id, mime, original_name, 'task' AS src FROM task_files WHERE task_id = ? AND kind = 'execucao' ORDER BY id`, tid) : []),
+      ...all(`SELECT id, mime, original_name, 'item' AS src FROM finance_item_files WHERE item_id = ? ORDER BY id`, i.id)]);
+  }
+  return {
+    ref_month: mt.ref_month, label: monthLabel(mt.ref_month), assignee_name: list[0]?.assignee_name || null, summary: checkSummary(list), today: today(),
+    items: list.map(i => ({ id: i.id, title: i.title, category: i.category, payee: i.payee, variable: !!i.variable, estimated: !!i.estimated, due_date: i.due_date,
+      amount_expected: i.amount_expected, paid_amount: i.paid_amount, paid_date: i.paid_date, check: i.check, reason: i.justify_reason, notes: i.notes,
+      previous_amount: i.variable ? previousAmount(i.obligation_id, i.ref_month) : null, files: files.get(i.id) })),
+  };
+}
+// Comprovante de uma parcela (sem tarefa própria)
+export function itemFileForUser(ctx, fileId) {
+  requireFinance(ctx.user);
+  const f = one('SELECT * FROM finance_item_files WHERE id = ?', fileId);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  return f;
 }
 
 // Previsto 0 = nada esperado no mês: a tarefa do mês sai da lista (cancelada); voltando a ter previsto, ela reabre
@@ -320,7 +488,7 @@ export function financeYear(ctx, y) {
   const keys = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   const ref = today();
   const items = new Map();
-  for (const it of all(`SELECT i.*, (SELECT COUNT(*) FROM task_files f WHERE f.task_id = i.task_id AND f.kind = 'execucao') AS files FROM finance_items i WHERE ref_month BETWEEN ? AND ?`, keys[0], keys[11])) {
+  for (const it of all(`SELECT i.*, (SELECT COUNT(*) FROM task_files f WHERE f.task_id = COALESCE(i.task_id, i.legacy_task_id) AND f.kind = 'execucao') + (SELECT COUNT(*) FROM finance_item_files ff WHERE ff.item_id = i.id) AS files FROM finance_items i WHERE ref_month BETWEEN ? AND ?`, keys[0], keys[11])) {
     if (!items.has(it.obligation_id)) items.set(it.obligation_id, new Map());
     items.get(it.obligation_id).set(it.ref_month, it);
   }
@@ -539,6 +707,7 @@ export function updateObligation(ctx, id, body, ip) {
     audit(ctx.user.id, 'finance', id, d.active ? 'Obrigação financeira atualizada' : 'Obrigação financeira inativada', { descricao: d.title, campos: Object.keys(d).filter(k => (d[k] ?? null) !== (o[k] ?? null)) }, ip);
   });
   generateItems(ctx.user.id);
+  syncMonthTasks(ctx.user.id);
 }
 
 // ---------- Uso interno (Folha): obrigação única por pessoa, sem exigir a liberação do Financeiro ----------
@@ -547,6 +716,7 @@ export function createObligationInternal(userId, d) {
   const id = Number(run(`INSERT INTO finance_obligations (title, category, payee, amount, variable, frequency, due_day, start_month, end_month, assignee_id, notes, active, created_by)
     VALUES (?,?,?,?,0,'unica',?,?,?,?,?,1,?)`, d.title, d.category || 'Folha de pagamento', d.payee || null, r2(d.amount), d.due_day, d.month, d.month, assignee, d.notes || null, userId).lastInsertRowid);
   createItem(one('SELECT * FROM finance_obligations WHERE id = ?', id), d.month, userId);
+  syncMonthTasks(userId);
   return id;
 }
 // Folha: corrige (ou restaura) o valor da parcela pré-lançada e registra na tarefa
@@ -559,6 +729,7 @@ export function setItemAmountInternal(itemId, amount, userId, { estimated = 0, h
     run('UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?', [taskDescription(o, r2(amount)), extra].filter(Boolean).join('\n\n'), new Date().toISOString(), it.task_id);
     if (history) taskHistory(it.task_id, userId, history, `${brl(it.amount_expected)} → ${brl(amount)}`);
   }
+  syncMonthTasks(userId);
 }
 // Folha de Campo: baixa a parcela (e conclui a tarefa) quando todos da folha foram pagos; estorna ao desfazer
 export function payItemInternal(itemId, userId, pd, note) {
@@ -571,6 +742,7 @@ export function payItemInternal(itemId, userId, pd, note) {
       now, `${pd}T15:00:00.000Z`, now, userId, now, now, it.task_id);
     taskHistory(it.task_id, userId, 'Pagamento registrado', `${brl(it.amount_expected)} pago em ${pd.split('-').reverse().join('/')}${note ? ` (${note})` : ''}`);
   }
+  syncMonthTasks(userId);
 }
 export function unpayItemInternal(itemId, userId, note) {
   const it = one('SELECT * FROM finance_items WHERE id = ?', itemId);
@@ -580,6 +752,7 @@ export function unpayItemInternal(itemId, userId, note) {
     run(`UPDATE tasks SET status = 'aberta', delivered_at = NULL, completed_at = NULL, review_status = NULL, reviewed_by = NULL, reviewed_at = NULL, progress_pct = NULL, updated_at = ? WHERE id = ?`, new Date().toISOString(), it.task_id);
     taskHistory(it.task_id, userId, 'Pagamento desfeito', note || 'Parcela voltou a pendente');
   }
+  syncMonthTasks(userId);
 }
 // Algum pagamento já registrado? (a folha só reabre se nada foi pago)
 export const obligationPaid = id => !!one(`SELECT 1 FROM finance_items WHERE obligation_id = ? AND status = 'paga' LIMIT 1`, id);
@@ -612,6 +785,11 @@ export function payItem(ctx, id, body, ip) {
   const now = new Date().toISOString();
   tx(() => {
     run(`UPDATE finance_items SET status = 'paga', estimated = 0, paid_date = ?, paid_amount = ?, notes = ?, paid_by = ? WHERE id = ?`, pd, amount, str(body.notes, { max: 1000, label: 'Observação' }) || it.notes, ctx.user.id, id);
+    if (!it.task_id) for (const f of files) {
+      const sv = saveImageFromDataUrl(f.data);
+      run('INSERT INTO finance_item_files (item_id, stored_name, mime, size, original_name, uploaded_by, created_at) VALUES (?,?,?,?,?,?,?)',
+        id, sv.stored_name, sv.mime, sv.size, cleanFileName(f.name) || (isPdf(sv.mime) ? 'comprovante.pdf' : null), ctx.user.id, now);
+    }
     if (it.task_id) {
       for (const f of files) {
         const s = saveImageFromDataUrl(f.data);
@@ -624,6 +802,7 @@ export function payItem(ctx, id, body, ip) {
       taskHistory(it.task_id, ctx.user.id, amount === 0 ? 'Não ocorreu no mês' : 'Pagamento registrado', amount === 0 ? 'Real lançado = R$ 0,00: a previsão não ocorreu neste mês (Financeiro)' : `${brl(amount)} pago em ${pd.split('-').reverse().join('/')}${files.length ? ` · ${files.length} comprovante(s)` : ''} (Financeiro)`);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, amount === 0 ? 'Parcela marcada como não ocorrida (real = 0)' : 'Parcela paga', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount, data: pd }, ip);
+    syncMonthTasks(ctx.user.id);
   });
   return getItem(ctx, id);
 }
@@ -638,6 +817,7 @@ export function unpayItem(ctx, id, ip) {
       taskHistory(it.task_id, ctx.user.id, 'Pagamento desfeito', 'Parcela voltou a pendente (Financeiro)');
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Pagamento desfeito', { parcela: `${it.title} ${monthLabel(it.ref_month)}` }, ip);
+    syncMonthTasks(ctx.user.id);
   });
   return getItem(ctx, id);
 }
@@ -659,14 +839,17 @@ export function setItemAmount(ctx, id, body, ip) {
       syncZeroTask(it.task_id, amount, ctx.user.id);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Valor da parcela ajustado', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, de: it.amount_expected, para: amount }, ip);
+    syncMonthTasks(ctx.user.id);
   });
   return getItem(ctx, id);
 }
 
 export function getItem(ctx, id) {
   const it = loadItem(ctx, id);
-  const files = it.task_id ? all(`SELECT id, mime, original_name, created_at FROM task_files WHERE task_id = ? AND kind = 'execucao' ORDER BY id`, it.task_id) : [];
-  return { ...it, files };
+  const tid = it.task_id || it.legacy_task_id;
+  const files = [...(tid ? all(`SELECT id, mime, original_name, created_at, 'task' AS src FROM task_files WHERE task_id = ? AND kind = 'execucao' ORDER BY id`, tid) : []),
+    ...all(`SELECT id, mime, original_name, created_at, 'item' AS src FROM finance_item_files WHERE item_id = ? ORDER BY id`, it.id)];
+  return { ...it, files, check: itemCheckState(it) };
 }
 
 // Tarefa da parcela concluída/reaberta pela tela de tarefas: a parcela acompanha (valor previsto, data de hoje)
@@ -678,6 +861,7 @@ export function syncFromTask(taskId, action, userId) {
   } else if (action === 'reopen' && it.status === 'paga') {
     run(`UPDATE finance_items SET status = 'pendente', paid_date = NULL, paid_amount = NULL, paid_by = NULL WHERE id = ?`, it.id);
   }
+  syncMonthTasks(userId);
 }
 
 // Quem pode ser responsável: usuários ativos com a liberação do Financeiro
@@ -772,10 +956,10 @@ export function financeMonth(ctx, ym) {
   generateItems(ctx.user.id);
   const ref = today();
   const month = /^\d{4}-\d{2}$/.test(String(ym || '')) ? ym : ref.slice(0, 7);
-  const rows = all(`SELECT i.*, o.title, o.category, o.payee, o.variable, o.repeat_last, o.frequency, u.name AS assignee_name, t.code AS task_code,
+  const rows = all(`SELECT i.*, o.title, o.category, o.payee, o.variable, o.repeat_last, o.frequency, o.assignee_id AS ob_assignee, COALESCE(u.name, ou.name) AS assignee_name, t.code AS task_code,
       (SELECT pm.ref FROM payroll_months pm WHERE pm.finance_item_id = i.id) AS payroll_ref
     FROM finance_items i JOIN finance_obligations o ON o.id = i.obligation_id
-    LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN users u ON u.id = t.assignee_id
+    LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN users u ON u.id = t.assignee_id LEFT JOIN users ou ON ou.id = o.assignee_id
     WHERE (i.ref_month = ? OR (i.status = 'pendente' AND i.due_date < ? AND i.ref_month >= ?)) AND NOT (i.status = 'pendente' AND i.amount_expected = 0) ORDER BY i.due_date, o.title`, month, ref, cutoff());
   const cut = cutoff();
   const limitOf = limitReader();
@@ -785,7 +969,7 @@ export function financeMonth(ctx, ym) {
     const limit = limitOf(conf);
     const late = !before && it.status === 'pendente' && limit < ref && r2(it.amount_expected) > 0;
     const days = Math.round((Date.parse(conf) - Date.parse(ref)) / 86400e3);
-    return { ...it, due_date: conf, planned_date: it.due_date, task_limit: limit, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : before ? 'antes' : late ? 'atrasada' : days < 0 ? 'a_conferir' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
+    return { ...it, check: itemCheckState(it), due_date: conf, planned_date: it.due_date, task_limit: limit, late, days_to_due: days, situation: it.status === 'paga' ? 'paga' : before ? 'antes' : late ? 'atrasada' : days < 0 ? 'a_conferir' : days === 0 ? 'hoje' : days <= 7 ? 'semana' : 'futura', frequency_label: FREQ_LABEL[it.frequency] };
   };
   // De outro mês, só as atrasadas; no mês atual, também as vencidas que ainda estão no prazo
   const items = rows.map(decorate).filter(it => it.ref_month === month || it.late || (it.situation === 'a_conferir' && month === ref.slice(0, 7)))
@@ -812,10 +996,24 @@ export function financeMonth(ctx, ym) {
     },
     control_start: controlStart(), control_label: controlStart() ? monthLabel(controlStart()) : null,
     items, // do mês + atrasadas de meses anteriores
+    month_lists: monthLists(month),
     categories: [...cats.values()].sort((a, b) => b.expected - a.expected),
     area_id: financeAreaId(),
     category_options: CATEGORIES,
   };
+}
+
+// Listas do mês (uma por responsável): avanço dos checks e a tarefa, se criada
+function monthLists(ym) {
+  try {
+    const groups = new Map();
+    for (const i of monthItems(ym)) { if (!groups.has(i.key)) groups.set(i.key, []); groups.get(i.key).push(i); }
+    return [...groups].map(([key, list]) => {
+      const mt = one('SELECT * FROM finance_month_tasks WHERE ref_month = ? AND assignee_key = ?', ym, key);
+      const t = mt?.task_id ? one('SELECT id, code, status, cancelled_at FROM tasks WHERE id = ?', mt.task_id) : null;
+      return { assignee_id: key || null, assignee_name: list[0].assignee_name || null, summary: checkSummary(list), task: t && !t.cancelled_at ? { id: t.id, code: t.code, status: t.status } : null, skipped: !!mt?.skipped };
+    }).sort((a, b) => (a.assignee_name || 'zz').localeCompare(b.assignee_name || 'zz', 'pt-BR'));
+  } catch { return []; }
 }
 
 // ---------- Mais Controle: cobertura dos dados, "Paguei" e justificativa ----------
@@ -881,6 +1079,7 @@ export function markPaid(ctx, id, body, ip) {
       taskHistory(it.task_id, ctx.user.id, 'Marcado como pago', `${amount != null ? brl(amount) : 'valor a confirmar'} · aguardando confirmação do Mais Controle`);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Parcela marcada como paga (aguardando Mais Controle)', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, valor: amount }, ip);
+    syncMonthTasks(ctx.user.id);
   });
   return getItem(ctx, id);
 }
@@ -894,6 +1093,7 @@ export function unmarkPaid(ctx, id, ip) {
       taskHistory(it.task_id, ctx.user.id, 'Marcação de pago desfeita', '');
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Marcação de pago desfeita', { parcela: `${it.title} ${monthLabel(it.ref_month)}` }, ip);
+    syncMonthTasks(ctx.user.id);
   });
   return getItem(ctx, id);
 }
@@ -922,6 +1122,7 @@ export function justifyItem(ctx, id, body, ip) {
       taskHistory(it.task_id, ctx.user.id, 'Pagamento reprogramado', `Vai ocorrer em ${nd.split('-').reverse().join('/')} · ${reason}`);
     }
     audit(ctx.user.id, 'finance', it.obligation_id, 'Despesa sem pagamento justificada', { parcela: `${it.title} ${monthLabel(it.ref_month)}`, vai_ocorrer: nd, motivo: reason }, ip);
+    syncMonthTasks(ctx.user.id);
   });
   return getItem(ctx, id);
 }

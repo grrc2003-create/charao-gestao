@@ -1292,36 +1292,58 @@ async function main() {
   let fMonth = (await fAna('GET', '/finance/month')).data;
   const fIt0 = fMonth.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
   ok(fIt0 && fIt0.amount_expected === 1234.5 && fIt0.planned_date === `${fRef}-20` && fIt0.due_date === new Date(Date.UTC(+fRef.slice(0, 4), +fRef.slice(5, 7), 0)).toISOString().slice(0, 10) && fIt0.status === 'pendente' && !fIt0.task_id, 'obrigação mensal gera a parcela do mês (previsto dia 20, vence no fim do mês), sem criar a tarefa sozinha');
+  // Tarefa antiga (uma por despesa), como as que já existem do modelo anterior
+  const legacyFinTask = async (sess, areaId, itemId, title, assigneeId) => {
+    const id = (await sess('POST', '/tasks', { project_id: areaId, title, description: 'Tarefa antiga da parcela (modelo anterior)', assignee_id: assigneeId, priority: 'media', proof_type: 'nenhuma', due_date: '2050-01-01' })).data.id;
+    const db = new DatabaseSync(path.join(DATA_DIR, 'charao.db'));
+    db.prepare('UPDATE finance_items SET task_id = ? WHERE id = ?').run(id, itemId);
+    db.close();
+    return id;
+  };
+  // Lista do mês: uma tarefa "Contas do mês" por mês e responsável (pergunta Sim/Não, sem padrão); cada despesa é um check
+  const fLast = ym => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).toISOString().slice(0, 10);
   const fSug = (await fAna('GET', '/finance/task-suggestions')).data;
-  ok(fSug.some(i => i.id === fIt0.id), 'Criar tarefa?: a parcela sem tarefa aparece para a pessoa decidir');
+  const fGrp = fSug.find(g => g.ref_month === fRef && g.assignee_id === kAnaId);
+  ok(fGrp && fGrp.title.startsWith('Contas do mês —') && fGrp.count >= 1 && fGrp.start === `${fRef}-01` && fGrp.due === fLast(fRef), 'Criar tarefa?: a lista do mês do responsável aparece para a pessoa decidir (do 1º ao último dia do mês)');
+  ok((await fAna('POST', '/finance/task-suggestions', { groups: [{ ref_month: fRef, assignee_id: kAnaId }] })).status === 400, 'a pergunta exige Sim ou Não (sem padrão)');
   const fOb = (await fAna('GET', `/finance/obligations/${fObId}`)).data;
-  const fSugR = (await fAna('POST', '/finance/task-suggestions', { ids: fOb.items.map(i => i.id), create: true })).data;
-  ok(fSugR.count === 3, 'Criar tarefa?: "criar" gera as tarefas das parcelas escolhidas');
-  const fIt = (await fAna('GET', '/finance/month')).data.items.find(i => i.obligation_id === fObId && i.ref_month === fRef);
-  ok(fIt.task_id && !(await fAna('GET', '/finance/task-suggestions')).data.some(i => i.id === fIt.id), 'parcela com tarefa sai da pergunta');
-  {
-    const nObId = (await fAna('POST', '/finance/obligations', { title: 'Pergunta teste', category: 'Outros', amount: 50, frequency: 'mensal', due_day: 10, start_month: fRef })).data.id;
-    const nItems = (await fAna('GET', `/finance/obligations/${nObId}`)).data.items;
-    await fAna('POST', '/finance/task-suggestions', { ids: [nItems[0].id], create: false });
-    ok(!(await fAna('GET', '/finance/task-suggestions')).data.some(i => i.id === nItems[0].id) && !(await fAna('GET', `/finance/items/${nItems[0].id}`)).data.task_id, 'Criar tarefa?: "não criar" não pergunta de novo');
-    await fAna('POST', '/finance/task-suggestions', { ids: [nItems[1].id], create: true });
-    const nTask = (await fAna('GET', `/finance/items/${nItems[1].id}`)).data.task_id;
-    await fAna('DELETE', `/tasks/${nTask}`, { reason: 'Não precisa de tarefa' });
-    await fAna('GET', '/finance/month');
-    ok(!(await fAna('GET', '/finance/task-suggestions')).data.some(i => i.id === nItems[1].id) && !(await fAna('GET', `/finance/items/${nItems[1].id}`)).data.task_id, 'tarefa da parcela excluída não volta nem é perguntada de novo');
-    await fAna('PUT', `/finance/obligations/${nObId}`, { active: false });
-  }
   ok(fOb.items.length === 3, 'gera as parcelas até 2 meses à frente');
-  const fTask = (await fAna('GET', `/tasks/${fIt.task_id}`)).data;
-  ok(fTask.title.startsWith('DAS Simples Nacional —') && fTask.assignee_id === kAnaId && fTask.stage_name === 'Impostos', 'tarefa da parcela: título com o mês, responsável e classificação = categoria');
-  ok((await ricardo('GET', `/tasks/${fIt.task_id}`)).status === 404, 'sem liberação financeira, a tarefa da parcela não aparece');
-  ok((await fAna('GET', '/tasks')).data.some(t => t.id === fIt.task_id), 'liberado vê a tarefa da parcela na lista de Tarefas');
-  let fPaid = (await fAna('POST', `/finance/items/${fIt.id}/pay`, { paid_date: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()), paid_amount: '1.200,00', files: [{ data: tinyPng() }] })).data;
-  ok(fPaid.status === 'paga' && fPaid.paid_amount === 1200 && fPaid.files.length === 1, 'pagamento registrado com valor e comprovante');
-  ok((await fAna('GET', `/tasks/${fIt.task_id}`)).data.status === 'concluida', 'a tarefa da parcela fica concluída');
+  const fOld = await legacyFinTask(fAna, fMonth.area_id, fIt0.id, 'DAS (tarefa antiga)', kAnaId);
+  const fSugR = (await fAna('POST', '/finance/task-suggestions', { groups: [{ ref_month: fRef, assignee_id: kAnaId }], create: true })).data;
+  ok(fSugR.count === 1 && fSugR.converted === 1, 'Sim: cria a lista do mês e converte a tarefa antiga aberta da despesa');
+  const fOldT = (await fAna('GET', `/tasks/${fOld}`)).data;
+  ok(fOldT.cancelled_at && /Convertida/.test(fOldT.cancel_reason || ''), 'a tarefa antiga fica encerrada como convertida (com histórico)');
+  let fIt = (await fAna('GET', `/finance/items/${fIt0.id}`)).data;
+  ok(!fIt.task_id && fIt.legacy_task_id === fOld && fIt.check === 'a_confirmar', 'a despesa vira check "a confirmar" (a tarefa antiga fica no histórico)');
+  const fMT = (await fAna('GET', '/finance/month')).data.month_lists.find(l => l.assignee_id === kAnaId).task.id;
+  const fTask = (await fAna('GET', `/tasks/${fMT}`)).data;
+  ok(fTask.title.startsWith('Contas do mês —') && fTask.assignee_id === kAnaId && fTask.stage_name === 'Contas do mês' && fTask.start_date === `${fRef}-01` && fTask.due_date === fLast(fRef), 'tarefa "Contas do mês": do 1º ao último dia do mês, com responsável e classificação próprias');
+  ok(!(await fAna('GET', '/finance/task-suggestions')).data.some(g => g.ref_month === fRef && g.assignee_id === kAnaId), 'lista com tarefa sai da pergunta');
+  ok((await ricardo('GET', `/tasks/${fMT}`)).status === 404 && (await ricardo('GET', `/finance/month-tasks/${fMT}`)).status === 403, 'sem liberação financeira, a lista do mês não aparece');
+  ok((await fAna('GET', '/tasks')).data.some(t => t.id === fMT), 'liberado vê a lista do mês em Tarefas');
+  const fCk = async () => (await fAna('GET', `/finance/month-tasks/${fMT}`)).data;
+  let fC = await fCk();
+  ok(fC.items.some(i => i.id === fIt0.id && i.check === 'a_confirmar') && fC.summary.pct === 0 && fC.summary.total >= 1, 'lista do mês: os checks começam "a confirmar"');
+  ok((await fAna('POST', `/tasks/${fMT}/actions/conclude`, {})).status === 400, 'a lista do mês não é concluída na mão');
+  ok((await fAna('POST', `/finance/items/${fIt0.id}/confirm`, { amount: '0' })).status === 400, 'vai ter com valor zero é recusado (para isso existe "não vai ter")');
+  fIt = (await fAna('POST', `/finance/items/${fIt0.id}/confirm`, { amount: '1.250,00' })).data;
+  fC = await fCk();
+  const fT1 = (await fAna('GET', `/tasks/${fMT}`)).data;
+  ok(fIt.check === 'vai_ter' && fIt.amount_expected === 1250 && fC.summary.pct === Math.round(50 / fC.summary.total) && fT1.progress_pct === fC.summary.pct && fT1.status === 'em_andamento', 'vai ter (com o valor do mês): avanço parcial na tarefa');
+  ok((await fAna('POST', `/finance/items/${fIt0.id}/unconfirm`)).data.check === 'a_confirmar', 'desfazer o "vai ter" volta a confirmar');
+  let fPaid = (await fAna('POST', `/finance/items/${fIt.id}/pay`, { paid_date: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()), paid_amount: '1.200,00', files: [{ data: tinyPng(), name: 'comprovante.png' }] })).data;
+  ok(fPaid.status === 'paga' && fPaid.paid_amount === 1200 && fPaid.files.length === 1 && fPaid.check === 'pago', 'pagamento registrado com valor e comprovante: check pago');
+  ok((await fetch(`${BASE}/api/finance-item-files/${fPaid.files.find(f => f.src === 'item').id}`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } })).status === 200, 'o comprovante da despesa abre para quem tem o Financeiro');
+  ok((await fCk()).items.find(i => i.id === fIt0.id).files.length === 1, 'a lista do mês mostra o comprovante da despesa');
   ok((await fAna('POST', `/finance/items/${fIt.id}/pay`, {})).status === 400, 'não paga duas vezes');
+  for (const i of (await fCk()).items) if (!['pago', 'nao_vai_ter', 'pago_aguardando'].includes(i.check)) await fAna('POST', `/finance/items/${i.id}/skip`, {});
+  ok((await fCk()).summary.pct === 100 && (await fAna('GET', `/tasks/${fMT}`)).data.status === 'concluida', 'com todos os checks resolvidos (pagos ou sem despesa no mês), a tarefa conclui sozinha');
   fPaid = (await fAna('POST', `/finance/items/${fIt.id}/unpay`)).data;
-  ok(fPaid.status === 'pendente' && (await fAna('GET', `/tasks/${fIt.task_id}`)).data.status === 'aberta', 'desfazer pagamento volta a parcela e a tarefa');
+  ok(fPaid.status === 'pendente' && fPaid.check === 'a_confirmar' && (await fAna('GET', `/tasks/${fMT}`)).data.status !== 'concluida', 'desfazer um pagamento: o check volta e a tarefa reabre sozinha');
+  {
+    const sk = (await fCk()).items.find(i => i.check === 'nao_vai_ter');
+    if (sk) ok(sk.reason === null || sk.reason === undefined || sk.reason === '', 'não vai ter: motivo opcional');
+  }
   const fNext = fOb.items.find(i => i.ref_month !== fRef);
   ok((await fAna('PUT', `/finance/items/${fNext.id}/amount`, { amount_expected: '1.500,00' })).data.amount_expected === 1500, 'ajusta o valor previsto de uma parcela');
   await fAna('PUT', `/finance/obligations/${fObId}`, { due_day: 25 });
@@ -1330,13 +1352,14 @@ async function main() {
   ok((await fAna('GET', `/finance/obligations/${fObId}`)).data.items.length === 1, 'inativar remove as parcelas futuras pendentes (mantém a do mês)');
   fMonth = (await fAna('GET', '/finance/month')).data;
   ok(fMonth.totals.count >= 1 && fMonth.categories.some(c => c.category === 'Impostos'), 'visão do mês com totais e resumo por categoria');
-  // Concluir a tarefa pela tela de tarefas marca a parcela como paga
+  ok(fMonth.month_lists.some(l => l.assignee_id === kAnaId && l.task && l.summary.total >= 1), 'visão do mês mostra a lista do mês de cada responsável');
+  // Tarefa antiga (não convertida) concluída pela tela de tarefas continua marcando a parcela como paga
   const fOb2 = (await fAna('POST', '/finance/obligations', { title: 'Aluguel do escritório', category: 'Aluguel e condomínio', amount: 3000, due_day: 5, start_month: fRef })).data.id;
-  const fIt2a = (await fAna('GET', `/finance/obligations/${fOb2}`)).data.items.find(i => i.ref_month === fRef);
-  await fAna('POST', '/finance/task-suggestions', { ids: [fIt2a.id], create: true });
   const fIt2 = (await fAna('GET', `/finance/obligations/${fOb2}`)).data.items.find(i => i.ref_month === fRef);
-  await fAna('POST', `/tasks/${fIt2.task_id}/actions/conclude`, { start_date: '2020-01-01' });
-  ok((await fAna('GET', `/finance/items/${fIt2.id}`)).data.status === 'paga', 'concluir a tarefa da parcela marca a parcela como paga');
+  ok(!fIt2.task_id && (await fCk()).items.some(i => i.id === fIt2.id && i.check === 'a_confirmar'), 'despesa nova não cria tarefa própria: entra como check na lista do mês');
+  const fOld2 = await legacyFinTask(fAna, fMonth.area_id, fIt2.id, 'Aluguel (tarefa antiga)', kAnaId);
+  await fAna('POST', `/tasks/${fOld2}/actions/conclude`, { start_date: '2020-01-01' });
+  ok((await fAna('GET', `/finance/items/${fIt2.id}`)).data.status === 'paga' && (await fCk()).items.find(i => i.id === fIt2.id).check === 'pago', 'concluir uma tarefa antiga da parcela marca a parcela como paga (e o check)');
   // Análise comparativa: gastos x faturado por período, com variação
   for (const [por, n] of [['mes', 12], ['tri', 8], ['sem', 6], ['ano', 5]]) {
     const an = (await fAna('GET', `/finance/analysis?por=${por}`)).data;
@@ -1352,8 +1375,7 @@ async function main() {
     let csItems = (await fAna('GET', `/finance/obligations/${csOb}`)).data.items;
     const old3 = csItems.find(i => i.ref_month === ymAdd(fRef, -3)), old2 = csItems.find(i => i.ref_month === ymAdd(fRef, -2));
     await fAna('POST', `/finance/items/${old3.id}/pay`, { paid_date: old3.due_date, paid_amount: 90 });
-    await fAna('POST', '/finance/task-suggestions', { ids: [old2.id], create: true });
-    const oldTask = (await fAna('GET', `/finance/items/${old2.id}`)).data.task_id;
+    const oldTask = await legacyFinTask(fAna, fMonth.area_id, old2.id, 'Controle teste (tarefa antiga)', kAnaId);
     ok((await fAna('GET', '/finance/month')).data.items.some(i => i.id === old2.id && i.situation === 'atrasada'), 'sem início do controle: parcela antiga aparece atrasada');
     ok((await ricardo('GET', '/finance/control-start')).status === 403, 'início do controle exige a liberação do Financeiro');
     ok((await fAna('PUT', '/finance/control-start', { month: ymAdd(fRef, 1) })).status === 400, 'início do controle não pode ser depois do mês atual');
@@ -2340,7 +2362,8 @@ async function main() {
     const oid = (await fo('POST', '/finance/obligations', body)).data.id;
     const row = async () => (await fo('GET', `/finance/year?ano=${y}`)).data.groups.flatMap(g => g.rows).find(r => r.id === oid);
     const before = await row();
-    await fo('POST', '/finance/task-suggestions', { ids: (await fo('GET', `/finance/obligations/${oid}`)).data.items.map(i => i.id), create: true });
+    { const its = (await fo('GET', `/finance/obligations/${oid}`)).data.items; const area = (await fo('GET', '/finance/month')).data.area_id; const me = (await fo('GET', '/auth/me')).data.user.id;
+      for (const i of its) await legacyFinTask(fo, area, i.id, `Previsto teste ${i.ref_month} (tarefa antiga)`, me); }
     const plan = Array(12).fill(0); plan[11] = 250; // tudo 0, só DEZ com 250
     const file = writeXlsx([{ name: 'Previsto 2026', header: true, rows: [['Tarefa *', 'Tipo da despesa', 'Ano *', 'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'],
       ['Previsto mensal teste', null, y, ...plan], ['TOTAL', null, null, ...plan]] }]).toString('base64');
@@ -2942,8 +2965,7 @@ async function main() {
   const ficMonth = new Date().toISOString().slice(0, 7);
   const ficOb = (await ficAna('POST', '/finance/obligations', { title: 'Corte de indicadores', category: 'Outros', amount: 70, frequency: 'mensal', due_day: 1, start_month: ficMonth, assignee_id: ficId })).data.id;
   const ficItem = (await ficAna('GET', `/finance/obligations/${ficOb}`)).data.items[0];
-  await ficAna('POST', '/finance/task-suggestions', { ids: [ficItem.id], create: true });
-  const ficTask = (await ficAna('GET', `/finance/items/${ficItem.id}`)).data.task_id;
+  const ficTask = await legacyFinTask(ficAna, (await ficAna('GET', '/finance/month')).data.area_id, ficItem.id, 'Corte de indicadores (tarefa)', ficId);
   const ficProj = (await ficAna('GET', `/tasks/${ficTask}`)).data.project_id;
   const ficOther = (await ficAna('POST', '/tasks', { project_id: 1, title: 'Fora do Financeiro', description: 'Teste', assignee_id: ficId, proof_type: 'nenhuma', due_date: '2050-01-01' })).data.id;
   const ficDb = new DatabaseSync(path.join(DATA_DIR, 'charao.db'));
@@ -3170,21 +3192,13 @@ async function main() {
   const dfcOverdue = (await dfcAna('GET', '/finance/obligations')).data;
   ok((Array.isArray(dfcOverdue) ? dfcOverdue : dfcOverdue.obligations).find(o => o.id === dfcOb).overdue === (dfcM(dfcLast.id).late ? 2 : 1), 'a obrigação conta como atrasado só o que passou do limite');
   ok((Array.isArray(dfcOverdue) ? dfcOverdue : dfcOverdue.obligations).find(o => o.id === dfcOb).next_due === dfcEnd(dfcPrev2), 'o próximo vencimento é o fim do mês');
-  const dfcSug = (await dfcAna('GET', '/finance/task-suggestions')).data.find(i => i.id === dfcNow.id);
-  await dfcAna('POST', '/finance/task-suggestions', { ids: [dfcNow.id], create: true });
-  const dfcTaskId = (await dfcAna('GET', `/finance/items/${dfcNow.id}`)).data.task_id;
-  const dfcTask = (await dfcAna('GET', `/tasks/${dfcTaskId}`)).data;
-  const dfcWeekdays = d => { let n = 0; for (let x = `${d.slice(0, 7)}-01`; x <= d; x = new Date(Date.parse(x) + 86400e3).toISOString().slice(0, 10)) { const w = new Date(x).getUTCDay(); if (w && w < 6) n++; } return n; };
-  ok(dfcTask.start_date === dfcEnd(dfcCur) && dfcTask.due_date.slice(0, 7) === dfcNext, 'a tarefa começa no fim do mês e vence no mês seguinte');
-  ok(dfcWeekdays(dfcTask.due_date) >= 10 && dfcWeekdays(dfcTask.due_date) <= 13 && ![0, 6].includes(new Date(dfcTask.due_date).getUTCDay()), 'o prazo é o 10º dia útil do mês seguinte');
-  ok(dfcSug.task_due === dfcTask.due_date, 'a pergunta de criar tarefa mostra esse prazo');
+  const dfcSug = (await dfcAna('GET', '/finance/task-suggestions')).data.find(g => g.ref_month === dfcCur && g.assignee_id === 1);
+  ok(!dfcSug || (dfcSug.start === `${dfcCur}-01` && dfcSug.due === dfcEnd(dfcCur)), 'a pergunta da lista do mês mostra o prazo: do 1º ao último dia do mês');
   ok((await dfcAna('PUT', `/finance/obligations/${dfcOb}`, { due_day: 15 })).status === 200, 'muda o dia de vencimento da obrigação');
-  const dfcEdited = (await dfcAna('GET', `/tasks/${dfcTaskId}`)).data;
-  ok(dfcEdited.due_date === dfcTask.due_date && (await dfcAna('GET', `/finance/items/${dfcNow.id}`)).data.due_date === `${dfcCur}-15`, 'o vencimento muda, o prazo da tarefa continua pelo fim do mês');
+  ok((await dfcAna('GET', `/finance/items/${dfcNow.id}`)).data.due_date === `${dfcCur}-15`, 'o vencimento da parcela acompanha');
   const dfcNd = `${dfcNext}-20`;
   ok((await dfcAna('POST', `/finance/items/${dfcNow.id}/justify`, { kind: 'vai_ocorrer', reason: 'Boleto adiado', new_date: dfcNd })).status === 200, 'justifica: vai ocorrer no mês seguinte');
-  const dfcMoved = (await dfcAna('GET', `/tasks/${dfcTaskId}`)).data;
-  ok(dfcMoved.start_date === dfcEnd(dfcNext) && dfcMoved.due_date.slice(0, 7) === dfcShift(dfcNext, 1), 'despesa reprogramada: conferência e tarefa acompanham o novo mês');
+  ok((await dfcAna('GET', `/finance/items/${dfcNow.id}`)).data.check === 'vai_ter', 'despesa reprogramada conta como "vai ter" na lista do mês');
 
   console.log('Corrida dos indicadores');
   const evAna = await login('ana@charao.eng.br');

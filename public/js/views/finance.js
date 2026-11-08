@@ -3,6 +3,7 @@
 import { html, raw, api, icon, fmtDate } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
+import { checkBadge, checkProgress, bindChecks } from './finance-checks.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = v => BRL.format(Number(v) || 0);
@@ -139,6 +140,7 @@ export async function view({ state, query, setQuery, render }) {
     <div class="fin-row-due"><span>${fmtDate(i.due_date)}</span>${sitBadge(i.situation)}${i.situation === 'a_conferir' ? html`<small>registrar até ${fmtDate(i.task_limit)}</small>` : ''}</div>
     <div class="fin-row-val"><b>${money(i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected)}</b>${i.status === 'paga' ? html`<small>pago em ${fmtDate(i.paid_date)}</small>` : i.estimated ? html`<small class="fin-est">valor estimado</small>` : i.variable ? html`<small>valor variável</small>` : ''}${i.payroll_ref ? html`<small>Folha ${i.payroll_ref.slice(5, 7)}/${i.payroll_ref.slice(0, 4)} vinculada</small>` : ''}</div>
     <div class="fin-row-act">
+      ${i.ref_month === d.month && i.check === 'a_confirmar' ? html`<button type="button" class="ck-badge ck-todo ck-ask" data-ck-ask="${i.id}" title="Vai ter ou não neste mês?">${icon('clock')}A confirmar</button>` : i.ref_month === d.month && i.check === 'vai_ter' ? checkBadge('vai_ter') : ''}
       ${i.status === 'pendente' ? html`<button type="button" class="btn btn-success btn-sm" data-pay="${i.id}">${icon('check')}Pagar</button>
         <button type="button" class="icon-btn" data-amount="${i.id}" title="Ajustar o valor previsto" aria-label="Ajustar valor">${icon('edit')}</button>`
         : html`<button type="button" class="btn btn-ghost btn-sm" data-unpay="${i.id}">Desfazer</button>`}
@@ -180,6 +182,8 @@ export async function view({ state, query, setQuery, render }) {
           </div>
         </section>
 
+        ${(d.month_lists || []).length ? html`<section class="card ck-month"><div class="card-head"><h2>${icon('tasks')}Listas do mês</h2><span class="sub">um check por despesa: vai ter / não vai ter / pago</span></div>
+          <ul class="ck-mlist">${d.month_lists.map(l => html`<li><div class="ck-mwho"><b>${l.assignee_name || 'Sem responsável'}</b>${l.task ? html`<a href="#/tarefas/${l.task.id}">${l.task.code} · abrir a tarefa</a>` : html`<small class="muted">${l.skipped ? 'sem tarefa (respondido “Não”)' : 'sem tarefa: responda em Planejamento anual'}</small>`}</div>${checkProgress(l.summary)}</li>`)}</ul></section>` : ''}
         <div class="fin-two">
           <section class="card"><div class="card-head"><h2>${icon('calendar')}Calendário de vencimentos</h2>
             <div class="fin-leg">${['atrasada', 'hoje', 'semana', 'futura', 'paga'].map(s => html`<span><i class="k ${SIT[s].cls}-k"></i>${SIT[s].label}</span>`)}</div></div>
@@ -206,6 +210,7 @@ export async function view({ state, query, setQuery, render }) {
       root.querySelectorAll('[data-pay]').forEach(b => b.addEventListener('click', () => payFlow(byId.get(Number(b.dataset.pay)), done)));
       root.querySelectorAll('[data-unpay]').forEach(b => b.addEventListener('click', () => unpayFlow(byId.get(Number(b.dataset.unpay)), done)));
       root.querySelectorAll('[data-amount]').forEach(b => b.addEventListener('click', () => amountFlow(byId.get(Number(b.dataset.amount)), done)));
+      bindChecks(root.querySelector('.fin-list')?.closest('section') || root, items.map(i => ({ ...i, variable: !!i.variable, files: [] })), done);
       root.querySelectorAll('[data-item]').forEach(b => b.addEventListener('click', () => {
         const it = byId.get(Number(b.dataset.item));
         if (it.status === 'pendente') payFlow(it, done); else unpayFlow(it, done);

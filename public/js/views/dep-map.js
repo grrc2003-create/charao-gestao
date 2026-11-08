@@ -21,7 +21,8 @@ function walk(start, links) {
 }
 
 // Colunas pelo maior caminho desde o início; as linhas seguem a média das predecessoras (mantém as cadeias alinhadas).
-// Atividades sem ligação ficam na primeira coluna, à mão para começar a ligar.
+// Atividades sem ligação ficam à esquerda, à mão para começar a ligar — em várias colunas quando são muitas
+// (mais ou menos da altura da sequência), para o mapa inteiro caber na tela ao ajustar a escala.
 function layout(nodes, edges) {
   const preds = new Map(nodes.map(n => [n.key, []]));
   const succs = new Map(nodes.map(n => [n.key, []]));
@@ -37,10 +38,8 @@ function layout(nodes, edges) {
     return d;
   };
   linked.forEach(n => depthOf(n.key));
-  const firstCol = free.length ? 1 : 0;
   const pos = new Map();
   const step = CARD_H + ROW_GAP;
-  free.forEach((n, i) => pos.set(n.key, { x: PAD_X, y: PAD_Y + i * step }));
   const colNext = new Map();
   const order = [...linked].sort((a, b) => depth.get(a.key) - depth.get(b.key));
   for (const n of order) {
@@ -49,10 +48,26 @@ function layout(nodes, edges) {
     const wanted = ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : 0;
     const y = Math.max(wanted, colNext.get(col) ?? PAD_Y);
     colNext.set(col, y + step);
-    pos.set(n.key, { x: PAD_X + (col + firstCol) * (CARD_W + COL_GAP), y });
+    pos.set(n.key, { x: col * (CARD_W + COL_GAP), y });
   }
+  // Sem vínculo: colunas com a altura da sequência (no mínimo 5 linhas)
+  const FREE_GAP = 20;
+  const linkedRows = linked.length ? Math.round((Math.max(...linked.map(n => pos.get(n.key).y)) - PAD_Y) / step) + 1 : 0;
+  // Linhas das soltas: a escolha que deixa o mapa inteiro maior numa tela de proporção ~1,6 (largura/altura)
+  const linkedW = linked.length ? Math.max(...linked.map(n => pos.get(n.key).x)) + CARD_W + COL_GAP : 0;
+  const linkedH = linkedRows * step;
+  let rows = 1, best = -1;
+  for (let r = Math.min(Math.max(5, linkedRows), Math.max(1, free.length)); r <= Math.max(5, free.length); r++) {
+    const W = Math.ceil(free.length / r) * (CARD_W + FREE_GAP) + linkedW + 2 * PAD_X, H = Math.max(r * step, linkedH) + 2 * PAD_Y;
+    const z = Math.min(1.6 / W, 1 / H);
+    if (z > best) { best = z; rows = r; }
+  }
+  const freeCols = free.length ? Math.ceil(free.length / rows) : 0;
+  free.forEach((n, i) => pos.set(n.key, { x: PAD_X + Math.floor(i / rows) * (CARD_W + FREE_GAP), y: PAD_Y + (i % rows) * step }));
+  const linkedX = free.length ? PAD_X + freeCols * (CARD_W + FREE_GAP) - FREE_GAP + COL_GAP : PAD_X;
+  for (const n of linked) pos.get(n.key).x += linkedX;
   const all = [...pos.values()];
-  return { pos, freeCount: free.length, linkedCount: linked.length, firstCol,
+  return { pos, freeCount: free.length, linkedCount: linked.length, linkedX,
     width: Math.max(0, ...all.map(p => p.x)) + CARD_W + PAD_X + 40, height: Math.max(0, ...all.map(p => p.y)) + CARD_H + PAD_Y };
 }
 
@@ -80,6 +95,8 @@ export async function view({ params, query }) {
         ${map.can_edit ? html`<label class="dm-lag">Folga (dias)<input type="text" inputmode="numeric" id="dm-lag" value="0" aria-label="Folga em dias da próxima ligação"></label>` : ''}
         <label class="dm-check"><input type="checkbox" data-f="chain" checked>Mostrar a cadeia ligada</label>
         <label class="dm-check"><input type="checkbox" data-f="done">Mostrar concluídas</label>
+        <div class="dm-zoom" role="group" aria-label="Escala do mapa"><button type="button" class="btn btn-ghost btn-sm" data-dz="-1" aria-label="Diminuir">−</button><span id="dm-zl">100%</span>
+          <button type="button" class="btn btn-ghost btn-sm" data-dz="1" aria-label="Aumentar">+</button><button type="button" class="btn btn-ghost btn-sm" data-dz="0" title="Ajustar a escala para ver o mapa inteiro">Ajustar</button></div>
       </div>
       <div class="dm-banner" id="dm-banner" hidden></div>
       <div class="notice dm-info" id="dm-info" hidden></div>
@@ -89,6 +106,22 @@ export async function view({ params, query }) {
       const stage = root.querySelector('#dm-stage');
       const banner = root.querySelector('#dm-banner');
       const info = root.querySelector('#dm-info');
+      // Escala do mapa (como no organograma): − / + e "Ajustar" para ver tudo
+      const ZK = `dm-zoom-${projectId}`;
+      let zoom = 1;
+      try { zoom = Number(sessionStorage.getItem(ZK)) || 1; } catch { /* sem armazenamento */ }
+      const setZoom = z => {
+        zoom = Math.max(0.15, Math.min(1.5, Math.round(z * 100) / 100));
+        stage.style.zoom = zoom;
+        root.querySelector('#dm-zl').textContent = `${Math.round(zoom * 100)}%`;
+        try { sessionStorage.setItem(ZK, String(zoom)); } catch { /* sem armazenamento */ }
+      };
+      const fit = () => {
+        const w = parseFloat(stage.style.width) || 1, h = parseFloat(stage.style.height) || 1;
+        setZoom(Math.min(1, (canvas.clientWidth - 16) / w, (canvas.clientHeight - 16) / h));
+        canvas.scrollLeft = 0; canvas.scrollTop = 0;
+      };
+      root.querySelectorAll('[data-dz]').forEach(b => b.addEventListener('click', () => { const dz = Number(b.dataset.dz); if (dz) setZoom(zoom + dz * 0.1); else fit(); }));
       const nodeOf = k => map.nodes.find(n => n.key === k);
       const nameOf = n => `${n.code} · ${n.title}`;
 
@@ -127,7 +160,7 @@ export async function view({ params, query }) {
         const anchor = (k, side) => { const p = L.pos.get(k); return [p.x + (side === 'out' ? CARD_W : 0), p.y + CARD_H / 2]; };
         stage.innerHTML = (nodes.length ? html`
           ${L.freeCount ? html`<div class="dm-coltitle" style="left:${PAD_X}px">Sem vínculo (${L.freeCount})</div>` : ''}
-          ${L.linkedCount ? html`<div class="dm-coltitle" style="left:${PAD_X + L.firstCol * (CARD_W + COL_GAP)}px">Sequência →</div>` : ''}
+          ${L.linkedCount ? html`<div class="dm-coltitle" style="left:${L.linkedX}px">Sequência →</div>` : ''}
           <svg class="dm-lines" width="${L.width}" height="${Math.max(L.height, 300)}" aria-hidden="true">
             <defs><marker id="dm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A8794"/></marker></defs>
             ${edges.map(e => {
@@ -226,7 +259,7 @@ export async function view({ params, query }) {
         const x1 = box.offsetLeft + CARD_W, y1 = box.offsetTop + CARD_H / 2;
         const sx = e.clientX, sy = e.clientY;
         let moved = false, over = null, raf = 0, last = e;
-        const stagePoint = ev => { const r = stage.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+        const stagePoint = ev => { const r = stage.getBoundingClientRect(); return [(ev.clientX - r.left) / zoom, (ev.clientY - r.top) / zoom]; };
         const setOver = el => { if (over === el) return; over?.classList.remove('is-target'); over = el; over?.classList.add('is-target'); };
         const autoScroll = () => {
           const r = canvas.getBoundingClientRect();
@@ -269,6 +302,7 @@ export async function view({ params, query }) {
       document.addEventListener('keydown', onKey);
       window.addEventListener('hashchange', function off() { document.removeEventListener('keydown', onKey); window.removeEventListener('hashchange', off); });
       draw();
+      setZoom(zoom);
     },
   };
 }

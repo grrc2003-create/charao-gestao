@@ -34,6 +34,7 @@ import * as Team from './services/team.js';
 import * as Vacations from './services/vacations.js';
 import * as Absences from './services/absences.js';
 import * as Quotes from './services/quotes.js';
+import * as ProjectAlerts from './services/project-alerts.js';
 import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
 import * as Field from './services/field.js';
@@ -392,6 +393,8 @@ api.get('/api/reimbursement-files/:id', (req, res, { ctx, params }) => sendFile(
 api.get('/api/suppliers', (req, res, { ctx }) => send(res, 200, Quotes.listSuppliers(ctx)));
 api.post('/api/suppliers', (req, res, { ctx, body }) => send(res, 201, Quotes.saveSupplier(ctx, null, body, clientIp(req))));
 api.put('/api/suppliers/:id', (req, res, { ctx, params, body }) => send(res, 200, Quotes.saveSupplier(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/projects/:id/alerts', (req, res, { ctx, params }) => send(res, 200, ProjectAlerts.getAlerts(ctx, intOrNull(params.id))));
+api.put('/api/projects/:id/alerts', (req, res, { ctx, params, body }) => send(res, 200, ProjectAlerts.saveAlerts(ctx, intOrNull(params.id), body, clientIp(req))));
 api.get('/api/projects/:id/quotes', (req, res, { ctx, params }) => send(res, 200, Quotes.projectQuotes(ctx, intOrNull(params.id))));
 api.get('/api/projects/:id/quotes/map', (req, res, { ctx, params }) => send(res, 200, Quotes.mapData(ctx, intOrNull(params.id))));
 api.get('/api/projects/:id/quotes/export.xlsx', (req, res, { ctx, params }) => { const x = Quotes.exportXlsx(ctx, intOrNull(params.id)); send(res, 200, x.buffer, {

@@ -15,16 +15,19 @@ const legend = html`<div class="qt-leg">${BUCKETS.map(([, l, c]) => html`<span><
 
 // Card de status (tela do projeto e topo do mapa)
 export function quotesCard(s, projectId, { link = true } = {}) {
-  if (!s || !s.items) return '';
+  if (!s) return '';
+  if (!s.items) return link ? html`<section class="card section qt-card"><div class="card-head"><h2>${icon('file')}Cotações</h2></div><div class="card-body qt-empty"><p class="muted" style="margin:0">Nenhum item para cotar ainda. Cadastre os itens ou importe o mapa de cotações da planilha.</p><a class="btn btn-primary btn-sm" href="#/projetos/${projectId}/cotacoes">${icon('plus')}Começar as cotações</a></div></section>` : '';
+  const go = q => (link ? `#/projetos/${projectId}/cotacoes${q ? `?${q}` : ''}` : null);
   const rq = s.requests;
   return html`<section class="card section qt-card"><div class="card-head"><h2>${icon('file')}Cotações</h2><span class="sub">meta: ${s.target} propostas por item · ${s.items} item(ns)</span>
       ${link ? html`<a class="btn btn-ghost btn-sm" href="#/projetos/${projectId}/cotacoes">Abrir mapa de cotações</a>` : ''}</div>
     <div class="card-body">
-      <div class="qt-kpis">${BUCKETS.map(([k, l, c]) => html`<div class="qt-kpi ${c}"><span>${l}</span><b>${s.buckets[k]}</b><small>${pct(s.buckets[k], s.items)}%</small></div>`)}</div>
+      <div class="qt-kpis">${BUCKETS.map(([k, l, c]) => (go() ? html`<a class="qt-kpi ${c}" href="${go(`faixa=${k}`)}" title="Ver os itens: ${l}"><span>${l}</span><b>${s.buckets[k]}</b><small>${pct(s.buckets[k], s.items)}%</small></a>`
+        : html`<div class="qt-kpi ${c}"><span>${l}</span><b>${s.buckets[k]}</b><small>${pct(s.buckets[k], s.items)}%</small></div>`))}</div>
       ${bar(s.buckets, s.items)}
       <div class="qt-rq"><span>${icon('send')}${rq.total} solicitação(ões) enviada(s)</span><span>${icon('check')}${rq.recebida} recebida(s)</span><span>${icon('clock')}${rq.enviada} aguardando</span>
-        ${rq.vencida ? html`<span class="qt-late">${icon('alert')}${rq.vencida} com prazo vencido</span>` : ''}${rq.declinou ? html`<span>${icon('x')}${rq.declinou} declinaram</span>` : ''}
-        ${s.no_request ? html`<span class="qt-late">${s.no_request} item(ns) sem nenhuma solicitação</span>` : ''}</div>
+        ${rq.vencida ? (go() ? html`<a class="qt-late" href="${go('faixa=vencidas')}">${icon('alert')}${rq.vencida} com prazo vencido</a>` : html`<span class="qt-late">${icon('alert')}${rq.vencida} com prazo vencido</span>`) : ''}${rq.declinou ? html`<span>${icon('x')}${rq.declinou} declinaram</span>` : ''}
+        ${s.no_request ? (go() ? html`<a class="qt-late" href="${go('faixa=sem_solicitacao')}">${s.no_request} item(ns) sem nenhuma solicitação</a>` : html`<span class="qt-late">${s.no_request} item(ns) sem nenhuma solicitação</span>`) : ''}</div>
       ${s.disciplines.length > 1 ? html`<div class="table-wrap"><table class="data qt-disc"><thead><tr><th>Disciplina</th><th class="num">Itens</th><th>Propostas por item</th><th class="num">Sem proposta</th></tr></thead>
         <tbody>${s.disciplines.map(d => html`<tr><td>${link ? html`<a href="#/projetos/${projectId}/cotacoes?disc=${encodeURIComponent(d.discipline)}">${d.discipline}</a>` : d.discipline}</td><td class="num">${d.items}</td><td>${bar(d, d.items)}</td><td class="num">${d.nenhuma}</td></tr>`)}</tbody></table></div>` : ''}
       ${legend}
@@ -40,7 +43,10 @@ export async function view({ params, query, setQuery, render }) {
   const disc = query.get('disc') || '';
   const open = Number(query.get('item')) || 0;
   const discs = [...new Set(d.items.map(i => i.discipline))];
-  const items = disc ? d.items.filter(i => i.discipline === disc) : d.items;
+  const FAIXAS = { tres: ['3 ou mais propostas', i => i.received >= d.target], dois: ['2 propostas', i => i.received === 2], um: ['1 proposta', i => i.received === 1], nenhuma: ['sem proposta', i => i.received === 0],
+    vencidas: ['com solicitação vencida', i => i.overdue > 0], sem_solicitacao: ['sem nenhuma solicitação', i => !i.requested] };
+  const faixa = FAIXAS[query.get('faixa')] ? query.get('faixa') : '';
+  const items = (disc ? d.items.filter(i => i.discipline === disc) : d.items).filter(i => !faixa || FAIXAS[faixa][1](i));
   const reqById = new Map(d.requests.map(r => [r.id, r]));
   const groups = (disc ? [disc] : discs).map(k => [k, items.filter(i => i.discipline === k)]).filter(([, l]) => l.length);
   const reqActs = r => !d.can_edit ? '' : html`<span class="qt-acts">
@@ -72,14 +78,16 @@ export async function view({ params, query, setQuery, render }) {
           <button type="button" class="btn btn-ghost" data-q-newitem>${icon('plus')}Novo item</button>
           <button type="button" class="btn btn-primary" data-q-req>${icon('send')}Solicitar proposta</button>` : ''}` })}
       ${d.items.length ? quotesCard(d.summary, d.project.id, { link: false }) : ''}
+      ${faixa ? html`<div class="notice section qt-filter">${icon('info')}<span>Mostrando só os itens <b>${FAIXAS[faixa][0]}</b> (${items.length}).</span><button type="button" class="btn btn-ghost btn-sm" data-q-faixa-off>Ver todos</button></div>` : ''}
       ${discs.length > 1 ? html`<div class="chips section" role="group" aria-label="Disciplina"><button class="chip" data-q-disc="" aria-pressed="${!disc}">Todas</button>${discs.map(k => html`<button class="chip" data-q-disc="${k}" aria-pressed="${disc === k}">${k}</button>`)}</div>` : ''}
       ${groups.length ? groups.map(([k, list]) => html`<section class="card section"><div class="card-head"><h2>${k}</h2><span class="sub">${list.length} item(ns) · ${list.filter(i => i.received >= d.target).length} com ${d.target}+ propostas</span></div>
         <div class="table-wrap"><table class="data qt-items"><thead><tr><th>Item</th><th>Propostas</th><th class="num">Mediano</th><th>Solicitações</th></tr></thead><tbody>${list.map(itemRow)}</tbody></table></div></section>`)
         : html`<div class="empty-state"><h2>Nenhum item para cotar</h2><p>Cadastre os itens (por disciplina) ou importe o mapa de cotações no modelo atual da planilha.</p></div>`}`,
     mount(root) {
       const reload = () => render();
-      root.querySelectorAll('[data-q-disc]').forEach(b => b.addEventListener('click', () => { setQuery({ disc: b.dataset.qDisc, item: '' }); render(); }));
-      root.querySelectorAll('[data-q-item]').forEach(tr => tr.addEventListener('click', e => { if (e.target.closest('button,a')) return; const id = Number(tr.dataset.qItem); setQuery({ disc, item: open === id ? '' : id }); render(); }));
+      root.querySelectorAll('[data-q-disc]').forEach(b => b.addEventListener('click', () => { setQuery({ disc: b.dataset.qDisc, item: '', faixa }); render(); }));
+      root.querySelector('[data-q-faixa-off]')?.addEventListener('click', () => { setQuery({ disc, item: '', faixa: '' }); render(); });
+      root.querySelectorAll('[data-q-item]').forEach(tr => tr.addEventListener('click', e => { if (e.target.closest('button,a')) return; const id = Number(tr.dataset.qItem); setQuery({ disc, item: open === id ? '' : id, faixa }); render(); }));
       root.querySelector('[data-q-newitem]')?.addEventListener('click', () => itemSheet(d, null, disc, reload));
       root.querySelectorAll('[data-q-edit]').forEach(b => b.addEventListener('click', () => itemSheet(d, d.items.find(i => i.id === Number(b.dataset.qEdit)), disc, reload)));
       root.querySelectorAll('[data-q-del]').forEach(b => b.addEventListener('click', async () => {

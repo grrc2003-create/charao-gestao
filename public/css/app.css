@@ -4064,3 +4064,58 @@ button.ck-ask:hover { background: #ffefc2; }
 .qm-list li { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; }
 .qm-list small { display: block; color: var(--muted); font-size: 12px; margin-left: 22px; }
 @media (max-width: 760px) { .qt-offers li { grid-template-columns: 1fr; } .qt-of-st { justify-content: flex-start; } .qt-acts { justify-content: flex-start; } }
+
+/* Alertas dos indicadores do projeto */
+.kpi { position: relative; }
+.kpi.is-alert-warn { box-shadow: inset 0 0 0 2px #EF9F27; background: #FFF8E9; }
+.kpi.is-alert-crit { box-shadow: inset 0 0 0 2px #E24B4A; background: #FDF0F0; }
+.kpi-alert { position: absolute; top: 8px; right: 8px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.kpi-alert-warn { background: #FAEEDA; color: #854F0B; }
+.kpi-alert-crit { background: #FCEBEB; color: #A32D2D; }
+.pa-banner { border-radius: 12px; padding: 10px 14px; border: 1px solid; }
+.pa-banner.is-crit { background: #FDF0F0; border-color: #F09595; }
+.pa-banner.is-warn { background: #FFF8E9; border-color: #EF9F27; }
+.pa-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.pa-head svg { width: 18px; height: 18px; color: #A32D2D; }
+.pa-head .btn { margin-left: auto; }
+.pa-banner ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.pa-lv { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-right: 6px; }
+.pa-crit .pa-lv { background: #FCEBEB; color: #A32D2D; } .pa-warn .pa-lv { background: #FAEEDA; color: #854F0B; }
+.pa-ok { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #3B6D11; background: #F2FAF5; border: 1px solid #CFE8DA; border-radius: 10px; padding: 6px 12px; }
+.pa-ok svg { width: 16px; height: 16px; }
+.pa-ok .btn { margin-left: auto; }
+.pa-table input { width: 90px; text-align: right; }
+/* Cotações: card clicável no corpo do projeto */
+a.qt-kpi { text-decoration: none; transition: transform .1s; }
+a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) inset; }
+.qt-rq a { display: inline-flex; align-items: center; gap: 4px; }
+.qt-empty { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.qt-filter { display: flex; align-items: center; gap: 8px; }
+.qt-filter .btn { margin-left: auto; }
+
+/* Mapa de vínculos: escala (− / + / Ajustar) */
+.dm-zoom { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.dm-zoom span { min-width: 42px; text-align: center; font-size: 13px; color: var(--muted); }
+.kpi-alert { position: static; display: inline-block; align-self: flex-start; margin-bottom: 4px; }
+/* Projeto: desempenho por responsável recolhido (a corrida já mostra) */
+.pp-perf > summary { cursor: pointer; list-style: none; }
+.pp-perf > summary::-webkit-details-marker { display: none; }
+.pp-perf > summary::after { content: '▾'; margin-left: 8px; color: var(--muted); }
+.pp-perf[open] > summary::after { content: '▴'; }
+
+/* Projeto: listas recolhidas com resumo no cabeçalho */
+.fold-card > .card-head { cursor: pointer; user-select: none; flex-wrap: wrap; row-gap: 4px; }
+.fold-card > .card-head > span.sub { display: none; }
+.fold-card:not(.is-open) > :not(.card-head) { display: none !important; }
+.fold-card:not(.is-open) > .card-head { border-bottom: 0; }
+.fold-info { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-left: 8px; flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+.fold-flag { font-size: 11.5px; font-weight: 700; color: #A32D2D; background: #FCEBEB; border-radius: 999px; padding: 2px 9px; }
+.fold-flag::before { content: '⚠ '; }
+.fold-chev { margin-left: auto; width: 9px; height: 9px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform .15s; }
+.fold-card.is-open .fold-chev { transform: rotate(-135deg); }
+.fold-card > .card-head:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
+@media (max-width: 760px) {
+  .fold-card > .card-head > .fold-info { flex: 1 1 100%; order: 5; margin: 2px 0 0; }
+  .fold-card > .card-head > .fold-info .fold-sum { flex: 1 1 auto; }
+  .fold-flag { white-space: normal; }
+}

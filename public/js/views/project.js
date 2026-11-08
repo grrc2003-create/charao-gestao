@@ -1,20 +1,60 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
 import { quotesCard } from './quotes.js';
-import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
+import { evaluateAlerts, alertMap, alertsBanner, alertsSheet } from './project-alerts.js';
+import { pageHead, kpi, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { recurrenceRows } from './recurrences.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
 import { ganttSection, bindGanttSections } from './gantt.js';
-import { calendarSection, bindCalendar } from './calendar-ui.js';
+import { calendarSheet } from './calendar-ui.js';
 import { recordsCard, bindRecordsCard } from './records.js';
 import { addPdfButtons } from '../section-pdf.js';
 import { evolutionSection, bindEvolution } from './evolution.js';
 
+// Listas da página do projeto ficam recolhidas: o cabeçalho diz o que há dentro e sinaliza o que é importante; um clique abre
+const fold = (key, sum, flag, content) => (content && String(content).trim() ? html`<div class="pf-wrap" data-fold="${key}" data-fold-sum="${sum}" data-fold-flag="${flag || ''}">${content}</div>` : '');
+function bindFolds(root, projectId) {
+  const SK = k => `charao-fold-${projectId}-${k}`;
+  root.querySelectorAll('[data-fold]').forEach(w => {
+    const card = w.firstElementChild;
+    const head = card?.querySelector(':scope > .card-head');
+    if (!card || !head) return;
+    card.classList.add('fold-card');
+    const key = w.dataset.fold;
+    let open = false;
+    try { open = sessionStorage.getItem(SK(key)) === '1'; } catch { /* sem armazenamento */ }
+    const info = document.createElement('span');
+    info.className = 'fold-info';
+    info.innerHTML = `${w.dataset.foldFlag ? `<span class="fold-flag">${w.dataset.foldFlag}</span>` : ''}<span class="fold-sum">${w.dataset.foldSum}</span><span class="fold-chev" aria-hidden="true"></span>`;
+    head.querySelector('h2')?.after(info);
+    head.setAttribute('role', 'button');
+    head.tabIndex = 0;
+    const set = v => { open = v; card.classList.toggle('is-open', open); head.setAttribute('aria-expanded', String(open)); try { sessionStorage.setItem(SK(key), open ? '1' : '0'); } catch { /* sem armazenamento */ } };
+    set(open);
+    head.addEventListener('click', e => { if (e.target.closest('a,button,select,input')) return; set(!open); });
+    head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); set(!open); } });
+  });
+}
+
 export async function view({ params, query, setQuery, render, navigate }) {
-  const [p, impactRank, recs, quotes] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
-    api(`/projects/${params.id}/records`).catch(() => null), api(`/projects/${params.id}/quotes/summary`).catch(() => null)]);
+  const [p, impactRank, recs, quotes, alertConf] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
+    api(`/projects/${params.id}/records`).catch(() => null), api(`/projects/${params.id}/quotes/summary`).catch(() => null), api(`/projects/${params.id}/alerts`).catch(() => ({ alerts: [] }))]);
+  // Alertas dos indicadores (limites definidos neste projeto)
+  const alerts = evaluateAlerts(p, quotes, alertConf);
+  const alertsBy = alertMap(alerts);
+  const qOk = quotes?.enabled;
+  const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+  const clOpen = (p.checklists || []).filter(c => c.eff_status !== 'concluida');
+  const clNc = clOpen.reduce((n, c) => n + (c.nc_open || 0), 0);
+  const clLate = clOpen.filter(c => c.eff_status === 'atrasada').length;
+  const rs = recs?.summary;
+  const stLate = p.stages.filter(s => s.summary.total || !s.is_default).reduce((n, s) => n + (s.summary.late || 0), 0);
+  const impEnd = (impactRank || []).filter(r => r.project_end_days > 0).length;
+  const pplLate = p.people.filter(u => u.summary.late).length;
+  const qPct = qOk && quotes.items ? Math.round((quotes.buckets.tres / quotes.items) * 100) : null;
+  const qWorst = ['cot_tres_pct', 'cot_sem', 'cot_vencidas'].map(k => alertsBy[k]).filter(Boolean).sort((a, b) => (a.level === b.level ? 0 : a.level === 'crit' ? -1 : 1))[0];
   const active = query.get('status') || '';
   const org = readOrg(query);
   const stage = Number(query.get('stage')) || 0;
@@ -41,7 +81,8 @@ export async function view({ params, query, setQuery, render, navigate }) {
           <a class="btn btn-ghost" href="#/imprimir/relatorio?type=projeto&id=${p.id}&level=detalhado">${icon('print')}Relatório</a>
           <a class="btn btn-ghost" href="#/imprimir/historia/${p.id}">${icon('history')}História</a>
           <a class="btn btn-ghost" href="#/projetos/${p.id}/vinculos">${icon('share')}Mapa de vínculos</a>
-          ${quotes?.enabled ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/cotacoes">${icon('file')}Cotações</a>` : ''}
+          <button type="button" class="btn btn-ghost" data-cal-open>${icon('calendar')}Calendário</button>
+          ${alertConf?.can_edit ? html`<button type="button" class="btn btn-ghost" data-pa-edit>${icon('alert')}Alertas</button>` : ''}
           ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar">${icon('file')}Importar planejamento</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
@@ -50,13 +91,15 @@ export async function view({ params, query, setQuery, render, navigate }) {
           ${p.schedule.impacting.length ? html`<details class="sch-det"><summary>Tarefas reagendadas que mudaram o fim do projeto (prazo original ${fmtDate(p.schedule.end_original)})</summary>
             <ul>${p.schedule.impacting.map(x => html`<li><a href="#/tarefas/${x.id}"><span class="mono">${x.code}</span> ${x.title}</a><b class="${x.days > 0 ? 'is-late' : 'is-early'}">${x.days > 0 ? `+${x.days}` : x.days} d</b></li>`)}</ul></details>`
             : html`<p class="muted" style="margin:6px 0 0;font-size:12.5px">${p.schedule.rescheduled_tasks ? `${p.schedule.rescheduled_tasks} tarefa(s) reagendada(s), sem mudar o fim do projeto.` : 'Nenhum reagendamento mudou o fim do projeto.'}</p>`}</div></section>` : ''}
-      ${kpiBlock(p.summary)}
-      ${execKpis(p.summary)}
-      ${quotes?.enabled && quotes.items ? quotesCard(quotes, p.id) : ''}
-      ${recs ? recordsCard(recs) : ''}
-      ${checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` })}
+      ${alertsBanner(alerts, alertConf, alertConf?.can_edit)}
+      ${kpiBlock(p.summary, { alerts: alertsBy })}
+      ${execKpis(p.summary, { alerts: alertsBy, extra: qOk ? kpi({ alert: qWorst, label: 'Cotações com 3+ propostas', value: qPct === null ? '—' : `${qPct}%`, href: `#/projetos/${p.id}/cotacoes`, color: '#3B6D11',
+        foot: quotes.items ? `${quotes.buckets.tres} de ${quotes.items} itens · ${quotes.buckets.nenhuma} sem proposta${quotes.requests.vencida ? ` · ${quotes.requests.vencida} solicitação(ões) vencida(s)` : ''}` : 'nenhum item cadastrado ainda' }) : '' })}
+      ${qOk ? quotesCard(quotes, p.id) : ''}
+      ${recs ? fold('registros', rs ? `${plural(rs.total, 'registro', 'registros')} · ${plural(rs.vigentes, 'definição vigente', 'definições vigentes')}${rs.open ? ` · ${plural(rs.open, 'pendência', 'pendências')}` : ''}` : '', rs?.late ? `${plural(rs.late, 'pendência atrasada', 'pendências atrasadas')}` : '', recordsCard(recs)) : ''}
+      ${fold('checklists', `${plural(clOpen.length, 'check-list em andamento', 'check-lists em andamento')} · ${(p.checklists || []).length - clOpen.length} concluído(s)`, [clNc ? `${clNc} NC em aberto` : '', clLate ? `${plural(clLate, 'atrasado', 'atrasados')}` : ''].filter(Boolean).join(' · '), checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` }))}
 
-      <div class="grid grid-dash section">
+      <div class="grid grid-dash grid-one section">
         <section class="card">
           <div class="card-head"><h2>Andamento</h2></div>
           <div class="card-body" style="display:grid;gap:16px">
@@ -75,16 +118,16 @@ export async function view({ params, query, setQuery, render, navigate }) {
             ${p.description ? html`<div><div class="sub-label">Escopo</div><div class="text-content" style="font-size:14px">${p.description}</div></div>` : ''}
           </div>
         </section>
-        <section class="card">
-          <div class="card-head"><h2>Desempenho por responsável</h2><span class="sub">neste projeto</span></div>
-          <ul class="rows">${p.people.map(u => html`<li>${u.id ? html`<a class="row-link" href="#/usuarios/${u.id}">${personRow(u)}</a>` : html`<div class="row-link">${personRow(u)}</div>`}</li>`)}</ul>
-          ${!p.people.length ? html`<div class="card-body muted">Sem tarefas atribuídas.</div>` : ''}
-        </section>
       </div>
 
       ${evolutionSection({ scope: 'projeto', id: p.id, sub: 'neste projeto' })}
+      ${fold('desempenho', plural(p.people.length, 'pessoa', 'pessoas'), pplLate ? `${plural(pplLate, 'pessoa com atraso', 'pessoas com atraso')}` : '', html`<section class="card section">
+        <div class="card-head"><h2>Desempenho por responsável</h2><span class="sub">neste projeto</span></div>
+        <ul class="rows">${p.people.map(u => html`<li>${u.id ? html`<a class="row-link" href="#/usuarios/${u.id}">${personRow(u)}</a>` : html`<div class="row-link">${personRow(u)}</div>`}</li>`)}</ul>
+        ${!p.people.length ? html`<div class="card-body muted">Sem tarefas atribuídas.</div>` : ''}
+      </section>`)}
 
-      ${usedStages.length > 1 || (usedStages.length === 1 && !usedStages[0].is_default) ? html`<section class="card section">
+      ${usedStages.length > 1 || (usedStages.length === 1 && !usedStages[0].is_default) ? fold('classificacao', plural(usedStages.length, 'classificação', 'classificações'), stLate ? `${plural(stLate, 'tarefa atrasada', 'tarefas atrasadas')}` : '', html`<section class="card section">
         <div class="card-head"><h2>Andamento por classificação</h2><span class="sub">Grupo / Local / Etapa · toque para filtrar</span></div>
         <ul class="rows">${usedStages.map(s => html`<li><button type="button" class="row-link proj-row stage-row ${stage === s.id ? 'is-active' : ''}" data-stage="${stage === s.id ? '' : s.id}">
           <div class="grow"><div class="row-title"><span class="stage-tag">${s.name}</span>${s.is_default ? html`<span class="muted" style="font-size:12px">sem classificação específica</span>` : ''}</div>
@@ -93,11 +136,10 @@ export async function view({ params, query, setQuery, render, navigate }) {
               <span style="color:${s.summary.late ? STATUS_COLOR.atrasada : ''}"><b style="color:inherit">${s.summary.late}</b> atrasadas</span><span><b>${s.summary.done}</b> concluídas</span></div>
             ${execInline(s.summary)}</div>
           <div class="proj-pct">${fmtPct(s.summary.completion_pct ?? 0)}</div></button></li>`)}</ul>
-      </section>` : ''}
+      </section>`) : ''}
 
       ${ganttSection({ id: `p${p.id}`, url: `/gantt?project=${p.id}`, sub: 'tarefas do projeto por classificação · setas = dependências · vermelho = caminho crítico' })}
-      ${calendarSection(p)}
-      ${impactRankingSection(impactRank, { sub: 'neste projeto' })}
+      ${fold('impacto', plural((impactRank || []).length, 'tarefa causou atrasos em outras', 'tarefas causaram atrasos em outras'), impEnd ? `${impEnd} ${impEnd === 1 ? 'empurrou' : 'empurraram'} o fim do projeto` : '', impactRankingSection(impactRank, { sub: 'neste projeto' }))}
       ${deadlineSection(p.summary, p.trend, {
         link: { scope: 'projeto', id: p.id },
         distBy: p.dist_by,
@@ -136,9 +178,11 @@ export async function view({ params, query, setQuery, render, navigate }) {
       // Botão "PDF" em cada quadro: imprime só aquele visual
       addPdfButtons(root, { title: `${p.code} · ${p.name}`, sub: p.client });
       bindGanttSections(root, url => api(url));
-      bindCalendar(root, p);
+      root.querySelector('[data-cal-open]')?.addEventListener('click', () => calendarSheet(p));
       if (recs) bindRecordsCard(root, recs, navigate);
       bindChecklistCards(root);
+      bindFolds(root, p.id);
+      root.querySelectorAll('[data-pa-edit]').forEach(b => b.addEventListener('click', () => alertsSheet(p, quotes, alertConf, () => render())));
       root.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { setQuery({ status: b.dataset.st, stage: stage || '', org }); render(); }));
       root.querySelectorAll('[data-org]').forEach(b => b.addEventListener('click', () => {
         saveOrg(b.dataset.org);

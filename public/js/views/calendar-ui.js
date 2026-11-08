@@ -46,10 +46,23 @@ function render(c) {
       Fins de semana e dias não trabalhados não contam nos dias úteis das tarefas.</p>`;
 }
 
+// Calendário da obra como configuração: abre numa janela pelo botão "Calendário" do projeto
+export function calendarSheet(p) {
+  const local = p.uf ? `${p.municipio || 'município não informado'}/${p.uf}` : 'local da obra não informado';
+  const done = sheet({ title: 'Calendário da obra', wide: true, submitLabel: 'Fechar',
+    body: html`<p class="muted" style="margin-top:0">Feriados e dias não trabalhados · ${local}. Valem para os prazos, dias úteis e indicadores do projeto.</p><div data-cal-body><p class="muted">Carregando…</p></div>` });
+  const body = document.querySelector('.sheet-backdrop:last-child [data-cal-body]');
+  if (body) mountCalendar(body, p);
+  return done;
+}
 export function bindCalendar(root, p) {
   const d = root.querySelector('[data-cal]');
   if (!d) return;
-  const body = d.querySelector('[data-cal-body]');
+  const { load } = mountCalendar(d.querySelector('[data-cal-body]'), p, { lazy: true });
+  try { if (sessionStorage.getItem(`charao-cal-${p.id}`) === '1') { d.open = true; load(); } } catch { /* sem armazenamento */ }
+  d.addEventListener('toggle', () => { try { sessionStorage.setItem(`charao-cal-${p.id}`, d.open ? '1' : '0'); } catch { /* sem armazenamento */ } if (d.open) load(); });
+}
+function mountCalendar(body, p, { lazy = false } = {}) {
   let year = new Date().getFullYear();
   const load = async () => {
     try { body.innerHTML = render(await api(`/projects/${p.id}/calendar`, { query: { year } })).toString(); bind(); } catch (e) { body.innerHTML = html`<p class="muted">${e.message}</p>`.toString(); }
@@ -73,6 +86,6 @@ export function bindCalendar(root, p) {
       if (r) { toast('Dia incluído.'); load(); }
     });
   };
-  try { if (sessionStorage.getItem(`charao-cal-${p.id}`) === '1') { d.open = true; load(); } } catch { /* sem armazenamento */ }
-  d.addEventListener('toggle', () => { try { sessionStorage.setItem(`charao-cal-${p.id}`, d.open ? '1' : '0'); } catch { /* sem armazenamento */ } if (d.open) load(); });
+  if (!lazy) load();
+  return { load };
 }

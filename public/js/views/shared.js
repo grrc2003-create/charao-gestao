@@ -26,28 +26,30 @@ export const pageHead = ({ eyebrow, title, sub, actions, back }) => {
   </div>` : ''}`;
 };
 
-export function kpi({ label, value, unit, foot, color, href, hero, pct }) {
-  const inner = html`<div class="kpi-label">${label}</div>
+export function kpi({ label, value, unit, foot, color, href, hero, pct, alert }) {
+  const inner = html`${alert ? html`<span class="kpi-alert kpi-alert-${alert.level}" title="${alert.label}: ${alert.text}">${alert.level === 'crit' ? 'Crítico' : 'Atenção'}</span>` : ''}<div class="kpi-label">${label}</div>
     <div class="kpi-value">${value}${unit ? html`<small>${unit}</small>` : ''}</div>
     ${pct !== undefined ? progress(pct, label) : ''}
     ${foot ? html`<div class="kpi-foot">${foot}</div>` : ''}`;
   const style = color ? `--kpi-c:${color}` : '';
   return href
-    ? html`<a class="kpi ${hero ? 'kpi-hero' : ''}" href="${href}" style="${style}">${inner}</a>`
-    : html`<div class="kpi ${hero ? 'kpi-hero' : ''}" style="${style}">${inner}</div>`;
+    ? html`<a class="kpi ${hero ? 'kpi-hero' : ''} ${alert ? `is-alert-${alert.level}` : ''}" href="${href}" style="${style}">${inner}</a>`
+    : html`<div class="kpi ${hero ? 'kpi-hero' : ''} ${alert ? `is-alert-${alert.level}` : ''}" style="${style}">${inner}</div>`;
 }
 
 // Bloco padrão de indicadores a partir de um resumo do backend
 // Indicadores de execução: média de dias (úteis) do início à conclusão real, antecipadas e atraso de preenchimento
 const dec = v => String(v).replace('.', ',');
-export function execKpis(s, { title = '' } = {}) {
+const worst = (alerts, ...keys) => keys.map(k => alerts?.[k]).filter(Boolean).sort((a, b) => (a.level === b.level ? 0 : a.level === 'crit' ? -1 : 1))[0];
+export function execKpis(s, { title = '', alerts = null, extra = '' } = {}) {
   if (!s) return '';
   const avg = s.exec_work_days_avg ?? null;
-  return html`${title ? html`<div class="sub-label section">${title}</div>` : ''}<div class="kpis kpis-3 ${title ? '' : 'section'} kpis-exec">
-    ${kpi({ label: 'Média de execução', value: avg !== null ? dec(avg) : s.exec_days_avg !== null && s.exec_days_avg !== undefined ? dec(s.exec_days_avg) : '—', unit: s.exec_count ? (avg !== null ? ' dias úteis' : ' dias') : '', color: '#2A3D50',
+  return html`${title ? html`<div class="sub-label section">${title}</div>` : ''}<div class="kpis ${extra ? 'kpis-4' : 'kpis-3'} ${title ? '' : 'section'} kpis-exec">
+    ${kpi({ alert: worst(alerts, 'exec_media'), label: 'Média de execução', value: avg !== null ? dec(avg) : s.exec_days_avg !== null && s.exec_days_avg !== undefined ? dec(s.exec_days_avg) : '—', unit: s.exec_count ? (avg !== null ? ' dias úteis' : ' dias') : '', color: '#2A3D50',
       foot: s.exec_count ? `${dec(s.exec_days_avg)} dias corridos · do início à conclusão real · ${s.exec_count} entrega(s)` : 'sem entregas ainda' })}
     ${kpi({ label: 'Tarefas antecipadas', value: s.early ?? 0, color: STATUS_COLOR.concluida, foot: s.early ? `${fmtPct(s.early_pct)} das entregas · em média ${dec(s.early_days_avg)} dia(s) antes do prazo` : 'nenhuma entrega antes do prazo' })}
-    ${kpi({ label: 'Atraso de preenchimento', value: s.filling_delays ?? 0, color: '#B7791F', foot: s.filling_delays ? [s.filling_own ? `${s.filling_own} registrada(s) depois do dia real · média ${dec(s.filling_delay_days_avg)} dia(s)` : '', s.review_delays ? `${s.review_delays} conferência(s) acima de 36 h · média ${s.review_delay_hours_avg} h` : ''].filter(Boolean).join(' · ') : 'registros e conferências em dia' })}
+    ${kpi({ alert: worst(alerts, 'atraso_preenchimento'), label: 'Atraso de preenchimento', value: s.filling_delays ?? 0, color: '#B7791F', foot: s.filling_delays ? [s.filling_own ? `${s.filling_own} registrada(s) depois do dia real · média ${dec(s.filling_delay_days_avg)} dia(s)` : '', s.review_delays ? `${s.review_delays} conferência(s) acima de 36 h · média ${s.review_delay_hours_avg} h` : ''].filter(Boolean).join(' · ') : 'registros e conferências em dia' })}
+    ${extra}
   </div>`;
 }
 // Versão em linha (listas: classificações, projetos, pessoas, subtarefas)
@@ -61,15 +63,15 @@ export function execInline(s) {
   </div>`;
 }
 
-export function kpiBlock(s, { linkBase, extra = [] } = {}) {
+export function kpiBlock(s, { linkBase, extra = [], alerts = null } = {}) {
   const link = st => (linkBase ? `${linkBase}${linkBase.includes('?') ? '&' : '?'}status=${st}` : undefined);
   return html`<div class="kpis">
-    ${kpi({ label: 'Conclusão', value: fmtPct(s.completion_pct ?? 0), hero: true, pct: s.completion_pct ?? 0, foot: `${s.done} de ${s.total} tarefas concluídas` })}
-    ${kpi({ label: 'Total de tarefas', value: s.total, href: linkBase, color: '#2A3D50', foot: `${s.due_soon} vencem em 7 dias` })}
+    ${kpi({ alert: worst(alerts, 'conclusao'), label: 'Conclusão', value: fmtPct(s.completion_pct ?? 0), hero: true, pct: s.completion_pct ?? 0, foot: `${s.done} de ${s.total} tarefas concluídas` })}
+    ${kpi({ alert: worst(alerts, 'vencem_7d'), label: 'Total de tarefas', value: s.total, href: linkBase, color: '#2A3D50', foot: `${s.due_soon} vencem em 7 dias` })}
     ${kpi({ label: 'Em andamento', value: s.in_progress, href: link('em_andamento'), color: STATUS_COLOR.em_andamento, foot: `${s.open} abertas` })}
-    ${kpi({ label: 'Em conferência', value: s.review, href: link('aguardando_conferencia'), color: STATUS_COLOR.aguardando_conferencia, foot: 'aguardando aprovação' })}
-    ${kpi({ label: 'Atrasadas', value: s.late, href: link('atrasada'), color: STATUS_COLOR.atrasada, foot: s.avg_delay_days ? `atraso médio ${String(s.avg_delay_days).replace('.', ',')} d` : 'sem atrasos ativos' })}
-    ${kpi({ label: 'Entregas no prazo', value: fmtPct(s.on_time_pct), color: STATUS_COLOR.concluida, foot: `${s.on_time} de ${s.delivered} entregas` })}
+    ${kpi({ alert: worst(alerts, 'em_conferencia'), label: 'Em conferência', value: s.review, href: link('aguardando_conferencia'), color: STATUS_COLOR.aguardando_conferencia, foot: 'aguardando aprovação' })}
+    ${kpi({ alert: worst(alerts, 'atrasadas', 'atraso_medio'), label: 'Atrasadas', value: s.late, href: link('atrasada'), color: STATUS_COLOR.atrasada, foot: s.avg_delay_days ? `atraso médio ${String(s.avg_delay_days).replace('.', ',')} d` : 'sem atrasos ativos' })}
+    ${kpi({ alert: worst(alerts, 'no_prazo'), label: 'Entregas no prazo', value: fmtPct(s.on_time_pct), color: STATUS_COLOR.concluida, foot: `${s.on_time} de ${s.delivered} entregas` })}
     ${extra}
   </div>`;
 }

@@ -3405,6 +3405,20 @@ async function main() {
     ok((await vA('POST', '/absences', { user_id: pj.id, kind: 'descontada', off_date: fut(10) })).status === 400, 'não lança ausência dentro de férias/recesso já lançados');
   }
 
+  // ---------- Alertas dos indicadores do projeto ----------
+  console.log('\nAlertas dos indicadores do projeto');
+  {
+    const paA = await login('ana@charao.eng.br');
+    ok((await paA('GET', '/projects/1/alerts')).data.alerts.length === 0 && (await paA('GET', '/projects/1/alerts')).data.can_edit === true, 'projeto sem alertas configurados');
+    ok((await paA('PUT', '/projects/1/alerts', { alerts: [{ indicator: 'atrasadas', warn: 5, crit: 3 }] })).status === 400, 'atrasadas: crítico não pode ser menor que atenção');
+    ok((await paA('PUT', '/projects/1/alerts', { alerts: [{ indicator: 'no_prazo', warn: 70, crit: 90 }] })).status === 400, 'no prazo: crítico não pode ser maior que atenção');
+    const paS = (await paA('PUT', '/projects/1/alerts', { alerts: [{ indicator: 'atrasadas', warn: '2', crit: 5 }, { indicator: 'no_prazo', warn: '80,5', crit: '' }, { indicator: 'inexistente', warn: 1 }, { indicator: 'vencem_7d', warn: '', crit: '' }] })).data;
+    ok(paS.alerts.length === 2 && paS.alerts.find(a => a.indicator === 'no_prazo').warn === 80.5 && paS.alerts.find(a => a.indicator === 'no_prazo').crit === null, 'alertas salvos (em branco = sem alerta; indicador desconhecido ignorado)');
+    ok((await login('marcos@charao.eng.br').then(c => c('PUT', '/projects/1/alerts', { alerts: [] }))).status >= 403, 'só quem gerencia o projeto define os alertas');
+    ok((await paA('GET', '/projects/2/alerts')).data.alerts.length === 0, 'alertas são de cada projeto');
+    await paA('PUT', '/projects/1/alerts', { alerts: [] });
+  }
+
   // ---------- Cotações do projeto ----------
   console.log('\nCotações');
   {

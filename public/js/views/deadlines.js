@@ -22,18 +22,20 @@ export const signal = l => (l ? html`<span class="signal sig-${l}"><i aria-hidde
 // Link para as tarefas por trás de um número. link = { scope, id }; sem link, o número não é clicável.
 const tasksHref = (link, ver, month = '') => (link ? `#/prazos/tarefas?scope=${link.scope}${link.id ? `&id=${link.id}` : ''}&ver=${ver}${month ? `&mes=${month}` : ''}` : null);
 
+// selo numa linha própria abaixo do número (espaço reservado também sem selo, para os cards ficarem alinhados)
+const sigRow = l => html`<span class="kpi-sig">${signal(l)}</span>`;
 export function deadlineKpis(s, chronicMin = 3, link = null) {
   return html`<div class="kpis kpis-dl">
-    ${kpi({ label: html`Ficaram atrasadas ${signal(level('late', s))}`, value: fmtPct(s.late_rate ?? 0), color: STATUS_COLOR.atrasada, href: tasksHref(link, 'atrasadas') || undefined,
+    ${kpi({ label: 'Ficaram atrasadas', value: html`${fmtPct(s.late_rate ?? 0)}${sigRow(level('late', s))}`, color: STATUS_COLOR.atrasada, href: tasksHref(link, 'atrasadas') || undefined,
       foot: `${s.ever_late} de ${s.with_due} tarefas com prazo, ao menos 1 vez` })}
-    ${kpi({ label: 'Episódios de atraso', value: s.late_episodes, color: STATUS_COLOR.atrasada, foot: `média ${n1(s.late_episodes_avg)} por tarefa` })}
-    ${kpi({ label: 'Taxa de repactuação', value: fmtPct(s.reschedule_rate ?? 0), color: ORANGE,
+    ${kpi({ label: 'Episódios de atraso', value: html`${s.late_episodes}${sigRow(null)}`, color: STATUS_COLOR.atrasada, foot: `média ${n1(s.late_episodes_avg)} por tarefa` })}
+    ${kpi({ label: 'Taxa de repactuação', value: html`${fmtPct(s.reschedule_rate ?? 0)}${sigRow(null)}`, color: ORANGE,
       foot: `${s.rescheduled} tarefa(s) · ${s.reschedules} reagendamento(s)` })}
-    ${kpi({ label: html`Repactuação corretiva ${signal(level('corrective', s))}`, value: fmtPct(s.corrective_pct ?? 0), color: ORANGE,
+    ${kpi({ label: 'Repactuação corretiva', value: html`${fmtPct(s.corrective_pct ?? 0)}${sigRow(level('corrective', s))}`, color: ORANGE,
       foot: `${s.corrective} após vencer · ${s.preventive} antes` })}
-    ${kpi({ label: html`Tarefas crônicas ${signal(level('chronic', s))}`, value: s.chronic, color: '#707E8B',
+    ${kpi({ label: 'Tarefas crônicas', value: html`${s.chronic}${sigRow(level('chronic', s))}`, color: '#707E8B',
       foot: `${chronicMin}+ reagendamentos · +${s.days_added} dia(s) acrescidos` })}
-    ${kpi({ label: 'Pontualidade real × repactuada', value: fmtPct(s.on_time_original_pct), color: STATUS_COLOR.concluida,
+    ${kpi({ label: 'Pontualidade real × repactuada', value: html`${fmtPct(s.on_time_original_pct)}${sigRow(null)}`, color: STATUS_COLOR.concluida,
       foot: `contra o prazo original · ${fmtPct(s.on_time_pct)} contra o vigente` })}
   </div>`;
 }

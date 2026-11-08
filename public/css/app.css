@@ -4136,3 +4136,13 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
 .kpi .qk-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--q); margin-right: 4px; vertical-align: 0; }
 .kpi .qk-leg b { color: var(--ink); }
 .kpi .qk-late { color: #A32D2D; }
+/* Prazos e repactuação: cards compactos; selo (Crítico/Bom) pequeno no canto, títulos com a mesma altura em qualquer largura */
+.kpis.kpis-dl { gap: 8px; }
+.kpis-dl .kpi { padding: 9px 10px 9px 13px; }
+.kpis-dl .kpi::before { top: 9px; bottom: 9px; }
+.kpis-dl .kpi-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 11.5px; line-height: 1.3; min-height: 2.6em; }
+.kpis-dl .kpi:has(.kpi-sig .signal) .kpi-label { padding-right: 54px; }
+.kpis-dl .kpi-value { font-size: 22px; margin-top: 2px; }
+.kpis-dl .kpi-sig { position: absolute; top: 8px; right: 8px; line-height: 1; letter-spacing: 0; }
+.kpis-dl .kpi-sig .signal { font-size: 9.5px; padding: 0 5px; font-weight: 700; }
+.kpis-dl .kpi-foot { font-size: 11px; line-height: 1.35; margin-top: 1px; }

@@ -692,3 +692,11 @@
 /* Recibos da Folha de Campo + comprovante (página própria) */
 .doc-stage .pd-proof { margin-top: 20px; }
 @media print { .pd-proof { break-before: page; page-break-before: always; } }
+
+/* Comprovante em PDF desenhado como imagem (uma por página do PDF) */
+.pd-pdf-pages { display: grid; gap: 10px; justify-items: center; font-size: 12.5px; color: #666; }
+.pd-pdf-pages:not(.is-ready) { min-height: 60px; align-content: center; grid-auto-flow: column; gap: 6px; }
+.pd-pdf-pages svg { width: 16px; height: 16px; }
+.pd-pdf-pages.is-error { color: #A93226; background: #fdecea; border-radius: 6px; padding: 8px 10px; }
+.pd-pdf-pages img { max-width: 100%; max-height: 240mm; object-fit: contain; border: 1px solid #e3e7ec; break-inside: avoid; page-break-inside: avoid; }
+.pd-proof-pdfpg { break-inside: auto; page-break-inside: auto; }

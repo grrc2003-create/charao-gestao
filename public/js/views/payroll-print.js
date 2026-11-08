@@ -1,6 +1,7 @@
 // Recibos da Folha (A4): um demonstrativo por página, no modelo da planilha, com o logo da empresa da pessoa.
 import { html, api, fmtDate, icon } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
+import { renderPdfPages } from '../pdf-pages.js';
 import { money, refLabel, refLong } from './payroll.js';
 
 const d2 = d => (d ? fmtDate(d) : '—');
@@ -93,8 +94,8 @@ function proofPage(m, e) {
       <tbody>${pays.map(p => html`<tr><td>${d2(p.paid_date)}</td><td>${money(p.amount)}</td><td>${p.notes || '—'}</td></tr>`)}</tbody>
       <tfoot><tr><th>Total pago</th><th>${money(pays.reduce((a, p) => a + p.amount, 0))}</th><th>de ${money(e.calc.total)}</th></tr></tfoot></table>
     ${files.filter(isImg).map(f => html`<figure class="pd-proof-img"><img src="/api/payroll-pay-files/${f.id}" alt="Comprovante ${f.original_name || ''}"><figcaption>${f.original_name || 'comprovante'} · ${d2(f.paid_date)}</figcaption></figure>`)}
-    ${pdfs.length ? html`<div class="pd-proof-pdf">${icon('file')}<div><b>Comprovante em PDF</b> (não entra na impressão: envie o arquivo junto):
-      ${pdfs.map(f => html`<a href="/api/payroll-pay-files/${f.id}" target="_blank" rel="noopener">${f.original_name || 'comprovante.pdf'}</a>`)}</div></div>` : ''}
+    ${pdfs.map(f => html`<figure class="pd-proof-img pd-proof-pdfpg"><div class="pd-pdf-pages" data-pdf-pages="/api/payroll-pay-files/${f.id}">${icon('file')}Carregando o PDF do comprovante…</div>
+      <figcaption>${f.original_name || 'comprovante.pdf'} · ${d2(f.paid_date)} · <a class="no-print" href="/api/payroll-pay-files/${f.id}" target="_blank" rel="noopener">abrir o PDF</a></figcaption></figure>`)}
     ${!files.length ? html`<p class="muted">Pagamento registrado sem arquivo de comprovante.</p>` : ''}
   </article>`;
 }
@@ -115,7 +116,7 @@ export async function view({ params, query }) {
       <div class="doc-stage pd-stage ${withProof ? '' : 'pd-noproof'}" id="pd-stage">${list.map(e => html`${receipt(m, e)}${proofPage(m, e)}`)}</div>
       ${m.status === 'aberta' ? html`<p class="no-print muted" style="text-align:center">Folha aberta: os valores ainda podem mudar até o fechamento.</p>` : ''}`,
     mount(root) {
-      bindPrintToolbar(root);
+      bindPrintToolbar(root, renderPdfPages(root));
       root.querySelector('#pd-proof-on')?.addEventListener('change', e => root.querySelector('#pd-stage').classList.toggle('pd-noproof', !e.target.checked));
     },
   };

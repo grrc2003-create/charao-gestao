@@ -4,6 +4,7 @@
 // Opções na barra: data e local do recibo, valor (o que a empresa paga na folha ou o já pago) e quem entra.
 import { html, api, fmtDate, todayISO, icon } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
+import { renderPdfPages } from '../pdf-pages.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = v => BRL.format(Number(v) || 0);
@@ -104,8 +105,8 @@ export async function view({ params, query, setQuery, render }) {
         <tbody>${x.payments.map(p => html`<tr><td>${fmtDate(p.paid_date)}</td><td>${money(p.amount)}</td><td>${p.notes || '—'}</td></tr>`)}</tbody>
         <tfoot><tr><th>Total pago</th><th>${money(x.payments.reduce((a, p) => a + p.amount, 0))}</th><th>de ${money(x.company)}</th></tr></tfoot></table>
       ${files.filter(isImg).map(f => html`<figure class="pd-proof-img"><img src="/api/field-pay-files/${f.id}" alt="Comprovante ${f.original_name || ''}"><figcaption>${f.original_name || 'comprovante'} · ${fmtDate(f.paid_date)}</figcaption></figure>`)}
-      ${pdfs.length ? html`<div class="pd-proof-pdf">${icon('file')}<div><b>Comprovante em PDF</b> (não entra na impressão: envie o arquivo junto):
-        ${pdfs.map(f => html`<a href="/api/field-pay-files/${f.id}" target="_blank" rel="noopener">${f.original_name || 'comprovante.pdf'}</a>`)}</div></div>` : ''}
+      ${pdfs.map(f => html`<figure class="pd-proof-img pd-proof-pdfpg"><div class="pd-pdf-pages" data-pdf-pages="/api/field-pay-files/${f.id}">${icon('file')}Carregando o PDF do comprovante…</div>
+        <figcaption>${f.original_name || 'comprovante.pdf'} · ${fmtDate(f.paid_date)} · <a class="no-print" href="/api/field-pay-files/${f.id}" target="_blank" rel="noopener">abrir o PDF</a></figcaption></figure>`)}
       ${!files.length ? html`<p class="muted">Pagamento registrado sem arquivo de comprovante.</p>` : ''}
     </article>`;
   };
@@ -127,7 +128,7 @@ export async function view({ params, query, setQuery, render }) {
     <div class="doc-stage">${pages.length ? pages.map((pg, k) => html`<article class="doc a4 rc-doc">${pg.map((x, j) => html`${j ? html`<div class="rc-cut" aria-hidden="true"><span>✂ recortar</span></div>` : ''}${recibo(x, k * 2 + j)}`)}</article>`)
       : html`<article class="doc a4 rc-doc"><p class="muted">${all.length ? 'Nenhum profissional escolhido.' : modo === 'pago' ? 'Ninguém com pagamento registrado nesta folha.' : 'Nenhum valor a pagar nesta folha.'}</p></article>`}${withProof ? list.map(proofPage) : ''}</div>`,
     mount(root) {
-      bindPrintToolbar(root);
+      bindPrintToolbar(root, renderPdfPages(root));
       setPageFooter(`Recibos · ${s.project.code} · ${s.code}`);
       root.querySelector('#rc-data').addEventListener('change', e => go({ data: e.target.value || todayISO() }));
       root.querySelector('#rc-local').addEventListener('change', e => go({ local: e.target.value.trim() }));

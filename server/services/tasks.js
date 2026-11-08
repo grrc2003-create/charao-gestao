@@ -11,6 +11,7 @@ import { activeReason, getSetting } from './settings.js';
 import { workingDaysBetween, vacationsOverlapping, dayOffReason } from './calendar.js';
 import { taskDependencies, itemDependencies, applyShift, applyPull, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask, monthTaskOf } from './finance.js';
+import { syncAbsenceTask } from './absences.js';
 import { originOfTask, recordsOfTask } from './records.js';
 import { readItems, insertItems, teamForCopy, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
@@ -1031,7 +1032,7 @@ export function transition(ctx, id, action, body = {}) {
       default:
         throw badRequest('Ação desconhecida.');
     }
-    if (['approve', 'conclude', 'reopen'].includes(action)) syncFromTask(id, action, ctx.user.id);
+    if (['approve', 'conclude', 'reopen'].includes(action)) { syncFromTask(id, action, ctx.user.id); syncAbsenceTask(id, action, ctx.user.id); }
     if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
 }

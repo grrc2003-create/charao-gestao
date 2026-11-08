@@ -3405,6 +3405,87 @@ async function main() {
     ok((await vA('POST', '/absences', { user_id: pj.id, kind: 'descontada', off_date: fut(10) })).status === 400, 'não lança ausência dentro de férias/recesso já lançados');
   }
 
+  // ---------- Cotações do projeto ----------
+  console.log('\nCotações');
+  {
+    const qA = await login('ana@charao.eng.br');
+    const qP = 1;
+    const ymd = d => d.toISOString().slice(0, 10);
+    const qToday = ymd(new Date(Date.now() - 3 * 3600e3));
+    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 0, 'projeto sem itens: resumo vazio');
+    const qS1 = (await qA('POST', '/suppliers', { name: 'Fornecedor Fictício Alfa', cnpj: '00.000.000/0001-01', disciplines: 'Climatização, Elétrica' })).data;
+    const qS2 = (await qA('POST', '/suppliers', { name: 'Fornecedor Fictício Beta' })).data;
+    const qS3 = (await qA('POST', '/suppliers', { name: 'Fornecedor Fictício Gama' })).data;
+    ok(qS1.id && qS1.disciplines.length === 2, 'fornecedor cadastrado com disciplinas');
+    ok((await qA('POST', '/suppliers', { name: 'Duplicado', cnpj: '00.000.000/0001-01' })).status === 400, 'CNPJ não se repete no cadastro');
+    const qI1 = (await qA('POST', `/projects/${qP}/quotes/items`, { discipline: 'Climatização', description: 'Sistema fictício de água gelada', qty: '1', unit: 'vb', abc: 'a' })).data.id;
+    const qI2 = (await qA('POST', `/projects/${qP}/quotes/items`, { discipline: 'Climatização', description: 'Dutos fictícios', qty: '120,5', unit: 'm' })).data.id;
+    const qI3 = (await qA('POST', `/projects/${qP}/quotes/items`, { discipline: 'Elétrica', description: 'Quadro fictício' })).data.id;
+    ok(qI1 && qI2 && qI3, 'itens cadastrados por disciplina');
+    ok((await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS1.id, item_ids: [qI1, qI2], sent_date: qToday })).status === 400, 'solicitação exige a evidência do envio');
+    const qPng = [{ data: tinyPng(), name: 'envio.png' }];
+    const qR1 = (await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS1.id, item_ids: [qI1, qI2], sent_date: qToday, channel: 'E-mail', due_date: qToday, files: qPng })).data.id;
+    const qR2 = (await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS2.id, item_ids: [qI1], sent_date: qToday, channel: 'WhatsApp', files: qPng })).data.id;
+    const qR3 = (await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS3.id, item_ids: [qI1, qI2], sent_date: qToday, files: qPng })).data.id;
+    ok(qR1 && qR2 && qR3, 'solicitações registradas com evidência');
+    ok((await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS1.id, item_ids: [qI1], sent_date: '2099-01-01', files: qPng })).status === 400, 'envio não pode ser no futuro');
+    let qM = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    ok(qM.summary.buckets.nenhuma === 3 && qM.summary.requests.total === 3 && qM.summary.requests.enviada === 3 && qM.summary.no_request === 1, 'mapa: nenhuma proposta ainda, 3 enviadas, 1 item sem solicitação');
+    ok((await qA('POST', `/quote-requests/${qR1}/receive`, { prices: [{ item_id: qI3, price: 10 }] })).status === 400, 'preço só para itens da solicitação');
+    await qA('POST', `/quote-requests/${qR1}/receive`, { prices: [{ item_id: qI1, price: '1.000,00' }, { item_id: qI2, price: 200 }], conditions: '30 dias', files: [{ data: tinyPng(), name: 'proposta.png' }] });
+    await qA('POST', `/quote-requests/${qR2}/receive`, { prices: [{ item_id: qI1, price: 1300 }] });
+    await qA('POST', `/quote-requests/${qR3}/receive`, { prices: [{ item_id: qI1, price: 900 }] });
+    qM = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    const qIt1 = qM.items.find(i => i.id === qI1), qIt2 = qM.items.find(i => i.id === qI2);
+    ok(qIt1.received === 3 && qIt1.median === 1000 && qIt1.min === 900, `item com 3 propostas: mediano ${qIt1.median}, menor ${qIt1.min}`);
+    ok(qIt2.received === 1 && qM.summary.buckets.tres === 1 && qM.summary.buckets.um === 1 && qM.summary.buckets.nenhuma === 1, 'resumo: 1 item com 3+, 1 com 1, 1 sem nenhuma');
+    await qA('POST', `/quote-requests/${qR1}/receive`, { prices: [{ item_id: qI1, price: 950 }] });
+    qM = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    ok(qM.items.find(i => i.id === qI1).offers.find(o => o.request_id === qR1).price === 950 && qM.items.find(i => i.id === qI1).offers.find(o => o.request_id === qR1).revision === 1, 'revisão R01: vale o preço mais recente');
+    const qR4 = (await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS2.id, item_ids: [qI3], sent_date: qToday, due_date: qToday, files: qPng })).data.id;
+    ok((await qA('POST', `/quote-requests/${qR4}/followup`, { notes: 'Cobrado por telefone', new_due_date: '2099-12-31', files: [{ data: tinyPng(), name: 'cobranca.png' }] })).status === 200, 'cobrança registrada com evidência e novo prazo');
+    ok((await qA('POST', `/quote-requests/${qR4}/decline`, { notes: 'Não atende' })).status === 200 && (await qA('GET', `/projects/${qP}/quotes/summary`)).data.requests.declinou === 1, 'fornecedor declinou');
+    ok((await qA('POST', `/quote-requests/${qR4}/receive`, { prices: [{ item_id: qI3, price: 5 }] })).status === 400, 'declinou: reabrir antes de lançar proposta');
+    ok((await qA('POST', `/quote-requests/${qR3}/reopen`, {})).status === 200 && (await qA('GET', `/projects/${qP}/quotes`)).data.items.find(i => i.id === qI1).received === 2, 'reabrir retira a proposta (volta a 2 propostas)');
+    const qFile = (await qA('GET', `/projects/${qP}/quotes`)).data.requests.find(r => r.id === qR1).files.find(f => f.kind === 'envio');
+    ok((await fetch(`${BASE}/api/quote-files/${qFile.id}`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } })).status === 200, 'evidência do envio abre para quem vê o projeto');
+    // Importar o mapa no modelo atual (planilha fictícia)
+    const qX = writeXlsx([{ name: 'HVAC', rows: [
+      ['PLANILHA COTAÇÃO - CLIMATIZAÇÃO FICTÍCIA', null, null, null, null, null, null, null, null],
+      ['CÓD ORÇ', 'LOCAL', 'DESCRIÇÃO', 'QTDE.', 'UND', 'DADOS', 'VALOR MEDIANO', 'EMPRESA 01', 'EMPRESA 02'],
+      ['X-1', null, 'Chiller fictício', 1, 'UND', 'PREÇO', 100, 100, null],
+      [null, null, null, null, null, 'NOME', null, 'Fornecedor Planilha Um', 'Fornecedor Planilha Dois'],
+      [null, null, null, null, null, 'CNPJ', null, '11.111.111/0001-11', null],
+      [null, null, null, null, null, 'SOLICITAÇÃO DE PREÇO', null, 'RECEBIDO', 'ENVIADO'],
+      [null, null, 'Fancoil fictício', 4, 'UND', 'PREÇO', null, 50, 70],
+      [null, null, null, null, null, 'NOME', null, 'Fornecedor Planilha Um', 'Fornecedor Planilha Dois'],
+    ] }, { name: 'Outra obra', rows: [['nada aqui']] }]).toString('base64');
+    const qPv = (await qA('POST', `/projects/${qP}/quotes/import/preview`, { file: { name: 'mapa.xlsx', data: qX } })).data;
+    ok(qPv.sheets.length === 1 && qPv.sheets[0].items === 2 && qPv.sheets[0].discipline === 'CLIMATIZAÇÃO FICTÍCIA' && qPv.sheets[0].prices === 3, 'prévia da importação: aba no modelo, itens e preços');
+    ok((await qA('POST', `/projects/${qP}/quotes/import`, { file: { name: 'mapa.xlsx', data: qX }, sheets: [] })).status === 400, 'importação exige escolher as abas');
+    const qImp = (await qA('POST', `/projects/${qP}/quotes/import`, { file: { name: 'mapa.xlsx', data: qX }, sheets: ['HVAC'] })).data;
+    ok(qImp.items === 2 && qImp.requests === 2 && qImp.prices === 3 && qImp.suppliers === 2, 'importado: itens, uma solicitação por fornecedor, preços e fornecedores novos');
+    const qM2 = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    ok(qM2.items.find(i => i.description === 'Fancoil fictício').received === 2 && qM2.requests.filter(r => r.imported).every(r => r.status === 'recebida'), 'itens importados com as propostas recebidas');
+    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 5, 'resumo para a tela do projeto');
+    // Exportar: Excel no modelo da planilha (relido pelo próprio importador) e dados do PDF
+    const qXr = await fetch(`${BASE}/api/projects/${qP}/quotes/export.xlsx`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } });
+    const qXb = Buffer.from(await qXr.arrayBuffer());
+    const qXs = readXlsxSheets(qXb);
+    ok(qXr.status === 200 && /spreadsheetml/.test(qXr.headers.get('content-type') || '') && qXs[0].name === 'Resumo' && qXs.some(x => x.name === 'Climatização'), 'exporta o Excel: aba Resumo e uma aba por disciplina');
+    const qClim = qXs.find(x => x.name === 'Climatização').rows;
+    ok(qClim.some(r => r && r.includes('PREÇO') && r.includes('Sistema fictício de água gelada')) && qClim.some(r => r && r.includes('SOLICITAÇÃO DE PREÇO')) && qClim.some(r => r && r.includes('EMPRESA 03')), 'aba no mesmo modelo: bloco PREÇO / NOME / … / SOLICITAÇÃO DE PREÇO e colunas EMPRESA');
+    const qRe = (await qA('POST', `/projects/${qP}/quotes/import/preview`, { file: { name: 'export.xlsx', data: qXb.toString('base64') } })).data;
+    ok(qRe.sheets.find(x => x.sheet === 'Climatização')?.items === qM2.items.filter(i => i.discipline === 'Climatização').length, 'o Excel exportado é relido pela importação (mesmo modelo)');
+    const qMap = (await qA('GET', `/projects/${qP}/quotes/map`)).data;
+    ok(qMap.disciplines.length === 3 && qMap.disciplines.every(x => x.cols >= 3) && qMap.summary.items === 5, 'dados do PDF: disciplinas, colunas de empresas e resumo');
+    ok((await login('felipe@charao.eng.br').then(c => c('GET', '/projects/999999/quotes/map'))).status === 404, 'mapa de projeto inexistente/sem acesso não abre');
+    // limpeza
+    for (const it of qM2.items) await qA('DELETE', `/projects/${qP}/quotes/items/${it.id}`);
+    for (const r of qM2.requests) await qA('DELETE', `/quote-requests/${r.id}`);
+    ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 0, 'itens e solicitações de teste excluídos');
+  }
+
   // ---------- Vendas e Prospecção ----------
   console.log('\nVendas e Prospecção');
   const svA = await login('ana@charao.eng.br');

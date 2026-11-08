@@ -700,3 +700,28 @@
 .pd-pdf-pages.is-error { color: #A93226; background: #fdecea; border-radius: 6px; padding: 8px 10px; }
 .pd-pdf-pages img { max-width: 100%; max-height: 240mm; object-fit: contain; border: 1px solid #e3e7ec; break-inside: avoid; page-break-inside: avoid; }
 .pd-proof-pdfpg { break-inside: auto; page-break-inside: auto; }
+
+/* Mapa de cotações (A4 paisagem) */
+.qp-doc { width: 297mm; min-height: 210mm; padding: 9mm 9mm 11mm; font-size: 7.6pt; page: paisagem; background: #fff; color: #1f2d3d; }
+.qp-stage { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.qp-head { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid #1f2d3d; padding-bottom: 5px; margin-bottom: 8px; }
+.qp-head b { display: block; font-size: 13pt; }
+.qp-head span { font-size: 8.5pt; color: #444; }
+.qp-meta { display: grid; justify-items: end; font-size: 8pt; }
+.qp-h { font-size: 10.5pt; margin: 4px 0; text-transform: uppercase; letter-spacing: .02em; }
+.qp-note { margin: 2px 0 6px; font-size: 8pt; color: #444; }
+.qp-t { width: 100%; border-collapse: collapse; }
+.qp-t th, .qp-t td { border: 0.5pt solid #b9c3cd; padding: 2px 4px; vertical-align: top; overflow-wrap: anywhere; }
+.qp-t thead th { background: #2a3d50; color: #fff; font-weight: 700; text-align: left; font-size: 7.2pt; }
+.qp-res td, .qp-res th { text-align: center; } .qp-res td:first-child, .qp-res th:first-child { text-align: left; }
+.qp-res tfoot th { background: #eef2f6; }
+.qp-map { table-layout: fixed; }
+.qp-map .qp-c { width: 14mm; } .qp-map .qp-desc { width: 44mm; } .qp-map .qp-n { width: 25mm; text-align: right; } .qp-map th.qp-n:nth-of-type(4) { width: 12mm; } .qp-map .qp-lab { width: 34mm; font-weight: 700; }
+.qp-map .qp-price td.qp-n { white-space: nowrap; }
+.qp-map td.qp-n { text-align: right; font-variant-numeric: tabular-nums; }
+.qp-price td { background: #eef2f6; }
+.qp-desc small { display: block; color: #555; font-weight: 400; }
+.qp-item { break-inside: avoid; }
+.qp-st-ok { color: #1f6b41; font-weight: 700; } .qp-st-late { color: #a32d2d; font-weight: 700; }
+@media print { .qp-doc { width: auto; min-height: 0; padding: 0; } .qp-break { break-before: page; } .qp-stage { display: block; } }
+.qp-map td.qp-m { vertical-align: middle; background: #eef2f6; }

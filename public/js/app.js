@@ -15,6 +15,8 @@ import * as ReportHistory from './views/report-history.js';
 import * as Projects from './views/projects.js';
 import * as PlanningImport from './views/planning-import.js';
 import * as Project from './views/project.js';
+import * as Quotes from './views/quotes.js';
+import * as QuotesPrint from './views/quotes-print.js';
 import * as DepMap from './views/dep-map.js';
 import * as ChecklistPlan from './views/checklist-plan.js';
 import * as Tasks from './views/tasks.js';
@@ -79,6 +81,7 @@ const routes = [
   ['/projetos/:id/editar', Projects.form],
   ['/projetos/:id/importar', PlanningImport.importPage],
   ['/projetos/:id/vinculos', DepMap.view],
+  ['/projetos/:id/cotacoes', Quotes.view],
   ['/prazos/tarefas', DeadlineTasks.view],
   ['/tarefas', Tasks.view],
   ['/tarefas/nova', TaskForm.view],
@@ -137,6 +140,7 @@ const routes = [
   ['/folha/pessoas/:id', Payroll.personForm],
   ['/folha/:id', Payroll.month],
   ['/imprimir/folha/:id', PayrollPrint.view, { print: true }],
+  ['/imprimir/cotacoes/:id', QuotesPrint.view, { print: true }],
   ['/financeiro', FinanceYear.view],
   ['/financeiro/mes', Finance.view],
   ['/financeiro/analise', Finance.analysis],

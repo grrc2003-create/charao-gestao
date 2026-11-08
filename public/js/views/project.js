@@ -1,4 +1,5 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
+import { quotesCard } from './quotes.js';
 import { pageHead, kpiBlock, donut, taskList, bindCommon, fieldListButton, STATUS_COLOR, execKpis, execInline, scheduleLine } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
@@ -12,8 +13,8 @@ import { addPdfButtons } from '../section-pdf.js';
 import { evolutionSection, bindEvolution } from './evolution.js';
 
 export async function view({ params, query, setQuery, render, navigate }) {
-  const [p, impactRank, recs] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
-    api(`/projects/${params.id}/records`).catch(() => null)]);
+  const [p, impactRank, recs, quotes] = await Promise.all([api(`/projects/${params.id}`), api('/impact-ranking', { query: { project: params.id } }).catch(() => []),
+    api(`/projects/${params.id}/records`).catch(() => null), api(`/projects/${params.id}/quotes/summary`).catch(() => null)]);
   const active = query.get('status') || '';
   const org = readOrg(query);
   const stage = Number(query.get('stage')) || 0;
@@ -40,6 +41,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
           <a class="btn btn-ghost" href="#/imprimir/relatorio?type=projeto&id=${p.id}&level=detalhado">${icon('print')}Relatório</a>
           <a class="btn btn-ghost" href="#/imprimir/historia/${p.id}">${icon('history')}História</a>
           <a class="btn btn-ghost" href="#/projetos/${p.id}/vinculos">${icon('share')}Mapa de vínculos</a>
+          ${quotes ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/cotacoes">${icon('file')}Cotações</a>` : ''}
           ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar">${icon('file')}Importar planejamento</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
@@ -50,6 +52,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
             : html`<p class="muted" style="margin:6px 0 0;font-size:12.5px">${p.schedule.rescheduled_tasks ? `${p.schedule.rescheduled_tasks} tarefa(s) reagendada(s), sem mudar o fim do projeto.` : 'Nenhum reagendamento mudou o fim do projeto.'}</p>`}</div></section>` : ''}
       ${kpiBlock(p.summary)}
       ${execKpis(p.summary)}
+      ${quotes?.items ? quotesCard(quotes, p.id) : ''}
       ${recs ? recordsCard(recs) : ''}
       ${checklistSection(p.checklists || [], { title: 'Check-lists do projeto', linkAll: `#/tarefas?tipo=checklist&project=${p.id}` })}
 

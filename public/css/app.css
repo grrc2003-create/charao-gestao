@@ -4018,3 +4018,49 @@ button.ck-ask:hover { background: #ffefc2; }
 .ab-taskq { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 6px; font-size: 13px; background: #eef4fb; border-radius: 6px; padding: 6px 10px; }
 .ab-taskq label { display: inline-flex; gap: 4px; align-items: center; font-weight: 600; }
 .ab-task { font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+
+/* Cotações */
+.qt-b3 { --q: #3B6D11; --qb: #EAF3DE; }
+.qt-b2 { --q: #185FA5; --qb: #E6F1FB; }
+.qt-b1 { --q: #854F0B; --qb: #FAEEDA; }
+.qt-b0 { --q: #A32D2D; --qb: #FCEBEB; }
+.qt-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.qt-kpi { background: var(--qb); color: var(--q); border-radius: var(--radius-sm); padding: 8px 12px; display: grid; }
+.qt-kpi span { font-size: 12px; font-weight: 600; }
+.qt-kpi b { font-size: 22px; line-height: 1.2; }
+.qt-kpi small { font-size: 12px; }
+.qt-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--line); min-width: 80px; }
+.qt-bar span { display: block; height: 100%; background: var(--q); }
+.qt-leg { display: flex; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.qt-leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--q); margin-right: 4px; vertical-align: -1px; }
+.qt-rq { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); margin: 12px 0; }
+.qt-rq span { display: inline-flex; align-items: center; gap: 4px; }
+.qt-rq svg { width: 14px; height: 14px; }
+.qt-late { color: #A32D2D !important; font-weight: 600; }
+.qt-disc td { vertical-align: middle; }
+.qt-pill { display: inline-block; font-size: 11.5px; font-weight: 650; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--qb, var(--navy-50)); color: var(--q, var(--ink-2)); }
+.qt-s-ok { --q: #3B6D11; --qb: #EAF3DE; } .qt-s-wait { --q: #854F0B; --qb: #FAEEDA; } .qt-s-late { --q: #A32D2D; --qb: #FCEBEB; } .qt-s-no { --q: #5F5E5A; --qb: #F1EFE8; }
+.qt-items td small { display: block; color: var(--muted); font-size: 12px; }
+.qt-item { cursor: pointer; }
+.qt-item:hover, .qt-item.is-open { background: var(--navy-50); }
+.qt-det td { background: var(--surface); padding: 10px 14px; }
+.qt-offers { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
+.qt-offers li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; }
+.qt-of-main small { display: block; color: var(--muted); font-size: 12px; }
+.qt-files { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-top: 2px; }
+.qt-files a { display: inline-flex; align-items: center; gap: 3px; }
+.qt-files svg { width: 13px; height: 13px; }
+.qt-of-st { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.qt-price { font-variant-numeric: tabular-nums; color: var(--navy); }
+.qt-acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.qt-it-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.qt-danger { color: #A32D2D; }
+.qr-items { display: grid; gap: 6px; max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px; }
+.qr-items summary { cursor: pointer; font-size: 13.5px; }
+.qr-items summary small { color: var(--muted); }
+.qr-it { display: flex; gap: 6px; align-items: baseline; font-size: 13px; padding: 3px 0 3px 18px; }
+.qr-it small { margin-left: auto; color: var(--muted); white-space: nowrap; }
+.qm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.qm-list li { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; }
+.qm-list small { display: block; color: var(--muted); font-size: 12px; margin-left: 22px; }
+@media (max-width: 760px) { .qt-offers li { grid-template-columns: 1fr; } .qt-of-st { justify-content: flex-start; } .qt-acts { justify-content: flex-start; } }

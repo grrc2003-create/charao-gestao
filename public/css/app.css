@@ -3787,7 +3787,7 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 
 /* Quadro: as colunas dividem a largura da tela; abaixo do mínimo, rola de lado */
 .sv-board { display: grid; grid-template-columns: repeat(var(--n, 6), minmax(150px, 1fr)); gap: 10px; overflow-x: auto; padding-bottom: 12px; align-items: start; -webkit-overflow-scrolling: touch; }
-.sv-col { min-width: 0; background: var(--kb, var(--navy-50)); border: 1px solid var(--line); border-top: 4px solid var(--k, var(--steel)); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 250px); min-height: 240px; }
+.sv-col { min-width: 0; background: var(--kb, var(--navy-50)); border: 1px solid var(--line); border-top: 4px solid var(--k, var(--steel)); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 240px; } /* sem altura máxima: a coluna cresce e a página rola */
 .sv-col.is-over { outline: 2px dashed var(--k); outline-offset: -2px; }
 .sv-col-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; padding: 10px 10px 0; }
 .sv-col-t { min-width: 0; }
@@ -3795,7 +3795,7 @@ a.dl-mlabel:hover { color: var(--navy); text-decoration: underline; }
 .sv-col-t small { display: block; font-size: 11px; color: var(--muted); }
 .sv-col-n { flex: none; min-width: 24px; text-align: center; font: 700 12px var(--font); color: #fff; background: var(--k); border-radius: 999px; padding: 2px 8px; }
 .sv-col-sum { padding: 2px 10px 8px; font-size: 13px; font-weight: 650; color: var(--ink-2); font-variant-numeric: tabular-nums; border-bottom: 1px solid rgba(0, 0, 0, .06); margin-bottom: 8px; }
-.sv-cards { list-style: none; margin: 0; padding: 0 7px 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; min-height: 60px; }
+.sv-cards { list-style: none; margin: 0; padding: 0 7px 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 60px; }
 .sv-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 16px 6px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); background: rgba(255, 255, 255, .5); }
 .sv-drop { height: 6px; border-radius: 3px; background: var(--k); list-style: none; }
 

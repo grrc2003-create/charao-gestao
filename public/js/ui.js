@@ -44,7 +44,8 @@ export function sheet({ title, body, submitLabel = 'Salvar', danger = false, onS
       setTimeout(() => wrap.remove(), 180);
       resolve(val);
     };
-    wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-close]')) close(null); });
+    // Clicar fora não fecha (evita perder o que foi digitado): só ✕, Cancelar ou Esc
+    wrap.addEventListener('click', e => { if (e.target.closest('[data-close]')) close(null); });
     wrap.addEventListener('keydown', e => { if (e.key === 'Escape') close(null); });
     form.addEventListener('submit', async e => {
       e.preventDefault();

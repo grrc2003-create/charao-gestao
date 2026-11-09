@@ -152,8 +152,8 @@ const checkSummary = list => {
   return c;
 };
 const monthTaskTitle = (ym, name) => `Contas do mês — ${monthLabel(ym)}${name ? ` — ${name}` : ' — sem responsável'}`;
-const monthTaskDescription = (ym, c) => [`Lista do mês ${monthLabel(ym)}: ${c.resolved} de ${c.total} resolvido(s) · ${c.a_confirmar} a confirmar · ${c.vai_ter} vai(ão) ter (a pagar) · ${c.pago} pago(s) · ${c.nao_vai_ter} não vai(ão) ter.`,
-  'Marque em cada despesa se vai ter ou não neste mês e registre os pagamentos. A tarefa avança com os checks e conclui sozinha quando todos estiverem resolvidos (pagos ou sem despesa no mês).'].join('\n');
+const monthTaskDescription = (ym, c) => [`Lista do mês ${monthLabel(ym)}: ${c.resolved} de ${c.total} resolvido(s) · ${c.a_confirmar} a confirmar · ${c.vai_ter} vai(ão) ter (aguardando o Mais Controle) · ${c.pago} pago(s) · ${c.nao_vai_ter} não vai(ão) ter.`,
+  'Marque em cada despesa se vai ter ou não neste mês. Quem vai ter fica aberta até a conferência com o Mais Controle, sem enviar comprovante. A tarefa conclui sozinha quando todos estiverem resolvidos (pagos ou sem despesa no mês).'].join('\n');
 
 // Acerta avanço, situação e descrição de uma tarefa "Contas do mês"
 function refreshMonthTask(mt, userId) {

@@ -2246,7 +2246,13 @@ async function main() {
     // Pagamento lançado à mão (diferente do Mais Controle) não é mexido
     const mi = (await fo('POST', `/finance/obligations/${man}/months/${y}-01`)).data.id;
     await fo('POST', `/finance/items/${mi}/pay`, { paid_date: `${y}-01-12`, paid_amount: 999 });
+    // "Vai ter": só confirma (sem valor nem comprovante) e a despesa fica aberta até puxar a base do Mais Controle
+    const vtId = (await fo('POST', `/finance/obligations/${cont}/months/${y}-01`)).data.id;
+    const vtIt = (await fo('POST', `/finance/items/${vtId}/confirm`, {})).data;
+    ok(vtIt.check === 'vai_ter' && vtIt.status === 'pendente' && !vtIt.paid_date && !vtIt.files?.length, '"vai ter" sem valor nem comprovante: a despesa fica aberta');
     const sy = (await fo('POST', '/finance/maiscontrole/sync', {})).data;
+    const vtPaid = (await fo('GET', `/finance/items/${vtId}`)).data;
+    ok(vtPaid.status === 'paga' && vtPaid.check === 'pago' && vtPaid.paid_amount === 300 && !vtPaid.files?.length, 'ao puxar a base, o Mais Controle dá a baixa na despesa com o valor real');
     const grid = async yr => (await fo('GET', `/finance/year?ano=${yr}`)).data;
     const row = (d, id) => d.groups.flatMap(g => g.rows).find(r => r.id === id);
     const gp = await grid(yp), gy = await grid(y);

@@ -10,11 +10,13 @@ import { myVacationCard, bindMyVacationCard } from './vacation-ui.js';
 import { myAbsenceCard, bindAbsenceCard } from './absence-ui.js';
 import { myReimbCard, bindMyReimbCard } from './reimb-ui.js';
 import { evolutionSection, bindEvolution } from './evolution.js';
+import { myReceiptsCard, receiptsSummary } from './my-receipts.js';
 
 const dec = v => String(v ?? '—').replace('.', ',');
 
 export async function view({ state, query, setQuery, render }) {
   const me = state.user;
+  const myRc = await api('/me/receipts').catch(() => ({ items: [] }));
   const [d, vac, reimb, rq, abs] = await Promise.all([api(`/users/${me.id}`), api('/vacations/me').catch(() => null), api('/reimbursements/me').catch(() => null), api('/review-queue').catch(() => []), me.is_external ? null : api('/absences/me').catch(() => null)]);
   const s = d.stats;
   const first = me.name.split(' ')[0];
@@ -137,6 +139,7 @@ export async function view({ state, query, setQuery, render }) {
         const right = reimb ? myReimbCard(reimb, { bare: true }) : '';
         return left || right ? html`<div class="grid grid-dash section ${left && right ? '' : 'grid-one'}">${left}${right}</div>` : '';
       })()}
+      ${fold('comprovantes', receiptsSummary(myRc.items), '', myReceiptsCard(myRc.items))}
       ${(() => { const f = checklistFold(d.checklists || []); return fold('checklists', f.sum, f.flag, checklistSection(d.checklists || [], { title: 'Meus check-lists', linkAll: '' })); })()}
       ${teamSection}`,
     mount(root) {

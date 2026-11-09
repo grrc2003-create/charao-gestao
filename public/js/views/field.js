@@ -685,6 +685,8 @@ async function workerSheet(w, mny, done, { pixTypes = ['CPF', 'CNPJ', 'Telefone'
           <div class="field"><label for="fw-doc">CPF / CNPJ</label><input type="text" id="fw-doc" name="doc" maxlength="30" value="${v.doc || ''}"></div></div>
         <div class="form-row"><div class="field"><label for="fw-pt">Tipo do PIX</label><select id="fw-pt" name="pix_type"><option value="">—</option>${pixTypes.map(t => html`<option ${v.pix_type === t ? 'selected' : ''}>${t}</option>`)}</select></div>
           <div class="field"><label for="fw-p">Chave PIX</label><input type="text" id="fw-p" name="pix" maxlength="120" value="${v.pix || ''}"></div></div>
+        <div class="field"><label for="fw-u">Usuário do sistema</label><select id="fw-u" name="user_id"><option value="">Sem usuário</option>${(v.user_id && !ld.some(x => x.id === v.user_id) ? [{ id: v.user_id, name: v.user_name || 'Usuário atual' }, ...ld] : ld).map(x => html`<option value="${x.id}" ${x.id === v.user_id ? 'selected' : ''}>${x.name}${x.job_title ? ` · ${x.job_title}` : ''}</option>`)}</select>
+          <span class="hint">Se o profissional tem acesso ao sistema, escolha o usuário dele: os comprovantes dos pagamentos aparecem no Meu painel dessa pessoa.</span></div>
         <div class="field"><label for="fw-ph">Telefone</label><input type="text" id="fw-ph" name="phone" maxlength="30" value="${v.phone || ''}"></div>
         <div class="field"><label for="fw-no">Observações</label><textarea id="fw-no" name="notes" rows="2">${v.notes || ''}</textarea></div>
         ${w ? html`<label class="pr-se-check"><input type="checkbox" name="active" value="1" ${v.active ? 'checked' : ''}> Ativo</label>` : ''}`

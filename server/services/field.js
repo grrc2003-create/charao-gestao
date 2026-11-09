@@ -71,9 +71,9 @@ const workerView = (w, money, wp = workerProjects()) => {
   const projects = wp.get(w.id) || [];
   const base = { id: w.id, name: w.name, kind: w.kind, role: w.role, active: w.active, leader_id: w.leader_id, leader_name: w.leader_name || null,
     leader_external: !!w.leader_external, project_ids: projects.map(p => p.id), projects };
-  return money ? { ...base, daily_rate: w.daily_rate, doc: w.doc, pix: w.pix, pix_type: w.pix_type, phone: w.phone, notes: w.notes } : base;
+  return money ? { ...base, user_id: w.user_id, user_name: w.linked_user_name || null, daily_rate: w.daily_rate, doc: w.doc, pix: w.pix, pix_type: w.pix_type, phone: w.phone, notes: w.notes } : base;
 };
-const WORKER_SQL = 'SELECT w.*, l.name AS leader_name, l.is_external AS leader_external FROM field_workers w LEFT JOIN users l ON l.id = w.leader_id';
+const WORKER_SQL = 'SELECT w.*, l.name AS leader_name, l.is_external AS leader_external, lu.name AS linked_user_name FROM field_workers w LEFT JOIN users l ON l.id = w.leader_id LEFT JOIN users lu ON lu.id = w.user_id';
 // Líder: pessoa ativa do organograma (equipe interna ou terceirizado); aparece com a equipe de campo dela
 const leaderOptions = () => all('SELECT id, name, job_title, is_external FROM users WHERE active = 1 ORDER BY is_external, name');
 export function listWorkers(ctx) {
@@ -140,6 +140,17 @@ function saveWorkerProjects(ctx, workerId, value) {
   run('DELETE FROM field_worker_projects WHERE worker_id = ?', workerId);
   for (const id of new Set([...keep, ...chosen])) run('INSERT INTO field_worker_projects (worker_id, project_id) VALUES (?, ?)', workerId, id);
 }
+// Usuário do sistema ligado ao profissional: passa a ver no Meu painel os comprovantes dele
+function readLinkedUser(v, cur, workerId) {
+  if (v === undefined) return cur ?? null;
+  const id = intOrNull(v);
+  if (!id) return null;
+  if (id === cur) return id;
+  if (!one('SELECT id FROM users WHERE id = ? AND active = 1', id)) throw badRequest('Usuário inválido: escolha uma pessoa ativa.');
+  const other = one('SELECT name FROM field_workers WHERE user_id = ? AND id <> ?', id, workerId || 0);
+  if (other) throw badRequest(`Este usuário já está ligado ao profissional ${other.name}.`);
+  return id;
+}
 function readWorker(b, money, cur = {}) {
   const d = {
     name: str(b.name, { max: 120, required: true, label: 'Nome' }),
@@ -148,9 +159,10 @@ function readWorker(b, money, cur = {}) {
     leader_id: readLeader(b.leader_id, cur.leader_id),
     active: b.active === false || b.active === 0 || b.active === '0' ? 0 : 1,
   };
-  if (!money) return { ...d, daily_rate: cur.daily_rate || 0, doc: cur.doc ?? null, pix: cur.pix ?? null, pix_type: cur.pix_type ?? null, phone: cur.phone ?? null, notes: cur.notes ?? null };
+  if (!money) return { ...d, user_id: cur.user_id ?? null, daily_rate: cur.daily_rate || 0, doc: cur.doc ?? null, pix: cur.pix ?? null, pix_type: cur.pix_type ?? null, phone: cur.phone ?? null, notes: cur.notes ?? null };
   return {
     ...d,
+    user_id: readLinkedUser(b.user_id, cur.user_id, cur.id),
     daily_rate: num(b.daily_rate, 'Valor da diária', { max: 100000 }),
     doc: str(b.doc, { max: 30, label: 'CPF/CNPJ' }),
     pix: str(b.pix, { max: 120, label: 'PIX' }),
@@ -164,8 +176,8 @@ export function createWorker(ctx, body, ip) {
   const money = canFieldMoney(ctx.user);
   const d = readWorker(body || {}, money);
   const id = tx(() => {
-    const nid = Number(run(`INSERT INTO field_workers (name, kind, role, leader_id, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
+    const nid = Number(run(`INSERT INTO field_workers (name, kind, role, leader_id, user_id, daily_rate, doc, pix, pix_type, phone, notes, active, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      d.name, d.kind, d.role, d.leader_id, d.user_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, ctx.user.id).lastInsertRowid);
     saveWorkerProjects(ctx, nid, body?.project_ids);
     addRoleName(d.role);
     return nid;
@@ -179,12 +191,12 @@ export function updateWorker(ctx, id, body, ip) {
   if (!cur) throw notFound('Profissional não encontrado.');
   const d = readWorker(body || {}, true, cur);
   tx(() => {
-    run(`UPDATE field_workers SET name=?, kind=?, role=?, leader_id=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
-      d.name, d.kind, d.role, d.leader_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
+    run(`UPDATE field_workers SET name=?, kind=?, role=?, leader_id=?, user_id=?, daily_rate=?, doc=?, pix=?, pix_type=?, phone=?, notes=?, active=?, updated_at=datetime('now') WHERE id=?`,
+      d.name, d.kind, d.role, d.leader_id, d.user_id, d.daily_rate, d.doc, d.pix, d.pix_type, d.phone, d.notes, d.active, id);
     saveWorkerProjects(ctx, id, body?.project_ids);
     addRoleName(d.role);
   });
-  audit(ctx.user.id, 'field', id, 'Profissional de campo atualizado', { nome: d.name }, ip);
+  audit(ctx.user.id, 'field', id, 'Profissional de campo atualizado', { nome: d.name, ...(d.user_id !== (cur.user_id ?? null) ? { usuario_vinculado: d.user_id ? one('SELECT name FROM users WHERE id = ?', d.user_id)?.name : 'removido' } : {}) }, ip);
   return workerView(one(`${WORKER_SQL} WHERE w.id = ?`, id), true);
 }
 
@@ -828,7 +840,34 @@ export function markPaid(ctx, body, ip) {
     { lancamentos: refs.length, data: pd, valor: paid ? total : undefined, comprovantes: files.length || undefined }, ip);
   return { ok: true, count: refs.length, partial, total };
 }
+// ---------- Meus comprovantes (Meu painel): só os pagamentos do próprio profissional ----------
+const LINE_WORKER = `CASE WHEN substr(fp.line, 1, 1) = 'p' THEN (SELECT x.worker_id FROM field_sheet_people x WHERE x.id = CAST(substr(fp.line, 2) AS INTEGER))
+  ELSE (SELECT c.worker_id FROM field_sheet_contracts x JOIN field_contracts c ON c.id = x.contract_id WHERE x.id = CAST(substr(fp.line, 2) AS INTEGER)) END`;
+const myWorker = ctx => one('SELECT id FROM field_workers WHERE user_id = ?', ctx.user.id);
+// Comprovante de pagamento feito para várias pessoas mostraria os valores das outras: não é exibido
+const soleBatch = (batchId, workerId) => !!one(`SELECT 1 FROM field_payments fp WHERE fp.batch_id = ? AND (${LINE_WORKER}) = ? LIMIT 1`, batchId, workerId)
+  && !one(`SELECT 1 FROM field_payments fp WHERE fp.batch_id = ? AND (${LINE_WORKER}) IS NOT ? LIMIT 1`, batchId, workerId);
+export function myFieldReceipts(ctx) {
+  const w = myWorker(ctx);
+  if (!w) return [];
+  return all(`SELECT fp.id, fp.amount, fp.paid_date, fp.batch_id, b.notes, s.seq, s.start_date, s.end_date, p.code AS project_code, p.name AS project_name
+    FROM field_payments fp JOIN field_pay_batches b ON b.id = fp.batch_id JOIN field_sheets s ON s.id = fp.sheet_id JOIN projects p ON p.id = s.project_id
+    WHERE (${LINE_WORKER}) = ? ORDER BY fp.paid_date DESC, fp.id DESC`, w.id).map(r => {
+    const own = soleBatch(r.batch_id, w.id);
+    return {
+      key: `campo-${r.id}`, kind: 'campo', date: r.paid_date, amount: r.amount, project_code: r.project_code, project_name: r.project_name,
+      sheet: `FC-${String(r.seq).padStart(2, '0')}`, start_date: r.start_date, end_date: r.end_date, notes: own ? r.notes : null, shared: !own,
+      files: own ? all('SELECT id, mime, original_name FROM field_pay_files WHERE batch_id = ? ORDER BY id', r.batch_id).map(f => ({ ...f, url: `/api/field-pay-files/${f.id}` })) : [],
+    };
+  });
+}
+
 export function payFileForUser(ctx, fileId) {
+  if (!canFieldMoney(ctx.user)) {
+    const own = one('SELECT * FROM field_pay_files WHERE id = ?', fileId);
+    const w = own && myWorker(ctx);
+    if (w && soleBatch(own.batch_id, w.id)) return own; // comprovante só dele
+  }
   requireMoney(ctx);
   const f = one('SELECT * FROM field_pay_files WHERE id = ?', fileId);
   if (!f) throw notFound('Arquivo não encontrado.');

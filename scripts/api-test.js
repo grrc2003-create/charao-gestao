@@ -1814,6 +1814,16 @@ async function main() {
     ok(pr.partial === 1 && pe.paid_amount === 500 && !pe.paid_at && pe.payments.length === 1 && pe.payments[0].files.length === 1 && (await pgItem()).status !== 'paga', 'pagamento parcial com comprovante: o restante continua a pagar');
     ok((await fetch(`${BASE}/api/payroll-pay-files/${pe.payments[0].files[0].id}`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } })).status === 200, 'comprovante abre para quem tem a Folha');
     ok((await prFel('GET', `/payroll-pay-files/${pe.payments[0].files[0].id}`)).status === 403, 'comprovante não abre sem a seção Folha');
+    // Meus comprovantes: a própria pessoa vê o que recebeu (e só o dela)
+    const rcCam = await login('camila@charao.eng.br');
+    const rcMine = (await rcCam('GET', '/me/receipts')).data.items;
+    const rcIt = rcMine.find(i => i.kind === 'folha' && i.month_id === foM.id);
+    ok(rcIt && rcIt.amount === 500 && !rcIt.complete && rcIt.files.length === 1 && !rcIt.shared, 'Meu painel: a pessoa vê o pagamento e o comprovante dela');
+    ok((await rcCam('GET', `/payroll-pay-files/${rcIt.files[0].id}`)).status === 200, 'o próprio comprovante abre sem a seção Folha');
+    ok((await rcCam('GET', '/payroll/months')).status === 403 && (await rcCam('GET', `/payroll/months/${foM.id}`)).status === 403, 'ver os próprios comprovantes não libera a Folha');
+    const rcMonth = (await rcCam('GET', `/me/receipts/folha/${foM.id}`)).data;
+    ok(rcMonth.entries.length === 1 && rcMonth.entries[0].id === pgE.id && !('totals' in rcMonth) && !('obligation_id' in rcMonth.entries[0]), 'recibo: só o lançamento da própria pessoa');
+    ok(!(await prFel('GET', '/me/receipts')).data.items.length && (await prFel('GET', `/me/receipts/folha/${foM.id}`)).status === 404, 'outra pessoa não vê o comprovante nem o recibo');
     pr = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: [pgE.id], paid_date: '2026-10-06' })).data;
     pe = pr.entries.find(e => e.id === pgE.id);
     ok(pe.paid_at === '2026-10-06' && Math.abs(pe.paid_amount - pgDue) < 0.01 && (await pgItem()).status === 'paga', 'pagar o restante: pessoa paga e o pagamento dela baixado no Financeiro');
@@ -1824,6 +1834,14 @@ async function main() {
     ok(pr.entries.filter(e => e.calc.total > 0).every(e => e.paid_at), 'marcar todos pagos de uma vez');
     pr = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: pr.entries.filter(e => e.calc.total > 0).map(e => e.id), paid: false })).data;
     ok(pr.entries.every(e => !e.paid_at && !e.paid_amount && !e.payments.length) && (await pgItem()).status === 'pendente', 'desfazer: volta a pagar, apaga os comprovantes e o Financeiro volta a pendente');
+    // Comprovante de pagamento feito junto para várias pessoas não aparece para cada uma
+    const rcAll = pr.entries.filter(e => e.calc.total > 0);
+    const rcLot = (await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: rcAll.map(e => e.id), paid_date: '2026-10-07', notes: 'Lote', files: [{ data: tinyPng(), name: 'lote.png' }] })).data;
+    const rcLotFile = rcLot.entries.find(e => e.id === pgE.id).payments[0].files[0].id;
+    const rcCam2 = await login('camila@charao.eng.br');
+    const rcShared = (await rcCam2('GET', '/me/receipts')).data.items.find(i => i.month_id === foM.id);
+    ok(rcShared.shared && !rcShared.files.length && rcShared.complete && (await rcCam2('GET', `/payroll-pay-files/${rcLotFile}`)).status === 403 && !(await rcCam2('GET', `/me/receipts/folha/${foM.id}`)).data.entries[0].payments[0].notes, 'pagamento em lote: aparece o valor, mas o arquivo e a observação do lote não');
+    await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: rcAll.map(e => e.id), paid: false });
     ok((await fo('POST', `/payroll/months/${foM.id}/reopen`)).data.status === 'aberta', 'sem pagamentos, a folha reabre');
     ok((await fo('POST', `/payroll/months/${foM.id}/paid`, { entries: [pgE.id] })).status === 400, 'folha aberta: não marca pagamento');
   }
@@ -2860,6 +2878,25 @@ async function main() {
   ok(fcPartIt.state === 'pending' && fcPartIt.amount === fcDueP - 100 && fcPartIt.paid_amount === 100 && fcPartPay.paid >= 100, 'Pagamentos: o já pago conta como pago e só o restante fica a pagar');
   ok((await fcAna('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 200 && (await fcJul('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 403, 'comprovante do pagamento abre só para a seção');
   ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com pagamento parcial registrado, a folha não reabre');
+  // Meus comprovantes: profissional ligado ao usuário do sistema
+  const fcJulId = (await fcJul('GET', '/auth/me')).data.user.id;
+  const fcWk = id => fcAna('GET', '/field/workers').then(r => r.data.workers.find(w => w.id === id));
+  const fcPw = await fcWk(fcP.id);
+  ok(!(await fcJul('GET', '/me/receipts')).data.items.length, 'sem vínculo no cadastro, não aparece comprovante');
+  ok((await fcAna('PUT', `/field/workers/${fcP.id}`, { ...fcPw, user_id: fcJulId })).data.user_id === fcJulId, 'cadastro do profissional: ligado ao usuário do sistema');
+  const fcHw = await fcWk(fcH.id);
+  ok((await fcAna('PUT', `/field/workers/${fcH.id}`, { ...fcHw, user_id: fcJulId })).status === 400, 'um usuário só pode estar ligado a um profissional');
+  const fcMine = (await fcJul('GET', '/me/receipts')).data.items.filter(i => i.kind === 'campo');
+  ok(fcMine.length === 1 && fcMine[0].amount === 100 && fcMine[0].files.length === 1 && fcMine[0].notes === 'Parcial (teste)' && (await fcJul('GET', `/field-pay-files/${fcMine[0].files[0].id}`)).status === 200, 'Meu painel: o profissional vê o pagamento e abre o comprovante dele');
+  ok((await fcJul('GET', '/field/payments')).status === 403, 'ver os próprios comprovantes não libera a Folha de Campo');
+  await fcAna('PUT', `/field/workers/${fcP.id}`, { ...fcPw, user_id: '' });
+  await fcAna('PUT', `/field/workers/${fcH.id}`, { ...fcHw, user_id: fcJulId });
+  const fcLot = (await fcAna('POST', '/field/paid', { lines: [lH, lC], paid_date: '2026-09-20', files: [{ data: tinyPng(), name: 'lote.png' }] })).data;
+  const fcLotFile = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcH.id).payments[0].files[0].id;
+  const fcShared = (await fcJul('GET', '/me/receipts')).data.items.filter(i => i.kind === 'campo');
+  ok(fcLot && fcShared.length === 1 && fcShared[0].shared && !fcShared[0].files.length && (await fcJul('GET', `/field-pay-files/${fcLotFile}`)).status === 403, 'pagamento em lote na Folha de Campo: o arquivo não aparece para cada um');
+  await fcAna('POST', '/field/paid', { lines: [lH, lC], paid: false });
+  await fcAna('PUT', `/field/workers/${fcH.id}`, { ...fcHw, user_id: '' });
   const fcRest = (await fcAna('POST', '/field/paid', { lines: [lP], paid_date: '2026-09-21' })).data;
   const fcRestS = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcP.id);
   ok(fcRest.partial === 0 && fcRest.total === fcDueP - 100 && fcRestS.paid_at === '2026-09-21' && fcRestS.paid_amount === fcDueP && fcRestS.payments.length === 2, 'pagar o restante completa e marca a pessoa como paga');

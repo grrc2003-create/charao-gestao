@@ -143,6 +143,7 @@ const routes = [
   ['/folha/pessoas/:id', Payroll.personForm],
   ['/folha/:id', Payroll.month],
   ['/imprimir/folha/:id', PayrollPrint.view, { print: true }],
+  ['/imprimir/meu-recibo/:id', PayrollPrint.mine, { print: true }],
   ['/imprimir/cotacoes/:id', QuotesPrint.view, { print: true }],
   ['/financeiro', FinanceYear.view],
   ['/financeiro/mes', Finance.view],

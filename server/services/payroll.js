@@ -549,8 +549,52 @@ export function markPaid(ctx, monthId, body, ip) {
   return { ...getMonth(ctx, m.id), partial, paid_total: total };
 }
 export function payFileForUser(ctx, fileId) {
-  requirePayroll(ctx);
   const f = one('SELECT * FROM payroll_pay_files WHERE id = ?', fileId);
+  const me = canPayroll(ctx.user) ? null : myPerson(ctx);
+  if (f && me && soleBatch(f.batch_id, me.id)) return f; // comprovante só dela
+  requirePayroll(ctx);
   if (!f) throw notFound('Arquivo não encontrado.');
   return f;
+}
+
+// ---------- Meus comprovantes (Meu painel): só os pagamentos da própria pessoa ----------
+const myPerson = ctx => one('SELECT id FROM payroll_people WHERE user_id = ?', ctx.user.id);
+// Lote só desta pessoa? Comprovante de pagamento feito para várias pessoas mostraria os valores das outras: não é exibido
+const soleBatch = (batchId, personId) => !!one('SELECT 1 FROM payroll_payments p JOIN payroll_entries e ON e.id = p.entry_id WHERE p.batch_id = ? AND e.person_id = ? LIMIT 1', batchId, personId)
+  && !one('SELECT 1 FROM payroll_payments p JOIN payroll_entries e ON e.id = p.entry_id WHERE p.batch_id = ? AND e.person_id <> ? LIMIT 1', batchId, personId);
+const ownPayments = (v, personId) => (v.payments || []).map(p => {
+  const own = soleBatch(p.batch_id, personId);
+  return { amount: p.amount, paid_date: p.paid_date, notes: own ? p.notes : null, files: own ? p.files : [], shared: !own };
+});
+const wasPaid = v => (v.paid_at !== null && v.paid_at !== undefined) || (v.payments || []).length > 0;
+
+export function myPayrollReceipts(ctx) {
+  const me = myPerson(ctx);
+  if (!me) return [];
+  return all(`SELECT e.* FROM payroll_entries e JOIN payroll_months m ON m.id = e.month_id WHERE e.person_id = ? AND m.status = 'fechada' ORDER BY m.ref DESC`, me.id).map(e => {
+    const m = loadMonth(e.month_id);
+    const v = entryView(m, e);
+    if (!wasPaid(v)) return null;
+    const pays = ownPayments(v, me.id);
+    return {
+      key: `folha-${m.id}`, kind: 'folha', month_id: m.id, ref: m.ref, company_name: COMPANIES[v.company]?.name || null,
+      date: v.paid_at || pays.map(p => p.paid_date).sort().pop() || null, amount: v.paid_amount, total: v.calc?.total ?? null, complete: v.paid_at !== null && v.paid_at !== undefined,
+      files: pays.flatMap(p => p.files.map(f => ({ ...f, url: `/api/payroll-pay-files/${f.id}` }))),
+      shared: pays.some(p => p.shared), by_finance: !pays.length,
+    };
+  }).filter(Boolean);
+}
+
+// Recibo da própria pessoa: a folha (fechada) só com o lançamento dela
+export function myPayrollMonth(ctx, id) {
+  const me = myPerson(ctx);
+  const e = me && one(`SELECT e.* FROM payroll_entries e JOIN payroll_months m ON m.id = e.month_id WHERE e.month_id = ? AND e.person_id = ? AND m.status = 'fechada'`, id, me.id);
+  if (!e) throw notFound('Recibo não encontrado.');
+  const m = loadMonth(id);
+  const v = entryView(m, e);
+  if (!wasPaid(v)) throw notFound('Recibo não encontrado.');
+  const { obligation_id: _o, ...own } = v;
+  const { bolsa, benefit } = periodsOf(m.ref);
+  return { id: m.id, ref: m.ref, status: m.status, pay_date: m.pay_date, vt_fare: m.vt_fare, vr_daily: m.vr_daily, bolsa, benefit, companies: COMPANIES,
+    entries: [{ ...own, payments: ownPayments(v, me.id) }] };
 }

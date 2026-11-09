@@ -35,6 +35,7 @@ import * as Vacations from './services/vacations.js';
 import * as Absences from './services/absences.js';
 import * as Quotes from './services/quotes.js';
 import * as MasterList from './services/master-list.js';
+import { myReceipts } from './services/my-receipts.js';
 import * as ProjectAlerts from './services/project-alerts.js';
 import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
@@ -383,6 +384,8 @@ api.get('/api/payroll-pay-files/:id', (req, res, { ctx, params }) => sendFile(re
 api.put('/api/payroll/entries/:id', (req, res, { ctx, params, body }) => send(res, 200, Payroll.updateEntry(ctx, intOrNull(params.id), body, clientIp(req))));
 api.delete('/api/payroll/entries/:id', (req, res, { ctx, params }) => send(res, 200, Payroll.removeEntry(ctx, intOrNull(params.id))));
 // ---------- Reembolsos (Meu painel → Folha) ----------
+api.get('/api/me/receipts', (req, res, { ctx }) => send(res, 200, myReceipts(ctx)));
+api.get('/api/me/receipts/folha/:id', (req, res, { ctx, params }) => send(res, 200, Payroll.myPayrollMonth(ctx, intOrNull(params.id))));
 api.get('/api/reimbursements/me', (req, res, { ctx }) => send(res, 200, Reimb.myReimbursements(ctx)));
 api.post('/api/reimbursements', (req, res, { ctx, body }) => send(res, 201, Reimb.createReimbursement(ctx, body, clientIp(req))));
 api.post('/api/reimbursements/:id/cancel', (req, res, { ctx, params }) => send(res, 200, Reimb.cancelReimbursement(ctx, intOrNull(params.id), clientIp(req))));

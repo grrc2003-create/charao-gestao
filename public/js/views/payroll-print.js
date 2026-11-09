@@ -102,7 +102,16 @@ function proofPage(m, e) {
 
 export async function view({ params, query }) {
   const m = await api(`/payroll/months/${params.id}`);
-  const only = Number(query.get('pessoa')) || null;
+  return page(m, Number(query.get('pessoa')) || null, query, `#/folha/${m.id}`);
+}
+
+// Meu painel: recibo da própria pessoa (o servidor devolve só o lançamento dela)
+export async function mine({ params, query }) {
+  const m = await api(`/me/receipts/folha/${params.id}`);
+  return page(m, m.entries[0].id, query, '#/painel');
+}
+
+function page(m, only, query, back) {
   const list = only ? m.entries.filter(e => e.id === only) : m.entries;
   if (!list.length) throw new Error('Nenhum recibo para imprimir.');
   setPageFooter(`Folha ${refLabel(m.ref)} · Demonstrativo de pagamento`);
@@ -111,7 +120,7 @@ export async function view({ params, query }) {
   const withProof = hasProof && (only ? query.get('comprovante') !== '0' : query.get('comprovante') === '1');
   return {
     title: `Recibos · Folha ${refLabel(m.ref)}`,
-    html: html`${printToolbar({ back: `#/folha/${m.id}`, title: only ? `Recibo · ${list[0].name}` : `Recibos · Folha ${refLabel(m.ref)} (${list.length})`,
+    html: html`${printToolbar({ back, title: only ? `Recibo · ${list[0].name}` : `Recibos · Folha ${refLabel(m.ref)} (${list.length})`,
         extra: hasProof ? html`<label class="pd-proof-opt"><input type="checkbox" id="pd-proof-on" ${withProof ? 'checked' : ''}>Incluir comprovante de pagamento</label>` : '' })}
       <div class="doc-stage pd-stage ${withProof ? '' : 'pd-noproof'}" id="pd-stage">${list.map(e => html`${receipt(m, e)}${proofPage(m, e)}`)}</div>
       ${m.status === 'aberta' ? html`<p class="no-print muted" style="text-align:center">Folha aberta: os valores ainda podem mudar até o fechamento.</p>` : ''}`,

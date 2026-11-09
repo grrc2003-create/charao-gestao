@@ -4,6 +4,7 @@ import { html, api, icon, fmtDate, fmtDateTime, avatar } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
 import { money, CO_SHORT } from './contracts.js';
+import { salesKpis, salesAnalytics, bindAnalytics } from './sales-analytics.js';
 
 const CO_NAME = { charao: 'Charão Engenharia & Construção', lus: 'Ludimila Siqueira Arquitetura & Design' };
 const coBadge = co => html`<span class="co-badge co-${co}" title="${CO_NAME[co] || ''}">${CO_SHORT[co] || co}</span>`;
@@ -257,12 +258,7 @@ export async function board({ state, query, setQuery, render, navigate }) {
   const visible = d.opportunities.filter(o => (!empresa || o.company === empresa) && (!q || norm(`${o.code} ${o.client} ${o.title} ${o.contact_name} ${o.city}`).includes(norm(q))));
   for (const o of visible) o.missing = missingFor(o, o.stage_kind);
   const byStage = new Map(d.stages.map(s => [s.id, visible.filter(o => o.stage_id === s.id)]));
-  const kindOf = id => d.stages.find(s => s.id === id)?.kind;
-  const openList = visible.filter(o => !['ganho', 'perdido'].includes(kindOf(o.stage_id)));
-  const won = visible.filter(o => kindOf(o.stage_id) === 'ganho');
-  const lost = visible.filter(o => kindOf(o.stage_id) === 'perdido');
   const sum = l => l.reduce((s, o) => s + (o.final_value || 0), 0);
-  const conv = won.length + lost.length ? Math.round((won.length / (won.length + lost.length)) * 100) : null;
   const chip = (val, label) => html`<button type="button" class="chip co-chip ${val ? `co-${val}` : ''}" data-empresa="${val}" aria-pressed="${String(empresa === val)}">${label}</button>`;
 
   return {
@@ -271,12 +267,8 @@ export async function board({ state, query, setQuery, render, navigate }) {
       ${pageHead({ eyebrow: 'Gestão da Empresa', title: 'Vendas e Prospecção', sub: 'Funil de oportunidades: arraste os cartões entre as colunas. O que cada etapa exige é pedido ao mover.',
         actions: html`<button type="button" class="btn btn-ghost" id="sv-cols">${icon('settings')}Colunas</button>
           <button type="button" class="btn btn-primary" id="sv-new">${icon('plus')}Nova oportunidade</button>` })}
-      <div class="sv-kpis">
-        <div class="sv-kpi"><span>Em andamento</span><b>${openList.length}</b><small>${money(sum(openList))}</small></div>
-        <div class="sv-kpi k-won"><span>Contratos fechados</span><b>${won.length}</b><small>${money(sum(won))}</small></div>
-        <div class="sv-kpi k-lost"><span>Perdidos</span><b>${lost.length}</b><small>${money(sum(lost))}</small></div>
-        <div class="sv-kpi"><span>Conversão</span><b>${conv === null ? '—' : `${conv}%`}</b><small>fechados ÷ (fechados + perdidos)</small></div>
-      </div>
+      ${salesKpis(visible, d.stages)}
+      ${salesAnalytics(visible, d.stages)}
       <div class="sv-filter">
         <div class="chips" role="group" aria-label="Empresa">${chip('', 'Todas')}${chip('charao', 'Charão')}${chip('lus', 'LuS')}</div>
         <label class="search sv-search">${icon('search')}<input type="search" id="sv-q" value="${q}" placeholder="Buscar cliente, código, cidade…" aria-label="Buscar oportunidade"></label>
@@ -297,6 +289,7 @@ export async function board({ state, query, setQuery, render, navigate }) {
         })}
       </div>`,
     mount(root) {
+      bindAnalytics(root);
       const byId = new Map(d.opportunities.map(o => [o.id, o]));
       const reload = () => render();
       root.querySelectorAll('[data-empresa]').forEach(b => b.addEventListener('click', () => { setQuery({ empresa: b.dataset.empresa, q }); reload(); }));

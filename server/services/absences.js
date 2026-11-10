@@ -185,6 +185,19 @@ export function absenceAction(ctx, id, action, body = {}, ip) {
     run(`UPDATE absences SET status = 'cancelada', decided_by = ?, decided_at = ?, decision_note = ?, updated_at = datetime('now') WHERE id = ?`, ctx.user.id, now, note, id);
     closeMakeupTask(a, ctx.user.id, 'cancel');
     label = 'Ausência combinada cancelada';
+  } else if (action === 'delete') {
+    // Exclusão definitiva de ausência aprovada (só administrador); os dados ficam no registro da Auditoria
+    if (!isAdmin(ctx.user)) throw forbidden('Somente o administrador exclui solicitações aprovadas.');
+    if (a.status !== 'aprovada') throw badRequest('Somente solicitações aprovadas podem ser excluídas.');
+    const why = str(body.note, { max: 1000, required: true, label: 'Motivo da exclusão' });
+    const by = a.decided_by ? one('SELECT name FROM users WHERE id = ?', a.decided_by)?.name : null;
+    tx(() => {
+      closeMakeupTask(a, ctx.user.id, 'cancel');
+      run('DELETE FROM absences WHERE id = ?', id);
+      audit(ctx.user.id, 'absence', id, 'Ausência aprovada excluída', { pessoa: t.name, tipo: a.kind === 'reposicao' ? 'falta com reposição' : 'falta descontada', dia: fmtD(a.off_date), reposicao: a.makeup_date ? fmtD(a.makeup_date) : undefined,
+        situacao_reposicao: a.makeup_status || undefined, combinado: a.note || undefined, aprovada_por: by || undefined, motivo_exclusao: why }, ip);
+    });
+    return { ok: true };
   } else if (action === 'makeup_done' || action === 'makeup_missed') {
     if (!approver) throw forbidden('Só o gestor confere a reposição.');
     if (a.status !== 'aprovada' || a.kind !== 'reposicao') throw badRequest('Esta ausência não tem reposição a conferir.');

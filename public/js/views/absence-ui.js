@@ -4,10 +4,10 @@ import { html, api, icon, fmtDate, todayISO } from '../core.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
 import { conflictBlock, readConflicts, proposalsBox, newConflictsBox, readApprovalConflicts } from './vacation-ui.js';
 
-const KIND = { reposicao: 'Falta com reposição', descontada: 'Falta descontada' };
+export const KIND = { reposicao: 'Falta com reposição', descontada: 'Falta descontada' };
 const ST = { solicitada: ['Aguardando aprovação', '#B7791F'], aprovada: ['Aprovada', '#1F6B41'], recusada: ['Recusada', '#9E2B20'], cancelada: ['Cancelada', '#8A96A3'] };
-const MK = { pendente: ['Reposição pendente', '#1F5F9E'], cumprida: ['Reposição cumprida', '#1F6B41'], nao_cumprida: ['Não cumprida · descontada', '#9E2B20'] };
-const pill = ([l, c]) => html`<span class="rg-st" style="--c:${c}">${l}</span>`;
+export const MK = { pendente: ['Reposição pendente', '#1F5F9E'], cumprida: ['Reposição cumprida', '#1F6B41'], nao_cumprida: ['Não cumprida · descontada', '#9E2B20'] };
+export const pill = ([l, c]) => html`<span class="rg-st" style="--c:${c}">${l}</span>`;
 const lastDayNextMonth = d => { const [y, m] = d.split('-').map(Number); return new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10); };
 const what = a => html`<b>${fmtDate(a.off_date)}</b> · ${KIND[a.kind]}${a.kind === 'reposicao' && a.makeup_date ? html` · repõe em <b>${fmtDate(a.makeup_date)}</b>` : ''}`;
 
@@ -80,7 +80,8 @@ export function myAbsenceCard(d) {
         <span class="ab-st">${pill(ST[a.status])}${a.status === 'aprovada' && a.makeup_status ? pill(MK[a.makeup_status]) : ''}${a.task_id ? html`<a class="ab-task" href="#/tarefas/${a.task_id}">${a.task_code || 'tarefa'}</a>` : ''}${a.status === 'solicitada' ? html`<button type="button" class="icon-btn" data-ab-cancel="${a.id}" title="Cancelar" aria-label="Cancelar">✕</button>` : ''}</span></li>`)}</ul>`
         : html`<p class="muted" style="margin:0">Precisa faltar um dia? Combine com o gestor: com reposição (até o fim do mês seguinte) ou descontada.</p>`}
       <div class="rg-task-acts"><button type="button" class="btn btn-primary btn-sm" data-ab-new>${icon('plus')}Combinar ausência</button>
-        ${d.people.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-ab-team>Lançar para a equipe</button>` : ''}</div>
+        ${d.people.length ? html`<button type="button" class="btn btn-ghost btn-sm" data-ab-team>Lançar para a equipe</button>` : ''}
+        <a class="btn btn-ghost btn-sm" href="#/painel/ausencias-ferias">Histórico</a></div>
     </div></section>
     ${d.approvals.length ? html`<section class="card" id="ab-appr"><div class="card-head"><h2>${icon('team')}Ausências para aprovar</h2><span class="sub">${d.approvals.length}</span></div>
       <ul class="rows">${d.approvals.map(a => html`<li class="vac-appr"><div class="grow"><div class="row-title">${a.user_name}</div><div class="row-meta"><span>${what(a)}</span>${a.note ? html`<span>“${a.note}”</span>` : ''}</div>${proposalsBox(a.reschedules, false)}${newConflictsBox(a.new_conflicts)}${a.kind === 'reposicao' ? html`<div class="ab-taskq"><span>Criar tarefa em <b>${fmtDate(a.makeup_date)}</b> para ${a.user_name.split(' ')[0]} confirmar a presença?</span><label><input type="radio" name="abt_${a.id}" value="sim">Sim</label><label><input type="radio" name="abt_${a.id}" value="nao">Não</label></div>` : ''}</div>

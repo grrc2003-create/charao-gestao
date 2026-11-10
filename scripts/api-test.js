@@ -3451,6 +3451,33 @@ async function main() {
     const ab3 = (await vA('POST', '/absences', { user_id: pj.id, kind: 'descontada', off_date: fut(20) })).data;
     ok(ab3.status === 'aprovada', 'falta descontada lançada pelo gestor');
     ok((await vA('POST', '/absences', { user_id: pj.id, kind: 'descontada', off_date: fut(10) })).status === 400, 'não lança ausência dentro de férias/recesso já lançados');
+    // Histórico: quem solicitou e quem aprovou conferem; só o administrador exclui as aprovadas
+    const lhFel = await login('felipe@charao.eng.br');
+    const lhRic = await login('ricardo@charao.eng.br');
+    const lhReq = (await lhFel('POST', '/absences', { kind: 'descontada', off_date: fut(60), note: 'Assunto pessoal' })).data;
+    ok((await vA('POST', `/absences/${lhReq.id}/delete`, { note: 'x' })).status === 400, 'solicitação ainda não aprovada não é excluída');
+    ok((await lhRic('POST', `/absences/${lhReq.id}/approve`, {})).status === 200, 'gestor aprova a ausência');
+    const lhKey = `a${lhReq.id}`;
+    const lhMine = (await lhFel('GET', '/leave-history')).data;
+    ok(lhMine.mine.some(r => r.key === lhKey && r.status === 'aprovada' && r.decided_by_name) && !lhMine.all && !lhMine.can_delete, 'quem solicitou confere a solicitação e quem aprovou');
+    ok((await lhRic('GET', '/leave-history')).data.approved.some(r => r.key === lhKey && r.user_name.startsWith('Felipe')), 'o gestor confere as que aprovou');
+    ok(!(await vMar('GET', '/leave-history')).data.mine.some(r => r.key === lhKey) && !(await vMar('GET', '/leave-history')).data.approved.some(r => r.key === lhKey), 'outra pessoa não vê');
+    const lhAna = (await vA('GET', '/leave-history')).data;
+    ok(lhAna.can_delete && lhAna.all.some(r => r.key === lhKey) && lhAna.all.every(r => r.status === 'aprovada'), 'administrador vê todas as aprovadas');
+    ok((await lhRic('POST', `/absences/${lhReq.id}/delete`, { note: 'x' })).status === 403 && (await lhFel('POST', `/absences/${lhReq.id}/delete`, { note: 'x' })).status === 403, 'gestor e solicitante não excluem');
+    ok((await vA('POST', `/absences/${lhReq.id}/delete`, {})).status === 400, 'exclusão exige o motivo');
+    ok((await vA('POST', `/absences/${lhReq.id}/delete`, { note: 'Lançada por engano' })).status === 200 && !(await lhFel('GET', '/leave-history')).data.mine.some(r => r.key === lhKey), 'administrador exclui a ausência aprovada');
+    const lhAud = (await vA('GET', '/audit')).data; ok((Array.isArray(lhAud) ? lhAud : lhAud.items || lhAud.logs).some(l => l.entity === 'absence' && l.entity_id === lhReq.id && /excluída/.test(l.action) && /Lançada por engano/.test(typeof l.details === 'string' ? l.details : JSON.stringify(l.details || ''))), 'exclusão registrada na Auditoria');
+    const lhTaskAb = (await vA('POST', '/absences', { user_id: es.id, kind: 'reposicao', off_date: fut(45), makeup_date: fut(47), create_task: true })).data;
+    const lhTaskId = (await vA('GET', '/absences/me')).data.upcoming.find(a => a.id === lhTaskAb.id).task_id;
+    await vA('POST', `/absences/${lhTaskAb.id}/delete`, { note: 'Teste' });
+    ok(!!(await vA('GET', `/tasks/${lhTaskId}`)).data.cancelled_at, 'excluir a ausência cancela a tarefa de confirmação de presença');
+    const lhVac = (await vA('GET', `/vacations/user/${pj.id}`)).data;
+    const lhVacR = lhVac.requests.find(r => r.status === 'aprovada' && r.days === 3);
+    ok((await lhRic('POST', `/vacations/${lhVacR.id}/delete`, { note: 'x' })).status === 403, 'gestor não exclui férias aprovadas');
+    ok((await vA('POST', `/vacations/${lhVacR.id}/delete`, { note: 'Teste' })).status === 200, 'administrador exclui férias aprovadas');
+    const lhVac2 = (await vA('GET', `/vacations/user/${pj.id}`)).data;
+    ok(!lhVac2.requests.some(r => r.id === lhVacR.id) && lhVac2.summary.available === lhVac.summary.available + 3, 'os dias voltam para o saldo');
   }
 
   // ---------- Alertas dos indicadores do projeto ----------

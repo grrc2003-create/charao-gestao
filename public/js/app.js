@@ -51,6 +51,7 @@ import * as Payroll from './views/payroll.js';
 import * as PayrollPrint from './views/payroll-print.js';
 import * as Field from './views/field.js';
 import * as Reimb from './views/reimb-ui.js';
+import * as LeaveHistory from './views/leave-history.js';
 
 const state = { user: null, meta: null, demo: false, version: null };
 
@@ -75,6 +76,7 @@ const routes = [
   ['/painel', MyPanel.view],
   ['/painel/desempenho', User.myPerformance],
   ['/painel/reembolsos', Reimb.history],
+  ['/painel/ausencias-ferias', LeaveHistory.view],
   ['/empresa', Dashboard.view],
   ['/projetos', Projects.list],
   ['/projetos/novo', Projects.form],

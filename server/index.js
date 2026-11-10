@@ -36,6 +36,7 @@ import * as Absences from './services/absences.js';
 import * as Quotes from './services/quotes.js';
 import * as MasterList from './services/master-list.js';
 import { myReceipts } from './services/my-receipts.js';
+import { leaveHistory } from './services/leave-history.js';
 import * as ProjectAlerts from './services/project-alerts.js';
 import * as Processes from './services/processes.js';
 import * as Payroll from './services/payroll.js';
@@ -424,6 +425,7 @@ api.post('/api/projects/:id/quotes/import', (req, res, { ctx, params, body }) =>
 api.post('/api/quote-requests/:id/:action', (req, res, { ctx, params, body }) => send(res, 200, Quotes.requestAction(ctx, intOrNull(params.id), params.action, body, clientIp(req))));
 api.delete('/api/quote-requests/:id', (req, res, { ctx, params }) => send(res, 200, Quotes.deleteRequest(ctx, intOrNull(params.id), clientIp(req))));
 api.get('/api/quote-files/:id', (req, res, { ctx, params }) => sendFile(req, res, Quotes.quoteFileForUser(ctx, intOrNull(params.id))));
+api.get('/api/leave-history', (req, res, { ctx }) => send(res, 200, leaveHistory(ctx)));
 api.get('/api/absences/me', (req, res, { ctx }) => send(res, 200, Absences.myAbsences(ctx)));
 api.post('/api/absences/preview', (req, res, { ctx, body }) => send(res, 200, Absences.previewAbsence(ctx, body)));
 api.post('/api/absences', (req, res, { ctx, body }) => send(res, 201, Absences.requestAbsence(ctx, body, clientIp(req))));

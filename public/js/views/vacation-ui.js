@@ -142,7 +142,8 @@ export function myVacationCard(v, user, { bare = false } = {}) {
           ${next ? html`<div class="vac-next">${icon('check')}Próximas férias: <b>${fmtDate(next.start_date)} a ${fmtDate(next.end_date)}</b> (${next.days} dias)</div>` : ''}
           ${pend.map(r => html`<div class="vac-next is-pend">${icon('clock')}Aguardando aprovação: <b>${dm(r.start_date)} a ${dm(r.end_date)}</b> (${r.days} dias)</div>`)}
           <div class="rg-task-acts"><button type="button" class="btn btn-primary btn-sm" data-vac-req>${icon('plus')}Solicitar ${s.mode === 'estagio' ? 'recesso' : 'férias'}</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-vac-hist>Histórico</button></div>`}
+            <button type="button" class="btn btn-ghost btn-sm" data-vac-hist>Histórico</button>
+            <a class="btn btn-ghost btn-sm" href="#/painel/ausencias-ferias">Solicitações</a></div>`}
       </div></section>
     ${v.approvals.length ? html`<section class="card" id="vac-appr"><div class="card-head"><h2>${icon('team')}Férias para aprovar</h2><span class="sub">${v.approvals.length}</span></div>
       ${approvalsList(v.approvals)}</section>` : ''}`;

@@ -353,6 +353,16 @@ export function vacationAction(ctx, id, action, body = {}, ip) {
     run(`UPDATE vacations SET status = 'cancelada', decided_by = ?, decided_at = ?, decision_note = ?, updated_at = datetime('now') WHERE id = ?`,
       ctx.user.id, now, str(body.note, { max: 1000, label: 'Motivo' }), id);
     audit(ctx.user.id, 'vacation', id, 'Férias canceladas', { pessoa: t.name, periodo: `${fmtD(v.start_date)} a ${fmtD(v.end_date)}` }, ip);
+  } else if (action === 'delete') {
+    // Exclusão definitiva de férias aprovadas (só administrador): os dias voltam ao saldo; os dados ficam no registro da Auditoria
+    if (!isAdmin(ctx.user)) throw forbidden('Somente o administrador exclui solicitações aprovadas.');
+    if (v.status !== 'aprovada') throw badRequest('Somente solicitações aprovadas podem ser excluídas.');
+    const why = str(body.note, { max: 1000, required: true, label: 'Motivo da exclusão' });
+    const by = v.decided_by ? one('SELECT name FROM users WHERE id = ?', v.decided_by)?.name : null;
+    tx(() => {
+      run('DELETE FROM vacations WHERE id = ?', id);
+      audit(ctx.user.id, 'vacation', id, 'Férias aprovadas excluídas', { pessoa: t.name, periodo: `${fmtD(v.start_date)} a ${fmtD(v.end_date)}`, dias: v.days, observacao: v.note || undefined, aprovada_por: by || undefined, motivo_exclusao: why }, ip);
+    });
   } else {
     throw badRequest('Ação inválida.');
   }

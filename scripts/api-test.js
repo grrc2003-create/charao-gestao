@@ -3559,6 +3559,22 @@ async function main() {
     const qM2 = (await qA('GET', `/projects/${qP}/quotes`)).data;
     ok(qM2.items.find(i => i.description === 'Fancoil fictício').received === 2 && qM2.requests.filter(r => r.imported).every(r => r.status === 'recebida'), 'itens importados com as propostas recebidas');
     ok((await qA('GET', `/projects/${qP}/quotes/summary`)).data.items === 5, 'resumo para a tela do projeto');
+    // Importada da planilha: completar a solicitação (envio, meio, evidência, recebimento, arquivo da proposta) sem mexer nos preços
+    const qEd = qM2.requests.find(r => r.imported && r.status === 'recebida');
+    const qEdPrices = JSON.stringify(qM2.items.flatMap(i => i.offers.filter(o => o.request_id === qEd.id).map(o => o.price)));
+    const qD = n => new Date(Date.now() - n * 86400e3).toISOString().slice(0, 10);
+    ok((await qA('POST', `/quote-requests/${qEd.id}/edit`, { sent_date: '2099-01-01' })).status === 400, 'editar: envio no futuro é recusado');
+    ok((await qA('POST', `/quote-requests/${qEd.id}/edit`, { sent_date: qD(10), received_date: qD(12) })).status === 400, 'editar: recebimento antes do envio é recusado');
+    ok((await qA('POST', `/quote-requests/${qEd.id}/edit`, { sent_date: qD(10), due_date: qD(12) })).status === 400, 'editar: prazo antes do envio é recusado');
+    ok((await qA('POST', `/quote-requests/${qEd.id}/edit`, { sent_date: qD(10), channel: 'E-mail', due_date: qD(5), received_date: qD(6), valid_until: qD(-30), conditions: '30 dias (teste)', files: qPng, proposal_files: [{ data: tinyPng(), name: 'proposta-importada.png' }] })).status === 200, 'editar a solicitação importada');
+    const qEdR = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    const qEdE = qEdR.requests.find(r => r.id === qEd.id);
+    ok(qEdE.sent_date === qD(10) && qEdE.channel === 'E-mail' && qEdE.received_date === qEdE.received_date && qEdE.received_date === qD(6) && qEdE.conditions === '30 dias (teste)' && qEdE.files.filter(f => f.kind === 'envio').length === 1 && qEdE.files.some(f => f.kind === 'proposta' && f.revision === 0) && qEdE.notes === 'Importada do mapa de cotações',
+      'importada completada: envio, meio, recebimento, evidência e arquivo da proposta (revisão atual)');
+    ok(JSON.stringify(qEdR.items.flatMap(i => i.offers.filter(o => o.request_id === qEd.id).map(o => o.price))) === qEdPrices && qEdE.revision === 0, 'os preços e a revisão não mudam ao editar');
+    ok((await qA('POST', `/quote-requests/${qEd.id}/followup`, { date: qD(8), channel: 'WhatsApp', notes: 'Cobrado (teste)' })).status === 200 && (await qA('POST', `/quote-requests/${qEd.id}/followup`, { date: qD(20) })).status === 400, 'importada recebida aceita registrar a cobrança (não antes do envio)');
+    ok((await qA('POST', `/quote-requests/${qEd.id}/edit`, { sent_date: qD(7) })).status === 400, 'o envio não pode ficar depois de uma cobrança registrada');
+    ok((await qA('POST', '/quote-requests/999999/edit', { channel: 'Telefone' })).status === 404, 'solicitação inexistente não é editada');
     // Exportar: Excel no modelo da planilha (relido pelo próprio importador) e dados do PDF
     const qXr = await fetch(`${BASE}/api/projects/${qP}/quotes/export.xlsx`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } });
     const qXb = Buffer.from(await qXr.arrayBuffer());

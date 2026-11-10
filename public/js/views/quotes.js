@@ -64,8 +64,10 @@ export async function view({ params, query, setQuery, render }) {
   const reqById = new Map(d.requests.map(r => [r.id, r]));
   const groups = (disc ? [disc] : discs).map(k => [k, items.filter(i => i.discipline === k)]).filter(([, l]) => l.length);
   const reqActs = r => !d.can_edit ? '' : html`<span class="qt-acts">
+    <button type="button" class="btn btn-ghost btn-sm" data-q-redit="${r.id}">${icon('edit')}Editar</button>
     ${r.status !== 'declinou' ? html`<button type="button" class="btn btn-ghost btn-sm" data-q-recv="${r.id}">${icon('check')}${r.status === 'recebida' ? 'Revisão' : 'Lançar proposta'}</button>` : ''}
     ${r.status === 'enviada' ? html`<button type="button" class="btn btn-ghost btn-sm" data-q-fup="${r.id}">${icon('send')}Cobrar</button><button type="button" class="btn btn-ghost btn-sm" data-q-dec="${r.id}">Declinou</button>` : ''}
+    ${r.imported && r.status === 'recebida' ? html`<button type="button" class="btn btn-ghost btn-sm" data-q-fup="${r.id}">${icon('send')}Cobrança</button>` : ''}
     ${r.status !== 'enviada' ? html`<button type="button" class="btn btn-ghost btn-sm" data-q-reopen="${r.id}">Reabrir</button>` : ''}
     <button type="button" class="icon-btn" data-q-delreq="${r.id}" title="Excluir solicitação" aria-label="Excluir solicitação">${icon('trash')}</button></span>`;
   const itemRow = it => html`<tr class="qt-item ${open === it.id ? 'is-open' : ''}" data-q-item="${it.id}" tabindex="0">
@@ -75,7 +77,7 @@ export async function view({ params, query, setQuery, render }) {
       <td><small class="${it.overdue ? 'qt-late' : ''}">${it.requested ? `${it.requested} enviada(s)${it.pending ? ` · ${it.pending} aguardando` : ''}${it.overdue ? ` · ${it.overdue} vencida(s)` : ''}` : html`<span class="qt-late">nenhuma enviada</span>`}</small></td></tr>
     ${open === it.id ? html`<tr class="qt-det"><td colspan="4">
       ${it.offers.length ? html`<ul class="qt-offers">${it.offers.map(o => { const r = reqById.get(o.request_id); return html`<li>
-        <div class="qt-of-main"><b>${o.supplier_name}</b><small>enviada ${dm(o.sent_date)}${r.channel ? ` · ${r.channel}` : ''}${r.imported ? ' · importada da planilha' : ''}${r.followups.length ? ` · ${r.followups.length} cobrança(s)` : ''}${r.conditions ? ` · ${r.conditions}` : ''}</small>
+        <div class="qt-of-main"><b>${o.supplier_name}</b><small>enviada ${dm(o.sent_date)}${r.channel ? ` · ${r.channel}` : ''}${r.imported ? ' · importada da planilha' : ''}${r.imported && !r.files.some(f => f.kind === 'envio') ? html` <span class="qt-pill qt-s-wait" title="Use Editar para incluir a data, o meio e a evidência do envio">completar a solicitação</span>` : ''}${r.followups.length ? ` · ${r.followups.length} cobrança(s)` : ''}${r.conditions ? ` · ${r.conditions}` : ''}</small>
           <span class="qt-files">${files(r, 'envio')}${files(r, 'cobranca')}${files(r, 'proposta')}</span></div>
         <div class="qt-of-st">${stPill(o)}<b class="qt-price">${money(o.price)}${o.revision ? html`<small> R${String(o.revision).padStart(2, '0')}</small>` : ''}</b></div>
         ${reqActs(r)}</li>`; })}</ul>` : html`<p class="muted" style="margin:0">Nenhuma solicitação enviada para este item.</p>`}
@@ -112,6 +114,7 @@ export async function view({ params, query, setQuery, render }) {
       root.querySelector('[data-q-req]')?.addEventListener('click', () => requestSheet(d, { disc }, reload));
       root.querySelectorAll('[data-q-req-item]').forEach(b => b.addEventListener('click', () => requestSheet(d, { disc, itemId: Number(b.dataset.qReqItem) }, reload)));
       root.querySelectorAll('[data-q-recv]').forEach(b => b.addEventListener('click', () => receiveSheet(d, reqById.get(Number(b.dataset.qRecv)), reload)));
+      root.querySelectorAll('[data-q-redit]').forEach(b => b.addEventListener('click', () => editRequestSheet(d, reqById.get(Number(b.dataset.qRedit)), reload)));
       root.querySelectorAll('[data-q-fup]').forEach(b => b.addEventListener('click', () => followupSheet(d, reqById.get(Number(b.dataset.qFup)), reload)));
       root.querySelectorAll('[data-q-dec]').forEach(b => b.addEventListener('click', async () => {
         const r = await sheet({ title: 'Fornecedor declinou', submitLabel: 'Confirmar', body: html`<div class="field"><label for="q-dn">Motivo (opcional)</label><input type="text" id="q-dn" name="notes" maxlength="1000" placeholder="Ex.: não atende a região"></div>`,
@@ -228,12 +231,41 @@ async function receiveSheet(d, rq, done) {
   if (r) { toast('Proposta registrada.'); done(); }
 }
 
+// Editar a solicitação (ex.: importada da planilha): envio, meio, prazo, evidência e dados da proposta, sem novos preços
+async function editRequestSheet(d, rq, done) {
+  const rec = rq.status === 'recebida';
+  const has = k => rq.files.filter(f => f.kind === k).length;
+  const r = await sheet({
+    title: `Editar solicitação · ${rq.supplier_name}`, wide: true,
+    body: html`${rq.imported ? html`<p class="hint" style="margin-top:0">Importada da planilha: complete a data e o meio do envio e anexe a evidência. Os preços não mudam.</p>` : ''}
+      <div class="form-row"><div class="field"><label class="req" for="qe-s">Enviada em</label><input type="date" id="qe-s" name="sent_date" required max="${todayISO()}" value="${rq.sent_date}"></div>
+        <div class="field"><label for="qe-c">Meio</label><select id="qe-c" name="channel"><option value="">—</option>${d.channels.map(c => html`<option ${rq.channel === c ? 'selected' : ''}>${c}</option>`)}</select></div>
+        <div class="field"><label for="qe-due">Responder até</label><input type="date" id="qe-due" name="due_date" value="${rq.due_date || ''}"></div></div>
+      <div class="field"><label for="qe-f">Evidência do envio</label><input type="file" id="qe-f" accept="image/*,application/pdf,.pdf" multiple>
+        <span class="hint">${has('envio') ? `Já há ${has('envio')} arquivo(s); os novos são acrescentados.` : 'Print do e-mail ou do WhatsApp, ou o PDF enviado.'}</span></div>
+      <div class="field"><label for="qe-n">Observação</label><input type="text" id="qe-n" name="notes" maxlength="1000" value="${rq.notes || ''}"></div>
+      ${rec ? html`<div class="form-row"><div class="field"><label class="req" for="qe-r">Recebida em</label><input type="date" id="qe-r" name="received_date" required max="${todayISO()}" value="${rq.received_date || ''}"></div>
+          <div class="field"><label for="qe-v">Validade</label><input type="date" id="qe-v" name="valid_until" value="${rq.valid_until || ''}"></div></div>
+        <div class="field"><label for="qe-pf">Arquivo da proposta</label><input type="file" id="qe-pf" accept="image/*,application/pdf,.pdf" multiple>
+          <span class="hint">Entra na revisão atual (sem criar revisão nova).${has('proposta') ? ` Já há ${has('proposta')} arquivo(s).` : ''}</span></div>
+        <div class="field"><label for="qe-cd">Condições e observações</label><input type="text" id="qe-cd" name="conditions" maxlength="1000" value="${rq.conditions || ''}"></div>` : ''}`,
+    submitLabel: 'Salvar',
+    onSubmit: async (x, form) => {
+      const files = await readAttachments(form.querySelector('#qe-f').files || []);
+      const props = rec ? await readAttachments(form.querySelector('#qe-pf').files || []) : [];
+      const pack = l => l.map(f => ({ data: f.data, name: f.name }));
+      return api(`/quote-requests/${rq.id}/edit`, { method: 'POST', body: { ...x, files: pack(files), proposal_files: pack(props) } });
+    },
+  });
+  if (r) { toast('Solicitação atualizada.'); done(); }
+}
+
 async function followupSheet(d, rq, done) {
   const r = await sheet({
     title: `Cobrar · ${rq.supplier_name}`,
-    body: html`<div class="form-row"><div class="field"><label class="req" for="qf-d">Cobrado em</label><input type="date" id="qf-d" name="date" required max="${todayISO()}" value="${todayISO()}"></div>
+    body: html`<div class="form-row"><div class="field"><label class="req" for="qf-d">Cobrado em</label><input type="date" id="qf-d" name="date" required max="${todayISO()}" min="${rq.sent_date}" value="${todayISO()}"></div>
         <div class="field"><label for="qf-c">Meio</label><select id="qf-c" name="channel">${d.channels.map(c => html`<option>${c}</option>`)}</select></div>
-        <div class="field"><label for="qf-nd">Novo prazo de resposta</label><input type="date" id="qf-nd" name="new_due_date"></div></div>
+        ${rq.status === 'enviada' ? html`<div class="field"><label for="qf-nd">Novo prazo de resposta</label><input type="date" id="qf-nd" name="new_due_date"></div>` : ''}</div>
       <div class="field"><label for="qf-f">Evidência da cobrança</label><input type="file" id="qf-f" accept="image/*,application/pdf,.pdf" multiple><span class="hint">Opcional: print do e-mail ou WhatsApp.</span></div>
       <div class="field"><label for="qf-n">Observação</label><input type="text" id="qf-n" name="notes" maxlength="1000"></div>`,
     submitLabel: 'Registrar cobrança',

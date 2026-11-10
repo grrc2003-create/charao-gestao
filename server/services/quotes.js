@@ -259,9 +259,10 @@ export function requestAction(ctx, id, action, body, ip) {
     });
     label = rev ? `Proposta revisada (R${String(rev).padStart(2, '0')})` : 'Proposta recebida';
   } else if (action === 'followup') {
-    if (r.status !== 'enviada') throw badRequest('Só é possível cobrar solicitações aguardando resposta.');
+    if (r.status !== 'enviada' && !(r.imported && r.status === 'recebida')) throw badRequest('Só é possível cobrar solicitações aguardando resposta.');
     const d = date(b.date, 'Data da cobrança') || today();
     if (d > today()) throw badRequest('A data da cobrança não pode ser no futuro.');
+    if (d < r.sent_date) throw badRequest('A cobrança não pode ser antes do envio da solicitação.');
     tx(() => {
       const fid = Number(run('INSERT INTO quote_followups (request_id, date, channel, notes, created_by) VALUES (?,?,?,?,?)', id, d,
         CHANNELS.includes(b.channel) ? b.channel : null, str(b.notes, { max: 1000, label: 'Observação' }), ctx.user.id).lastInsertRowid);
@@ -270,6 +271,43 @@ export function requestAction(ctx, id, action, body, ip) {
       if (nd) run(`UPDATE quote_requests SET due_date = ?, updated_at = datetime('now') WHERE id = ?`, nd, id);
     });
     label = 'Fornecedor cobrado';
+  } else if (action === 'edit') {
+    // Completa ou corrige a solicitação (ex.: importada da planilha): envio, meio, prazo, evidência e dados da proposta,
+    // sem mexer nos preços nem criar revisão. Arquivos novos são acrescentados.
+    const sent = date(b.sent_date, 'Enviada em') || r.sent_date;
+    if (sent > today()) throw badRequest('A data do envio não pode ser no futuro.');
+    const due = b.due_date === undefined ? r.due_date : date(b.due_date, 'Responder até');
+    if (due && due < sent) throw badRequest('O prazo de resposta não pode ser antes do envio.');
+    let recv = r.received_date;
+    if (r.status === 'recebida') {
+      recv = date(b.received_date, 'Recebida em') || r.received_date;
+      if (recv > today()) throw badRequest('A data de recebimento não pode ser no futuro.');
+      if (recv < sent) throw badRequest('A proposta não pode ser recebida antes do envio da solicitação.');
+    }
+    const fup = one('SELECT MIN(date) AS d FROM quote_followups WHERE request_id = ?', id)?.d;
+    if (fup && fup < sent) throw badRequest(`Há cobrança em ${fmtD(fup)}: o envio não pode ser depois dela.`);
+    const evid = Array.isArray(b.files) ? b.files : [];
+    const props = r.status === 'recebida' && Array.isArray(b.proposal_files) ? b.proposal_files : [];
+    const changed = [];
+    tx(() => {
+      const note = b.notes === undefined ? r.notes : str(b.notes, { max: 1000, label: 'Observação' });
+      run(`UPDATE quote_requests SET sent_date = ?, channel = ?, due_date = ?, notes = ?, received_date = ?, valid_until = ?, conditions = ?, updated_at = datetime('now') WHERE id = ?`,
+        sent, b.channel === undefined ? r.channel : (CHANNELS.includes(b.channel) ? b.channel : null), due, note, recv,
+        r.status === 'recebida' && b.valid_until !== undefined ? date(b.valid_until, 'Validade') : r.valid_until,
+        r.status === 'recebida' && b.conditions !== undefined ? str(b.conditions, { max: 1000, label: 'Condições' }) : r.conditions, id);
+      if (sent !== r.sent_date) changed.push(`envio ${fmtD(r.sent_date)} → ${fmtD(sent)}`);
+      if (recv !== r.received_date) changed.push(`recebida ${fmtD(r.received_date)} → ${fmtD(recv)}`);
+      if (evid.length) {
+        changed.push(`${saveFiles(ctx, id, evid, 'envio')} evidência(s) do envio`);
+        if (note === 'Importada do mapa de cotações (sem evidência do envio)') run('UPDATE quote_requests SET notes = ? WHERE id = ?', 'Importada do mapa de cotações', id);
+      }
+      if (props.length) {
+        const rev = one('SELECT MAX(revision) AS n FROM quote_prices WHERE request_id = ?', id)?.n ?? 0;
+        changed.push(`${saveFiles(ctx, id, props, 'proposta', { revision: rev })} arquivo(s) da proposta`);
+      }
+    });
+    audit(ctx.user.id, 'quote', p.id, 'Solicitação de proposta editada', { projeto: p.code, fornecedor: sup, alteracoes: changed.length ? changed : undefined }, ip);
+    return { ok: true };
   } else if (action === 'decline') {
     if (r.status === 'recebida') throw badRequest('Já há proposta recebida nesta solicitação.');
     run(`UPDATE quote_requests SET status = 'declinou', notes = COALESCE(?, notes), updated_at = datetime('now') WHERE id = ?`, str(b.notes, { max: 1000, label: 'Motivo' }), id);

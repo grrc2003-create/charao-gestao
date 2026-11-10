@@ -5,9 +5,9 @@ import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/ht
 import { canAccessProject } from '../lib/permissions.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
-import { saveImageFromDataUrl, cleanFileName, deleteStored } from './files.js';
+import { saveImageFromDataUrl, cleanFileName, deleteStored, readStored } from './files.js';
 import { readXlsxSheets } from '../lib/xlsx.js';
-import { writeXlsx } from '../lib/xlsx-write.js';
+import { writeXlsx, zip } from '../lib/xlsx-write.js';
 
 export const TARGET = 3;
 export const CHANNELS = ['E-mail', 'WhatsApp', 'Portal', 'Telefone', 'Pessoalmente'];
@@ -29,6 +29,20 @@ function project(ctx, projectId, { edit = false, any = false } = {}) {
   if (!any && !p.has_quotes) throw badRequest('Este projeto não tem cotações. Para usar, marque "Este projeto terá cotações" no cadastro do projeto.');
   if (edit && ctx.user.is_external) throw forbidden('Terceirizados não alteram as cotações.');
   return p;
+}
+// Nome padrão da proposta: Projeto-Disciplina-Fornecedor-ID (ID = número do arquivo no sistema, não muda).
+// Calculado na hora (vale também para as propostas já anexadas); o nome do arquivo enviado fica guardado como está.
+const part = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^[_-]+|[_-]+$/g, '');
+const FILE_EXT = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+export function proposalName({ code, disciplines = [], supplier, fileId, mime }) {
+  const ds = [...new Set(disciplines.map(part).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const disc = ds.length > 2 ? 'Varias_disciplinas' : ds.join('+') || 'Sem_disciplina';
+  return `${part(code) || 'Projeto'}-${disc.slice(0, 60)}-${part(supplier).slice(0, 50) || 'Fornecedor'}-${String(fileId).padStart(4, '0')}${FILE_EXT[mime] || ''}`;
+}
+function proposalNameOf(requestId, fileId, mime) {
+  const r = one('SELECT p.code, s.name AS supplier FROM quote_requests r JOIN projects p ON p.id = r.project_id JOIN suppliers s ON s.id = r.supplier_id WHERE r.id = ?', requestId);
+  const discs = all('SELECT DISTINCT i.discipline FROM quote_request_items x JOIN quote_items i ON i.id = x.item_id WHERE x.request_id = ?', requestId).map(d => d.discipline);
+  return proposalName({ code: r?.code, disciplines: discs, supplier: r?.supplier, fileId, mime });
 }
 const saveFiles = (ctx, requestId, files, kind, { followupId = null, revision = null } = {}) => {
   let n = 0;
@@ -284,7 +298,7 @@ export function quoteFileForUser(ctx, fileId) {
   const f = one('SELECT f.*, r.project_id FROM quote_files f JOIN quote_requests r ON r.id = f.request_id WHERE f.id = ?', fileId);
   if (!f) throw notFound('Arquivo não encontrado.');
   project(ctx, f.project_id, { any: true });
-  return f;
+  return f.kind === 'proposta' ? { ...f, original_name: proposalNameOf(f.request_id, f.id, f.mime) } : f;
 }
 
 // ---------- Importar o mapa de cotações (planilha no modelo atual) ----------
@@ -406,12 +420,38 @@ export function mapData(ctx, projectId) {
   const p = one('SELECT code, name, client, location, municipio, uf FROM projects WHERE id = ?', d.project.id);
   p.address = [p.location, p.municipio && p.uf ? `${p.municipio}/${p.uf}` : p.uf].filter(Boolean).join(' · ');
   const reqById = new Map(d.requests.map(r => [r.id, r]));
+  // Anexos: arquivos da proposta vigente de cada fornecedor, na ordem em que aparecem no mapa.
+  // O nome padrão (Projeto-Disciplina-Fornecedor-ID) vai na linha NOME DO ARQUIVO (Excel e PDF) e liga o mapa à página do anexo.
+  const annexes = [], annexOf = new Map();
+  const revLabel = n => `R${String(n).padStart(2, '0')}`;
+  const discOfItem = new Map(d.items.map(i => [i.id, i.discipline]));
+  const stdName = (r, f, supplier) => proposalName({ code: p.code, disciplines: r.item_ids.map(id => discOfItem.get(id)), supplier, fileId: f.id, mime: f.mime });
+  const annexFor = (r, supplier) => {
+    if (annexOf.has(r.id)) return annexOf.get(r.id);
+    const files = r.files.filter(f => f.kind === 'proposta');
+    const last = Math.max(0, ...files.map(f => f.revision ?? 0));
+    const list = files.filter(f => (f.revision ?? 0) === last).map(f => {
+      const a = { no: annexes.length + 1, code: String(f.id).padStart(4, '0'), file_id: f.id, mime: f.mime, name: stdName(r, f, supplier), original: f.original_name || null, supplier, cnpj: r.supplier_cnpj || null,
+        revision: revLabel(last), received: r.received_date, disciplines: [], items: 0 };
+      annexes.push(a);
+      return a;
+    });
+    const old = files.filter(f => (f.revision ?? 0) < last).map(f => `${stdName(r, f, supplier)} (${revLabel(f.revision ?? 0)} substituída)`);
+    const v = { list, text: [...list.map(a => a.name), ...old].join('; ') };
+    annexOf.set(r.id, v);
+    return v;
+  };
   const disciplines = [...new Set(d.items.map(i => i.discipline))].map(name => {
     const items = d.items.filter(i => i.discipline === name).map(it => {
       // Recebidas primeiro (menor preço antes), depois as demais
       const offers = [...it.offers].sort((a, b) => (a.price === null) - (b.price === null) || (a.price ?? 0) - (b.price ?? 0) || a.supplier_name.localeCompare(b.supplier_name, 'pt-BR')).map(o => {
         const r = reqById.get(o.request_id);
-        const files = r.files.filter(f => f.kind === 'proposta').map(f => f.original_name || 'proposta').join(', ');
+        let files = r.files.filter(f => f.kind === 'proposta').map(f => f.original_name || 'proposta').join(', ');
+        if (o.price !== null) {
+          const ax = annexFor(r, o.supplier_name);
+          files = ax.text;
+          for (const a of ax.list) { a.items++; if (!a.disciplines.includes(name)) a.disciplines.push(name); }
+        }
         return { name: o.supplier_name, cnpj: r.supplier_cnpj, phone: r.supplier_phone, file: files, obs: [r.conditions, r.valid_until ? `validade ${fmtD(r.valid_until)}` : ''].filter(Boolean).join(' · '),
           address: r.supplier_address, status: SIT(o, r), situation: `${SIT(o, r)}${o.price !== null && r.received_date ? ` ${fmtD(r.received_date)}` : SIT(o, r) === 'ENVIADO' && o.sent_date ? ` ${fmtD(o.sent_date)}` : ''}`, sent: o.sent_date, received: o.price !== null ? r.received_date : null, price: o.price, revision: o.revision };
       });
@@ -420,7 +460,7 @@ export function mapData(ctx, projectId) {
     const sum = summarize(items, d.requests.filter(r => r.item_ids.some(id => items.some(i => i.id === id))));
     return { name, items, cols: Math.max(TARGET, ...items.map(i => i.offers.length)), summary: sum };
   });
-  return { project: p, today: today(), target: TARGET, summary: d.summary, disciplines };
+  return { project: p, today: today(), target: TARGET, summary: d.summary, disciplines, annexes };
 }
 // Bloco de cada item, igual ao mapa original: PREÇO + 7 linhas de dados do fornecedor
 const ROWS = [['NOME', 'name'], ['CNPJ', 'cnpj'], ['TELEFONE', 'phone'], ['NOME DO ARQUIVO', 'file'], ['OBSERVAÇÃO', 'obs'], ['ENDEREÇO', 'address'], ['SOLICITAÇÃO DE PREÇO', 'situation']];
@@ -437,6 +477,21 @@ function docHead(m, title, nCols, rightCols = 3) {
   const merges = [`A1:${colL(R - 1)}9`, ...right.map((_, i) => `${colL(R)}${i + 2}:${colL(nCols - 1)}${i + 2}`)];
   return { rows, merges, heights: { 1: 20 } };
 }
+// Propostas anexas num .zip, com o nome padrão Projeto-Disciplina-Fornecedor-ID (o mesmo da linha NOME DO ARQUIVO do mapa)
+const safeName = s => String(s || '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+export function proposalsZip(ctx, projectId) {
+  const m = mapData(ctx, projectId);
+  const entries = [];
+  for (const a of m.annexes) {
+    const f = one('SELECT stored_name, mime FROM quote_files WHERE id = ?', a.file_id);
+    const data = f && readStored(f.stored_name);
+    if (!data) continue;
+    entries.push({ name: a.name, data });
+  }
+  if (!entries.length) throw notFound('Nenhuma proposta anexada no mapa de cotações deste projeto.');
+  return { buffer: zip(entries), filename: `propostas-${safeName(m.project.code)}.zip` };
+}
+
 export function exportXlsx(ctx, projectId) {
   const m = mapData(ctx, projectId);
   const used = new Set(['RESUMO']);

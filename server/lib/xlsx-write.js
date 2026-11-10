@@ -5,7 +5,8 @@ import { deflateRawSync, crc32 } from 'node:zlib';
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const colName = i => { let s = ''; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
 
-function zip(entries) {
+// Também usado para baixar vários arquivos de uma vez (.zip)
+export function zip(entries) {
   const locals = [], centrals = [];
   let offset = 0;
   for (const { name, data } of entries) {

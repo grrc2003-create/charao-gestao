@@ -415,6 +415,8 @@ api.put('/api/master-list/items/:id/stages', (req, res, { ctx, params, body }) =
 api.get('/api/master-list/items/:id/history', (req, res, { ctx, params }) => send(res, 200, MasterList.history(ctx, intOrNull(params.id))));
 api.get('/api/settings/master-list-types', (req, res) => send(res, 200, MasterList.listTypes({ includeInactive: true })));
 api.put('/api/settings/master-list-types', (req, res, { ctx, body }) => send(res, 200, MasterList.saveTypes(ctx, body.types, clientIp(req))));
+api.get('/api/projects/:id/quotes/propostas.zip', (req, res, { ctx, params }) => { const x = Quotes.proposalsZip(ctx, intOrNull(params.id)); send(res, 200, x.buffer, {
+  'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="propostas.zip"; filename*=UTF-8''${encodeURIComponent(x.filename)}` }); });
 api.get('/api/projects/:id/quotes/summary', (req, res, { ctx, params }) => send(res, 200, Quotes.quotesSummary(ctx, intOrNull(params.id))));
 api.post('/api/projects/:id/quotes/items', (req, res, { ctx, params, body }) => send(res, 201, Quotes.saveItem(ctx, intOrNull(params.id), null, body, clientIp(req))));
 api.put('/api/projects/:id/quotes/items/:item', (req, res, { ctx, params, body }) => send(res, 200, Quotes.saveItem(ctx, intOrNull(params.id), intOrNull(params.item), body, clientIp(req))));

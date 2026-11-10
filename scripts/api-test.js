@@ -3571,6 +3571,27 @@ async function main() {
     const qMap = (await qA('GET', `/projects/${qP}/quotes/map`)).data;
     ok(qMap.disciplines.length === 3 && qMap.disciplines.every(x => x.cols >= 3) && qMap.summary.items === 5, 'dados do PDF: disciplinas, colunas de empresas e resumo');
     ok((await login('felipe@charao.eng.br').then(c => c('GET', '/projects/999999/quotes/map'))).status === 404, 'mapa de projeto inexistente/sem acesso não abre');
+    // Propostas anexas: número na linha NOME DO ARQUIVO, igual no PDF e no Excel; só a revisão vigente é anexada
+    await qA('POST', `/quote-requests/${qR1}/receive`, { prices: [{ item_id: qI1, price: 940 }], files: [{ data: tinyPng(), name: 'proposta-r2.png' }] });
+    const qAx = (await qA('GET', `/projects/${qP}/quotes/map`)).data;
+    const qAxOne = qAx.annexes.find(a => a.original === 'proposta-r2.png');
+    const qAxOffer = qAx.disciplines.flatMap(x => x.items).flatMap(i => i.offers).find(o => o.file.includes(qAxOne?.name || '§'));
+    ok(qAxOne && qAx.annexes.every((a, i) => a.no === i + 1) && !qAx.annexes.some(a => a.original === 'proposta.png') && qAxOne.revision === 'R02' && qAxOne.items >= 1 && qAxOne.disciplines.length >= 1, 'anexos numerados na ordem do mapa, só com a revisão vigente da proposta');
+    ok(new RegExp(`^${qMap.project.code}-[A-Za-z0-9_+]+-Fornecedor_Ficticio_Alfa-${String(qAxOne.file_id).padStart(4, '0')}\.png$`).test(qAxOne.name), `proposta renomeada Projeto-Disciplina-Fornecedor-ID → ${qAxOne.name}`);
+    ok(qAxOffer.file.startsWith(qAxOne.name) && !/Anexo/.test(qAxOffer.file) && /-Fornecedor_Ficticio_Alfa-\d{4}\.png \(R00 substituída\)/.test(qAxOffer.file), 'NOME DO ARQUIVO traz o nome padrão e cita a revisão substituída');
+    ok((await qA('GET', `/projects/${qP}/quotes`)).data.requests.some(r => r.files.some(f => f.id === qAxOne.file_id && f.original_name === 'proposta-r2.png')), 'o nome do arquivo enviado continua guardado (o nome padrão é calculado)');
+    const qAxXls = readXlsxSheets(Buffer.from(await (await fetch(`${BASE}/api/projects/${qP}/quotes/export.xlsx`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } })).arrayBuffer()));
+    ok(qAxXls.some(x => x.rows.some(r => r && r.some(c => String(c ?? '').startsWith(qAxOne.name)))), 'o Excel traz o mesmo nome do arquivo');
+    const qZr = await fetch(`${BASE}/api/projects/${qP}/quotes/propostas.zip`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } });
+    const qZb = Buffer.from(await qZr.arrayBuffer());
+    const qZn = []; for (let i = 0; i + 30 < qZb.length; i++) if (qZb.readUInt32LE(i) === 0x04034b50) { const n = qZb.readUInt16LE(i + 26); qZn.push(qZb.toString('utf8', i + 30, i + 30 + n)); }
+    ok(qZr.status === 200 && /zip/.test(qZr.headers.get('content-type') || '') && qZn.length === qAx.annexes.length && qZn.every(n => qAx.annexes.some(a => a.name === n)), `zip com as propostas renomeadas (${qZn.join(', ')})`);
+    // Proposta em PDF: ao abrir ou baixar sozinha, já vem com o nome padrão
+    await qA('POST', `/quote-requests/${qR1}/receive`, { prices: [{ item_id: qI1, price: 930 }], files: [{ data: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF').toString('base64'), name: 'Proposta Revisada.pdf' }] });
+    const qAxPdf = (await qA('GET', `/projects/${qP}/quotes/map`)).data.annexes.find(a => a.original === 'Proposta Revisada.pdf');
+    const qAxFile = await fetch(`${BASE}/api/quote-files/${qAxPdf?.file_id}`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } });
+    ok(qAxPdf && /.pdf$/.test(qAxPdf.name) && qAxFile.status === 200 && decodeURIComponent(qAxFile.headers.get('content-disposition') || '').includes(qAxPdf.name), `proposta em PDF abre já com o nome padrão (${qAxPdf?.name})`);
+    ok((await login('felipe@charao.eng.br').then(c => c('GET', '/projects/999999/quotes/propostas.zip'))).status === 404, 'zip de projeto sem acesso não baixa');
     // limpeza
     for (const it of qM2.items) await qA('DELETE', `/projects/${qP}/quotes/items/${it.id}`);
     for (const r of qM2.requests) await qA('DELETE', `/quote-requests/${r.id}`);

@@ -751,3 +751,17 @@
 .ml-doc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 @media print { .ml-doc { width: auto; min-height: 0; padding: 0; } .ml-stage { display: block; } }
 .ml-doc-mv { color: #666; }
+
+/* Cotações: propostas anexas */
+.qa-idx td { text-align: left; }
+.qa-idx td:first-child { white-space: nowrap; font-weight: 700; }
+.qa-head { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px; margin-bottom: 8px; }
+.qa-no { flex: none; background: #003366; color: #fff; font-weight: 700; font-size: 11pt; padding: 5px 10px; }
+.qa-info { display: grid; gap: 1px; font-size: 8.5pt; min-width: 0; overflow-wrap: anywhere; }
+.qa-annex .pd-pdf-pages.is-ready { display: block; }
+.qa-annex .pdf-pg { margin: 0; text-align: center; }
+.qa-annex .pdf-pg img { max-width: 100%; max-height: 238mm; object-fit: contain; border: 1px solid #e3e7ec; }
+.qa-annex .pdf-pg figcaption { font-size: 8pt; color: #555; margin-top: 3px; overflow-wrap: anywhere; }
+.qa-annex .pdf-pg + .pdf-pg { margin-top: 14px; }
+@media print { .qa-annex .pdf-pg + .pdf-pg { margin-top: 0; break-before: page; page-break-before: always; } .qa-annex .pdf-pg { break-inside: avoid; page-break-inside: avoid; } }
+.qa-idx .qa-orig { display: block; color: #666; font-size: 6.6pt; }

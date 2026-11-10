@@ -8,6 +8,7 @@ import { listVisible, listCancelled, execSummary } from './tasks.js';
 import { audit } from './audit.js';
 import { listStages, syncStages, defaultStageId } from './stages.js';
 import { getSetting, validTemplateId, validProjectTypeId } from './settings.js';
+import { ensureProjectTypes } from './master-list.js';
 import { UFS } from './calendar.js';
 import { listRecurrences } from './recurrences.js';
 import { checklistDashboard } from './checklist.js';
@@ -160,6 +161,7 @@ export function createProject(ctx, body, ip) {
       code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
       d.uf, d.municipio, d.ibge_code, kind, d.type_id, d.field_control, d.has_quotes, d.has_master_list, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
+    if (d.has_master_list) ensureProjectTypes(Number(r.lastInsertRowid));
     const teamLog = syncTeam(id, memberIds);
     defaultStageId(id);
     const stagesLog = syncStages(id, body.stages);
@@ -182,6 +184,7 @@ export function updateProject(ctx, id, body, ip) {
       lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, field_control=?, has_quotes=?, has_master_list=?, updated_at=? WHERE id=?`,
       d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
       d.uf, d.municipio, d.ibge_code, d.type_id, d.field_control, d.has_quotes, d.has_master_list, new Date().toISOString(), id);
+    if (d.has_master_list) ensureProjectTypes(id);
     const teamLog = body.member_ids !== undefined ? syncTeam(id, memberIds, members(id).map(m => m.id)) : null;
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));
     const stagesLog = syncStages(id, body.stages);

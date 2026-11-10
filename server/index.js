@@ -413,6 +413,8 @@ api.put('/api/master-list/items/:id', (req, res, { ctx, params, body }) => send(
 api.delete('/api/master-list/items/:id', (req, res, { ctx, params }) => send(res, 200, MasterList.deleteItem(ctx, intOrNull(params.id), clientIp(req))));
 api.put('/api/master-list/items/:id/stages', (req, res, { ctx, params, body }) => send(res, 200, MasterList.updateStages(ctx, intOrNull(params.id), body, clientIp(req))));
 api.get('/api/master-list/items/:id/history', (req, res, { ctx, params }) => send(res, 200, MasterList.history(ctx, intOrNull(params.id))));
+api.get('/api/projects/:id/master-list-types', (req, res, { ctx, params }) => send(res, 200, MasterList.projectTypes(ctx, intOrNull(params.id))));
+api.put('/api/projects/:id/master-list-types', (req, res, { ctx, params, body }) => send(res, 200, MasterList.saveProjectTypes(ctx, intOrNull(params.id), body.types, clientIp(req))));
 api.get('/api/settings/master-list-types', (req, res) => send(res, 200, MasterList.listTypes({ includeInactive: true })));
 api.put('/api/settings/master-list-types', (req, res, { ctx, body }) => send(res, 200, MasterList.saveTypes(ctx, body.types, clientIp(req))));
 api.get('/api/projects/:id/quotes/propostas.zip', (req, res, { ctx, params }) => { const x = Quotes.proposalsZip(ctx, intOrNull(params.id)); send(res, 200, x.buffer, {

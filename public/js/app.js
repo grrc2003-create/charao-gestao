@@ -86,6 +86,7 @@ const routes = [
   ['/projetos/:id/vinculos', DepMap.view],
   ['/projetos/:id/cotacoes', Quotes.view],
   ['/projetos/:id/lista-mestra', MasterList.view],
+  ['/projetos/:id/lista-mestra/tipos', MasterList.typesPage],
   ['/imprimir/lista-mestra/:id', MasterList.printView, { print: true }],
   ['/prazos/tarefas', DeadlineTasks.view],
   ['/tarefas', Tasks.view],

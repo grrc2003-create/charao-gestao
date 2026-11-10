@@ -157,7 +157,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
           <label class="pr-se-check"><input type="checkbox" name="has_quotes" value="1" ${v.has_quotes ? 'checked' : ''}> Este projeto terá cotações</label>
           <label class="pr-se-check obra-only" ${isInt ? 'hidden' : ''}><input type="checkbox" name="has_master_list" value="1" ${v.has_master_list ? 'checked' : ''}> Este projeto terá Lista Mestra</label>
           <span class="hint">Marcado, o projeto ganha o <b>mapa de cotações</b> (itens, solicitações de proposta com evidência, propostas e exportação). Desmarcado, a área some do projeto, mas nada do que já foi lançado é apagado.</span>
-          <span class="hint obra-only" ${isInt ? 'hidden' : ''}>Lista Mestra marcada: o projeto ganha a <b>Lista Mestra de projetos</b> (arquitetura, estrutural, complementares — etapas, datas e motivos das alterações). Desmarcada, a área some do projeto, mas nada é apagado.</span>
+          <span class="hint obra-only" ${isInt ? 'hidden' : ''}>Lista Mestra marcada: o projeto ganha a <b>Lista Mestra de projetos</b> (arquitetura, estrutural, complementares — etapas, datas e motivos das alterações), com os tipos e etapas do formato padrão, que podem ser ajustados só para esta obra. Desmarcada, a área some do projeto, mas nada é apagado.</span>
           <span class="hint obra-only" ${isInt ? 'hidden' : ''}>Marcado, a obra aparece na <b>Folha de Campo</b> (diárias, empreitadas, medição do terceiro e pagamentos). Desmarcado, ela some da Folha de Campo, mas nada do que já foi lançado é apagado.</span>
         </fieldset>
         <fieldset class="fieldset form"><legend>Classificação das tarefas (Grupo/Local/Etapa)</legend>

@@ -100,7 +100,7 @@ export async function view({ params, query, setQuery, render }) {
         sub: 'Em que etapa está cada projeto da obra, as próximas datas previstas e o porquê de cada alteração.',
         actions: html`${d.items.length ? html`<a class="btn btn-ghost" href="/api/master-list/export.xlsx?project=${pid}" download>${icon('file')}Excel</a>
             <a class="btn btn-ghost" href="#/imprimir/lista-mestra/${pid}">${icon('print')}PDF</a>` : ''}
-          ${d.can_manage_types ? html`<a class="btn btn-ghost" href="#/configuracoes?sec=lista-mestra">${icon('settings')}Tipos e etapas</a>` : ''}
+          ${d.can_manage_types ? html`<a class="btn btn-ghost" href="#/projetos/${pid}/lista-mestra/tipos">${icon('settings')}Tipos e etapas da obra</a>` : ''}
           ${P.can_edit ? html`<button type="button" class="btn btn-accent" data-new="${pid}">${icon('plus')}Novo projeto</button>` : ''}`,
       })}
       ${d.items.length ? html`<div class="kpis kpis-dl ml-kpis">
@@ -131,7 +131,7 @@ export async function view({ params, query, setQuery, render }) {
           <span class="sub">${nOf(items.length, 'projeto', 'projetos')}${late ? html` · <b class="ml-late-n">${late} atrasado(s)</b>` : ''}</span></div>
           <div class="ml-list">${head}${items.map(itemRow)}</div></section>`
         : html`<div class="empty-state"><h2>Nenhum projeto neste filtro</h2><p>Ajuste os filtros acima.</p></div>`}` : html`<div class="empty-state"><h2>Lista Mestra vazia</h2>
-        <p>Inclua os projetos desta obra (arquitetura, estrutural, complementares…) com as datas previstas de cada etapa. As etapas vêm do tipo de projeto (Configurações).</p>
+        <p>Inclua os projetos desta obra (arquitetura, estrutural, complementares…) com as datas previstas de cada etapa. As etapas vêm do tipo de projeto (formato desta obra, em <b>Tipos e etapas da obra</b>).</p>
         ${P.can_edit ? html`<button type="button" class="btn btn-accent" data-new="${pid}">${icon('plus')}Incluir o primeiro projeto</button>` : ''}</div>`}`,
     mount(root) {
       const form = root.querySelector('#ml-f');
@@ -199,7 +199,7 @@ async function itemSheet(d, it, projectId, done) {
         <select id="ml-p" name="project_id" required><option value="">Escolha…</option>${editable.map(p => html`<option value="${p.id}" ${projectId === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`)}</select></div>`}
       <div class="form-row"><div class="field"><label class="req" for="ml-t">Tipo de projeto</label>
           <select id="ml-t" name="type_id" required ${locked ? 'disabled' : ''}><option value="">Escolha…</option>${types.map(t => html`<option value="${t.id}" ${it?.type_id === t.id ? 'selected' : ''}>${t.name}</option>`)}</select>
-          ${locked ? html`<span class="hint">Com datas registradas, o tipo não pode ser trocado.</span>` : html`<span class="hint">As etapas vêm do tipo (Configurações → Lista Mestra).</span>`}</div>
+          ${locked ? html`<span class="hint">Com datas registradas, o tipo não pode ser trocado.</span>` : html`<span class="hint">As etapas vêm do tipo (Tipos e etapas da obra).</span>`}</div>
         <div class="field"><label for="ml-n">Complemento</label><input type="text" id="ml-n" name="name" maxlength="120" value="${it?.name || ''}" placeholder="Ex.: Bloco A, Fachada"></div></div>
       <div class="form-row"><div class="field"><label for="ml-d">Projetista / escritório</label><input type="text" id="ml-d" name="designer" maxlength="160" value="${it?.designer || ''}"></div>
         <div class="field"><label for="ml-r">Revisão atual</label><input type="text" id="ml-r" name="revision" maxlength="20" value="${it?.revision || ''}" placeholder="Ex.: R00"></div></div>
@@ -355,18 +355,19 @@ const typeLi = (t, open = false) => html`<li class="ml-type ${t.active === 0 ? '
   <div class="ml-ts-box" ${open ? '' : 'hidden'}><ol class="ml-ts-list">${(t.stages || []).map(stageLi)}</ol>
   <button type="button" class="btn btn-ghost btn-sm" data-sadd>${icon('plus')}Etapa</button></div></li>`;
 
-export const typesSection = types => html`<section class="card" id="ml-types-card" style="max-width:900px;margin-bottom:16px">
-  <div class="card-head"><h2>${icon('checklist')}Lista Mestra: tipos de projeto e etapas</h2><span class="sub">${types.filter(t => t.active).length} tipo(s) ativo(s)</span></div>
+export const typesSection = (types, { project = null } = {}) => html`<section class="card" id="ml-types-card" style="max-width:900px;margin-bottom:16px">
+  <div class="card-head"><h2>${icon('checklist')}${project ? `Tipos de projeto e etapas · ${project.code}` : 'Lista Mestra: formato padrão de tipos e etapas'}</h2><span class="sub">${types.filter(t => t.active).length} tipo(s) ativo(s)</span></div>
   <form class="card-body form" id="ml-types-form" novalidate>
-    <p class="muted" style="margin:0">Cada tipo de projeto (arquitetura, estrutural, complementares…) tem a sua sequência de etapas. Alterar o nome ou a ordem vale para
-      todos os projetos daquele tipo; etapa nova aparece sem datas. Etapas e tipos já usados não podem ser excluídos — inative-os.</p>
+    <p class="muted" style="margin:0">${project ? html`Formato desta obra: começou como cópia do padrão (Configurações) e pode ser ajustado só aqui. Alterar o nome ou a ordem vale para todos os projetos daquele tipo nesta obra; etapa nova aparece sem datas.`
+      : html`Formato padrão: cada obra que liga a Lista Mestra recebe uma cópia destes tipos e etapas e pode ajustá-la na própria obra. Mudar o padrão vale para as próximas obras (as que já têm a Lista Mestra mantêm o formato delas).`}
+      Etapas e tipos já usados não podem ser excluídos — inative-os.</p>
     <ul class="ml-types" id="ml-types">${types.map(t => typeLi(t))}</ul>
     <div><button type="button" class="btn btn-ghost" id="ml-type-add">${icon('plus')}Novo tipo de projeto</button></div>
     <div class="form-error" hidden></div>
     <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar tipos e etapas</button></div>
   </form></section>`;
 
-export function bindTypesSection(root) {
+export function bindTypesSection(root, endpoint = '/settings/master-list-types') {
   const form = root.querySelector('#ml-types-form');
   if (!form) return;
   const list = form.querySelector('#ml-types');
@@ -416,10 +417,25 @@ export function bindTypesSection(root) {
     const btn = form.querySelector('[type=submit]');
     btn.disabled = true;
     try {
-      const saved = await api('/settings/master-list-types', { method: 'PUT', body: { types } });
+      const saved = await api(endpoint, { method: 'PUT', body: { types } });
       list.innerHTML = saved.map(t => typeLi(t).toString()).join('');
       toast('Tipos de projeto e etapas salvos.');
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
     btn.disabled = false;
   });
+}
+
+// Página da obra: tipos de projeto e etapas desta obra (cópia do padrão, editável aqui)
+export async function typesPage({ params }) {
+  const pid = Number(params.id);
+  const d = await api(`/projects/${pid}/master-list-types`);
+  return {
+    title: `Tipos e etapas · ${d.project.code}`,
+    html: html`${pageHead({ back: { href: `#/projetos/${pid}/lista-mestra`, label: 'Lista Mestra' }, eyebrow: `${d.project.code} · ${d.project.name}`, title: 'Tipos de projeto e etapas da obra',
+        sub: 'Formato usado na Lista Mestra desta obra.' })}
+      ${d.can_edit ? typesSection(d.types, { project: d.project })
+        : html`<section class="card"><div class="card-body"><p class="muted" style="margin-top:0">Somente o responsável da obra e os gestores alteram o formato.</p>
+          <ul class="ml-types">${d.types.map(t => html`<li class="ml-type ${t.active ? '' : 'is-inactive'}"><b>${t.name}</b><div class="ml-chain">${t.stages.filter(s => s.active).map(s => s.name).join(' → ')}</div></li>`)}</ul></div></section>`}`,
+    mount(root) { if (d.can_edit) bindTypesSection(root, `/projects/${pid}/master-list-types`); },
+  };
 }

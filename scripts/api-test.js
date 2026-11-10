@@ -3738,16 +3738,25 @@ async function main() {
     if (mFi) {
       ok(!mFi.can_edit && (await mF('PUT', `/master-list/items/${mId}/stages`, { stages: [] })).status === 403, 'colaborador (não responsável da obra) não altera as datas');
     }
-    ok((await mF('PUT', '/settings/master-list-types', { types: [] })).status === 403, 'colaborador não altera os tipos e etapas');
-    // tipos e etapas editáveis depois
-    const mTy = (await mA('GET', '/settings/master-list-types')).data;
-    let mSave = await mA('PUT', '/settings/master-list-types', { types: mTy.map(t => (t.id === mArq.id ? { ...t, stages: t.stages.slice(1) } : t)) });
+    ok((await mF('PUT', '/settings/master-list-types', { types: [] })).status === 403 && (await mF('PUT', '/projects/1/master-list-types', { types: [] })).status === 403, 'colaborador não altera os tipos e etapas (padrão nem da obra)');
+    // Tipos e etapas da obra: cópia do formato padrão, editável só na obra
+    const mTy = (await mA('GET', '/projects/1/master-list-types')).data.types;
+    const mDef = (await mA('GET', '/settings/master-list-types')).data;
+    ok(mTy.some(t => t.id === mArq.id) && !mDef.some(t => t.id === mArq.id) && mDef.some(t => t.name === 'Arquitetura'), 'a obra tem a própria cópia dos tipos (o padrão continua separado)');
+    ok((await mA('POST', '/master-list/items', { project_id: 1, type_id: mDef.find(t => t.name === 'Estrutural').id, name: 'Outro' })).status === 400, 'o projeto só usa tipos da própria obra');
+    let mSave = await mA('PUT', '/projects/1/master-list-types', { types: mTy.map(t => (t.id === mArq.id ? { ...t, stages: t.stages.slice(1) } : t)) });
     ok(mSave.status === 400, 'etapa com datas não pode ser excluída (inative)');
-    mSave = await mA('PUT', '/settings/master-list-types', { types: [...mTy.map(t => (t.id === mArq.id ? { ...t, stages: [...t.stages.map((s, i) => (i === 1 ? { ...s, name: 'Estudo preliminar (EP)' } : s)), { name: 'As built', active: true }] } : t)), { name: 'Paisagismo', stages: [{ name: 'Estudo' }, { name: 'Executivo' }] }] });
-    ok(mSave.status === 200 && mSave.data.find(t => t.name === 'Paisagismo')?.stages.length === 2, 'tipo novo com etapas cadastrado');
+    mSave = await mA('PUT', '/projects/1/master-list-types', { types: [...mTy.map(t => (t.id === mArq.id ? { ...t, stages: [...t.stages.map((s, i) => (i === 1 ? { ...s, name: 'Estudo preliminar (EP)' } : s)), { name: 'As built', active: true }] } : t)), { name: 'Paisagismo', stages: [{ name: 'Estudo' }, { name: 'Executivo' }] }] });
+    ok(mSave.status === 200 && mSave.data.find(t => t.name === 'Paisagismo')?.stages.length === 2, 'tipo novo com etapas cadastrado na obra');
     const mAfter = (await mA('GET', `/master-list/items/${mId}/history`)).data.item;
-    ok(mAfter.stages.length === 8 && mAfter.stages[1].name === 'Estudo preliminar (EP)' && mAfter.stages[1].done_date && !mAfter.stages[7].planned_date, 'renomear e incluir etapas vale para os projetos existentes, sem perder as datas');
-    ok((await mA('PUT', '/settings/master-list-types', { types: mSave.data.filter(t => t.id !== mArq.id) })).status === 400, 'tipo em uso não pode ser excluído');
+    ok(mAfter.stages.length === 8 && mAfter.stages[1].name === 'Estudo preliminar (EP)' && mAfter.stages[1].done_date && !mAfter.stages[7].planned_date, 'renomear e incluir etapas na obra vale para os projetos dela, sem perder as datas');
+    ok(!(await mA('GET', '/settings/master-list-types')).data.some(t => t.name === 'Paisagismo') && (await mA('GET', '/settings/master-list-types')).data.find(t => t.name === 'Arquitetura').stages[1].name === 'Estudo preliminar', 'mudar a obra não mexe no formato padrão');
+    ok((await mA('PUT', '/projects/1/master-list-types', { types: mSave.data.filter(t => t.id !== mArq.id) })).status === 400, 'tipo em uso não pode ser excluído');
+    // Mudar o padrão vale para as próximas obras; a que já tem a Lista Mestra mantém o formato dela
+    await mA('PUT', '/settings/master-list-types', { types: [...mDef, { name: 'Topografia', stages: [{ name: 'Levantamento' }] }] });
+    ok(!(await mA('GET', '/projects/1/master-list-types')).data.types.some(t => t.name === 'Topografia'), 'novo tipo no padrão não entra na obra que já tem o formato próprio');
+    ok((await mA('PUT', '/projects/3', { has_master_list: 1 })).status === 200 && (await mA('GET', '/master-list?project=3')).data.types.some(t => t.name === 'Topografia'), 'obra que liga a Lista Mestra recebe a cópia do padrão atual');
+    await mA('PUT', '/projects/3', { has_master_list: 0 });
     const mX = await fetch(BASE + '/api/master-list/export.xlsx?project=1', { headers: { Cookie: await cookieOf('ana@charao.eng.br'), 'X-Requested-With': 'charao-app' } });
     ok(mX.status === 200 && /spreadsheetml/.test(mX.headers.get('content-type')) && (await mX.arrayBuffer()).byteLength > 2000, 'Excel da Lista Mestra (lista, etapas e histórico)');
     ok((await mA('PUT', `/master-list/items/${mId}`, { type_id: mEst.id })).status === 400, 'com datas registradas o tipo não pode ser trocado');

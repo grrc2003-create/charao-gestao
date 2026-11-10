@@ -34,9 +34,10 @@ function requireEdit(ctx, p) {
 }
 
 // ---------- Tipos de projeto e etapas ----------
-export function listTypes({ includeInactive = false } = {}) {
+// Formato padrão (Configurações): tipos sem obra. Cada obra com Lista Mestra tem a própria cópia, editável na obra.
+export function listTypes({ includeInactive = false, projectId = null } = {}) {
   const types = all(`SELECT t.id, t.name, t.active, t.sort_order, (SELECT COUNT(*) FROM ml_items i WHERE i.type_id = t.id) AS use_count
-    FROM ml_types t ${includeInactive ? '' : 'WHERE t.active = 1'} ORDER BY t.sort_order, t.id`);
+    FROM ml_types t WHERE IFNULL(t.project_id, 0) = ? ${includeInactive ? '' : 'AND t.active = 1'} ORDER BY t.sort_order, t.id`, projectId || 0);
   const stages = all(`SELECT s.id, s.type_id, s.name, s.active, s.sort_order,
       (SELECT COUNT(*) FROM ml_item_stages x WHERE x.stage_id = s.id AND (x.planned_date IS NOT NULL OR x.done_date IS NOT NULL OR x.base_date IS NOT NULL))
         + (SELECT COUNT(*) FROM ml_changes c WHERE c.stage_id = s.id) AS use_count
@@ -44,10 +45,38 @@ export function listTypes({ includeInactive = false } = {}) {
   return types.map(t => ({ ...t, stages: stages.filter(s => s.type_id === t.id && (includeInactive || s.active)) }));
 }
 
-export function saveTypes(ctx, input, ip) {
-  requireSettingsManager(ctx.user);
+// Obra com Lista Mestra e ainda sem tipos próprios: copia o formato padrão atual
+export function ensureProjectTypes(projectId) {
+  if (!projectId || one('SELECT 1 FROM ml_types WHERE project_id = ? LIMIT 1', projectId)) return;
+  tx(() => {
+    for (const t of all('SELECT * FROM ml_types WHERE project_id IS NULL ORDER BY sort_order, id')) {
+      const nid = Number(run('INSERT INTO ml_types (project_id, src_id, name, active, sort_order) VALUES (?,?,?,?,?)', projectId, t.id, t.name, t.active, t.sort_order).lastInsertRowid);
+      for (const s of all('SELECT * FROM ml_type_stages WHERE type_id = ? ORDER BY sort_order, id', t.id)) {
+        run('INSERT INTO ml_type_stages (type_id, src_id, name, active, sort_order) VALUES (?,?,?,?,?)', nid, s.id, s.name, s.active, s.sort_order);
+      }
+    }
+  });
+}
+// Tipos e etapas de uma obra (quem vê a Lista Mestra da obra)
+export function projectTypes(ctx, projectId) {
+  const p = projectRow(ctx, projectId);
+  requireEnabled(p);
+  ensureProjectTypes(p.id);
+  return { project: { id: p.id, code: p.code, name: p.name }, can_edit: canEditProject(ctx, p), types: listTypes({ includeInactive: true, projectId: p.id }) };
+}
+export function saveProjectTypes(ctx, projectId, input, ip) {
+  const p = projectRow(ctx, projectId);
+  requireEnabled(p);
+  requireEdit(ctx, p);
+  ensureProjectTypes(p.id);
+  return saveTypes(ctx, input, ip, p);
+}
+
+export function saveTypes(ctx, input, ip, proj = null) {
+  if (!proj) requireSettingsManager(ctx.user);
+  const projectId = proj?.id || null;
   if (!Array.isArray(input)) throw badRequest('Lista de tipos inválida.');
-  const current = listTypes({ includeInactive: true });
+  const current = listTypes({ includeInactive: true, projectId });
   const byId = new Map(current.map(t => [t.id, t]));
   const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
   const items = input.slice(0, 60).map((x, i) => ({
@@ -94,7 +123,7 @@ export function saveTypes(ctx, input, ip) {
         if (before !== JSON.stringify([x.name, x.active, x.stages.map(s => [s.id, s.name, s.active])])) log.alterados.push(x.name);
         for (const s of old.stages) if (!x.stages.some(n => n.id === s.id)) run('DELETE FROM ml_type_stages WHERE id = ?', s.id);
       } else {
-        tid = Number(run('INSERT INTO ml_types (name, active, sort_order) VALUES (?, ?, ?)', x.name, x.active, x.order).lastInsertRowid);
+        tid = Number(run('INSERT INTO ml_types (project_id, name, active, sort_order) VALUES (?, ?, ?, ?)', projectId, x.name, x.active, x.order).lastInsertRowid);
         log.criados.push(x.name);
       }
       for (const s of x.stages) {
@@ -102,9 +131,10 @@ export function saveTypes(ctx, input, ip) {
         else run('INSERT INTO ml_type_stages (type_id, name, active, sort_order) VALUES (?, ?, ?, ?)', tid, s.name, s.active, s.order);
       }
     }
-    audit(ctx.user.id, 'settings', null, 'Lista Mestra: tipos de projeto e etapas atualizados', log, ip);
+    if (proj) audit(ctx.user.id, 'project', proj.id, 'Lista Mestra: tipos de projeto e etapas da obra atualizados', log, ip);
+    else audit(ctx.user.id, 'settings', null, 'Lista Mestra: formato padrão de tipos e etapas atualizado', log, ip);
   });
-  return listTypes({ includeInactive: true });
+  return listTypes({ includeInactive: true, projectId });
 }
 
 // ---------- Leitura ----------
@@ -193,6 +223,7 @@ export function list(ctx, { projectId = null, withHistory = false } = {}) {
   if (projectId) {
     project = projectRow(ctx, projectId);
     if (!project.has_master_list) return { enabled: false, today: t, items: [], summary: summarize([], t), types: [], projects: [], reasons: REASONS };
+    ensureProjectTypes(project.id);
   }
   const items = loadItems(ctx, { projectId });
   const projects = all(`SELECT id, code, name, lead_id, status, kind FROM projects WHERE status <> 'cancelado' AND kind <> 'interno' AND has_master_list = 1 ORDER BY code`)
@@ -200,8 +231,8 @@ export function list(ctx, { projectId = null, withHistory = false } = {}) {
     .map(p => ({ id: p.id, code: p.code, name: p.name, status: p.status, kind: p.kind, can_edit: canEditProject(ctx, p) }));
   return {
     enabled: true, project: project ? { id: project.id, code: project.code, name: project.name, client: project.client, can_edit: canEditProject(ctx, project) } : null,
-    today: t, reasons: REASONS, types: listTypes(), items, summary: summarize(items, t),
-    projects, can_add: projects.some(p => p.can_edit), can_manage_types: canManageSettings(ctx.user), can_rebase: canRebase(ctx),
+    today: t, reasons: REASONS, types: listTypes({ projectId: project?.id || null }), items, summary: summarize(items, t),
+    projects, can_add: projects.some(p => p.can_edit), can_manage_types: project ? canEditProject(ctx, project) : canManageSettings(ctx.user), can_rebase: canRebase(ctx),
     ...(withHistory ? { history: items.length ? all(`SELECT c.id, c.item_id, c.kind, c.old_date, c.new_date, c.reason, c.explanation, c.cascade, c.created_at, u.name AS user_name, s.name AS stage_name
       FROM ml_changes c LEFT JOIN users u ON u.id = c.created_by LEFT JOIN ml_type_stages s ON s.id = c.stage_id
       WHERE c.reason IS NOT NULL AND c.item_id IN (${items.map(() => '?').join(',')}) ORDER BY c.id DESC LIMIT 500`, ...items.map(i => i.id)) : [] } : {}),
@@ -226,10 +257,10 @@ function readItem(b) {
     notes: str(b.notes, { max: 1000, label: 'Observações' }),
   };
 }
-const validType = (v, current = null) => {
+const validType = (v, current = null, projectId = null) => {
   const id = intOrNull(v);
   if (!id) throw badRequest('Escolha o tipo de projeto.');
-  const t = one('SELECT id, active, name FROM ml_types WHERE id = ?', id);
+  const t = one('SELECT id, active, name FROM ml_types WHERE id = ? AND IFNULL(project_id, 0) = ?', id, projectId || 0);
   if (!t || (!t.active && id !== current)) throw badRequest('Tipo de projeto inválido.');
   return t;
 };
@@ -250,10 +281,11 @@ export function saveItem(ctx, id, body, ip) {
     requireEnabled(p);
   }
   requireEdit(ctx, p);
+  ensureProjectTypes(p.id);
   let typeId = item?.type_id;
   if (!item || (b.type_id !== undefined && Number(b.type_id) !== item.type_id)) {
     if (item && hasDates(item.id)) throw badRequest('O tipo não pode ser trocado: este projeto já tem datas registradas.');
-    typeId = validType(b.type_id, item?.type_id).id;
+    typeId = validType(b.type_id, item?.type_id, p.id).id;
   }
   const dup = one(`SELECT id FROM ml_items WHERE project_id = ? AND type_id = ? AND IFNULL(name, '') = IFNULL(?, '') AND id <> ?`, p.id, typeId, d.name, id || 0);
   if (dup) throw badRequest('Esta obra já tem este projeto na Lista Mestra. Use o complemento (ex.: Bloco A) para diferenciar.');

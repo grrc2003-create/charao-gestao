@@ -473,6 +473,37 @@ async function main() {
   const recM = (await ricardo('POST', '/recurrences', { project_id: npR, title: 'Medição mensal', description: 'Boletim de medição', freq: 'mensal', start_date: plus(40), month_day: 31, end_type: 'nunca', lead_days: 5 })).data;
   const rm2 = (await ricardo('GET', `/recurrences/${recM.id}`)).data;
   ok(recM.generated === 0 && rm2.tasks.length === 0 && rm2.next_dates[0] >= plus(40) && rm2.next_dates[0].slice(0, 7) === plus(40).slice(0, 7) && rm2.active, 'ocorrência só é criada dentro da antecedência configurada');
+  // Período: início + N dias úteis ou corridos = término (mensal e anual)
+  {
+    const isoAdd = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400e3).toISOString().slice(0, 10);
+    const dow = d => new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay();
+    // Início numa segunda-feira daqui a 2 a 8 semanas, num dia sem feriado nacional por perto (calendário da empresa)
+    let st = plus(14); while (dow(st) !== 1) st = isoAdd(st, 1);
+    ok((await ricardo('POST', '/recurrences', { project_id: npR, title: 'X', description: 'x', freq: 'mensal', start_date: st, period_days: 0.5, end_type: 'nunca' })).status === 400, 'período: quantidade de dias inválida é recusada');
+    ok((await ricardo('POST', '/recurrences', { project_id: npR, title: 'X', description: 'x', freq: 'mensal', start_date: st, period_days: 3, period_day_type: 'x', end_type: 'nunca' })).status === 400, 'período: tipo de dias inválido é recusado');
+    const pvC = (await ricardo('POST', '/recurrences/preview', { project_id: npR, freq: 'mensal', start_date: st, period_days: 10, period_day_type: 'corridos', end_type: 'ocorrencias', end_count: 3 })).data;
+    ok(pvC.periods?.length === 3 && pvC.periods[0].start === st && pvC.periods[0].due === isoAdd(st, 9) && /\+ 10 dias corridos/.test(pvC.description), 'corridos: início + 10 dias = término no 10º dia');
+    const pvU = (await ricardo('POST', '/recurrences/preview', { project_id: npR, freq: 'mensal', start_date: st, period_days: 5, period_day_type: 'uteis', end_type: 'ocorrencias', end_count: 2 })).data;
+    const wd = (await ricardo('GET', `/projects/${npR}/plan-dates?start=${st}&days=5`)).data;
+    ok(pvU.periods[0].start === st && pvU.periods[0].due === wd.due && pvU.periods[0].due >= isoAdd(st, 4), 'úteis: término igual ao prazo rápido (5 dias úteis)');
+    // Início no fim de semana: em dias úteis começa no próximo dia útil
+    const sat = isoAdd(st, 5);
+    const pvS = (await ricardo('POST', '/recurrences/preview', { project_id: npR, freq: 'mensal', start_date: sat, period_days: 1, period_day_type: 'uteis', end_type: 'ocorrencias', end_count: 1 })).data;
+    ok(pvS.periods[0].start > sat && dow(pvS.periods[0].start) !== 0 && dow(pvS.periods[0].start) !== 6 && pvS.periods[0].due === pvS.periods[0].start, 'úteis: início no sábado passa para o próximo dia útil');
+    // A antecedência conta do início: início em ~14+ dias com antecedência de 60 já cria a 1ª
+    const recP = (await ricardo('POST', '/recurrences', { project_id: npR, title: 'Relatório mensal (período)', description: 'Relatório do período', freq: 'mensal', start_date: st, period_days: 10, period_day_type: 'corridos', end_type: 'ocorrencias', end_count: 2, lead_days: 20 })).data;
+    const rp = (await ricardo('GET', `/recurrences/${recP.id}`)).data;
+    const t1 = rp.tasks[0];
+    ok(recP.generated >= 1 && t1.start_date === st && t1.due_date === isoAdd(st, 9) && rp.has_period && rp.next_periods !== undefined, 'mensal com período: tarefa com início e término calculado');
+    const recY = (await ricardo('POST', '/recurrences', { project_id: npR, title: 'Renovação anual', description: 'Renovar licenças', freq: 'anual', start_date: st, period_days: 30, period_day_type: 'corridos', end_type: 'nunca', lead_days: 0 })).data;
+    const ry = (await ricardo('GET', `/recurrences/${recY.id}`)).data;
+    ok(ry.freq === 'anual' && recY.generated === 0 && ry.next_periods?.[0]?.start === st && ry.next_periods[0].due === isoAdd(st, 29) && ry.next_periods[1]?.start === `${Number(st.slice(0, 4)) + 1}${st.slice(4)}` && /Todo ano, início em/.test(ry.rule_text), 'anual com período (início + 30 dias corridos; repete no ano seguinte)');
+    ok((await ricardo('PUT', `/recurrences/${recY.id}`, { period_days: '' })).status === 400, 'editar: não dá para tirar o período (a data da regra é o início)');
+    ok((await ricardo('PUT', `/recurrences/${recY.id}`, { period_days: 15, period_day_type: 'uteis' })).status === 200 && (await ricardo('GET', `/recurrences/${recY.id}`)).data.period_days === 15, 'editar: muda a quantidade e o tipo de dias');
+    await ricardo('POST', `/recurrences/${recY.id}/end`, { reason: 'teste' });
+    await ricardo('POST', `/recurrences/${recP.id}/end`, { reason: 'teste', cancel_future: true });
+  }
+
   // Permissões
   ok((await camila('POST', '/recurrences', { project_id: 1, title: 'X', description: 'x', freq: 'diaria', start_date: plus(1), end_type: 'nunca' })).status === 403, 'sem acesso ao projeto não cria recorrência');
   ok((await camila('GET', `/recurrences/${recW.data.id}`)).status === 404, 'sem acesso ao projeto não vê a recorrência');

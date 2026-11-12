@@ -2,7 +2,7 @@
 import { html, api, icon, fmtDate, fmtDateTime, PRIORITY, PROOF } from '../core.js';
 import { toast, sheet } from '../ui.js';
 import { pageHead, taskList, bindCommon } from './shared.js';
-import { endFields, bindEndFields } from './recurrence-fields.js';
+import { endFields, bindEndFields, periodFields } from './recurrence-fields.js';
 
 const statusPill = r => (r.active
   ? html`<span class="pill" style="color:#1F6B41;background:var(--st-concluida-bg);border-color:#B7DCC6">Ativa</span>`
@@ -59,13 +59,13 @@ export async function view({ params, navigate }) {
           <div style="font-weight:650;font-size:15px">${r.rule_text}</div>
           <dl class="kv" style="margin-top:12px">
             <dt>Situação</dt><dd>${statusPill(r)}</dd>
-            <dt>Antecedência</dt><dd>cria cada ocorrência ${r.lead_days} dia(s) antes do prazo</dd>
-            <dt>Duração</dt><dd>${r.duration_days} dia(s) por ocorrência</dd>
+            <dt>Antecedência</dt><dd>cria cada ocorrência ${r.lead_days} dia(s) antes do ${r.has_period ? 'início do período' : 'prazo'}</dd>
+            ${r.has_period ? html`<dt>Período</dt><dd>início + ${r.period_days} ${r.period_day_type === 'corridos' ? (r.period_days === 1 ? 'dia corrido' : 'dias corridos') : (r.period_days === 1 ? 'dia útil' : 'dias úteis')} até o término</dd>` : html`<dt>Duração</dt><dd>${r.duration_days} dia(s) por ocorrência</dd>`}
             <dt>Criadas</dt><dd>${r.generated_count}${r.total_planned ? ` de ${r.total_planned}` : ''} ocorrência(s)</dd>
             <dt>Criada por</dt><dd>${r.creator_name} · ${fmtDateTime(r.created_at)}</dd>
           </dl>
           ${r.active && r.next_dates.length ? html`<div class="sub-label" style="margin-top:12px">Próximas ocorrências</div>
-            <div class="rec-dates">${r.next_dates.map(d => html`<span>${fmtDate(d)}</span>`)}</div>` : ''}
+            <div class="rec-dates">${r.next_periods ? r.next_periods.map(x => html`<span>${fmtDate(x.start)} → ${fmtDate(x.due)}</span>`) : r.next_dates.map(d => html`<span>${fmtDate(d)}</span>`)}</div>` : ''}
         </section>
         <section class="card card-pad">
           <div class="sub-label">Molde da tarefa (vale para as próximas ocorrências)</div>
@@ -131,6 +131,7 @@ export async function edit({ params, state, navigate }) {
             <div class="field"><label for="proof_type">Comprovação exigida</label><select id="proof_type" name="proof_type">${Object.entries(PROOF).map(([k, p]) => opt(k, p.label, r.proof_type))}</select></div>
           </div>
         </fieldset>
+        ${r.has_period ? html`<fieldset class="fieldset form"><legend>Período de cada ocorrência (a partir do início)</legend>${periodFields(r)}</fieldset>` : ''}
         <fieldset class="fieldset form"><legend>Término e antecedência</legend>${endFields(r)}</fieldset>
         <div class="form-error" hidden></div>
         <div class="form-actions"><a class="btn btn-ghost" href="#/recorrencias/${r.id}">Cancelar</a><button class="btn btn-primary" type="submit">${icon('check')}Salvar</button></div>
@@ -138,13 +139,16 @@ export async function edit({ params, state, navigate }) {
     mount(root) {
       const f = root.querySelector('#rec-form');
       bindEndFields(f);
+      // Com período, a duração em dias não se aplica (o término vem da contagem do período)
+      if (r.has_period) f.querySelectorAll('.rec-dur').forEach(e => (e.style.display = 'none'));
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const err = f.querySelector('.form-error');
         err.hidden = true;
         const d = Object.fromEntries(new FormData(f));
         try {
-          await api(`/recurrences/${r.id}`, { method: 'PUT', body: { ...d, end_count: Number(d.end_count), lead_days: Number(d.lead_days), duration_days: Number(d.duration_days) } });
+          await api(`/recurrences/${r.id}`, { method: 'PUT', body: { ...d, end_count: Number(d.end_count), lead_days: Number(d.lead_days), duration_days: Number(d.duration_days),
+            ...(r.has_period ? { period_days: Number(d.period_days), period_day_type: d.period_day_type } : {}) } });
           toast('Recorrência atualizada.');
           navigate(`/recorrencias/${r.id}`);
         } catch (ex) { err.textContent = ex.message; err.hidden = false; }

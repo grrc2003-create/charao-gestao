@@ -4408,3 +4408,6 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
 .ct-saldo-t { color: #9A5B00; font-weight: 600; }
 .ct-settle .pr-se-check { display: flex; gap: 8px; align-items: flex-start; }
 .ct-settle .pr-se-check input { margin-top: 3px; }
+
+/* Recorrência: 4 frequências e período */
+.rec-period .hint { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }

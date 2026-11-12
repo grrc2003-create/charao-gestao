@@ -4,7 +4,8 @@ import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
 import { isAdmin, canAccessProject, canCreateTaskIn, userHasProjectAccess, isManagerRole } from '../lib/permissions.js';
 import { today, addDays } from './metrics.js';
-import { FREQS, END_TYPES, occurrenceDates, describeRule } from './recurrence-rules.js';
+import { FREQS, END_TYPES, occurrenceDates, describeRule, hasPeriod } from './recurrence-rules.js';
+import { addWorkingDays, nextWorkingDay } from './calendar.js';
 import { insertTask, validateAssignee, listVisible, listCancelled, PRIORITIES, PROOF_TYPES } from './tasks.js';
 import { resolveStage } from './stages.js';
 import { saveImageFromDataUrl, cleanFileName, isPdf } from './files.js';
@@ -22,7 +23,8 @@ const BASE = `SELECT r.*, p.code AS project_code, p.name AS project_name, p.stat
 // ---------- Regra ----------
 export const ruleOf = r => ({
   freq: r.freq, interval: r.interval_n, weekdays: r.weekdays ? r.weekdays.split(',').map(Number) : [],
-  month_day: r.month_day, workdays_only: !!r.workdays_only, start_date: r.start_date,
+  month_day: r.month_day, year_month: r.year_month ?? null, period_days: r.period_days ?? null, period_day_type: r.period_day_type ?? null,
+  workdays_only: !!r.workdays_only, start_date: r.start_date,
   end_type: r.end_type, end_date: r.end_date, end_count: r.end_count,
 });
 
@@ -37,8 +39,14 @@ function readRule(body, { creating, current } = {}) {
   const start = date(body.start_date ?? body.due_date, 'Prazo da 1ª ocorrência');
   if (!start) throw badRequest('Informe o prazo da 1ª ocorrência.');
   if (creating && start < today()) throw badRequest('A 1ª ocorrência deve ser hoje ou uma data futura.');
-  const monthDay = freq === 'mensal' ? Number(body.month_day || start.slice(8, 10)) : null;
-  if (freq === 'mensal' && (!Number.isInteger(monthDay) || monthDay < 1 || monthDay > 31)) throw badRequest('Dia do mês inválido.');
+  const monthly = freq === 'mensal' || freq === 'anual';
+  const monthDay = monthly ? Number(body.month_day || start.slice(8, 10)) : null;
+  if (monthly && (!Number.isInteger(monthDay) || monthDay < 1 || monthDay > 31)) throw badRequest(freq === 'anual' ? 'Dia do prazo inválido.' : 'Dia do mês inválido.');
+  const yearMonth = freq === 'anual' ? Number(body.year_month || start.slice(5, 7)) : null;
+  if (freq === 'anual' && (!Number.isInteger(yearMonth) || yearMonth < 1 || yearMonth > 12)) throw badRequest('Mês do prazo inválido.');
+  if (freq === 'anual' && monthDay > lastDay(yearMonth)) throw badRequest('Esse dia não existe no mês escolhido.');
+  // Período (opcional, mensal e anual): a data da regra passa a ser o INÍCIO; o término sai de N dias úteis ou corridos
+  const period = readPeriod(body, freq);
   const endType = oneOf(body.end_type, END_TYPES, 'Término da recorrência');
   const endDate = endType === 'data' ? date(body.end_date, 'Data de término') : null;
   if (endType === 'data' && (!endDate || endDate < start)) throw badRequest('A data de término deve ser igual ou posterior à 1ª ocorrência.');
@@ -46,7 +54,23 @@ function readRule(body, { creating, current } = {}) {
   if (endType === 'ocorrencias' && (!Number.isInteger(endCount) || endCount < 1 || endCount > 500)) throw badRequest('Número de ocorrências inválido (1 a 500).');
   if (current && endType === 'ocorrencias' && endCount < current.generated_count) throw badRequest(`Já foram criadas ${current.generated_count} ocorrência(s); o total não pode ser menor.`);
   if (current && endType === 'data' && current.last_generated_date && endDate < current.last_generated_date) throw badRequest(`Já existe ocorrência com prazo em ${current.last_generated_date.split('-').reverse().join('/')}; escolha uma data igual ou posterior.`);
-  return { freq, interval, weekdays, month_day: monthDay, workdays_only: freq === 'diaria' && !!body.workdays_only, start_date: start, end_type: endType, end_date: endDate, end_count: endCount };
+  return { freq, interval, weekdays, month_day: monthDay, year_month: yearMonth, ...period, workdays_only: freq === 'diaria' && !!body.workdays_only, start_date: start, end_type: endType, end_date: endDate, end_count: endCount };
+}
+const lastDay = m => [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+const blank = v => v === undefined || v === null || v === '' || v === 0 || v === '0';
+function readPeriod(body, freq) {
+  const none = { period_days: null, period_day_type: null };
+  if ((freq !== 'mensal' && freq !== 'anual') || blank(body.period_days)) return none;
+  const days = Number(body.period_days);
+  if (!Number.isInteger(days) || days < 1 || days > 366) throw badRequest('Quantidade de dias do período inválida (1 a 366).');
+  return { period_days: days, period_day_type: oneOf(body.period_day_type, ['uteis', 'corridos'], 'Tipo de dias do período', 'uteis') };
+}
+// Período de uma ocorrência: início na data da regra (úteis: no próximo dia útil da obra/responsável) e término após N dias
+export function periodOf(rule, start, projectId, userId = null) {
+  if (!hasPeriod(rule)) return null;
+  if (rule.period_day_type === 'corridos') return { start, due: addDays(start, rule.period_days - 1) };
+  const s = nextWorkingDay(projectId || null, start, userId || null);
+  return { start: s, due: addWorkingDays(projectId || null, s, rule.period_days - 1, userId || null) };
 }
 
 function readOptions(body) {
@@ -75,7 +99,8 @@ export function previewRule(body) {
   const rule = readRule(body, { creating: false });
   const next = [...occurrenceDates(rule, { limit: 8 })];
   const total = rule.end_type === 'nunca' ? null : [...occurrenceDates(rule, { limit: 501 })].length;
-  return { description: describeRule(rule), next, total };
+  const pid = intOrNull(body.project_id), uid = intOrNull(body.assignee_id);
+  return { description: describeRule(rule), next, total, periods: hasPeriod(rule) ? next.map(d => periodOf(rule, d, pid, uid)) : null };
 }
 
 // ---------- Permissões ----------
@@ -108,6 +133,7 @@ export function generateFor(recId, ref = today()) {
   }
   const rule = ruleOf(r);
   const horizon = addDays(ref, r.lead_days);
+  // Com período, as datas da regra são os inícios: a ocorrência é criada N dias antes do início
   const dates = [...occurrenceDates(rule, { until: horizon, limit: r.generated_count + 200 })].slice(r.generated_count);
   const files = all('SELECT stored_name, mime, caption, original_name FROM recurrence_files WHERE recurrence_id = ?', r.id);
   const created = [];
@@ -120,7 +146,8 @@ export function generateFor(recId, ref = today()) {
       const data = {
         title: r.title, description: r.description, field_summary: r.field_summary, notes: r.notes,
         priority: r.priority, proof_type: r.proof_type, assignee_id: assigneeOk ? r.assignee_id : null,
-        due_date: due, start_date: r.duration_days > 1 ? addDays(due, -(r.duration_days - 1)) : null,
+        ...(() => { const per = periodOf(rule, due, r.project_id, assigneeOk ? r.assignee_id : null);
+          return per ? { due_date: per.due, start_date: per.start } : { due_date: due, start_date: r.duration_days > 1 ? addDays(due, -(r.duration_days - 1)) : null }; })(),
       };
       // Classificação removida do projeto: ocorrência vai para "Geral"
       const stageOk = r.stage_id && one('SELECT id FROM project_stages WHERE id = ? AND project_id = ?', r.stage_id, r.project_id);
@@ -164,10 +191,10 @@ export function createRecurrence(ctx, body, ip) {
   const images = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
   const id = tx(() => {
     const r = run(`INSERT INTO recurrences (project_id, title, description, field_summary, notes, assignee_id, stage_id, priority, proof_type,
-        duration_days, freq, interval_n, weekdays, month_day, workdays_only, start_date, end_type, end_date, end_count, lead_days, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        duration_days, freq, interval_n, weekdays, month_day, year_month, period_days, period_day_type, workdays_only, start_date, end_type, end_date, end_count, lead_days, created_by, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       projectId, t.title, t.description, t.field_summary, t.notes, t.assignee_id, t.stage_id, t.priority, t.proof_type,
-      opt.duration_days, rule.freq, rule.interval, rule.weekdays.join(',') || null, rule.month_day, rule.workdays_only ? 1 : 0,
+      opt.duration_days, rule.freq, rule.interval, rule.weekdays.join(',') || null, rule.month_day, rule.year_month, rule.period_days, rule.period_day_type, rule.workdays_only ? 1 : 0,
       rule.start_date, rule.end_type, rule.end_date, rule.end_count, opt.lead_days, ctx.user.id, nowIso(), nowIso());
     const rid = Number(r.lastInsertRowid);
     for (const img of images) {
@@ -192,7 +219,7 @@ export function listRecurrences(ctx, { project } = {}) {
 function decorate(ctx, r) {
   const rule = ruleOf(r);
   const next = r.active ? [...occurrenceDates(rule, { limit: r.generated_count + 3 })].slice(r.generated_count) : [];
-  return { ...r, rule, rule_text: describeRule(rule), next_dates: next, can_manage: canManage(ctx, r) };
+  return { ...r, rule, rule_text: describeRule(rule), next_dates: next, has_period: hasPeriod(rule), can_manage: canManage(ctx, r) };
 }
 
 export function getRecurrence(ctx, id) {
@@ -200,6 +227,7 @@ export function getRecurrence(ctx, id) {
   const d = decorate(ctx, r);
   const rule = ruleOf(r);
   d.next_dates = r.active ? [...occurrenceDates(rule, { limit: r.generated_count + 6 })].slice(r.generated_count) : [];
+  d.next_periods = d.has_period ? d.next_dates.map(x => periodOf(rule, x, r.project_id, r.assignee_id)) : null;
   d.total_planned = r.end_type === 'nunca' ? null : [...occurrenceDates(rule, { limit: 501 })].length;
   d.files = all('SELECT id, mime, caption, original_name FROM recurrence_files WHERE recurrence_id = ? ORDER BY id', id);
   d.tasks = [...listVisible(ctx, 'WHERE t.recurrence_id = ?', id), ...listCancelled(ctx, 'WHERE t.recurrence_id = ?', id)]
@@ -213,13 +241,16 @@ export function updateRecurrence(ctx, id, body, ip) {
   if (!r.active) throw badRequest('Recorrência encerrada não pode ser editada.');
   const t = readTemplate({ ...r, ...body }, r.project_id);
   // Frequência e 1ª ocorrência são fixas; término, antecedência e duração podem mudar
-  const rule = readRule({ ...ruleOf(r), interval: r.interval_n, weekdays: ruleOf(r).weekdays, ...pick(body, ['end_type', 'end_date', 'end_count']) }, { current: r });
+  // Com período: dá para mudar a quantidade e o tipo de dias, mas não tirar o período (a data da regra é o início)
+  const hadPeriod = hasPeriod(ruleOf(r));
+  const rule = readRule({ ...ruleOf(r), interval: r.interval_n, weekdays: ruleOf(r).weekdays, ...pick(body, ['end_type', 'end_date', 'end_count', ...(hadPeriod ? ['period_days', 'period_day_type'] : [])]) }, { current: r });
+  if (hadPeriod && !hasPeriod(rule)) throw badRequest('Informe a quantidade de dias do período.');
   const opt = readOptions({ lead_days: body.lead_days ?? r.lead_days, duration_days: body.duration_days ?? r.duration_days });
   tx(() => {
     run(`UPDATE recurrences SET title=?, description=?, field_summary=?, notes=?, assignee_id=?, stage_id=?, priority=?, proof_type=?,
-        duration_days=?, lead_days=?, end_type=?, end_date=?, end_count=?, updated_at=? WHERE id=?`,
+        duration_days=?, lead_days=?, end_type=?, end_date=?, end_count=?, period_days=?, period_day_type=?, updated_at=? WHERE id=?`,
       t.title, t.description, t.field_summary, t.notes, t.assignee_id, t.stage_id, t.priority, t.proof_type,
-      opt.duration_days, opt.lead_days, rule.end_type, rule.end_date, rule.end_count, nowIso(), id);
+      opt.duration_days, opt.lead_days, rule.end_type, rule.end_date, rule.end_count, rule.period_days, rule.period_day_type, nowIso(), id);
     audit(ctx.user.id, 'recurrence', id, 'Recorrência alterada (vale para as próximas ocorrências)', { titulo: t.title, regra: describeRule(rule), antecedencia: opt.lead_days }, ip);
   });
   generateFor(id);

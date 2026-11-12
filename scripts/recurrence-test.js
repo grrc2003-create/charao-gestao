@@ -1,5 +1,5 @@
 // Testes do motor de datas das tarefas recorrentes (sem banco). Uso: node scripts/recurrence-test.js
-import { occurrenceDates, describeRule } from '../server/services/recurrence-rules.js';
+import { occurrenceDates, describeRule, hasPeriod } from '../server/services/recurrence-rules.js';
 
 let passed = 0, failed = 0;
 const ok = (cond, name, extra = '') => { if (cond) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.log(`  ✗ ${name} ${extra}`); } };
@@ -31,6 +31,16 @@ d = dates({ freq: 'semanal', interval: 1, weekdays: [1], start_date: '2026-10-05
 ok(d.join() === '2026-10-05,2026-10-12,2026-10-19', 'horizonte menor que a data final', d.join());
 ok(describeRule({ freq: 'semanal', interval: 1, weekdays: [3, 1], start_date: '2026-10-05', end_type: 'data', end_date: '2026-12-31' })
   === 'Toda semana: segunda e quarta · a partir de 05/10/2026 · até 31/12/2026', 'descrição legível da regra');
+// Anual e período (início e fim) de cada ocorrência
+d = dates({ freq: 'anual', interval: 1, start_date: '2027-04-15', end_type: 'ocorrencias', end_count: 3 });
+ok(d.join() === '2027-04-15,2028-04-15,2029-04-15', 'anual no mesmo dia/mês', d.join());
+d = dates({ freq: 'anual', interval: 1, month_day: 29, year_month: 2, start_date: '2027-03-01', end_type: 'ocorrencias', end_count: 2 });
+ok(d.join() === '2028-02-29,2029-02-28', 'anual 29/02: ano sem 29 usa 28; 1ª não antecede a data inicial', d.join());
+d = dates({ freq: 'anual', interval: 2, month_day: 10, year_month: 1, start_date: '2027-01-10', end_type: 'data', end_date: '2031-12-31' });
+ok(d.join() === '2027-01-10,2029-01-10,2031-01-10', 'a cada 2 anos até a data final', d.join());
+ok(hasPeriod({ freq: 'mensal', period_days: 5 }) && hasPeriod({ freq: 'anual', period_days: 30 }) && !hasPeriod({ freq: 'mensal' }) && !hasPeriod({ freq: 'semanal', period_days: 5 }), 'período só no mensal e anual, com quantidade de dias');
+ok(describeRule({ freq: 'mensal', interval: 1, month_day: 1, period_days: 5, period_day_type: 'uteis', start_date: '2027-03-01', end_type: 'nunca' }).startsWith('Todo mês, início no dia 1 + 5 dias úteis'), 'descrição: início + dias úteis (mensal)');
+ok(describeRule({ freq: 'anual', interval: 1, month_day: 1, year_month: 3, period_days: 30, period_day_type: 'corridos', start_date: '2027-03-01', end_type: 'nunca' }).startsWith('Todo ano, início em 01/03 + 30 dias corridos'), 'descrição: início + dias corridos (anual)');
 
 console.log(`\n${passed} passaram, ${failed} falharam`);
 process.exitCode = failed ? 1 : 0;

@@ -2,7 +2,8 @@
 // setor e admissão). Pessoas sem acesso ao sistema também entram (cadastradas aqui, sem login).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/http.js';
-import { isAdmin, requireSection, hasSection, teamIds } from '../lib/permissions.js';
+import { isAdmin, requireSection, hasSection, teamIds, sameCompanyOk, companyRestriction } from '../lib/permissions.js';
+import { applyUserCompany } from './companies.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
 import { NO_LOGIN, placeholderEmail, isPlaceholderEmail, assertNoManagerCycle } from './users.js';
@@ -44,7 +45,7 @@ function person(u, load, vac, ctx) {
   const l = load.get(u.id) || { open: 0, late: 0, review: 0 };
   return {
     id: u.id, name: u.name, job_title: u.job_title, department: u.department, responsibilities: u.responsibilities, role: u.role,
-    is_external: u.is_external, company: u.company, login_enabled: u.login_enabled, active: u.active, manager_id: u.manager_id,
+    is_external: u.is_external, company: u.company, company_id: u.company_id ?? null, login_enabled: u.login_enabled, active: u.active, manager_id: u.manager_id,
     admission_date: u.admission_date, vacation_since: u.vacation_since, ...workOf(u), employment: u.employment || null, employment_suggested: u.employment ? null : suggestedEmployment(u.id), phone: hasSection(ctx.user, 'equipe') ? u.phone : null,
     email: isPlaceholderEmail(u.email) ? null : u.email,
     missing_function: missingFunction(u),
@@ -67,7 +68,8 @@ function vacationFlags() {
 
 export function orgChart(ctx, { inactive = false } = {}) {
   requireTeam(ctx);
-  const users = all(`SELECT * FROM users ${inactive ? '' : 'WHERE active = 1'} ORDER BY name`);
+  // Empresa de fora do grupo: só as pessoas da própria empresa
+  const users = all(`SELECT * FROM users ${inactive ? '' : 'WHERE active = 1'} ORDER BY name`).filter(u => sameCompanyOk(ctx, u.id));
   const load = taskLoad();
   const vac = vacationFlags();
   const people = users.map(u => person(u, load, vac, ctx));
@@ -99,8 +101,9 @@ export function orgChart(ctx, { inactive = false } = {}) {
 export function moveManager(ctx, id, body, ip) {
   requireTeam(ctx);
   const u = one('SELECT * FROM users WHERE id = ?', id);
-  if (!u || !u.active) throw notFound('Pessoa não encontrada.');
+  if (!u || !u.active || !sameCompanyOk(ctx, id)) throw notFound('Pessoa não encontrada.');
   const managerId = intOrNull(body.manager_id);
+  if (managerId && !sameCompanyOk(ctx, managerId)) throw badRequest('Gestor inválido.');
   if (!isAdmin(ctx.user) && u.role === 'admin') throw forbidden('Somente administradores alteram a posição de administradores.');
   if (managerId) {
     const m = one('SELECT * FROM users WHERE id = ?', managerId);
@@ -120,7 +123,7 @@ export function moveManager(ctx, id, body, ip) {
 // ---------- Cadastro da Equipe ----------
 export function listTeam(ctx) {
   requireRoster(ctx);
-  const users = all('SELECT * FROM users ORDER BY name');
+  const users = all('SELECT * FROM users ORDER BY name').filter(u => sameCompanyOk(ctx, u.id));
   const byId = new Map(users.map(u => [u.id, u]));
   const load = taskLoad();
   const vac = vacationFlags();
@@ -134,7 +137,7 @@ export function listTeam(ctx) {
 export function getMember(ctx, id) {
   requireRoster(ctx);
   const u = one('SELECT * FROM users WHERE id = ?', id);
-  if (!u) throw notFound('Pessoa não encontrada.');
+  if (!u || !sameCompanyOk(ctx, id)) throw notFound('Pessoa não encontrada.');
   return { ...person(u, taskLoad(), vacationFlags(), ctx), manager_name: u.manager_id ? one('SELECT name FROM users WHERE id = ?', u.manager_id)?.name : null };
 }
 
@@ -179,6 +182,7 @@ export function createMember(ctx, body, ip) {
     const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since, work_days, work_shift, employment)
       VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.work_days, d.work_shift, d.employment);
     const nid = Number(r.lastInsertRowid);
+    applyUserCompany(nid, body, { fallback: companyRestriction(ctx), only: companyRestriction(ctx) });
     audit(ctx.user.id, 'user', nid, 'Pessoa cadastrada na Gestão da Equipe (sem acesso ao sistema)', { nome: d.name, funcao: d.job_title }, ip);
     return nid;
   });
@@ -188,7 +192,7 @@ export function createMember(ctx, body, ip) {
 export function updateMember(ctx, id, body, ip) {
   requireRoster(ctx);
   const u = one('SELECT * FROM users WHERE id = ?', id);
-  if (!u) throw notFound('Pessoa não encontrada.');
+  if (!u || !sameCompanyOk(ctx, id)) throw notFound('Pessoa não encontrada.');
   if (!isAdmin(ctx.user) && u.role === 'admin') throw forbidden('Somente administradores alteram o cadastro de administradores.');
   const d = readMember(body, { creating: false, current: u });
   if (u.is_external && !d.manager_id) throw badRequest('Terceirizado precisa de um líder interno.');
@@ -204,6 +208,7 @@ export function updateMember(ctx, id, body, ip) {
       const active = body.active === undefined ? u.active : body.active ? 1 : 0;
       run('UPDATE users SET name = ?, phone = ?, active = ? WHERE id = ?', d.name, d.phone, active, id);
     }
+    applyUserCompany(id, body, { only: companyRestriction(ctx) });
     audit(ctx.user.id, 'user', id, 'Cadastro da equipe atualizado', { nome: d.name || u.name, funcao: d.job_title, setor: d.department, admissao: d.admission_date, vinculo: d.employment, jornada: d.work_days, turno: d.work_shift }, ip);
   });
   return getMember(ctx, id);

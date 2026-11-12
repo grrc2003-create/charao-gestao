@@ -4,7 +4,7 @@ import { html, raw, api, icon, fmtDate, initials, ROLE, avatarUrl } from '../cor
 import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
 import { deleteButton, bindDeleteButton } from './user-delete.js';
 import { toast, sheet, confirmSheet } from '../ui.js';
-import { pageHead, kpi } from './shared.js';
+import { pageHead, kpi, companyOptions, companiesIn } from './shared.js';
 import { vacPill } from './vacation-ui.js';
 
 const ROLE_COLOR = { admin: '#C9520F', gestor: '#2A3D50', coordenador: '#1F6FB2', colaborador: '#5B6B7A' };
@@ -45,7 +45,7 @@ function card(p, { childCount = 0, collapsed = false, print = false } = {}) {
   return html`<div class="org-card ${p.is_external ? 'is-ext' : ''} ${p.missing_function ? 'is-missing' : ''}" data-pid="${p.id}" ${print ? '' : html`draggable="true" tabindex="0" role="button" aria-label="${p.name}"`} style="--c:${colorOf(p)}">
     <div class="org-top"><span class="org-av">${av(p)}</span><div class="org-who"><b>${p.name}</b><small>${roleOf(p)}${p.department ? ` · ${p.department}` : ''}</small></div></div>
     <div class="org-fn ${p.missing_function ? 'warn' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</div>
-    ${p.is_external && p.company ? html`<div class="org-meta">${p.company}</div>` : ''}
+    ${p.company ? html`<div class="org-meta">${p.company}</div>` : ''}
     <div class="org-tags">
       ${!p.login_enabled ? html`<span class="org-tag">Sem acesso</span>` : ''}
       ${v ? html`<span class="org-tag ${v.now ? 'is-vac' : 'is-vac-soon'}">${v.now ? `De férias até ${dm(v.end_date)}` : `Férias ${dm(v.start_date)}`}</span>` : ''}
@@ -206,6 +206,10 @@ const FILTERS = [['', 'Todos'], ['pendentes', 'Função não detalhada'], ['sem_
 export async function list({ query, setQuery, state }) {
   const data = await api('/team');
   const f = query.get('f') || '';
+  // Filtro por empresa (só aparece quando há pessoas de mais de uma empresa)
+  const cos = companiesIn(state.meta, data.people.map(p => p.company_id));
+  const co = Number(query.get('empresa')) || 0;
+  if (co) data.people = data.people.filter(p => p.company_id === co);
   const match = p => (f === 'inativos' ? !p.active : p.active) && (!f || f === 'inativos'
     || (f === 'pendentes' && p.missing_function) || (f === 'sem_acesso' && !p.login_enabled) || (f === 'terceirizados' && p.is_external)
     || (f === 'sem_admissao' && !p.is_external && !p.admission_date));
@@ -234,18 +238,20 @@ export async function list({ query, setQuery, state }) {
         ${kpi({ label: 'Sem data de admissão', value: act.filter(p => !p.is_external && !p.admission_date).length, color: '#B7791F', foot: 'necessária para as férias' })}
       </div>
       <div class="chips section" role="group" aria-label="Filtro">${FILTERS.map(([k, l]) => html`<button type="button" class="chip" data-f="${k}" aria-pressed="${f === k}">${l}<span class="n">${count(k)}</span></button>`)}</div>
-      <input type="search" id="tm-q" class="section" placeholder="Buscar por nome, função ou setor…" aria-label="Buscar" style="width:100%;max-width:420px">
+      <div class="tm-search section"><input type="search" id="tm-q" placeholder="Buscar por nome, função ou setor…" aria-label="Buscar" style="width:100%;max-width:420px">
+        ${cos.length > 1 ? html`<select id="tm-co" aria-label="Empresa"><option value="">Todas as empresas</option>${cos.map(c => html`<option value="${c.id}" ${co === c.id ? 'selected' : ''}>${c.name}</option>`)}</select>` : ''}</div>
       ${deps.map(dep => html`<section class="card section" data-dep><div class="card-head"><h2>${dep}</h2><span class="sub">${byDep.get(dep).length}</span></div>
         <ul class="rows">${byDep.get(dep).map(p => html`<li data-text="${`${p.name} ${p.job_title || ''} ${p.department || ''}`.toLowerCase()}"><a class="row-link" href="#/equipe/cadastro/${p.id}">
           <span class="org-av" style="--c:${colorOf(p)}">${av(p)}</span>
           <div class="grow"><div class="row-title">${p.name}</div>
-            <div class="row-meta"><span class="${p.missing_function ? 'late' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</span><span>${roleOf(p)}</span>
+            <div class="row-meta"><span class="${p.missing_function ? 'late' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</span><span>${roleOf(p)}</span>${p.company ? html`<span class="tm-co">${p.company}</span>` : ''}
               ${p.manager_name ? html`<span>${p.is_external ? 'Líder' : 'Gestor'}: ${p.manager_name}</span>` : ''}${p.admission_date ? html`<span>admissão ${fmtDate(p.admission_date)}</span>` : ''}${p.employment ? html`<span>${{ clt: 'CLT', pj: 'PJ', estagio: 'Estagiário' }[p.employment]}</span>` : ''}</div></div>
           <div class="tm-pills">${!p.login_enabled ? html`<span class="org-tag">Sem acesso</span>` : html`<span class="org-tag">${roleOf(p)}</span>`}${p.vacation_summary && p.vacation_summary.status !== 'concluido' && p.vacation_summary.status !== 'disponivel' ? vacPill(p.vacation_summary.status) : ''}</div>
           <span class="chev">${icon('chevron')}</span></a></li>`)}</ul></section>`)}
       ${!shown.length ? html`<p class="muted">Ninguém neste filtro.</p>` : ''}`,
     mount(root, ctx) {
-      root.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { setQuery({ f: b.dataset.f }); ctx.render(); }));
+      root.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { setQuery({ f: b.dataset.f, empresa: co || '' }); ctx.render(); }));
+      root.querySelector('#tm-co')?.addEventListener('change', e => { setQuery({ f, empresa: e.target.value }); ctx.render(); });
       root.querySelector('#tm-q').addEventListener('input', e => {
         const q = e.target.value.trim().toLowerCase();
         root.querySelectorAll('[data-dep]').forEach(s => {
@@ -275,6 +281,8 @@ export async function form({ params, state, navigate }) {
       <form class="card card-pad form" id="tm-form" novalidate style="max-width:860px">
         ${!creating ? avatarEditor(u, { canEdit: u.role !== 'admin' || state.user.role === 'admin' || u.id === state.user.id }) : ''}
         ${own ? html`<div class="field"><label class="req" for="tm-name">Nome completo</label><input type="text" id="tm-name" name="name" maxlength="120" required value="${u.name}"></div>` : ''}
+        <div class="field" style="max-width:420px"><label for="tm-co-sel">Empresa</label><select id="tm-co-sel" name="company_id">${companyOptions(state.meta, u.company_id ?? (u.is_external ? '' : (state.meta.my_company || (state.meta.companies || []).find(c => c.is_default)?.id)), { empty: u.is_external ? 'Não informada' : '' })}</select>
+          <span class="hint">Empresa à qual a pessoa pertence (cadastro em Configurações → Empresas). Não muda o acesso.</span></div>
         <div class="form-row">
           <div class="field"><label class="req" for="tm-fn">Função</label><input type="text" id="tm-fn" name="job_title" maxlength="120" required value="${u.job_title || ''}" placeholder="Ex.: Mestre de obras, Engenheira de planejamento"></div>
           <div class="field"><label for="tm-dep">Setor</label><input type="text" id="tm-dep" name="department" maxlength="80" list="tm-deps" value="${u.department || ''}" placeholder="Ex.: Obras, Engenharia, Administrativo">

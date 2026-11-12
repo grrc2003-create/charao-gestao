@@ -137,8 +137,29 @@ export function canManageProject(ctx, projectId) {
   return projectId == null || canAccessProject(user, projectId, ctx.projects);
 }
 
+// Empresa: quem é de empresa de fora do grupo (parceira/terceirizada) só enxerga as pessoas da própria empresa.
+// Administradores e quem é do grupo (Charão, LuS) seguem as regras de sempre.
+function viewerCompany(ctx) {
+  if (ctx._vco === undefined) {
+    try { ctx._vco = one('SELECT c.id, c.kind FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = ?', ctx.user.id) || null; } catch { ctx._vco = null; }
+  }
+  return ctx._vco;
+}
+export function companyRestriction(ctx) {
+  if (!ctx?.user || isAdmin(ctx.user)) return null;
+  const c = viewerCompany(ctx);
+  return c && c.kind !== 'grupo' ? c.id : null;
+}
+export function sameCompanyOk(ctx, userId) {
+  const c = companyRestriction(ctx);
+  if (!c || userId === ctx.user.id) return true;
+  if (!ctx._uco) ctx._uco = new Map(all('SELECT id, company_id FROM users').map(r => [r.id, r.company_id]));
+  return ctx._uco.get(userId) === c;
+}
+
 export function canSeeUser(ctx, userId) {
   const { user } = ctx;
+  if (!sameCompanyOk(ctx, userId)) return false;
   return isAdmin(user) || user.id === userId || ctx.team.has(userId) || hasSection(user, 'cadastro_usuarios');
 }
 

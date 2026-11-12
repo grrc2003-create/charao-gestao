@@ -4411,3 +4411,29 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
 
 /* Recorrência: 4 frequências e período */
 .rec-period .hint { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+
+/* Empresas */
+.pill-co { background: #EEF3F8; color: #2A3D50; border: 1px solid #D5E0EA; }
+.co-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.co-item { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.6fr) minmax(0, 1fr) auto auto 28px; gap: 8px; align-items: center; }
+.co-item.is-inactive input[data-co=name] { opacity: .55; text-decoration: line-through; }
+.co-use { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.co-item .switch { margin: 0; white-space: nowrap; }
+@media (max-width: 720px) { .co-item { grid-template-columns: 1fr 1fr; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); } .co-item input[data-co=name] { grid-column: 1 / -1; } }
+.tm-search { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tm-search select { width: auto; max-width: 280px; }
+.tm-co { color: #2A3D50; font-weight: 600; }
+
+/* Empresas: logo */
+.co-item { grid-template-columns: 64px minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr) auto auto 28px; }
+.co-logo { position: relative; display: flex; align-items: center; justify-content: center; width: 64px; height: 40px; }
+.co-logo > img { max-width: 64px; max-height: 40px; object-fit: contain; }
+.co-logo-btn { width: 64px; height: 40px; border: 1px dashed var(--line); border-radius: var(--radius-sm); background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 2px; cursor: pointer; color: var(--muted); }
+.co-logo-btn img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.co-logo-btn svg { width: 14px; height: 14px; }
+.co-logo-btn small { font-size: 10px; }
+.co-logo-rm { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); background: #fff; font-size: 10px; line-height: 1; padding: 0; cursor: pointer; }
+@media (max-width: 720px) { .co-item { grid-template-columns: 64px 1fr; } .co-item input[data-co=name] { grid-column: auto; } }
+/* Logo da empresa de quem usa o sistema */
+.sidebar-brand.is-company img { max-height: 72px; width: auto; max-width: 100%; object-fit: contain; display: block; margin: 0 auto; }
+.topbar-brand.is-company img { height: 30px; width: auto; max-width: 150px; object-fit: contain; }

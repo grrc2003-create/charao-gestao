@@ -10,7 +10,7 @@ import {
   checkLoginRate, registerLoginFailure, clearLoginFailures, hashPassword, validatePasswordStrength,
 } from './lib/auth.js';
 import { seedDemo } from './demo-data.js';
-import { accessContext, canAccessProject, canSeeUser, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
+import { accessContext, canAccessProject, canSeeUser, companyRestriction, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
 import { evolution } from './services/evolution.js';
 import * as Projects from './services/projects.js';
@@ -23,6 +23,7 @@ import * as Finance from './services/finance.js';
 import * as FinanceImport from './services/finance-import.js';
 import * as MaisControle from './services/mais-controle.js';
 import * as TaskImport from './services/task-import.js';
+import * as Companies from './services/companies.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
@@ -230,13 +231,16 @@ api.get('/api/evolution', (req, res, { ctx, query }) => {
   send(res, 200, { scope, ...evolution({ tasks: units, people, overallLabel: companyLabel }) });
 });
 
-api.get('/api/dashboard', (req, res, { ctx }) => {
+api.get('/api/dashboard', (req, res, { ctx, query }) => {
   requireSection(ctx.user, 'dashboard');
-  const tasks = Tasks.listVisible(ctx);
+  // Filtro por empresa (empresa do projeto)
+  const empresa = intOrNull(query.get('empresa'));
+  const projCompany = empresa ? new Map(all('SELECT id, company_id FROM projects').map(p => [p.id, p.company_id])) : null;
+  const tasks = Tasks.listVisible(ctx).filter(t => !empresa || projCompany.get(t.project_id) === empresa);
   // Indicadores: cada item de check-list conta como uma subtarefa
   const clItems = Checklist.checklistItemsAsSubtasks(tasks);
   const units = [...tasks, ...clItems];
-  const projects = Projects.listProjects(ctx, units);
+  const projects = Projects.listProjects(ctx, units).filter(p => !empresa || p.company_id === empresa);
   const users = Users.listUsers(ctx, units).filter(u => u.active && u.stats.assigned > 0);
   const ref = today();
   const counted = tasks.filter(countsInIndicators);
@@ -269,20 +273,26 @@ api.get('/api/dashboard', (req, res, { ctx }) => {
     team_size: team.length,
     my_checklist: Checklist.myPendingItems(ctx),
     checklists: Checklist.checklistDashboard(tasks, { ctx }),
+    empresa,
   });
 });
 
 api.get('/api/meta', (req, res, { ctx }) => {
-  const projects = all(`SELECT id, code, name, status, kind, specialty_template_id FROM projects ORDER BY kind = 'interno', code`)
+  const projects = all(`SELECT id, code, name, status, kind, specialty_template_id, company_id FROM projects ORDER BY kind = 'interno', code`)
     .filter(p => ctx.projects === null || ctx.projects.has(p.id))
     .map(p => ({ ...p, stages: all('SELECT id, name, is_default FROM project_stages WHERE project_id = ? ORDER BY is_default DESC, sort_order, id', p.id),
       specialties: Settings.specialtiesOf(p.specialty_template_id) }));
-  const users = all(`SELECT id, name, role, job_title, active, manager_id, is_external, company, login_enabled FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
+  const users = all(`SELECT id, name, role, job_title, active, manager_id, is_external, company, company_id, login_enabled FROM users ORDER BY name`).filter(u => canSeeUser(ctx, u.id));
   // Para filtros de tarefas também listamos responsáveis visíveis nas tarefas (sem dados pessoais)
   const assignees = new Map();
   for (const t of Tasks.listVisible(ctx)) if (t.assignee_id) assignees.set(t.assignee_id, { id: t.assignee_id, name: t.assignee_name });
   send(res, 200, {
     projects, users,
+    // Empresas (Configurações → Empresas): seleção no cadastro de pessoas e projetos e filtros
+    companies: Companies.listCompanies().map(c => ({ id: c.id, name: c.name, kind: c.kind, is_default: c.is_default })),
+    my_company: companyRestriction(ctx),
+    // Logo do sistema para quem está usando: o da empresa da pessoa (se tiver); senão, o padrão
+    brand: Companies.brandFor(one('SELECT company_id FROM users WHERE id = ?', ctx.user.id)),
     // Especialidades de todos os modelos (usadas quando a obra ainda não tem modelo escolhido)
     specialties_all: [...new Set(Settings.listSpecialtyTemplates().flatMap(t => t.items))],
     assignees: [...assignees.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
@@ -763,6 +773,11 @@ api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listS
 api.put('/api/settings/specialties', (req, res, { ctx, body }) => send(res, 200, Settings.saveSpecialtyTemplates(ctx, body.templates, clientIp(req))));
 api.get('/api/settings/contract-types', (req, res, { ctx, query }) => { Contracts.requireContracts(ctx.user); send(res, 200, Settings.listContractTypes({ includeInactive: query.get('all') === '1' })); });
 api.put('/api/settings/contract-types', (req, res, { ctx, body }) => { Contracts.requireContracts(ctx.user); send(res, 200, Settings.saveContractTypes(ctx, body.types, clientIp(req))); });
+api.post('/api/settings/companies/:id/logo', (req, res, { ctx, params, body }) => send(res, 200, Companies.setCompanyLogo(ctx, intOrNull(params.id), body, clientIp(req))));
+api.delete('/api/settings/companies/:id/logo', (req, res, { ctx, params }) => send(res, 200, Companies.removeCompanyLogo(ctx, intOrNull(params.id), clientIp(req))));
+api.get('/api/companies/:id/logo', (req, res, { params }) => sendFile(req, res, Companies.companyLogoFile(intOrNull(params.id))));
+api.get('/api/settings/companies', (req, res, { query }) => send(res, 200, Companies.listCompanies({ includeInactive: query.get('all') === '1' })));
+api.put('/api/settings/companies', (req, res, { ctx, body }) => send(res, 200, Companies.saveCompanies(ctx, body.companies, clientIp(req))));
 api.get('/api/settings/project-types', (req, res, { query }) => send(res, 200, Settings.listProjectTypes({ includeInactive: query.get('all') === '1' })));
 api.put('/api/settings/project-types', (req, res, { ctx, body }) => send(res, 200, Settings.saveProjectTypes(ctx, body.types, clientIp(req))));
 api.get('/api/settings/record-types', (req, res, { query }) => send(res, 200, Records.listRecordTypes({ includeInactive: query.get('all') === '1' })));

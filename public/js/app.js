@@ -271,11 +271,14 @@ function openMoreMenu(items) {
 
 function shell() {
   const u = state.user;
+  // Logo do sistema: o da empresa de quem está usando (Configurações → Empresas), senão o da Charão
+  const brand = state.meta?.brand || null;
+  document.title = `${brand ? brand.name : 'Charão'} · Gestão de Obras`;
   const app = document.getElementById('app');
   const mob = mobileNav();
   app.innerHTML = html`
     <aside class="sidebar" aria-label="Navegação principal">
-      <a href="#/" class="sidebar-brand" aria-label="Charão — início"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção"></a>
+      <a href="#/" class="sidebar-brand ${brand ? 'is-company' : ''}" aria-label="${brand ? brand.name : 'Charão'} — início"><img src="${brand ? brand.logo : '/assets/logo.webp'}" alt="${brand ? brand.name : 'Charão Engenharia & Construção'}"></a>
       <div class="sidebar-tag">Gestão de Obras</div>
       <nav>${navItems().map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${label}</span></a>`)}
         ${state.meta?.can.field ? html`<a href="#/campo" data-nav="/campo">${icon('team')}<span>Folha de Campo</span></a>` : ''}
@@ -298,7 +301,7 @@ function shell() {
       ${state.demo ? html`<div class="demo-flag" title="Os dados exibidos são fictícios para testes">Ambiente de demonstração</div>` : ''}
     </aside>
     <header class="topbar">
-      <a href="#/" class="topbar-brand" aria-label="Início">${brandMark(30)}<span><b>CHARÃO</b><small>Gestão de Obras</small></span></a>
+      <a href="#/" class="topbar-brand ${brand ? 'is-company' : ''}" aria-label="Início">${brand ? html`<img src="${brand.logo}" alt="${brand.name}"><span><small>Gestão de Obras</small></span>` : html`${brandMark(30)}<span><b>CHARÃO</b><small>Gestão de Obras</small></span>`}</a>
       <a href="#/conta" class="topbar-user" aria-label="Minha conta">${avatar(u.name, 'sm', u.id)}</a>
     </header>
     <main id="view" tabindex="-1"></main>
@@ -394,7 +397,7 @@ export async function render() {
     if (token !== renderToken) return;
     root.innerHTML = v.html.toString();
     // docTitle: título completo da aba (vira o nome do PDF), para documentos de outra empresa do grupo
-    if (v.title) { document.title = v.docTitle || `${v.title} · Charão`; setCurrentTitle(v.title); }
+    if (v.title) { document.title = v.docTitle || `${v.title} · ${state.meta?.brand?.name || 'Charão'}`; setCurrentTitle(v.title); }
     if (!printMode) window.scrollTo(0, same ? keepY : 0);
     v.mount?.(root, ctx);
     if (same) {

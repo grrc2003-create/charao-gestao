@@ -59,6 +59,18 @@ export async function view({ state, reloadMeta, query }) {
   const [reasons, general, templates, stageTpls, cal, types] = await Promise.all([api('/settings/reasons', { query: { all: '1' } }), api('/settings/general'),
     api('/settings/specialties'), api('/settings/stage-templates'), api('/settings/calendar'), api('/settings/project-types', { query: { all: '1' } })]);
   const recTypes = await api('/settings/record-types', { query: { all: '1' } });
+  const companies = state.user.role === 'admin' ? await api('/settings/companies', { query: { all: '1' } }).catch(() => null) : null;
+  const CO_KIND = { grupo: 'Do grupo', parceira: 'Outra empresa', terceirizada: 'Terceirizada' };
+  const coItem = c => html`<li class="co-item ${c.active ? '' : 'is-inactive'}" data-id="${c.id || ''}" data-group="${c.group_key ? '1' : ''}">
+    <span class="co-logo">${c.id && !c.is_default ? html`<button type="button" class="co-logo-btn" data-co-logo="${c.id}" title="${c.logo_url ? 'Trocar o logo' : 'Enviar o logo'}">${c.logo_url ? html`<img src="${c.logo_url}" alt="Logo ${c.name}">` : html`${icon('plus')}<small>Logo</small>`}</button>
+      ${c.logo_file ? html`<button type="button" class="co-logo-rm" data-co-logo-rm="${c.id}" aria-label="Remover o logo">✕</button>` : ''}` : c.is_default ? html`<img src="/assets/logo.webp" alt="Logo do sistema" title="Logo padrão do sistema">` : html`<small class="muted" title="Salve a empresa para enviar o logo">Logo</small>`}</span>
+    <input type="text" data-co="name" maxlength="160" value="${c.name || ''}" aria-label="Nome da empresa" required>
+    <select data-co="kind" aria-label="Tipo" ${c.group_key ? 'disabled' : ''}>${(c.group_key ? ['grupo'] : ['parceira', 'terceirizada']).map(k => html`<option value="${k}" ${c.kind === k ? 'selected' : ''}>${CO_KIND[k]}</option>`)}</select>
+    <input type="text" data-co="cnpj" maxlength="20" value="${c.cnpj || ''}" placeholder="CNPJ (opcional)" aria-label="CNPJ">
+    <span class="co-use">${c.people || 0} pessoa(s) · ${c.projects || 0} projeto(s)</span>
+    <label class="switch" title="${c.is_default ? 'Empresa principal: sempre ativa' : 'Ativa'}"><input type="checkbox" data-co="active" ${c.active ? 'checked' : ''} ${c.is_default ? 'disabled' : ''}>Ativa</label>
+    ${c.group_key || c.people || c.projects ? html`<span class="co-rm-ph"></span>` : html`<button type="button" class="icon-btn" data-co-rm aria-label="Excluir empresa">✕</button>`}
+  </li>`;
   const mlTypes = await api('/settings/master-list-types').catch(() => null);
   const ctTypes = state.meta.can.contracts ? await api('/settings/contract-types', { query: { all: '1' } }).catch(() => null) : null;
   const SALES_CARDS = [['source', 'Origens das oportunidades', 'De onde o cliente veio (indicação, site, Instagram…). Escolhida no cadastro da oportunidade.', 'Nova origem (ex.: Feira)'],
@@ -81,6 +93,20 @@ export async function view({ state, reloadMeta, query }) {
           <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn btn-primary">${icon('check')}Salvar</button></div>
         </form>
       </section>
+      ${companies ? html`<section class="card" id="co-card" style="max-width:900px;margin-bottom:16px">
+        <div class="card-head"><h2>${icon('team')}Empresas</h2><span class="sub">${companies.filter(c => c.active).length} ativa(s)</span></div>
+        <form class="card-body form" id="co-form" novalidate>
+          <p class="muted" style="margin:0 0 6px"><b>Logo:</b> quem é de uma empresa com logo vê o logo dela no sistema (menu, topo do celular e aba do navegador). Toque no quadrado à esquerda para enviar (PNG, JPG ou WEBP, de preferência horizontal e com fundo transparente).</p>
+          <p class="muted" style="margin:0">Empresa de cada pessoa (Cadastro da Equipe) e de cada projeto. Não muda o acesso: perfil e projetos liberados continuam valendo.
+            Quem é de uma empresa <b>de fora do grupo</b> vê apenas as pessoas da própria empresa (organograma, cadastro, ranking); administradores veem todos.
+            Empresas em uso não podem ser excluídas — inative-as.</p>
+          <ul class="co-list" id="co-list">${companies.map(coItem)}</ul>
+          <div class="stage-add"><input type="text" id="co-new" maxlength="160" placeholder="Nova empresa (ex.: Construtora Parceira Ltda.)" aria-label="Nova empresa">
+            <button type="button" class="btn btn-ghost" id="co-add">${icon('plus')}Adicionar</button></div>
+          <div class="form-error" hidden></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar empresas</button></div>
+        </form>
+      </section>` : ''}
       <section class="card" id="types-card" style="max-width:900px;margin-bottom:16px">
         <div class="card-head"><h2>${icon('projects')}Tipos de projeto</h2><span class="sub">${types.filter(t => t.active).length} ativo(s)</span></div>
         <form class="card-body form" id="types-form" novalidate>
@@ -325,6 +351,55 @@ export async function view({ state, reloadMeta, query }) {
         });
       };
       bindTypesSection(root);
+      // Empresas
+      const coForm = root.querySelector('#co-form');
+      if (coForm) {
+        const cl = coForm.querySelector('#co-list'), cIn = coForm.querySelector('#co-new');
+        const addCo = () => {
+          const name = cIn.value.trim();
+          if (!name) return cIn.focus();
+          cl.insertAdjacentHTML('beforeend', coItem({ name, kind: 'parceira', active: 1 }).toString());
+          cIn.value = ''; cIn.focus();
+        };
+        coForm.querySelector('#co-add').addEventListener('click', addCo);
+        cIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCo(); } });
+        cl.addEventListener('click', async e => {
+          if (e.target.closest('[data-co-rm]')) return e.target.closest('.co-item').remove();
+          const up = e.target.closest('[data-co-logo]'), rm = e.target.closest('[data-co-logo-rm]');
+          if (rm) {
+            try { await api(`/settings/companies/${rm.dataset.coLogoRm}/logo`, { method: 'DELETE' }); toast('Logo removido.'); await reloadMeta?.(); ctx.render(); } catch (ex) { toast(ex.message, 'error'); }
+            return;
+          }
+          if (!up) return;
+          const inp = document.createElement('input');
+          inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp';
+          inp.addEventListener('change', () => {
+            const file = inp.files[0];
+            if (!file) return;
+            if (file.size > 4 * 1024 * 1024) return toast('Use uma imagem de até 4 MB.', 'error');
+            const rd = new FileReader();
+            rd.onload = async () => {
+              try { await api(`/settings/companies/${up.dataset.coLogo}/logo`, { method: 'POST', body: { data: rd.result } }); toast('Logo da empresa salvo.'); await reloadMeta?.(); ctx.render(); }
+              catch (ex) { toast(ex.message, 'error'); }
+            };
+            rd.readAsDataURL(file);
+          });
+          inp.click();
+        });
+        cl.addEventListener('change', e => { if (e.target.matches('[data-co=active]')) e.target.closest('.co-item').classList.toggle('is-inactive', !e.target.checked); });
+        coForm.addEventListener('submit', async e => {
+          e.preventDefault();
+          const err = coForm.querySelector('.form-error');
+          err.hidden = true;
+          const list = [...cl.querySelectorAll('.co-item')].map(li => ({
+            id: li.dataset.id ? Number(li.dataset.id) : null,
+            name: li.querySelector('[data-co=name]').value, kind: li.querySelector('[data-co=kind]').value,
+            cnpj: li.querySelector('[data-co=cnpj]').value, active: li.querySelector('[data-co=active]').checked,
+          }));
+          try { await api('/settings/companies', { method: 'PUT', body: { companies: list } }); toast('Empresas salvas.'); await reloadMeta?.(); ctx.render(); }
+          catch (ex) { err.textContent = ex.message; err.hidden = false; }
+        });
+      }
       if (query?.get('sec') === 'lista-mestra') setTimeout(() => root.querySelector('#ml-types-card')?.scrollIntoView({ block: 'start' }), 60);
       bindTypes('#types-form', '#type-list', '#type-new', '#type-add', '/settings/project-types', 'projeto(s)', 'Tipos de projeto salvos.');
       bindTypes('#ctypes-form', '#ctype-list', '#ctype-new', '#ctype-add', '/settings/contract-types', 'contrato(s)', 'Tipos de contrato salvos.');

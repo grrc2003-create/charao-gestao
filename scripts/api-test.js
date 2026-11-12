@@ -3862,6 +3862,57 @@ async function main() {
     ok((await mA('DELETE', `/master-list/items/${mId}`)).status === 200 && !(await mA('GET', '/master-list?project=1')).data.items.length, 'projeto excluído da Lista Mestra');
   }
 
+  // ---------- Empresas: pessoa e projeto de outra empresa (dados fictícios) ----------
+  console.log('Empresas');
+  {
+    const eA = await login('ana@charao.eng.br');
+    const coList = (await eA('GET', '/settings/companies?all=1')).data;
+    const charaoId = coList.find(c => c.is_default)?.id;
+    ok(charaoId && coList.some(c => c.kind === 'grupo' && c.group_key === 'lus') && coList.some(c => c.name === 'Empreiteira Alfa' && c.kind === 'terceirizada'),
+      'empresas: Charão e LuS do grupo; empresa digitada no terceirizado virou cadastro');
+    ok((await (await login('camila@charao.eng.br'))('PUT', '/settings/companies', { companies: coList })).status === 403, 'só administrador altera o cadastro de empresas');
+    const saved = (await eA('PUT', '/settings/companies', { companies: [...coList, { name: 'Construtora Parceira Teste', kind: 'parceira', cnpj: '00.000.000/0001-00' }] })).data;
+    const pId = saved.find(c => c.name === 'Construtora Parceira Teste')?.id;
+    ok(pId && saved.find(c => c.id === pId).kind === 'parceira', 'empresa parceira cadastrada');
+    ok((await eA('PUT', '/settings/companies', { companies: saved.filter(c => !c.is_default) })).status === 400, 'empresa do grupo não pode ser excluída');
+    // Gestor da outra empresa (mesmo acesso de um gestor) e um colaborador da equipe dele
+    const gP = await eA('POST', '/users', { name: 'Gestor Parceira Teste', email: 'gestor.parceira@teste.com', role: 'gestor', access_scope: 'projetos', project_ids: [1], company_id: pId, password: 'parceira12345' });
+    ok(gP.status === 201, 'pessoa cadastrada como gestor da outra empresa');
+    const cP = await eA('POST', '/users', { name: 'Colaborador Parceira Teste', email: 'colab.parceira@teste.com', role: 'colaborador', access_scope: 'projetos', project_ids: [1], manager_id: gP.data.id, company_id: pId, password: 'parceira12345' });
+    const gU = (await eA('GET', `/users/${gP.data.id}`)).data.user;
+    ok(cP.status === 201 && gU.company_id === pId && gU.company === 'Construtora Parceira Teste' && gU.role === 'gestor', 'empresa gravada na pessoa (perfil continua gestor)');
+    ok((await eA('PUT', '/settings/companies', { companies: saved.filter(c => c.id !== pId) })).status === 400, 'empresa em uso não pode ser excluída');
+    const gL = await login('gestor.parceira@teste.com', 'parceira12345');
+    const gMeta = (await gL('GET', '/meta')).data;
+    ok(gMeta.my_company === pId && gMeta.users.length >= 2 && gMeta.users.every(u => u.company_id === pId), 'quem é da outra empresa vê só as pessoas da própria empresa');
+    ok((await gL('GET', '/users/1')).status === 404 && (await gL('GET', `/users/${cP.data.id}`)).status === 200, 'pessoa da Charão não abre; a da própria equipe abre');
+    ok((await eA('GET', `/users/${cP.data.id}`)).status === 200 && (await eA('GET', '/meta')).data.users.some(u => u.company_id === charaoId), 'administrador vê as pessoas de todas as empresas');
+    // Equipe sem login cadastrada pela Gestão da Equipe com empresa
+    const mP = await eA('POST', '/team', { name: 'Encarregado Parceira Teste', job_title: 'Encarregado', responsibilities: 'Coordenar a equipe de campo da parceira', company_id: pId });
+    ok(mP.status === 201 && mP.data.company_id === pId, 'Cadastro da Equipe grava a empresa da pessoa');
+    // Projeto da outra empresa: filtro em projetos, tarefas e Visão da empresa
+    const prP = await eA('POST', '/projects', { name: 'Obra Parceira Teste', client: 'Cliente Parceiro', company_id: pId });
+    const prV = (await eA('GET', `/projects/${prP.data.id}`)).data;
+    ok(prP.status === 201 && prV.company_id === pId && prV.company_name === 'Construtora Parceira Teste', 'projeto associado à outra empresa');
+    const prN = (await eA('POST', '/projects', { name: 'Obra Padrão Teste', client: 'Cliente X' })).data;
+    ok((await eA('GET', `/projects/${prN.id}`)).data.company_id === charaoId, 'projeto sem empresa escolhida fica na empresa principal');
+    const tAll = (await eA('GET', '/tasks')).data, tCh = (await eA('GET', `/tasks?empresa=${charaoId}`)).data, tPa = (await eA('GET', `/tasks?empresa=${pId}`)).data;
+    ok(tCh.length && tCh.every(t => t.project_company_id === charaoId) && tPa.every(t => t.project_company_id === pId) && tCh.length + tPa.length <= tAll.length, 'tarefas filtradas pela empresa do projeto');
+    const dP = (await eA('GET', `/dashboard?empresa=${pId}`)).data;
+    ok(dP.empresa === pId && dP.projects.every(p => p.company_id === pId) && dP.projects.some(p => p.id === prP.data.id), 'Visão da empresa filtrada pela empresa');
+    ok((await eA('POST', '/projects', { name: 'X', client: 'Y', company_id: 99999 })).status === 400, 'empresa inexistente é recusada');
+    // Logo da empresa: quem é dela vê o logo no sistema; a Charão continua com o logo padrão
+    ok((await gL('POST', `/settings/companies/${pId}/logo`, { data: tinyPng() })).status === 403, 'só administrador envia o logo');
+    ok((await eA('POST', `/settings/companies/${charaoId}/logo`, { data: tinyPng() })).status === 400, 'logo da empresa principal é o do sistema');
+    const lg = (await eA('POST', `/settings/companies/${pId}/logo`, { data: tinyPng() })).data;
+    const gBrand = (await gL('GET', '/meta')).data.brand;
+    ok(lg.logo_url && gBrand?.id === pId && gBrand.logo === lg.logo_url && gBrand.name === 'Construtora Parceira Teste', 'quem é da outra empresa vê o logo dela');
+    ok((await eA('GET', '/meta')).data.brand === null, 'quem é da Charão continua com o logo padrão');
+    const lgF = await fetch(BASE + lg.logo_url, { headers: { Cookie: await cookieOf('gestor.parceira@teste.com', 'parceira12345'), 'X-Requested-With': 'charao-app' } });
+    ok(lgF.status === 200 && /image\//.test(lgF.headers.get('content-type')), 'arquivo do logo servido');
+    ok((await eA('DELETE', `/settings/companies/${pId}/logo`)).status === 200 && (await gL('GET', '/meta')).data.brand === null, 'sem logo: volta ao logo padrão');
+  }
+
 }
 
 main()

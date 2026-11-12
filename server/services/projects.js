@@ -2,7 +2,7 @@
 import { projectSchedule } from './schedule.js';
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
-import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin } from '../lib/permissions.js';
+import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin, companyRestriction } from '../lib/permissions.js';
 import { summarize, monthlyTrend, rescheduleContributors } from './metrics.js';
 import { listVisible, listCancelled, execSummary } from './tasks.js';
 import { audit } from './audit.js';
@@ -11,11 +11,13 @@ import { getSetting, validTemplateId, validProjectTypeId } from './settings.js';
 import { ensureProjectTypes } from './master-list.js';
 import { UFS } from './calendar.js';
 import { listRecurrences } from './recurrences.js';
+import { resolveCompany, defaultCompanyId } from './companies.js';
 import { checklistDashboard } from './checklist.js';
 
 export const PROJECT_STATUSES = ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'];
 
-const BASE = `SELECT p.*, l.name AS lead_name, pt.name AS type_name FROM projects p LEFT JOIN users l ON l.id = p.lead_id LEFT JOIN project_types pt ON pt.id = p.type_id`;
+const BASE = `SELECT p.*, l.name AS lead_name, pt.name AS type_name, co.name AS company_name, co.group_key AS company_key FROM projects p LEFT JOIN users l ON l.id = p.lead_id
+  LEFT JOIN project_types pt ON pt.id = p.type_id LEFT JOIN companies co ON co.id = p.company_id`;
 
 // Equipe = usuários com o projeto liberado (mesma liberação de Usuários → Permissões)
 function members(projectId) {
@@ -87,7 +89,7 @@ export function getProject(ctx, id) {
   };
 }
 
-function readProjectBody(body, currentType = null) {
+function readProjectBody(body, currentType = null, currentCompany = null) {
   const kind = body.kind === 'interno' ? 'interno' : 'obra';
   const d = {
     // Tipo do projeto (Configurações → Tipos de projeto); áreas internas não têm tipo
@@ -113,6 +115,8 @@ function readProjectBody(body, currentType = null) {
     has_quotes: body.has_quotes === true || body.has_quotes === 1 || body.has_quotes === '1' || body.has_quotes === 'on' ? 1 : 0,
     // Lista Mestra de projetos (só obras)
     has_master_list: kind !== 'interno' && (body.has_master_list === true || body.has_master_list === 1 || body.has_master_list === '1' || body.has_master_list === 'on') ? 1 : 0,
+    // Empresa do projeto (Configurações → Empresas)
+    company_id: resolveCompany(body.company_id, currentCompany),
   };
   if (d.start_date && d.end_date && d.end_date < d.start_date) throw badRequest('A previsão de término deve ser posterior ao início.');
   if (d.lead_id && !one('SELECT id FROM users WHERE id = ? AND active = 1 AND is_external = 0', d.lead_id)) throw badRequest('Responsável técnico deve ser um usuário interno ativo.');
@@ -152,14 +156,16 @@ export function ensureInternalArea() {
 export function createProject(ctx, body, ip) {
   if (!canManageProject(ctx, null)) throw forbidden('Apenas administradores e gestores podem cadastrar projetos.');
   const { d, memberIds } = readProjectBody(body);
+  // Sem empresa escolhida: a empresa de quem cria (se for de fora do grupo) ou a principal
+  if (!d.company_id) d.company_id = companyRestriction(ctx) || defaultCompanyId();
   const kind = body.kind === 'interno' ? 'interno' : 'obra';
   return tx(() => {
     const code = nextCode(kind);
     const now = new Date().toISOString();
     const r = run(`INSERT INTO projects (code, name, client, location, description, status, start_date, end_date, actual_end_date,
-      lead_id, specialty_template_id, uf, municipio, ibge_code, kind, type_id, field_control, has_quotes, has_master_list, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      lead_id, specialty_template_id, uf, municipio, ibge_code, kind, type_id, field_control, has_quotes, has_master_list, company_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       code, d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
-      d.uf, d.municipio, d.ibge_code, kind, d.type_id, d.field_control, d.has_quotes, d.has_master_list, ctx.user.id, now, now);
+      d.uf, d.municipio, d.ibge_code, kind, d.type_id, d.field_control, d.has_quotes, d.has_master_list, d.company_id, ctx.user.id, now, now);
     const id = Number(r.lastInsertRowid);
     if (d.has_master_list) ensureProjectTypes(Number(r.lastInsertRowid));
     const teamLog = syncTeam(id, memberIds);
@@ -178,12 +184,13 @@ export function updateProject(ctx, id, body, ip) {
   const p = one('SELECT * FROM projects WHERE id = ?', id);
   if (!p || !canAccessProject(ctx.user, id, ctx.projects)) throw notFound('Projeto não encontrado.');
   if (!canManageProject(ctx, id)) throw forbidden('Você não pode editar este projeto.');
-  const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) }, p.type_id);
+  const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) }, p.type_id, p.company_id);
+  if (!d.company_id) d.company_id = p.company_id || defaultCompanyId();
   tx(() => {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
-      lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, field_control=?, has_quotes=?, has_master_list=?, updated_at=? WHERE id=?`,
+      lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, field_control=?, has_quotes=?, has_master_list=?, company_id=?, updated_at=? WHERE id=?`,
       d.name, d.client, d.location, d.description, d.status, d.start_date, d.end_date, d.actual_end_date, d.lead_id, d.specialty_template_id,
-      d.uf, d.municipio, d.ibge_code, d.type_id, d.field_control, d.has_quotes, d.has_master_list, new Date().toISOString(), id);
+      d.uf, d.municipio, d.ibge_code, d.type_id, d.field_control, d.has_quotes, d.has_master_list, d.company_id, new Date().toISOString(), id);
     if (d.has_master_list) ensureProjectTypes(id);
     const teamLog = body.member_ids !== undefined ? syncTeam(id, memberIds, members(id).map(m => m.id)) : null;
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (p[k] ?? null));

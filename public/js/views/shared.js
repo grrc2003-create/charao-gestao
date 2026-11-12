@@ -424,3 +424,14 @@ export function bindFolds(root, scope) {
     head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); set(!open); } });
   });
 }
+
+// ---------- Empresas (Configurações → Empresas) ----------
+// Opções do select de empresa (quem é de empresa de fora do grupo só vê a própria)
+export const companyOptions = (meta, cur, { empty = '' } = {}) => {
+  const list = (meta.companies || []).filter(c => !meta.my_company || c.id === meta.my_company || c.id === Number(cur));
+  return html`${empty ? html`<option value="">${empty}</option>` : ''}${list.map(c => html`<option value="${c.id}" ${String(cur ?? '') === String(c.id) ? 'selected' : ''}>${c.name}</option>`)}`;
+};
+// Selo com o nome da empresa (só quando não é a empresa principal)
+export const companyPill = (meta, id) => { const c = (meta.companies || []).find(x => x.id === id); return c && !c.is_default ? html`<span class="pill pill-co" title="Empresa">${c.name}</span>` : ''; };
+// Empresas em uso numa lista (para mostrar filtro só quando há mais de uma)
+export const companiesIn = (meta, ids) => { const set = new Set(ids.filter(Boolean)); return (meta.companies || []).filter(c => set.has(c.id)); };

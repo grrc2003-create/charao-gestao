@@ -1,13 +1,18 @@
 import { html, api, icon, PROJECT_STATUS, fmtDate, fmtPct, progress, todayISO } from '../core.js';
 import { toast } from '../ui.js';
-import { pageHead, stackBar, bindCommon, STATUS_COLOR, execInline, scheduleLine } from './shared.js';
+import { pageHead, stackBar, bindCommon, STATUS_COLOR, execInline, scheduleLine, companyOptions, companiesIn } from './shared.js';
 import { setPendingPlanning, downloadPlanningTemplate } from './planning-import.js';
 
 export async function list({ state, query, setQuery }) {
-  const [projects, types] = await Promise.all([api('/projects'), api('/settings/project-types', { query: { all: '1' } }).catch(() => [])]);
+  let [projects, types] = await Promise.all([api('/projects'), api('/settings/project-types', { query: { all: '1' } }).catch(() => [])]);
   const canCreate = state.meta.can.manage_projects;
   const filter = query.get('status') || 'ativos';
   const typeQ = query.get('type') || '';
+  // Empresa do projeto: filtro só quando há projetos de mais de uma empresa
+  const cos = companiesIn(state.meta, projects.map(p => p.company_id));
+  const coQ = Number(query.get('empresa')) || 0;
+  const allProjects = projects;
+  projects = coQ ? projects.filter(p => p.company_id === coQ) : projects;
   const groups = {
     ativos: p => ['planejamento', 'em_andamento', 'pausado'].includes(p.status),
     concluidos: p => p.status === 'concluido',
@@ -18,7 +23,7 @@ export async function list({ state, query, setQuery }) {
     <div class="card-body" style="display:grid;gap:10px">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
         <span class="mono muted" style="font-weight:600">${p.code}</span>${p.kind === 'interno' ? html`<span class="pill pill-orange">Interno</span>` : html`<span class="pill ${p.status === 'em_andamento' ? '' : 'pill-sand'}">${PROJECT_STATUS[p.status]}</span>`}</div>
-      <div><h2 style="font-size:16px">${p.name}</h2><div class="muted" style="font-size:13px">${p.client}</div></div>
+      <div><h2 style="font-size:16px">${p.name}</h2><div class="muted" style="font-size:13px">${p.client}${p.company_key !== 'charao' && p.company_name ? html` · <span class="pill pill-co">${p.company_name}</span>` : ''}</div></div>
       <div style="display:flex;align-items:center;gap:10px"><div style="flex:1">${progress(p.summary.completion_pct ?? 0)}</div><b>${fmtPct(p.summary.completion_pct ?? 0)}</b></div>
       ${stackBar(p.summary.by_status)}
       <div class="stat-inline"><span><b>${p.summary.total}</b> tarefas</span><span><b>${p.summary.in_progress}</b> em andamento</span>
@@ -36,6 +41,9 @@ export async function list({ state, query, setQuery }) {
         sub: 'Obras recebem código PRJ-000 e áreas internas da empresa INT-000; as tarefas seguem a sequência do código (ex.: PRJ-000-00000).',
         actions: canCreate ? html`<a class="btn btn-ghost" href="#/projetos/novo?tipo=interno">${icon('plus')}Nova área interna</a><a class="btn btn-accent" href="#/projetos/novo">${icon('plus')}Novo projeto</a>` : '',
       })}
+      ${cos.length > 1 ? html`<div class="chips" role="group" aria-label="Filtrar por empresa" style="margin-bottom:8px">
+        <button class="chip" data-co="" aria-pressed="${!coQ}">Todas as empresas<span class="n">${allProjects.length}</span></button>
+        ${cos.map(c => html`<button class="chip" data-co="${c.id}" aria-pressed="${coQ === c.id}">${c.name}<span class="n">${allProjects.filter(p => p.company_id === c.id).length}</span></button>`)}</div>` : ''}
       <div class="chips" role="group" aria-label="Filtrar projetos" style="margin-bottom:8px">
         ${[['ativos', 'Ativos'], ['concluidos', 'Concluídos'], ['todos', 'Todos']].map(([k, l]) =>
           html`<button class="chip" data-filter="${k}" aria-pressed="${filter === k}">${l}<span class="n">${projects.filter(groups[k]).length}</span></button>`)}
@@ -67,11 +75,15 @@ export async function list({ state, query, setQuery }) {
     mount(root, ctx) {
       bindCommon(root);
       root.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
-        setQuery({ status: b.dataset.filter, type: typeQ });
+        setQuery({ status: b.dataset.filter, type: typeQ, empresa: coQ || '' });
+        ctx.render();
+      }));
+      root.querySelectorAll('[data-co]').forEach(b => b.addEventListener('click', () => {
+        setQuery({ status: filter === 'ativos' ? '' : filter, type: typeQ, empresa: b.dataset.co });
         ctx.render();
       }));
       root.querySelectorAll('[data-ptype]').forEach(b => b.addEventListener('click', () => {
-        setQuery({ status: filter === 'ativos' ? '' : filter, type: b.dataset.ptype });
+        setQuery({ status: filter === 'ativos' ? '' : filter, type: b.dataset.ptype, empresa: coQ || '' });
         ctx.render();
       }));
     },
@@ -125,6 +137,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         <fieldset class="fieldset form"><legend>Identificação</legend>
           <div class="field"><label class="req" for="name" id="name-label">${isInt ? 'Nome da área' : 'Nome do projeto'}</label><input id="name" name="name" type="text" maxlength="160" required value="${v.name || ''}"
             placeholder="${isInt ? 'Ex.: Charão — Interno, Manutenção de frota' : ''}"></div>
+          <div class="field"><label for="company_id">Empresa</label><select id="company_id" name="company_id">${companyOptions(state.meta, v.company_id ?? (state.meta.my_company || (state.meta.companies || []).find(c => c.is_default)?.id))}</select>
+            <span class="hint">Empresa responsável pelo projeto (Configurações → Empresas). Permite filtrar projetos, tarefas e a Visão da empresa.</span></div>
           <div class="field obra-only" ${isInt ? 'hidden' : ''}><label for="type_id">Tipo de projeto</label>
             <select id="type_id" name="type_id"><option value="">Sem tipo</option>
               ${ptypes.filter(t => t.active || t.id === v.type_id).map(t => opt(t.id, `${t.name}${t.active ? '' : ' (inativo)'}`, v.type_id))}</select>

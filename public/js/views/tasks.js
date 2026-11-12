@@ -1,6 +1,6 @@
 import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
 import { sheet, toast, setBlocked } from '../ui.js';
-import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions } from './shared.js';
+import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions, companiesIn } from './shared.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 
 const DUE = { '': 'Qualquer prazo', vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo', reagendadas: 'Reagendadas', ja_atrasadas: 'Ficaram atrasadas alguma vez', corretivas: 'Repactuadas após vencer', cronicas: 'Crônicas (muitos reagendamentos)', concluidas_atraso: 'Concluídas com atraso' };
@@ -18,6 +18,7 @@ export async function view({ state, query, setQuery }) {
     org: readOrg(query),
     kind: query.get('kind') || '',
     tipo: query.get('tipo') || '',
+    empresa: query.get('empresa') || '',
   };
   // Contagem por status sem o filtro de status (para os chips)
   const [tasks, base, cancelled] = await Promise.all([
@@ -27,7 +28,8 @@ export async function view({ state, query, setQuery }) {
   ]);
   const counts = Object.fromEntries(STATUS_ORDER.map(s => [s, base.filter(t => t.eff_status === s).length]));
   const meta = state.meta;
-  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo'].filter(k => f[k]).length;
+  const advCount = ['project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo', 'empresa'].filter(k => f[k]).length;
+  const cos = companiesIn(meta, meta.projects.map(p => p.company_id));
   const opt = (v, l, cur) => html`<option value="${v}" ${cur === String(v) ? 'selected' : ''}>${l}</option>`;
   // Classificações: do projeto escolhido, ou agrupadas por projeto
   const selProject = meta.projects.find(p => String(p.id) === f.project);
@@ -64,6 +66,7 @@ export async function view({ state, query, setQuery }) {
           ${cancelled.length || f.status.includes('cancelada') ? html`<button type="button" class="chip chip-cancel" data-st="cancelada" aria-pressed="${f.status.includes('cancelada')}" style="--c:#5D6670" title="Canceladas não entram em indicadores nem relatórios"><span class="dot"></span>Canceladas<span class="n">${cancelled.length}</span></button>` : ''}
         </div>
         <div class="filters-adv" id="adv" ${advCount ? '' : 'hidden'}>
+          ${cos.length > 1 || f.empresa ? html`<select name="empresa" aria-label="Empresa">${opt('', 'Todas as empresas', f.empresa)}${cos.map(c => opt(c.id, c.name, f.empresa))}</select>` : ''}
           <select name="project" aria-label="Projeto">${opt('', 'Todos os projetos', f.project)}${projectOptions(meta.projects, f.project, opt)}</select>
           <select name="assignee" aria-label="Responsável">${opt('', 'Todos os responsáveis', f.assignee)}${opt('me', 'Minhas tarefas', f.assignee)}${opt('none', 'Sem responsável', f.assignee)}${meta.assignees.map(u => opt(u.id, u.name, f.assignee))}</select>
           <select name="due" aria-label="Prazo">${Object.entries(DUE).map(([k, l]) => opt(k, l, f.due))}</select>
@@ -141,7 +144,7 @@ export async function view({ state, query, setQuery }) {
         if (!r) return;
         const qs = new URLSearchParams({ type: 'tarefas', level: r.level, group: r.group });
         if (!r.gantt) qs.set('gantt', '0');
-        for (const k of ['q', 'project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo']) if (f[k]) qs.set(k, f[k]);
+        for (const k of ['q', 'project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo', 'empresa']) if (f[k]) qs.set(k, f[k]);
         const st = f.status.filter(s => s !== 'cancelada');
         if (st.length) qs.set('status', st.join(','));
         ctx.navigate(`/imprimir/relatorio?${qs}`);

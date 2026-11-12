@@ -1,7 +1,7 @@
 import { html, api, icon, avatar, ROLE, SCOPE, fmtPct, fmtDateTime, roleLabel } from '../core.js';
 import { toast, sheet } from '../ui.js';
 import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
-import { pageHead, bindCommon, STATUS_COLOR } from './shared.js';
+import { pageHead, bindCommon, STATUS_COLOR, companyOptions } from './shared.js';
 
 export async function list({ state }) {
   const users = await api('/users');
@@ -93,7 +93,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <div class="field"><label class="req" for="name">Nome completo</label><input id="name" name="name" type="text" maxlength="120" required value="${u.name || ''}"></div>
             <div class="field"><label for="email" id="email-label">E-mail (login)</label><input id="email" name="email" type="email" maxlength="160" value="${u.email || ''}" autocomplete="off"></div>
           </div>
-          <div class="field ext-only" ${ext ? '' : 'hidden'}><label for="company">Empresa terceirizada</label><input id="company" name="company" type="text" maxlength="160" value="${u.company || ''}" placeholder="Ex.: Empreiteira Alfa"></div>
+          <div class="field"><label for="company_id">Empresa</label><select id="company_id" name="company_id">${companyOptions(state.meta, u.company_id ?? (ext ? '' : (state.meta.my_company || (state.meta.companies || []).find(c => c.is_default)?.id)), { empty: ext ? 'Não informada' : '' })}</select>
+            <span class="hint">Empresa à qual a pessoa pertence. Não muda o acesso; quem é de empresa de fora do grupo vê só as pessoas da própria empresa. Cadastre empresas em <b>Configurações → Empresas</b>.</span></div>
           <div class="form-row">
             <div class="field"><label for="job_title">Cargo / função</label><input id="job_title" name="job_title" type="text" maxlength="120" value="${u.job_title || ''}"></div>
             <div class="field"><label for="phone">Telefone</label><input id="phone" name="phone" type="tel" maxlength="40" value="${u.phone || ''}"></div>

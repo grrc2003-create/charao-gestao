@@ -1,5 +1,5 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
-import { fold, bindFolds, nOf, checklistFold, pageHead, kpiBlock, donut, projectRow, userRankRow, rankUsers, bindCommon, kpi, stackBar, STATUS_COLOR, execInline } from './shared.js';
+import { fold, bindFolds, nOf, checklistFold, pageHead, kpiBlock, donut, projectRow, userRankRow, rankUsers, bindCommon, kpi, stackBar, STATUS_COLOR, execInline, companiesIn } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
@@ -55,8 +55,11 @@ function bindProjectFold(root, total) {
   fit();
 }
 
-export async function view({ state }) {
-  const [d, impactRank] = await Promise.all([api('/dashboard'), api('/impact-ranking').catch(() => [])]);
+export async function view({ state, query, setQuery }) {
+  const empresa = query?.get('empresa') || '';
+  const [d, impactRank] = await Promise.all([api('/dashboard', { query: { empresa } }), api('/impact-ranking').catch(() => [])]);
+  // Empresa do projeto: filtro só quando há projetos de mais de uma empresa
+  const cos = companiesIn(state.meta, state.meta.projects.map(p => p.company_id));
   const u = state.user;
   const s = d.summary;
   const firstName = u.name.split(' ')[0];
@@ -87,6 +90,9 @@ export async function view({ state }) {
         sub: `${plural(d.projects.filter(p => p.status === 'em_andamento').length, 'obra ativa', 'obras ativas')} · ${plural(s.total, 'tarefa visível', 'tarefas visíveis')} para o seu perfil${d.checklist_items ? ` (inclui ${d.checklist_items} ${d.checklist_items === 1 ? 'item' : 'itens'} de check-list, contados como subtarefas)` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/painel">${icon('user')}Meu painel</a>${state.meta.can.contracts ? html`<a class="btn btn-ghost" href="#/contratos">${icon('contract')}Contratos</a>` : ''}${state.meta.can.finance ? html`<a class="btn btn-ghost" href="#/financeiro">${icon('wallet')}Financeiro</a>` : ''}<a class="btn btn-ghost" href="#/relatorios">${icon('reports')}Relatórios</a><a class="btn btn-accent" href="#/tarefas/nova">${icon('plus')}Nova tarefa</a>`,
       })}
+      ${cos.length > 1 || empresa ? html`<div class="chips" role="group" aria-label="Filtrar por empresa" style="margin-bottom:12px">
+        <button type="button" class="chip" data-dco="" aria-pressed="${!empresa}">Todas as empresas</button>
+        ${cos.map(c => html`<button type="button" class="chip" data-dco="${c.id}" aria-pressed="${String(c.id) === empresa}">${c.name}</button>`)}</div>` : ''}
       ${myCl.length ? fold('meus-cl', nOf(myCl.length, 'check-list', 'check-lists'), myClPend ? nOf(myClPend, 'item pendente', 'itens pendentes') : '', html`<section class="card section cl-alert">
         <div class="card-head"><h2>${icon('checklist')} Itens de check-list para você</h2><a class="sub" href="#/tarefas?tipo=checklist&assignee=me">Ver check-lists</a></div>
         <ul class="rows">${d.my_checklist.map(c => html`<li><a class="row-link" href="#/tarefas/${c.id}">
@@ -169,7 +175,8 @@ export async function view({ state }) {
         </section>`)}
       </div>
       <a class="fab" href="#/tarefas/nova" aria-label="Nova tarefa">${icon('plus')}</a>`,
-    mount: root => {
+    mount: (root, ctx) => {
+      root.querySelectorAll('[data-dco]').forEach(b => b.addEventListener('click', () => { setQuery({ empresa: b.dataset.dco }); ctx.render(); }));
       bindProjectFold(root, projects.length + d.internal_areas.length);
       bindCommon(root);
       bindChecklistCards(root);

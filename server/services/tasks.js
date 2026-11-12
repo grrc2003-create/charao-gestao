@@ -21,7 +21,7 @@ const PRIORITY_LABEL = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente:
 const PROOF_LABEL = { nenhuma: 'Nenhuma', foto: 'Somente foto', descricao: 'Somente descrição', foto_descricao: 'Foto + descrição' };
 const STATUS_LABEL = { aberta: 'Aberta', em_andamento: 'Em andamento', aguardando_conferencia: 'Aguardando conferência', concluida: 'Concluída' };
 
-const BASE_SQL = `SELECT t.*, p.restricted AS project_restricted, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
+const BASE_SQL = `SELECT t.*, p.restricted AS project_restricted, p.company_id AS project_company_id, p.code AS project_code, p.name AS project_name, p.client AS project_client, p.kind AS project_kind,
     p.lead_id AS project_lead_id, (SELECT pl.name FROM users pl WHERE pl.id = p.lead_id) AS project_lead_name,
     a.name AS assignee_name, a.is_external AS assignee_external, a.login_enabled AS assignee_login, a.manager_id AS assignee_leader_id, a.company AS assignee_company, (SELECT lu.name FROM users lu WHERE lu.id = a.manager_id) AS assignee_leader_name,
     c.name AS creator_name, ab.name AS assigned_by_name, r.name AS reviewer_name,
@@ -1156,7 +1156,7 @@ export function taskFilters(getAll) {
   return {
     q: (getAll('q')[0] || '').trim().toLowerCase(), status: list('status'), project: intOrNull(first('project')),
     assignee: first('assignee'), priority: list('priority'), due: first('due'), kind: first('kind'),
-    stage: list('stage').map(intOrNull).filter(Boolean), nivel: first('nivel'), tipo: first('tipo'),
+    stage: list('stage').map(intOrNull).filter(Boolean), nivel: first('nivel'), tipo: first('tipo'), empresa: intOrNull(first('empresa')),
   };
 }
 
@@ -1169,6 +1169,7 @@ export function filterTasks(ctx, f, { cancelled = 'incluir' } = {}) {
   if (f.q) tasks = tasks.filter(t => [t.code, t.title, t.description, t.project_name, t.assignee_name].some(v => v && v.toLowerCase().includes(f.q)));
   if (f.status.length) tasks = tasks.filter(t => f.status.includes(t.eff_status));
   if (f.project) tasks = tasks.filter(t => t.project_id === f.project);
+  if (f.empresa) tasks = tasks.filter(t => t.project_company_id === f.empresa);
   if (f.assignee === 'none') tasks = tasks.filter(t => !t.assignee_id);
   else if (f.assignee === 'me') tasks = tasks.filter(t => t.assignee_id === ctx.user.id || ctx.checklist?.has(t.id));
   else if (f.assignee) tasks = tasks.filter(t => t.assignee_id === intOrNull(f.assignee));

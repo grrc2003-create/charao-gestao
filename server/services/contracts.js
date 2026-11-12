@@ -79,6 +79,26 @@ export const contractsAreaId = () => one('SELECT id FROM projects WHERE restrict
 // ---------- Cálculos ----------
 const itemsOf = contractId => all('SELECT * FROM contract_items WHERE contract_id = ? ORDER BY seq, id', contractId);
 const measurementsOf = contractId => all('SELECT * FROM measurements WHERE contract_id = ? ORDER BY seq', contractId);
+// ---------- Recebimentos (inclusive parciais) ----------
+// Recebido = soma dos pagamentos; saldo = total − recebido enquanto a medição não está quitada (situação "recebida").
+// Medição recebida antes do histórico de pagamentos (sem linhas): vale o valor registrado ou o total.
+const paymentsOf = id => all('SELECT p.*, u.name AS user_name FROM measurement_payments p LEFT JOIN users u ON u.id = p.created_by WHERE p.measurement_id = ? ORDER BY p.paid_date, p.id', id);
+const paidMap = () => new Map(all('SELECT measurement_id, SUM(amount) AS s, MAX(paid_date) AS d FROM measurement_payments GROUP BY measurement_id').map(r => [r.measurement_id, r]));
+function paidOf(m, total, pm = null) {
+  const r = pm ? pm.get(m.id) : one('SELECT SUM(amount) AS s, MAX(paid_date) AS d FROM measurement_payments WHERE measurement_id = ?', m.id);
+  const has = r && r.s !== null && r.s !== undefined;
+  const paid = has ? r2(r.s) : m.status === 'recebida' ? r2(m.paid_amount ?? total) : 0;
+  const open = m.status === 'recebida' ? 0 : ['faturada', 'emitida'].includes(m.status) ? r2(Math.max(0, total - paid)) : 0;
+  return { paid, open, partial: m.status !== 'recebida' && paid > 0.005, last_paid: has ? r.d : m.paid_date };
+}
+// Pagamentos por data (para os totais por mês/ano); medição recebida sem histórico entra pela data registrada
+function paymentsByDate(ms, totalOf) {
+  const ids = new Set(ms.map(m => m.id));
+  const rows = all('SELECT measurement_id, paid_date, amount FROM measurement_payments').filter(p => ids.has(p.measurement_id));
+  const withRows = new Set(rows.map(r => r.measurement_id));
+  for (const m of ms) if (m.status === 'recebida' && m.paid_date && !withRows.has(m.id)) rows.push({ measurement_id: m.id, paid_date: m.paid_date, amount: m.paid_amount ?? totalOf.get(m.id) });
+  return rows;
+}
 
 // Valores de uma medição: soma das linhas (qtd × preço) e dos ajustes
 function measurementTotals(m, items = null) {
@@ -92,7 +112,8 @@ function measurementTotals(m, items = null) {
 
 function contractSummary(c) {
   const items = itemsOf(c.id);
-  const ms = measurementsOf(c.id).map(m => ({ ...m, ...measurementTotals(m, items) }));
+  const pm = paidMap();
+  const ms = measurementsOf(c.id).map(m => { const t = measurementTotals(m, items); return { ...m, ...t, ...paidOf(m, t.total, pm) }; });
   const sum = (arr, k) => r2(arr.reduce((s, x) => s + (x[k] || 0), 0));
   const issued = ms.filter(m => BILLED.includes(m.status));
   const billed = ms.filter(m => m.status === 'faturada' || m.status === 'recebida');
@@ -104,8 +125,10 @@ function contractSummary(c) {
     measured,
     measured_total: sum(issued, 'total'),
     billed: sum(billed, 'total'),
-    received: r2(received.reduce((s, m) => s + (m.paid_amount ?? m.total), 0)),
-    to_receive: r2(sum(billed.filter(m => m.status === 'faturada'), 'total')),
+    received: sum(ms, 'paid'),
+    to_receive: r2(sum(billed.filter(m => m.status === 'faturada'), 'open')),
+    partial: ms.filter(m => m.partial).length,
+    partial_open: r2(sum(ms.filter(m => m.partial), 'open')),
     to_bill: r2(sum(ms.filter(m => m.status === 'emitida'), 'total')),
     balance: r2(value - measured),
     pct: value ? Math.round((measured / value) * 1000) / 10 : null,
@@ -136,7 +159,7 @@ export function getContract(ctx, id) {
       const mq = r8(measuredQty.get(i.id) || 0);
       return { ...i, value: r2(i.quantity * i.unit_price), measured_qty: mq, measured_value: r2(mq * i.unit_price), balance_qty: r8(i.quantity - mq), balance_value: r2((i.quantity - mq) * i.unit_price), used: used.has(i.id) };
     }),
-    measurements: measurementsOf(id).map(m => ({ ...m, ...measurementTotals(m, items) })),
+    measurements: (() => { const pm = paidMap(); return measurementsOf(id).map(m => { const t = measurementTotals(m, items); return { ...m, ...t, ...paidOf(m, t.total, pm) }; }); })(),
     summary: contractSummary(c),
   };
 }
@@ -309,10 +332,14 @@ export function getMeasurement(ctx, id) {
   totals.prev_total = r2(totals.prev + totals.adj_prev);
   totals.to_bill = r2(totals.measured + totals.adj);
   totals.acc_total = r2(totals.acc + totals.adj_acc);
+  const pinfo = paidOf(m, totals.to_bill);
+  totals.paid = pinfo.paid;
+  totals.open = pinfo.open;
+  const payments = paymentsOf(m.id);
   const later = one(`SELECT 1 FROM measurements WHERE contract_id = ? AND seq > ? AND status <> 'rascunho' LIMIT 1`, c.id, m.seq);
   return {
     ...m, ref_label: monthLabel(m.ref_month),
-    contract: c, rows, adjustments, totals,
+    contract: c, rows, adjustments, totals, payments, partial: pinfo.partial,
     issued_by_name: m.issued_by ? one('SELECT name FROM users WHERE id = ?', m.issued_by)?.name : null,
     // Tarefa do Financeiro para atualizar o Mais Controle com o recebimento (e quem pode ser o responsável)
     mc_task: m.mc_task_id ? one(`SELECT t.id, t.code, t.status, t.due_date, t.cancelled_at, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.id = ?`, m.mc_task_id) || null : null,
@@ -406,7 +433,13 @@ export function correctMeasurement(ctx, id, body, ip) {
       for (const a of adjustments) run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', id, a.seq, a.description, a.unit, a.amount);
     }
     const after = getMeasurement(ctx, id);
-    if (m.status === 'recebida' && body.paid === 'total') run('UPDATE measurements SET paid_amount = ? WHERE id = ?', after.totals.to_bill, id);
+    if (m.status === 'recebida' && body.paid === 'total') {
+      run('UPDATE measurements SET paid_amount = ? WHERE id = ?', after.totals.to_bill, id);
+      // O histórico acompanha: a diferença vai para o último pagamento
+      const lp = one('SELECT id, amount FROM measurement_payments WHERE measurement_id = ? ORDER BY id DESC LIMIT 1', id);
+      const tot = one('SELECT SUM(amount) AS s FROM measurement_payments WHERE measurement_id = ?', id)?.s;
+      if (lp) run('UPDATE measurement_payments SET amount = ? WHERE id = ?', r2(lp.amount + after.totals.to_bill - (tot || 0)), lp.id);
+    }
     const changedItems = after.rows.filter(r => r.qty !== (before.rows.find(x => x.item_id === r.item_id)?.qty ?? 0)).map(r => `${r.seq}. ${r.description}: ${before.rows.find(x => x.item_id === r.item_id)?.qty ?? 0} → ${r.qty}`);
     audit(ctx.user.id, 'measurement', id, 'Medição corrigida (boletim já emitido)', {
       boletim: m.code, situacao: m.status, motivo: reason,
@@ -448,11 +481,22 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
         break;
       }
       case 'receive': {
-        if (!can.receive) throw badRequest('Só uma medição emitida ou faturada pode ser marcada como recebida.');
+        if (!can.receive) throw badRequest('Só uma medição emitida ou faturada pode receber pagamento.');
         const pd = date(body.paid_date, 'Data do recebimento') || today();
-        const amount = body.paid_amount === '' || body.paid_amount === undefined || body.paid_amount === null ? view.totals.to_bill : r2(num(body.paid_amount, 'Valor recebido', { min: 0 }));
+        const remaining = view.totals.open;
+        const amount = body.paid_amount === '' || body.paid_amount === undefined || body.paid_amount === null ? remaining : r2(num(body.paid_amount, 'Valor recebido', { min: 0 }));
+        if (!(amount > 0)) throw badRequest('Informe o valor recebido.');
+        // Valor menor que o saldo: pagamento parcial (saldo fica em aberto) ou quitar com diferença (ex.: retenção). Sempre perguntado.
+        const short = amount < remaining - 0.005;
+        if (short && !['parcial', 'quitar'].includes(body.settle)) throw badRequest(`O valor é menor que o saldo (${remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}): responda se é pagamento parcial (saldo fica em aberto) ou se quita a medição.`);
+        const closes = !short || body.settle === 'quitar';
+        const paidNow = r2(view.totals.paid + amount);
+        const openAfter = closes ? 0 : r2(remaining - amount);
+        const payId = Number(run('INSERT INTO measurement_payments (measurement_id, paid_date, amount, notes, closes, created_by) VALUES (?,?,?,?,?,?)',
+          id, pd, amount, str(body.notes, { max: 500, label: 'Observação do recebimento' }), closes ? 1 : 0, ctx.user.id).lastInsertRowid);
         // Recebido direto do emitido (sem NF): a data do recebimento vale como data de faturamento
-        run(`UPDATE measurements SET status = 'recebida', paid_date = ?, paid_amount = ?, nf_date = COALESCE(nf_date, ?), updated_at = datetime('now') WHERE id = ?`, pd, amount, pd, id);
+        run(`UPDATE measurements SET status = ?, paid_date = ?, paid_amount = ?, nf_date = COALESCE(nf_date, ?), updated_at = datetime('now') WHERE id = ?`,
+          closes ? 'recebida' : 'faturada', pd, paidNow, pd, id);
         // Tarefa no Financeiro para lançar este recebimento no Mais Controle (pode ser desmarcada na janela)
         let taskCode = null;
         run('UPDATE measurements SET mc_task_id = NULL WHERE id = ?', id);
@@ -467,25 +511,33 @@ export function measurementAction(ctx, id, action, body = {}, ip) {
               `Contrato: ${c.code}${c.number ? ` (nº ${c.number})` : ''} · ${c.title}`, `Cliente: ${c.client}${c.client_doc ? ` · ${c.client_doc}` : ''}`,
               c.project_code ? `Obra: ${c.project_code} · ${c.project_name}` : '', `Empresa: ${c.company_name}`,
               `Boletim: ${m.code} · referência ${monthLabel(m.ref_month)}`, m.nf_number ? `Nota fiscal: ${m.nf_number} de ${dmy(m.nf_date)}` : 'Sem nota fiscal',
-              `Recebido em ${dmy(pd)}: ${brl(amount)}${Math.abs(amount - view.totals.to_bill) > 0.005 ? ` (boletim ${brl(view.totals.to_bill)})` : ''}`,
+              `Recebido em ${dmy(pd)}: ${brl(amount)}${Math.abs(amount - view.totals.to_bill) > 0.005 ? ` (boletim ${brl(view.totals.to_bill)})` : ''}${!closes ? ` · pagamento parcial; saldo em aberto ${brl(openAfter)}` : ''}`,
               `Abrir a medição: #/medicoes/${m.id}`].filter(Boolean).join('\n'),
             due_date: due, assignee_id: intOrNull(body.mc_assignee_id), stage: 'Mais Controle', userId: ctx.user.id,
           });
           run('UPDATE measurements SET mc_task_id = ? WHERE id = ?', taskId, id);
+          run('UPDATE measurement_payments SET mc_task_id = ? WHERE id = ?', taskId, payId);
           taskCode = one('SELECT code FROM tasks WHERE id = ?', taskId)?.code;
         }
-        log('Recebimento registrado', { data: pd, valor: amount, ...(taskCode ? { tarefa_mais_controle: taskCode } : {}) });
+        log(closes ? (view.totals.paid > 0.005 ? 'Recebimento final registrado (medição quitada)' : 'Recebimento registrado') : 'Recebimento parcial registrado', { data: pd, valor: amount, recebido_total: paidNow, ...(closes ? (short ? { quitada_com_diferenca: r2(remaining - amount) } : {}) : { saldo_em_aberto: openAfter }), ...(taskCode ? { tarefa_mais_controle: taskCode } : {}) });
         break;
       }
       case 'undo': {
         if (!can.undo) throw badRequest('Nada a desfazer.');
-        if (m.status === 'recebida') {
-          run(`UPDATE measurements SET status = 'faturada', paid_date = NULL, paid_amount = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+        const lastPay = one('SELECT * FROM measurement_payments WHERE measurement_id = ? ORDER BY id DESC LIMIT 1', id);
+        if (lastPay || m.status === 'recebida') {
+          // Desfaz o último recebimento (os anteriores continuam); sem nenhum, volta a faturada aguardando
+          if (lastPay) run('DELETE FROM measurement_payments WHERE id = ?', lastPay.id);
+          const rest = one('SELECT SUM(amount) AS s, MAX(paid_date) AS d FROM measurement_payments WHERE measurement_id = ?', id);
+          const prevTask = one('SELECT mc_task_id FROM measurement_payments WHERE measurement_id = ? ORDER BY id DESC LIMIT 1', id)?.mc_task_id ?? null;
+          run(`UPDATE measurements SET status = 'faturada', paid_date = ?, paid_amount = ?, mc_task_id = ?, updated_at = datetime('now') WHERE id = ?`, rest?.d || null, rest?.s ?? null, prevTask ?? m.mc_task_id ?? null, id);
           // A tarefa do Mais Controle ainda aberta deixa de valer (concluída fica no histórico)
-          cancelOpenTask(m.mc_task_id, ctx.user.id, `Recebimento da medição ${m.code} desfeito em Contratos`);
+          cancelOpenTask(lastPay ? lastPay.mc_task_id : m.mc_task_id, ctx.user.id, `Recebimento da medição ${m.code} desfeito em Contratos`);
+          log(rest?.s ? 'Recebimento parcial desfeito (último pagamento)' : 'Recebimento desfeito', { valor: lastPay?.amount ?? m.paid_amount, data: lastPay?.paid_date ?? m.paid_date, recebido_restante: rest?.s ?? 0 });
+        } else {
+          run(`UPDATE measurements SET status = 'emitida', nf_number = NULL, nf_date = NULL, updated_at = datetime('now') WHERE id = ?`, id);
+          log('Faturamento desfeito');
         }
-        else run(`UPDATE measurements SET status = 'emitida', nf_number = NULL, nf_date = NULL, updated_at = datetime('now') WHERE id = ?`, id);
-        log(m.status === 'recebida' ? 'Recebimento desfeito' : 'Faturamento desfeito');
         break;
       }
       case 'delete':
@@ -525,6 +577,10 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   // Série mensal: medido (mês de referência), faturado (mês da NF) e recebido (mês do pagamento)
   const ms = all('SELECT * FROM measurements WHERE status <> \'rascunho\'').filter(m => inList.has(m.contract_id));
   const totalOf = new Map(ms.map(m => [m.id, measurementTotals(m).total]));
+  const pmAll = paidMap();
+  const paidInfo = new Map(ms.map(m => [m.id, paidOf(m, totalOf.get(m.id), pmAll)]));
+  const pays = paymentsByDate(ms, totalOf);
+  const paidIn = test => r2(pays.filter(p => p.paid_date && test(p.paid_date)).reduce((s, p) => s + p.amount, 0));
   const end = today().slice(0, 7);
   const keys = [];
   let [y, mo] = end.split('-').map(Number);
@@ -533,7 +589,7 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
     month: k, label: monthLabel(k),
     measured: r2(ms.filter(m => m.ref_month === k).reduce((s, m) => s + totalOf.get(m.id), 0)),
     billed: r2(ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === k).reduce((s, m) => s + totalOf.get(m.id), 0)),
-    received: r2(ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === k).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0)),
+    received: paidIn(d => d.slice(0, 7) === k),
   }));
   // Por cliente
   const byClient = new Map();
@@ -553,13 +609,13 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   const md = ref.slice(5);
   const inYear = (d, y) => d && d.slice(0, 4) === y && d.slice(5) <= md;
   const billedIn = y => r2(ms.filter(m => inYear(m.nf_date, y)).reduce((s, m) => s + totalOf.get(m.id), 0));
-  const receivedIn = y => r2(ms.filter(m => m.status === 'recebida' && inYear(m.paid_date, y)).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0));
+  const receivedIn = y => paidIn(d => inYear(d, y));
   const measuredIn = y => r2(ms.filter(m => m.ref_month.slice(0, 4) === y && m.ref_month <= `${y}-${md.slice(0, 2)}`).reduce((s, m) => s + totalOf.get(m.id), 0));
   // A receber por antiguidade (dias desde a NF)
   const code = new Map(list.map(c => [c.id, c]));
   const open = ms.filter(m => m.status === 'faturada').map(m => ({
     id: m.id, code: m.code, contract: code.get(m.contract_id)?.client, contract_id: m.contract_id, nf: m.nf_number, nf_date: m.nf_date,
-    total: totalOf.get(m.id), days: m.nf_date ? Math.max(0, Math.round((Date.parse(ref) - Date.parse(m.nf_date)) / 86400e3)) : 0,
+    total: paidInfo.get(m.id).open, partial: paidInfo.get(m.id).partial, paid: paidInfo.get(m.id).paid, bulletin: totalOf.get(m.id), days: m.nf_date ? Math.max(0, Math.round((Date.parse(ref) - Date.parse(m.nf_date)) / 86400e3)) : 0,
   }));
   const BUCKETS = [['0–30 dias', 0, 30], ['31–60 dias', 31, 60], ['61–90 dias', 61, 90], ['Mais de 90 dias', 91, 1e9]];
   const aging = BUCKETS.map(([label, a, b]) => {
@@ -595,7 +651,12 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   for (const m of ms.filter(x => x.status === 'emitida')) {
     actions.push({ kind: 'faturar', severity: 'serious', text: `Boletim ${m.code} emitido aguardando faturamento · ${totalOf.get(m.id).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: code.get(m.contract_id)?.client, code: m.code, href: `#/medicoes/${m.id}` });
   }
-  for (const o of open.filter(x => x.days > 30)) {
+  // Saldo pendente de medição com recebimento parcial: alerta sempre, até quitar
+  for (const o of open.filter(x => x.partial)) {
+    const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    actions.push({ kind: 'saldo', severity: o.days > 30 ? 'critical' : 'serious', text: `Saldo pendente do boletim ${o.code}: ${brl(o.total)} (recebido ${brl(o.paid)} de ${brl(o.bulletin)})`, client: o.contract, code: o.code, href: `#/medicoes/${o.id}` });
+  }
+  for (const o of open.filter(x => x.days > 30 && !x.partial)) {
     actions.push({ kind: 'cobrar', severity: o.days > 90 ? 'critical' : 'serious', text: `${o.nf ? `NF ${o.nf}` : `Cobrança ${o.code} (sem NF)`} sem recebimento há ${o.days} dias · ${o.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, client: o.contract, code: o.code, href: `#/medicoes/${o.id}` });
   }
   const sev = { critical: 0, serious: 1, warning: 2 };
@@ -608,14 +669,14 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
     const mon = k => Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`).map(key => r2(k(key)));
     const measured = mon(key => ms.filter(m => m.ref_month === key).reduce((s, m) => s + totalOf.get(m.id), 0));
     const billed = mon(key => ms.filter(m => m.nf_date && m.nf_date.slice(0, 7) === key).reduce((s, m) => s + totalOf.get(m.id), 0));
-    const received = mon(key => ms.filter(m => m.status === 'recebida' && m.paid_date && m.paid_date.slice(0, 7) === key).reduce((s, m) => s + (m.paid_amount ?? totalOf.get(m.id)), 0));
+    const received = mon(key => paidIn(d => d.slice(0, 7) === key));
     const tot = a => r2(a.reduce((s, v) => s + v, 0));
     return { year: y, measured, billed, received, totals: { measured: tot(measured), billed: tot(billed), received: tot(received) } };
   });
   // Faturamento por nota (para o ranking de clientes por período, filtrado na tela)
   const billing = ms.filter(m => m.nf_date).map(m => {
     const c = code.get(m.contract_id);
-    return { client: c?.client || '—', contract: c?.code, nf_date: m.nf_date, total: totalOf.get(m.id), received: m.status === 'recebida' ? (m.paid_amount ?? totalOf.get(m.id)) : 0 };
+    return { client: c?.client || '—', contract: c?.code, nf_date: m.nf_date, total: totalOf.get(m.id), received: paidInfo.get(m.id).paid };
   });
   // Lembrete: medições em rascunho, emitidas que ainda não foram faturadas e faturadas que ainda não foram recebidas (as mais antigas primeiro)
   const sinceDays = d => (d ? Math.max(0, Math.round((Date.parse(ref) - Date.parse(String(d).slice(0, 10))) / 86400e3)) : null);
@@ -624,8 +685,10 @@ export function contractsDashboard(ctx, { months = 12, company = '', type = '' }
   const openMeasurements = [...drafts, ...ms.filter(m => m.status === 'emitida' || m.status === 'faturada')].map(m => {
     const c = code.get(m.contract_id);
     const since = m.status === 'faturada' ? m.nf_date : m.status === 'emitida' ? m.issued_at : m.created_at;
+    const pi = paidInfo.get(m.id);
     return { id: m.id, code: m.code, status: m.status, ref_month: m.ref_month, ref_label: monthLabel(m.ref_month), contract_id: m.contract_id, contract_code: c?.code, client: c?.client,
-      company: c?.company, total: totalOf.get(m.id), nf_number: m.nf_number || null, since: since ? String(since).slice(0, 10) : null, days: sinceDays(since) };
+      company: c?.company, total: pi && m.status === 'faturada' ? pi.open : totalOf.get(m.id), bulletin: totalOf.get(m.id), paid: pi?.paid || 0, partial: !!pi?.partial,
+      nf_number: m.nf_number || null, since: since ? String(since).slice(0, 10) : null, days: sinceDays(since) };
   }).sort((a, b) => (a.since || '9999').localeCompare(b.since || '9999') || a.code.localeCompare(b.code));
   return {
     months,

@@ -19,7 +19,10 @@ export const M_STATUS = {
   faturada: { label: 'Faturada', cls: 'm-billed' },
   recebida: { label: 'Recebida', cls: 'm-paid' },
 };
-export const mBadge = s => html`<span class="m-badge ${M_STATUS[s].cls}">${M_STATUS[s].label}</span>`;
+export const mBadge = (s, partial = false) => partial ? html`<span class="m-badge m-partial">Recebida parcialmente</span>` : html`<span class="m-badge ${M_STATUS[s].cls}">${M_STATUS[s].label}</span>`;
+// Alerta de saldo pendente (recebimento parcial): aparece até a medição ser quitada
+const saldoNote = (m, T) => html`<div class="notice notice-warn section ct-saldo-note" role="alert">${icon('alert')}<span><b>Saldo pendente: ${money(T.open)}</b> — recebido ${money(T.paid)} de ${money(T.to_bill)}
+  em ${m.payments.length} pagamento(s). Registre o próximo recebimento quando chegar; se a diferença não for ser paga (ex.: retenção), registre um recebimento e escolha <b>quitar</b>.</span></div>`;
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const ym = s => `${MONTHS[Number(s.slice(5, 7)) - 1]}/${s.slice(2, 4)}`;
 
@@ -101,7 +104,7 @@ const delta = (cur, prev, prevYear) => {
   const d = Math.round(((cur - prev) / prev) * 1000) / 10;
   return html`<span class="ct-delta ${d >= 0 ? 'is-up' : 'is-down'}">${d >= 0 ? '▲' : '▼'} ${String(Math.abs(d)).replace('.', ',')}% vs mesmo período de ${prevYear}</span>`;
 };
-const ACT_KINDS = [['cobrar', 'Cobrar'], ['faturar', 'Faturar'], ['medir', 'Medir'], ['encerrar', 'Encerrar'], ['vencendo', 'Vencendo']];
+const ACT_KINDS = [['saldo', 'Saldo pendente'], ['cobrar', 'Cobrar'], ['faturar', 'Faturar'], ['medir', 'Medir'], ['encerrar', 'Encerrar'], ['vencendo', 'Vencendo']];
 const SEV = { critical: { label: 'Crítico', ic: 'alert' }, serious: { label: 'Atenção', ic: 'clock' }, warning: { label: 'Pendente', ic: 'info' } };
 
 // ---------- Comparativo anual ----------
@@ -330,7 +333,7 @@ const OPEN_SHOW = 6;
 const daysSince = d => (d ? Math.max(0, Math.round((Date.parse(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })) - Date.parse(String(d).slice(0, 10))) / 86400e3)) : null);
 const openOf = c => c.measurements.filter(m => m.status === 'rascunho' || m.status === 'emitida' || m.status === 'faturada').map(m => {
   const since = m.status === 'faturada' ? m.nf_date : m.status === 'emitida' ? m.issued_at : m.created_at;
-  return { id: m.id, code: m.code, status: m.status, ref_label: ym(m.ref_month), client: c.client, total: m.total, nf_number: m.nf_number || null, since: since ? String(since).slice(0, 10) : null, days: daysSince(since) };
+  return { id: m.id, code: m.code, status: m.status, ref_label: ym(m.ref_month), client: c.client, total: m.status === 'faturada' ? m.open : m.total, bulletin: m.total, paid: m.paid || 0, partial: !!m.partial, nf_number: m.nf_number || null, since: since ? String(since).slice(0, 10) : null, days: daysSince(since) };
 }).sort((a, b) => (a.since || '9999').localeCompare(b.since || '9999'));
 function openMeasurementsCard(list, { empty = 'Nenhuma medição em rascunho, aguardando faturamento ou recebimento.' } = {}) {
   if (!list.length) return html`<section class="card ct-open is-empty"><div class="card-head"><h2>${icon('check')}Medições em aberto</h2><span class="sub">lembrete</span></div>
@@ -338,11 +341,11 @@ function openMeasurementsCard(list, { empty = 'Nenhuma medição em rascunho, ag
   const groups = [
     ['rascunho', 'Em rascunho (não emitidas)', 'criada há', 'ct-open-draft'],
     ['emitida', 'Aguardando faturamento', 'emitida há', 'ct-open-bill'],
-    ['faturada', 'Faturadas, aguardando recebimento', 'faturada há', 'ct-open-rec'],
+    ['faturada', 'Faturadas, aguardando recebimento (saldo)', 'faturada há', 'ct-open-rec'],
   ].map(([st, title, since, cls]) => ({ st, title, since, cls, items: list.filter(m => m.status === st) })).filter(g => g.items.length);
   const row = (m, g) => html`<li><a class="row-link ct-open-row" href="#/medicoes/${m.id}">
     <div class="grow"><div class="row-title"><b class="mono">${m.code}</b><span class="truncate">${m.client || '—'}</span></div>
-      <div class="row-meta"><span>Referência ${m.ref_label}</span>${m.nf_number ? html`<span>NF ${m.nf_number}</span>` : ''}${m.days !== null ? html`<span class="${m.days > 30 ? 'ct-open-late' : ''}">${g.since} ${m.days} ${m.days === 1 ? 'dia' : 'dias'}</span>` : ''}</div></div>
+      <div class="row-meta">${m.partial ? html`<span class="ct-partial-tag">${icon('alert')}Saldo pendente · recebido ${money(m.paid)} de ${money(m.bulletin)}</span>` : ''}<span>Referência ${m.ref_label}</span>${m.nf_number ? html`<span>NF ${m.nf_number}</span>` : ''}${m.days !== null ? html`<span class="${m.days > 30 ? 'ct-open-late' : ''}">${g.since} ${m.days} ${m.days === 1 ? 'dia' : 'dias'}</span>` : ''}</div></div>
     <b class="ct-open-v">${money(m.total)}</b><span class="chev">${icon('chevron')}</span></a></li>`;
   return html`<section class="card ct-open">
     <div class="card-head"><h2>${icon('alert')}Medições em aberto</h2><span class="sub">${list.length} · ${money(list.reduce((s, m) => s + m.total, 0))} · lembrete</span></div>
@@ -750,7 +753,7 @@ export async function view({ params, state, navigate }) {
         ${kpi({ label: 'Medido', value: money(s.measured_total), color: '#2F6FB3', foot: `${pct(s.pct)} do contrato` })}
         ${kpi({ label: 'Faturado', value: money(s.billed), color: '#8E6CB0' })}
         ${kpi({ label: 'Recebido', value: money(s.received), color: '#2E8B57' })}
-        ${kpi({ label: 'A receber', value: money(s.to_receive), color: '#C0392B' })}
+        ${kpi({ label: 'A receber', value: money(s.to_receive), color: '#C0392B', foot: s.partial ? `${s.partial} com saldo pendente (${money(s.partial_open)})` : '' })}
         ${kpi({ label: 'Saldo a medir', value: money(s.balance), color: '#707E8B' })}
       </div>
       <div class="section">${openMeasurementsCard(openOf(c), { empty: 'Nenhuma medição deste contrato em rascunho, aguardando faturamento ou recebimento.' })}</div>
@@ -758,8 +761,8 @@ export async function view({ params, state, navigate }) {
         <div class="card-head"><h2>${icon('file')}Medições (boletins)</h2><span class="sub">${c.measurements.length} medição(ões)</span></div>
         ${c.measurements.length ? html`<div class="table-wrap"><table class="data ct-table"><thead><tr><th>Boletim</th><th>Referência</th><th>Período</th><th class="num">A faturar</th><th>Situação</th><th>NF</th><th>Recebido</th></tr></thead>
           <tbody>${[...c.measurements].reverse().map(m => html`<tr data-href="#/medicoes/${m.id}" tabindex="0"><td class="mono"><b>${m.code}</b></td><td>${ym(m.ref_month)}</td><td class="nowrap">${fmtDate(m.period_start)} → ${fmtDate(m.period_end)}</td>
-            <td class="num">${money(m.total)}</td><td>${mBadge(m.status)}</td><td>${m.nf_number ? html`${m.nf_number}<div class="t-sub">${fmtDate(m.nf_date)}</div>` : ['faturada', 'recebida'].includes(m.status) ? html`<span class="muted">sem NF</span>${m.nf_date ? html`<div class="t-sub">${fmtDate(m.nf_date)}</div>` : ''}` : '—'}</td>
-            <td>${m.paid_date ? html`${money(m.paid_amount ?? m.total)}<div class="t-sub">${fmtDate(m.paid_date)}</div>` : '—'}</td></tr>`)}</tbody></table></div>`
+            <td class="num">${money(m.total)}</td><td>${mBadge(m.status, m.partial)}</td><td>${m.nf_number ? html`${m.nf_number}<div class="t-sub">${fmtDate(m.nf_date)}</div>` : ['faturada', 'recebida'].includes(m.status) ? html`<span class="muted">sem NF</span>${m.nf_date ? html`<div class="t-sub">${fmtDate(m.nf_date)}</div>` : ''}` : '—'}</td>
+            <td>${m.paid > 0.005 ? html`${money(m.paid)}<div class="t-sub">${m.last_paid ? fmtDate(m.last_paid) : ''}</div>${m.partial ? html`<div class="t-sub ct-saldo-t">saldo ${money(m.open)}</div>` : ''}` : '—'}</td></tr>`)}</tbody></table></div>`
           : html`<div class="card-body muted">Nenhuma medição ainda. Use “Nova medição”.</div>`}
       </section>
       <section class="card section">
@@ -811,17 +814,18 @@ export async function measurement({ params, query, state, render, navigate }) {
     title: `Boletim ${m.code}`,
     html: html`
       ${pageHead({ back: { href: `#/contratos/${c.id}`, label: c.code }, eyebrow: `${c.client} · ${c.code}`, title: html`Medição ${m.ref_label} · ${m.code}`,
-        sub: html`Período ${fmtDate(m.period_start)} → ${fmtDate(m.period_end)} · ${mBadge(m.status)}${m.nf_number ? html` · NF ${m.nf_number} (${fmtDate(m.nf_date)})` : ['faturada', 'recebida'].includes(m.status) ? html` · sem NF${m.nf_date ? ` (faturado em ${fmtDate(m.nf_date)})` : ''}` : ''}${m.paid_date ? html` · recebido ${money(m.paid_amount)} em ${fmtDate(m.paid_date)}` : ''}`,
+        sub: html`Período ${fmtDate(m.period_start)} → ${fmtDate(m.period_end)} · ${mBadge(m.status, m.partial)}${m.nf_number ? html` · NF ${m.nf_number} (${fmtDate(m.nf_date)})` : ['faturada', 'recebida'].includes(m.status) ? html` · sem NF${m.nf_date ? ` (faturado em ${fmtDate(m.nf_date)})` : ''}` : ''}${m.partial ? html` · recebido ${money(T.paid)} · saldo ${money(T.open)}` : m.paid_date ? html` · recebido ${money(m.paid_amount)} em ${fmtDate(m.paid_date)}` : ''}`,
         actions: html`<a class="btn btn-ghost" href="#/imprimir/medicao/${m.id}">${icon('print')}Boletim (PDF)</a>
           ${!correcting && m.can.issue ? html`<button type="button" class="btn btn-primary" data-ma="issue">${icon('send')}Emitir</button>` : ''}
           ${!correcting && m.can.bill ? html`<button type="button" class="btn btn-primary" data-ma="bill">${icon('file')}Registrar faturamento</button>` : ''}
-          ${!correcting && m.can.receive ? html`<button type="button" class="btn btn-success" data-ma="receive">${icon('check')}Registrar recebimento</button>` : ''}
+          ${!correcting && m.can.receive ? html`<button type="button" class="btn btn-success" data-ma="receive">${icon('check')}${m.partial ? 'Registrar recebimento do saldo' : 'Registrar recebimento'}</button>` : ''}
           ${!correcting && m.can.reopen ? html`<button type="button" class="btn btn-ghost" data-ma="reopen">${icon('history')}Reabrir</button>` : ''}
-          ${!correcting && m.can.undo ? html`<button type="button" class="btn btn-ghost" data-ma="undo">${icon('history')}${m.status === 'recebida' ? 'Desfazer recebimento' : 'Desfazer faturamento'}</button>` : ''}
+          ${!correcting && m.can.undo ? html`<button type="button" class="btn btn-ghost" data-ma="undo">${icon('history')}${m.payments.length > 1 ? 'Desfazer último recebimento' : m.status === 'recebida' || m.payments.length ? 'Desfazer recebimento' : 'Desfazer faturamento'}</button>` : ''}
           ${!correcting && m.can.delete ? html`<button type="button" class="btn btn-ghost" data-ma="delete">${icon('trash')}Excluir rascunho</button>` : ''}
           ${m.can.correct && !correcting ? html`<a class="btn btn-ghost" href="#/medicoes/${m.id}?corrigir=1">${icon('edit')}Corrigir medição</a>` : ''}` })}
       ${correcting ? html`<div class="notice notice-warn m-correct-note">${icon('alert')}<span><b>Corrigindo o boletim ${m.code} (${M_STATUS[m.status].label}).</b> Situação, NF e recebimento ficam como estão; as medições seguintes recalculam o acumulado e o saldo.
         A correção exige motivo e fica registrada na auditoria. <a href="#/medicoes/${m.id}">Cancelar</a></span></div>` : ''}
+      ${m.partial && !correcting ? saldoNote(m, T) : ''}
       ${m.mc_task ? html`<div class="notice section ct-mc-note">${icon(m.mc_task.status === 'concluida' ? 'check' : 'info')}<span>Mais Controle: tarefa <a href="#/tarefas/${m.mc_task.id}"><b>${m.mc_task.code}</b></a> no Financeiro para lançar este recebimento —
         ${m.mc_task.cancelled_at ? 'cancelada' : m.mc_task.status === 'concluida' ? 'concluída' : `prazo ${fmtDate(m.mc_task.due_date)}${m.mc_task.assignee_name ? ` · ${m.mc_task.assignee_name}` : ' · sem responsável'}`}.</span></div>` : ''}
       <div class="kpis kpis-4 ct-kpis">
@@ -830,6 +834,14 @@ export async function measurement({ params, query, state, render, navigate }) {
         ${kpi({ label: 'Total a faturar', value: money(T.to_bill), color: '#2A3D50', hero: true })}
         ${kpi({ label: 'Saldo contratual', value: money(T.balance), color: '#707E8B', foot: `acumulado ${money(T.acc_total)}` })}
       </div>
+      ${m.payments.length ? html`<section class="card section ct-pays">
+        <div class="card-head"><h2>${icon('check')}Recebimentos</h2><span class="sub">${m.payments.length} · ${money(T.paid)} de ${money(T.to_bill)}${m.status === 'recebida' ? ' · quitada' : ` · saldo ${money(T.open)}`}</span></div>
+        <div class="table-wrap"><table class="data ct-table"><thead><tr><th>Data</th><th class="num">Valor</th><th>Situação</th><th>Observação</th><th>Registrado por</th></tr></thead>
+          <tbody>${m.payments.map((p, i) => html`<tr><td class="nowrap">${fmtDate(p.paid_date)}</td><td class="num">${money(p.amount)}</td>
+            <td>${p.closes ? (i === m.payments.length - 1 && Math.abs(T.paid - T.to_bill) > 0.005 ? html`<span class="pill">quitou com diferença de ${money(T.to_bill - T.paid)}</span>` : html`<span class="pill">quitou</span>`) : html`<span class="pill pill-warn">parcial</span>`}</td>
+            <td>${p.notes || '—'}</td><td>${p.user_name || '—'}</td></tr>`)}</tbody>
+          <tfoot><tr><td><b>Recebido</b></td><td class="num"><b>${money(T.paid)}</b></td><td colspan="3">${m.status === 'recebida' ? '' : html`<b class="ct-saldo-t">Saldo pendente ${money(T.open)}</b>`}</td></tr></tfoot></table></div>
+      </section>` : ''}
       <form id="m-form" novalidate>
         ${edit ? html`<section class="card section"><div class="card-body form"><div class="form-row form-row-3">
           <div class="field"><label for="m-ref">Mês de referência</label><input type="month" id="m-ref" name="ref_month" value="${m.ref_month}" ${correcting ? 'disabled title="O mês de referência define o número do boletim e não muda na correção"' : ''}></div>
@@ -936,24 +948,42 @@ export async function measurement({ params, query, state, render, navigate }) {
           if (r) act('bill', { ...r, no_nf: r.no_nf === '1' });
         } else if (a === 'receive') {
           // A tarefa nunca é criada sem resposta: a pergunta Sim/Não vem sem opção marcada
-          const r = await sheet({ title: 'Registrar recebimento', submitLabel: 'Registrar',
-            onSubmit: d => { if (!d.mc_task) throw new Error('Responda se deve criar a tarefa no Financeiro para atualizar o Mais Controle.'); return d; },
-            body: html`<div class="form-row"><div class="field"><label for="pd">Data do recebimento</label><input type="date" id="pd" name="paid_date" value="${todayISO()}"></div>
-              <div class="field"><label for="pa">Valor recebido (R$)</label><input type="text" id="pa" name="paid_amount" inputmode="decimal" value="${String(T.to_bill).replace('.', ',')}"></div></div>
-              <span class="hint">Em branco = valor do boletim (${money(T.to_bill)}).${m.status === 'emitida' ? ' Boletim sem faturamento registrado: o recebimento é lançado sem nota fiscal e a data do recebimento vale como data de faturamento.' : ''}</span>
+          // Valor menor que o saldo: pergunta (sem opção marcada) se é parcial ou se quita a medição
+          setTimeout(() => {
+            const pa = document.querySelector('#pa'), box = document.querySelector('#settle-box');
+            const upd = () => { const v = parseNum(pa.value); box.hidden = !(v > 0 && v < T.open - 0.005); const rest = document.querySelector('#settle-rest'); if (rest) rest.textContent = money(Math.max(0, T.open - (v || 0))); };
+            pa?.addEventListener('input', upd); upd();
+          }, 60);
+          const r = await sheet({ title: m.partial ? 'Registrar recebimento do saldo' : 'Registrar recebimento', submitLabel: 'Registrar',
+            onSubmit: d => {
+              const v = d.paid_amount ? parseNum(d.paid_amount) : T.open;
+              if (!(v > 0)) throw new Error('Informe o valor recebido.');
+              if (v < T.open - 0.005 && !d.settle) throw new Error('O valor é menor que o saldo: responda se é pagamento parcial ou se quita a medição.');
+              if (!d.mc_task) throw new Error('Responda se deve criar a tarefa no Financeiro para atualizar o Mais Controle.');
+              return d;
+            },
+            body: html`${m.partial ? html`<div class="notice notice-warn">${icon('alert')}<span>Já recebido ${money(T.paid)} de ${money(T.to_bill)}. <b>Saldo pendente: ${money(T.open)}</b>.</span></div>` : ''}
+              <div class="form-row"><div class="field"><label for="pd">Data do recebimento</label><input type="date" id="pd" name="paid_date" value="${todayISO()}"></div>
+              <div class="field"><label for="pa">Valor recebido (R$)</label><input type="text" id="pa" name="paid_amount" inputmode="decimal" value="${String(T.open).replace('.', ',')}"></div></div>
+              <span class="hint">Em branco = ${m.partial ? 'saldo pendente' : 'valor do boletim'} (${money(T.open)}). Pode registrar um valor menor: o saldo fica em aberto com alerta até ser recebido.${m.status === 'emitida' ? ' Boletim sem faturamento registrado: o recebimento é lançado sem nota fiscal e a data do recebimento vale como data de faturamento.' : ''}</span>
+              <fieldset class="fieldset form ct-settle" id="settle-box" hidden><legend>O valor é menor que o saldo. Como fica a diferença (<span id="settle-rest"></span>)?</legend>
+                <label class="pr-se-check"><input type="radio" name="settle" value="parcial"> <span><b>Pagamento parcial</b> — o saldo fica em aberto, com alerta de saldo pendente</span></label>
+                <label class="pr-se-check"><input type="radio" name="settle" value="quitar"> <span><b>Quitar a medição</b> — a diferença não será recebida (ex.: retenção, desconto)</span></label></fieldset>
+              <div class="field"><label for="pn">Observação do recebimento</label><input type="text" id="pn" name="notes" maxlength="500" placeholder="Opcional. Ex.: 1ª parcela, depósito parcial do cliente"></div>
               <fieldset class="fieldset form ct-mc"><legend>Criar tarefa no Financeiro para atualizar o Mais Controle?</legend>
                 <div class="ct-mc-ask"><label class="pr-se-check"><input type="radio" name="mc_task" value="1"> Sim, criar a tarefa</label>
                   <label class="pr-se-check"><input type="radio" name="mc_task" value="0"> Não criar</label></div>
                 <div class="ct-mc-fields"><div class="form-row"><div class="field"><label for="mc-a">Responsável</label><select id="mc-a" name="mc_assignee_id"><option value="">Equipe do Financeiro (sem responsável)</option>${(m.finance_assignees || []).map(u => html`<option value="${u.id}">${u.name}${u.job_title ? ` · ${u.job_title}` : ''}</option>`)}</select></div>
                   <div class="field"><label for="mc-d">Prazo</label><input type="date" id="mc-d" name="mc_due" value="${(() => { const d = new Date(`${todayISO()}T12:00:00`); d.setDate(d.getDate() + 2); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })()}"></div></div>
                 <span class="hint">A tarefa vai para a área do <b>Financeiro</b> (classificação "Mais Controle") com o contrato, o cliente, o boletim, a NF e o valor recebido. Se o recebimento for desfeito, a tarefa aberta é cancelada.</span></div></fieldset>` });
-          if (r) act('receive', { ...r, paid_amount: r.paid_amount ? parseNum(r.paid_amount) : '', mc_task: r.mc_task === '1' });
+          if (r) act('receive', { ...r, paid_amount: r.paid_amount ? parseNum(r.paid_amount) : '', settle: r.settle || '', mc_task: r.mc_task === '1' });
         } else if (a === 'delete') {
           if (await confirmSheet('Excluir rascunho', `Excluir a medição ${m.code}? A numeração será reaproveitada.`, 'Excluir', true)) act('delete');
         } else if (a === 'reopen') {
           if (await confirmSheet('Reabrir medição', 'A medição volta para rascunho para correção. Deseja reabrir?', 'Reabrir')) act('reopen');
         } else if (a === 'undo') {
-          if (await confirmSheet('Desfazer', m.status === 'recebida' ? 'Desfazer o registro de recebimento?' : 'Desfazer o faturamento (NF)?', 'Desfazer')) act('undo');
+          const lp = m.payments[m.payments.length - 1];
+          if (await confirmSheet('Desfazer', lp ? `Desfazer o último recebimento (${money(lp.amount)} em ${fmtDate(lp.paid_date)})?${m.payments.length > 1 ? ' Os recebimentos anteriores continuam registrados.' : ''}` : m.status === 'recebida' ? 'Desfazer o registro de recebimento?' : 'Desfazer o faturamento (NF)?', 'Desfazer')) act('undo');
         }
       }));
     },

@@ -2544,6 +2544,36 @@ async function main() {
   const nfAnn = nfD.annual.find(y => y.year === '2026');
   ok(nfD.contracts.find(c => c.id === nfCt).summary.billed === 2000 && nfAnn.billed[2] >= 1000 && nfAnn.received[2] >= 1000, 'sem NF também conta no faturado e recebido do painel');
   ok((await fo('POST', `/measurements/${nfB}/actions/undo`)).data.status === 'faturada' && (await fo('POST', `/measurements/${nfB}/actions/undo`)).data.status === 'emitida', 'desfazer volta para faturada e depois emitida');
+  // Recebimento parcial: o saldo fica em aberto (com alerta) até quitar; desfazer tira o último pagamento
+  {
+    const pp = async (body) => fo('POST', `/measurements/${nfA}/actions/receive`, body);
+    const pv = async () => (await fo('GET', `/measurements/${nfA}`)).data;
+    ok((await pp({ paid_date: '2026-02-10', paid_amount: 400 })).status === 400, 'parcial: valor menor que o saldo exige responder parcial ou quitar');
+    ok((await pp({ paid_date: '2026-02-10', paid_amount: 0, settle: 'parcial' })).status === 400, 'parcial: valor zero é recusado');
+    let v = (await pp({ paid_date: '2026-02-10', paid_amount: 400, settle: 'parcial', notes: '1ª parcela (teste)' })).data;
+    ok(v.status === 'faturada' && v.partial === true && v.totals.paid === 400 && v.totals.open === 600 && v.payments.length === 1 && v.payments[0].notes === '1ª parcela (teste)' && v.can.receive && v.can.undo,
+      'parcial: continua faturada, recebido 400 e saldo 600 em aberto');
+    let dd = (await fo('GET', '/contracts/dashboard')).data;
+    const ctS = dd.contracts.find(c => c.id === nfCt).summary;
+    ok(ctS.partial === 1 && ctS.partial_open === 600 && ctS.received === 400 && ctS.to_receive === 600, 'parcial: contrato soma recebido 400 e a receber 600 (saldo)');
+    const al = dd.actions.find(a => a.kind === 'saldo' && a.href === `#/medicoes/${nfA}`);
+    ok(al && /Saldo pendente/.test(al.text), 'parcial: alerta de saldo pendente nas próximas ações');
+    const om = dd.open_measurements.find(m => m.id === nfA);
+    ok(om && om.partial && om.total === 600 && om.paid === 400 && om.bulletin === 1000, 'parcial: medição em aberto mostra o saldo');
+    ok(dd.annual.find(y => y.year === '2026').received[1] >= 400, 'parcial: recebido entra no mês do pagamento');
+    ok((await fo('GET', `/contracts/${nfCt}`)).data.measurements.find(m => m.id === nfA).open === 600, 'parcial: tabela do contrato traz o saldo');
+    v = (await pp({ paid_date: '2026-02-15', paid_amount: 300, settle: 'parcial' })).data;
+    ok(v.status === 'faturada' && v.totals.paid === 700 && v.totals.open === 300 && v.payments.length === 2, 'parcial: segundo pagamento, saldo 300');
+    ok((await fo('POST', `/measurements/${nfA}/actions/undo`)).data.totals.open === 600 && (await pv()).payments.length === 1, 'desfazer tira só o último pagamento (saldo volta a 600)');
+    v = (await pp({ paid_date: '2026-02-20', paid_amount: 500, settle: 'quitar' })).data;
+    ok(v.status === 'recebida' && v.totals.paid === 900 && v.totals.open === 0 && !v.partial && v.paid_amount === 900 && v.paid_date === '2026-02-20', 'quitar com diferença: recebida com 900 (diferença de 100 aceita)');
+    dd = (await fo('GET', '/contracts/dashboard')).data;
+    ok(!dd.actions.some(a => a.kind === 'saldo' && a.href === `#/medicoes/${nfA}`), 'quitada: alerta de saldo some');
+    v = (await fo('POST', `/measurements/${nfA}/actions/undo`)).data;
+    ok(v.status === 'faturada' && v.partial && v.totals.open === 600, 'desfazer a quitação volta a parcial com saldo 600');
+    v = (await pp({ paid_date: '2026-02-25' })).data;
+    ok(v.status === 'recebida' && v.totals.paid === 1000 && v.payments.length === 2 && v.payments[1].amount === 600, 'em branco recebe o saldo e quita');
+  }
 
   // ---------- Folha de Campo (dados fictícios) ----------
   { const g = await login('ana@charao.eng.br'); const u = (await g('GET', '/users/1')).data.user; await g('PUT', '/users/1', { ...u, sections: [...u.section_list, 'folha_campo'] }); }

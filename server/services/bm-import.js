@@ -325,6 +325,7 @@ export function applyImport(ctx, body, ip) {
           VALUES (?,?,?,?,?,?, 'recebida', ?,?,?,?,?,?,?,?)`, contract.id, seq, code, x.month, `${x.month}-01`, `${x.month}-${String(last).padStart(2, '0')}`,
           x.notes, x.docs, x.nf_date, x.paid_date, x.total, `${x.nf_date}T12:00:00.000Z`, ctx.user.id, ctx.user.id);
         const mid = Number(r.lastInsertRowid);
+        if (x.paid_date) run('INSERT INTO measurement_payments (measurement_id, paid_date, amount, closes, created_by) VALUES (?,?,?,1,?)', mid, x.paid_date, x.total, ctx.user.id);
         const qty = new Map(x.lines.map(l => [itemFor.get(l.nature), l.value]));
         for (const it of items) run('INSERT INTO measurement_lines (measurement_id, item_id, quantity) VALUES (?,?,?)', mid, it.id, qty.get(it.id) || 0);
         x.adjustments.forEach((adj, k) => run('INSERT INTO measurement_adjustments (measurement_id, seq, description, unit, amount) VALUES (?,?,?,?,?)', mid, k + 1, adj.description, 'vb', adj.amount));

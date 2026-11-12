@@ -2,7 +2,7 @@
 // para quem tem equipe abaixo, a análise de desempenho da equipe. Atalho para a Visão da empresa (se liberada).
 import { html, api, icon, statusBadge, dueInfo, fmtPct, fmtDate } from '../core.js';
 import { toast, sheet, lightbox } from '../ui.js';
-import { fold, bindFolds, nOf, checklistFold, pageHead, kpi, execKpis, userRankRow, stackBar, bindCommon, STATUS_COLOR } from './shared.js';
+import { fold, bindFolds, nOf, checklistFold, pageHead, kpi, execKpis, userRankRow, rankUsers, stackBar, bindCommon, STATUS_COLOR } from './shared.js';
 import { deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { weekPlanSection, bindWeekPlan } from './week-plan.js';
@@ -97,8 +97,8 @@ export async function view({ state, query, setQuery, render }) {
     <div class="grid grid-dash section">
       ${fold('eq-atrasadas', teamLate.length ? 'as mais atrasadas primeiro' : 'nenhuma atrasada', teamLate.length ? nOf(teamLate.length, 'atrasada', 'atrasadas') : '', html`<section class="card"><div class="card-head"><h2>${icon('alert')}Atrasadas da equipe</h2><span class="sub">${teamLate.length}</span></div>
         ${teamLate.length ? html`<ul class="rows">${teamLate.slice(0, 8).map(t => taskRow(t, true))}</ul>` : html`<div class="card-body muted">Nenhuma tarefa atrasada na equipe. 👍</div>`}</section>`)}
-      ${fold('ranking', nOf(team.length, 'integrante', 'integrantes'), '', html`<section class="card"><div class="card-head"><h2>${icon('team')}Ranking da equipe</h2><span class="sub">entregas no prazo</span></div>
-        <ul class="rows">${[...team].sort((a, b) => (b.stats.on_time_pct ?? -1) - (a.stats.on_time_pct ?? -1)).map((m, i) => userRankRow(m, i))}</ul></section>`)}
+      ${fold('ranking', nOf(team.length, 'integrante', 'integrantes'), '', html`<section class="card"><div class="card-head"><h2>${icon('team')}Ranking da equipe</h2><span class="sub">índice de desempenho</span></div>
+        <ul class="rows">${rankUsers(team).map((m, i) => userRankRow(m, i))}</ul></section>`)}
     </div>
     ${team.some(m => m.stats.with_due) ? fold('prazos', nOf(team.filter(m => m.stats.with_due).length, 'integrante com prazos', 'integrantes com prazos'), '', html`<section class="card section"><div class="card-head"><h2>Prazos e repactuações da equipe</h2></div><div class="card-body">
       ${deadlineTable(team.filter(m => m.stats.with_due).map(m => ({ label: m.name, s: m.stats, href: `#/usuarios/${m.id}` })), 'Integrante')}</div></section>`) : ''}` : '';

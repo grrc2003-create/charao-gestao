@@ -143,9 +143,50 @@ const rankCalc = s => {
     filling: `Atraso de preenchimento\nRegistradas depois do dia real ${s.filling_own ?? 0} + conferências de liderados acima de 36 h ${s.review_delays ?? 0} = ${s.filling_delays ?? 0}${s.filling_own ? `\nRegistro: em média, ${br(s.filling_delay_days_avg)} dias depois.` : ''}${s.review_delays ? `\nConferência: em média, ${s.review_delay_hours_avg} horas de espera.` : ''}`,
   };
 };
-export const userRankRow = (u, i, _all, calc = rankCalc(u.stats)) => html`<li><a class="row-link rank" href="#/usuarios/${u.id}">
-  <span class="rank-num">${i + 1}</span>${avatar(u.name, 'sm', u.id)}
-  <div class="grow"><div class="row-title truncate">${u.name}</div><div class="row-meta"><span class="truncate">${u.job_title || ''}</span></div></div>
+// ---------- Índice de desempenho (0 a 100) para ordenar o ranking ----------
+// 40% pontualidade ajustada (poucas entregas puxadas para a média da equipe) · 20% sem atrasos em aberto ·
+// 15% volume entregue (escala logarítmica) · 10% antecipação (ajustada) · 15% registro em dia.
+// Classifica quem tem 3 ou mais entregas; quem tem menos aparece abaixo. Todo o histórico. Dias por execução não conta.
+const RANK_W = { P: 40, A: 20, V: 15, E: 10, R: 15 };
+const RANK_K = 5, RANK_MIN = 3;
+export function rankUsers(list) {
+  const st = u => u.stats || {};
+  const tot = list.reduce((a, u) => ({ del: a.del + (st(u).delivered || 0), on: a.on + (st(u).on_time || 0), early: a.early + (st(u).early || 0) }), { del: 0, on: 0, early: 0 });
+  const pOn = tot.del ? tot.on / tot.del : 0.8, pEarly = tot.del ? tot.early / tot.del : 0;
+  const maxDone = Math.max(0, ...list.map(u => st(u).done || 0));
+  const eRaw = u => ((st(u).early || 0) + RANK_K * pEarly) / ((st(u).delivered || 0) + RANK_K);
+  const maxE = Math.max(0, ...list.map(eRaw));
+  const out = list.map(u => {
+    const s = st(u), del = s.delivered || 0, open = Math.max(0, (s.assigned || 0) - (s.done || 0));
+    const P = ((s.on_time || 0) + RANK_K * pOn) / (del + RANK_K);
+    const A = open ? Math.max(0, 1 - (s.late || 0) / open) : 1;
+    const V = maxDone ? Math.log(1 + (s.done || 0)) / Math.log(1 + maxDone) : 0;
+    const E = maxE ? eRaw(u) / maxE : 0;
+    const R = del ? Math.max(0, 1 - (s.filling_delays || 0) / del) : 1;
+    const parts = { P, A, V, E, R };
+    const score = Math.round(Object.entries(RANK_W).reduce((a, [k, w]) => a + w * parts[k], 0));
+    return { ...u, rank: { score, parts, tier: del >= RANK_MIN ? 0 : del > 0 ? 1 : 2, del, open, pOn } };
+  });
+  return out.sort((a, b) => a.rank.tier - b.rank.tier || b.rank.score - a.rank.score || (st(b).done || 0) - (st(a).done || 0) || String(a.name).localeCompare(String(b.name), 'pt-BR'));
+}
+const pct0 = v => `${Math.round(v * 100)}%`;
+const rankScoreCalc = (u) => {
+  const r = u.rank, s = u.stats;
+  if (!r) return '';
+  if (r.tier === 2) return `Índice de desempenho\nAinda sem entregas: o índice aparece a partir da primeira entrega, e a pessoa entra na classificação com ${RANK_MIN} entregas.`;
+  const line = (w, label, v, how) => `${label} (${w}%): ${pct0(v)} → ${br(Math.round(w * v * 10) / 10)} pts\n  ${how}`;
+  return [`Índice de desempenho: ${r.score} de 100${r.tier ? ` · ${r.tier === 1 ? `com menos de ${RANK_MIN} entregas, fica abaixo dos classificados` : 'sem entregas ainda'}` : ''}`,
+    line(RANK_W.P, 'Pontualidade ajustada', r.parts.P, `(${s.on_time ?? 0} no prazo + ${RANK_K} × média da equipe ${pct0(r.pOn)}) ÷ (${r.del} entregas + ${RANK_K})`),
+    line(RANK_W.A, 'Sem atrasos em aberto', r.parts.A, `1 − ${s.late ?? 0} atrasada(s) ÷ ${r.open} em aberto`),
+    line(RANK_W.V, 'Volume entregue', r.parts.V, `${s.done ?? 0} concluídas, comparado com quem mais concluiu (escala logarítmica)`),
+    line(RANK_W.E, 'Antecipação', r.parts.E, `${s.early ?? 0} entrega(s) antes do prazo, ajustada e comparada com a melhor da equipe`),
+    line(RANK_W.R, 'Registro em dia', r.parts.R, `1 − ${s.filling_delays ?? 0} atraso(s) de preenchimento ÷ ${r.del} entregas`),
+    'Dias por execução aparece, mas não conta para a posição (depende do tamanho da tarefa).'].join('\n');
+};
+export const userRankRow = (u, i, _all, calc = rankCalc(u.stats)) => html`<li><a class="row-link rank ${u.rank?.tier ? 'is-unranked' : ''}" href="#/usuarios/${u.id}">
+  <span class="rank-num">${u.rank?.tier ? '–' : i + 1}</span>${avatar(u.name, 'sm', u.id)}
+  <div class="grow"><div class="row-title truncate">${u.name}</div><div class="row-meta"><span class="truncate">${u.job_title || ''}</span>${u.rank?.tier ? html`<span class="rank-tag">${u.rank.tier === 1 ? 'poucas entregas para classificar' : 'sem entregas'}</span>` : ''}</div></div>
+  ${u.rank ? html`<div class="rank-score" data-calc="${rankScoreCalc(u)}"><b>${u.rank.tier === 2 ? '—' : u.rank.score}</b>índice</div>` : ''}
   <div class="rank-metrics">
     <div class="ok" data-calc="${calc.onTime}"><b>${fmtPct(u.stats.on_time_pct)}</b>no prazo</div>
     <div data-calc="${calc.done}"><b>${u.stats.done}</b>concluídas</div>

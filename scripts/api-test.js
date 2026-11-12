@@ -3422,7 +3422,9 @@ async function main() {
     const abNo = await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5), makeup_date: fut(8) });
     ok(abNo.status === 400 && /proponha um novo prazo ou explique/.test(abNo.data.error || ''), 'ausência em dia com entrega exige novo prazo ou explicação');
     ok((await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5), makeup_date: fut(8), reschedules: [{ task_id: abTask, new_due: fut(5) }] })).status === 400, 'novo prazo não pode cair no dia da ausência');
-    const ab = await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5), makeup_date: fut(8), note: 'Consulta médica', reschedules: [{ task_id: abTask, explanation: 'Entrego no dia anterior' }] });
+    // todas as tarefas com entrega no dia (inclusive as do banco de exemplo, conforme a hora em que o teste roda)
+    const abAll = (await vMar('POST', '/absences/preview', { off_date: fut(5) })).data.conflicts.map(c => ({ task_id: c.id, explanation: 'Entrego no dia anterior' }));
+    const ab = await vMar('POST', '/absences', { kind: 'reposicao', off_date: fut(5), makeup_date: fut(8), note: 'Consulta médica', reschedules: abAll });
     ok(ab.status === 201 && ab.data.status === 'solicitada', 'a pessoa combina a ausência (aguarda o gestor)');
     ok((await vMar('POST', `/absences/${ab.data.id}/approve`, {})).status === 403, 'a própria pessoa não aprova');
     ok((await vMar('POST', '/absences', { kind: 'descontada', off_date: fut(5) })).status === 400, 'não combina duas ausências no mesmo dia');
@@ -3699,6 +3701,26 @@ async function main() {
     final_scope: 'Escopo D', proposal_value: 3000, proposals: [{ file: snPdf, name: 'proposta-d.pdf' }] }));
   ok(snWon.status === 201 && (await svA('GET', `/sales/opportunities/${snWon.data.id}`)).data.closed_at, 'pode cadastrar direto em Contrato fechado (com os dados da proposta)');
   ok((await svA('DELETE', `/sales/opportunities/${snId}`)).status === 200 && (await svA('DELETE', `/sales/opportunities/${snWon.data.id}`)).status === 200, 'oportunidades com observações são excluídas');
+  // Exigências editáveis por coluna: para entrar e para sair e seguir
+  {
+    const rb = (await svA('GET', '/sales/board')).data;
+    const st = k => rb.stages.find(x => x.kind === k);
+    ok(st('proposta').rules.entry.join() === 'final_scope,proposal_value' && st('negociacao').rules.entry.includes('profile_id') && !st('apresentacao').rules.exit.length && rb.rule_fields.includes('contact_name'), 'exigências padrão de cada coluna (como antes)');
+    const asSave = rb.stages.map(x => ({ id: x.id, name: x.name, kind: x.kind, entry_fields: x.rules.entry, exit_fields: x.id === st('apresentacao').id ? ['contact_name', 'phone'] : x.rules.exit }));
+    const rs = await svA('PUT', '/sales/stages', { stages: asSave });
+    ok(rs.status === 200 && rs.data.find(x => x.id === st('apresentacao').id).exit_fields.includes('contact_name'), 'Apresentação passa a exigir contato e telefone para sair');
+    const rid = (await svA('POST', '/sales/opportunities', { client: 'Cliente Regras Fictício', address: 'Rua R, 1', source_id: svSrc, stage_id: st('apresentacao').id })).data.id;
+    const mv = await svA('PUT', `/sales/opportunities/${rid}`, { stage_id: st('proposta').id, final_scope: 'Escopo R', proposal_value: '1.000,00' });
+    ok(mv.status === 400 && /Para sair de "Apresentação"/.test(mv.data.error || '') && mv.data.details?.missing?.includes('contact_name'), 'para seguir adiante, pede o que a coluna exige para sair');
+    ok((await svA('PUT', `/sales/opportunities/${rid}`, { stage_id: st('prospeccao').id })).status === 200, 'voltar para uma coluna anterior não pede as exigências de saída');
+    ok((await svA('PUT', `/sales/opportunities/${rid}`, { stage_id: st('proposta').id, final_scope: 'Escopo R', proposal_value: '1.000,00' })).status === 400, 'pular colunas pede também o que as colunas do caminho exigem para sair');
+    ok((await svA('POST', '/sales/opportunities', { client: 'Direto Fictício', address: 'Rua D', source_id: svSrc, stage_id: st('proposta').id, final_scope: 'E', proposal_value: 100 })).status === 400, 'cadastro direto numa coluna pede as saídas das colunas anteriores');
+    ok((await svA('PUT', `/sales/opportunities/${rid}`, { stage_id: st('proposta').id, final_scope: 'Escopo R', proposal_value: '1.000,00', contact_name: 'Contato Fictício', phone: '(51) 0000-0000' })).status === 200, 'com os campos preenchidos, segue para a próxima coluna');
+    ok((await svA('PUT', `/sales/opportunities/${rid}`, { stage_id: st('perdido').id, lost_reason_id: svB.lists.loss[0].id })).status === 200, 'Contrato perdido pede só o motivo');
+    const block = rb.stages.map(x => ({ id: x.id, name: x.name, kind: x.kind, entry_fields: x.id === st('perdido').id ? ['email'] : x.rules.entry, exit_fields: x.rules.exit }));
+    ok((await svA('PUT', '/sales/stages', { stages: block })).status === 400, 'coluna com oportunidades só passa a exigir para entrar o que elas já têm');
+    ok((await svA('PUT', '/sales/stages', { stages: rb.stages.map(x => ({ id: x.id, name: x.name, kind: x.kind, entry_fields: x.rules.entry, exit_fields: x.rules.exit })) })).status === 200 && (await svA('DELETE', `/sales/opportunities/${rid}`)).status === 200, 'exigências restauradas');
+  }
 
   // ---------- Lista Mestra de projetos ----------
   console.log('\nLista Mestra');

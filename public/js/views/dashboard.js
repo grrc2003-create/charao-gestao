@@ -1,5 +1,5 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
-import { fold, bindFolds, nOf, checklistFold, pageHead, kpiBlock, donut, projectRow, userRankRow, bindCommon, kpi, stackBar, STATUS_COLOR, execInline } from './shared.js';
+import { fold, bindFolds, nOf, checklistFold, pageHead, kpiBlock, donut, projectRow, userRankRow, rankUsers, bindCommon, kpi, stackBar, STATUS_COLOR, execInline } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
 import { impactRankingSection } from './deps-ui.js';
@@ -60,8 +60,7 @@ export async function view({ state }) {
   const u = state.user;
   const s = d.summary;
   const firstName = u.name.split(' ')[0];
-  const ranking = [...d.users].sort((a, b) =>
-    (b.stats.on_time_pct ?? -1) - (a.stats.on_time_pct ?? -1) || b.stats.done - a.stats.done || a.stats.late - b.stats.late);
+  const ranking = rankUsers(d.users);
   const projects = [...d.projects].sort((a, b) => (a.status === 'concluido') - (b.status === 'concluido') || b.summary.late - a.summary.late);
 
   const taskMini = t => {

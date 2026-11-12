@@ -1,5 +1,5 @@
 // Vendas e Prospecção: funil em Kanban (colunas personalizadas), ficha da oportunidade e passagem para Contratos.
-// Cada coluna tem um tipo de etapa; ao entrar nela, o que faltar é pedido numa janela antes de mover.
+// Cada coluna tem um tipo de etapa e exigências editáveis (para entrar e para sair e seguir); o que faltar é pedido numa janela antes de mover.
 import { html, api, icon, fmtDate, fmtDateTime, avatar } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments } from '../ui.js';
 import { pageHead } from './shared.js';
@@ -8,7 +8,6 @@ import { salesKpis, salesAnalytics, bindAnalytics } from './sales-analytics.js';
 
 const CO_NAME = { charao: 'Charão Engenharia & Construção', lus: 'Ludimila Siqueira Arquitetura & Design' };
 const coBadge = co => html`<span class="co-badge co-${co}" title="${CO_NAME[co] || ''}">${CO_SHORT[co] || co}</span>`;
-const LEVEL = { prospeccao: 1, livre: 1, apresentacao: 2, proposta: 3, negociacao: 4, ganho: 3, perdido: 1 };
 const KIND_CLS = { prospeccao: 'k-pro', apresentacao: 'k-apr', proposta: 'k-prop', negociacao: 'k-neg', ganho: 'k-won', perdido: 'k-lost', livre: 'k-free' };
 const LIST_OF = { source_id: 'source', lost_reason_id: 'loss', profile_id: 'profile' };
 const LIST_NEW = { source: 'Nova origem', loss: 'Novo motivo', profile: 'Nova avaliação' };
@@ -21,30 +20,30 @@ function denied(state) {
   if (!state.meta.can.sales) throw new Error('A seção Vendas e Prospecção não está liberada para o seu usuário. Solicite ao administrador (Cadastro da Equipe → Seções).');
 }
 
-// O que falta para a oportunidade ficar numa coluna do tipo informado (mesma regra do servidor)
-export function missingFor(o, kind) {
+// Exigências por coluna (mesma regra do servidor): sempre o cadastro básico + o que a coluna de destino exige para entrar;
+// indo para a frente, também o que a coluna de origem e as do caminho exigem para sair. Voltar não pede o que é de saída.
+const BASE_REQ = ['client', 'address', 'source_id', 'company'];
+const closingKind = k => k === 'ganho' || k === 'perdido';
+const rulesOf = s => s?.rules || { entry: [], exit: [] };
+function requiredFor(to, from, stages) {
+  const req = new Set(BASE_REQ);
+  if (to.kind === 'perdido') req.add('lost_reason_id');
+  rulesOf(to).entry.forEach(k => req.add(k));
+  if (to.kind === 'perdido') return req;
+  const pos = new Map(stages.map((x, i) => [x.id, i]));
+  const ti = pos.get(to.id) ?? stages.length, fi = from ? pos.get(from.id) ?? -1 : -1;
+  if (!from || ti > fi) stages.forEach((x, i) => { if (i >= Math.max(fi, 0) && i < ti && !closingKind(x.kind)) rulesOf(x).exit.forEach(k => req.add(k)); });
+  return req;
+}
+function missingOf(o, req) {
   const miss = [];
-  if (!String(o.client || '').trim()) miss.push('client');
-  if (!String(o.address || '').trim()) miss.push('address');
-  if (!o.source_id) miss.push('source_id');
-  if (!o.company) miss.push('company');
-  if (kind === 'perdido') { if (!o.lost_reason_id) miss.push('lost_reason_id'); return miss; }
-  if (LEVEL[kind] >= 3) {
-    if (!String(o.final_scope || '').trim()) miss.push('final_scope');
-    if (!(o.proposal_value > 0)) miss.push('proposal_value');
+  for (const k of req) {
+    if (k === 'proposal_file') { if (!(o.files_count > 0)) miss.push(k); continue; }
+    const v = o[k];
+    if (k === 'proposal_value' ? !(Number(v) > 0) : (v === null || v === undefined || !String(v).trim())) miss.push(k);
   }
-  if (kind === 'negociacao' && !o.profile_id) miss.push('profile_id');
   return miss;
 }
-const requiredFor = kind => {
-  const r = new Set(['client', 'address', 'source_id', 'company']);
-  if (kind === 'perdido') r.add('lost_reason_id');
-  else {
-    if (LEVEL[kind] >= 3) ['final_scope', 'proposal_value'].forEach(k => r.add(k));
-    if (kind === 'negociacao') r.add('profile_id');
-  }
-  return r;
-};
 
 // ---------- Campos ----------
 const LABEL = {
@@ -168,12 +167,15 @@ const checkRequired = form => {
 // ---------- Mover entre colunas ----------
 // Pede o que faltar para a coluna de destino; no contrato fechado pergunta (Sim/Não, sem padrão) se cria o contrato
 async function moveFlow(o, stage, { position, d, navigate, done }) {
-  const miss = missingFor(o, stage.kind);
+  const from = d.stages.find(x => x.id === o.stage_id) || null;
+  const req = requiredFor(stage, from, d.stages);
+  const miss = missingOf(o, req);
+  const forward = from && d.stages.indexOf(stage) > d.stages.indexOf(from) && stage.kind !== 'perdido';
+  const exitMiss = forward ? miss.filter(k => !requiredFor(stage, stage, d.stages).has(k)) : [];
   const body = { stage_id: stage.id, ...(position !== undefined ? { position } : {}) };
   if (stage.kind === 'perdido' || miss.length) {
     const stop = sheetObserver(d);
     const keys = stage.kind === 'perdido' ? [...new Set([...miss.filter(k => k !== 'lost_reason_id'), 'lost_reason_id', 'lost_notes'])] : miss.flatMap(k => (k === 'proposal_value' ? ['proposal_value', 'discount_pct'] : [k]));
-    const req = requiredFor(stage.kind);
     const r = await sheet({
       title: `Mover ${o.code} para “${stage.name}”`,
       wide: true,
@@ -181,6 +183,7 @@ async function moveFlow(o, stage, { position, d, navigate, done }) {
       danger: stage.kind === 'perdido',
       body: html`<div class="sv-move-sheet" data-sv-sheet>
         <p class="muted" style="margin:0 0 4px">${stage.kind === 'perdido' ? html`Informe o motivo da perda de <b>${o.client}</b>. Os motivos são cadastrados em <b>Configurações</b> (e aqui mesmo, em “Novo motivo”).`
+          : exitMiss.length ? html`Para sair de <b>${from.name}</b> e seguir para <b>${stage.name}</b>, preencha os campos abaixo de <b>${o.client}</b>.`
           : html`A coluna <b>${stage.name}</b> exige os campos abaixo para <b>${o.client}</b>.`}</p>
         ${rows(keys, o, d, req)}
         <div class="field"><label for="sv-stage_note">Observação da etapa (${stage.name})</label><textarea id="sv-stage_note" name="stage_note" rows="2" maxlength="4000" placeholder="Opcional"></textarea></div></div>`,
@@ -242,6 +245,7 @@ const card = (o, s) => {
         ${o.contract_code ? html`<span class="sv-tag t-won">${icon('contract')}${o.contract_code}</span>` : s.kind === 'ganho' ? html`<span class="sv-tag t-warn">sem contrato</span>` : ''}
       </div>
       ${o.missing?.length ? html`<span class="sv-warn">${icon('alert')}Falta: ${o.missing.map(k => LABEL[k]).join(', ')}</span>` : ''}
+      ${o.next?.length ? html`<span class="sv-next" title="O que esta coluna exige para o cartão seguir adiante">Para avançar: ${o.next.map(k => LABEL[k]).join(', ')}</span>` : ''}
     </a>
     <div class="sv-card-foot">${o.owner_name ? html`<span class="sv-owner" title="Responsável: ${o.owner_name}">${avatar(o.owner_name, 'sm sv-av', o.owner_id)}<span>${o.owner_name.split(' ')[0]}</span></span>` : '<span></span>'}
       <span class="sv-days ${dd > 30 ? 'is-old' : ''}" title="Na coluna desde ${fmtDateTime(o.stage_since)}">${icon('clock')}${dd === 0 ? 'hoje' : `${dd} ${dd === 1 ? 'dia' : 'dias'}`}</span>
@@ -256,7 +260,11 @@ export async function board({ state, query, setQuery, render, navigate }) {
   const q = (query.get('q') || '').trim();
   const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const visible = d.opportunities.filter(o => (!empresa || o.company === empresa) && (!q || norm(`${o.code} ${o.client} ${o.title} ${o.contact_name} ${o.city}`).includes(norm(q))));
-  for (const o of visible) o.missing = missingFor(o, o.stage_kind);
+  for (const o of visible) {
+    const st = d.stages.find(x => x.id === o.stage_id);
+    o.missing = st ? missingOf(o, requiredFor(st, st, d.stages)) : [];
+    o.next = st && !closingKind(st.kind) && !o.missing.length ? missingOf(o, rulesOf(st).exit) : [];
+  }
   const byStage = new Map(d.stages.map(s => [s.id, visible.filter(o => o.stage_id === s.id)]));
   const sum = l => l.reduce((s, o) => s + (o.final_value || 0), 0);
   const chip = (val, label) => html`<button type="button" class="chip co-chip ${val ? `co-${val}` : ''}" data-empresa="${val}" aria-pressed="${String(empresa === val)}">${label}</button>`;
@@ -368,8 +376,9 @@ const KIND_EXTRA = {
 };
 async function newOpportunity(d, reload, stage, navigate) {
   const o = { company: 'charao' };
-  const req = requiredFor(stage.kind);
-  const extra = KIND_EXTRA[stage.kind] || [];
+  const req = requiredFor(stage, null, d.stages);
+  const ruleExtra = [...req].filter(k => !BASE_FIELDS.includes(k) && !(KIND_EXTRA[stage.kind] || []).includes(k));
+  const extra = [...(KIND_EXTRA[stage.kind] || []), ...ruleExtra.flatMap(k => (k === 'proposal_value' ? ['proposal_value', 'discount_pct'] : [k]))].filter((k, i, a) => a.indexOf(k) === i);
   const stop = sheetObserver(d);
   const r = await sheet({
     title: `Nova oportunidade em “${stage.name}”`,
@@ -397,25 +406,43 @@ async function newOpportunity(d, reload, stage, navigate) {
 }
 
 // ---------- Colunas ----------
+// Exigências de uma coluna: o que pede para entrar e para sair e seguir (campos da oportunidade)
+const ruleBox = (s, d, kindLabel = null) => {
+  const r = s.rules || { entry: d.kind_entry[s.kind || 'livre'] || [], exit: [] };
+  const chk = (kind, k, on) => html`<label><input type="checkbox" data-rule="${kind}" value="${k}" ${on ? 'checked' : ''}>${LABEL[k]}</label>`;
+  return html`<div class="sv-rules" hidden>
+    <p class="hint" style="margin:0">Sempre exigidos: cliente, endereço, origem e empresa${(s.kind || '') === 'perdido' ? ' e o motivo da perda' : ''}.</p>
+    <div class="sv-rule-g"><b>Para entrar nesta coluna</b><div class="sv-rule-opts">${d.rule_fields.map(k => chk('entry', k, r.entry.includes(k)))}</div></div>
+    ${['ganho', 'perdido'].includes(s.kind) ? '' : html`<div class="sv-rule-g"><b>Para sair e seguir para as próximas colunas</b><div class="sv-rule-opts">${d.rule_fields.map(k => chk('exit', k, r.exit.includes(k)))}</div>
+      <span class="hint">Pedido ao levar o cartão para a frente (inclusive pulando colunas). Voltar para uma coluna anterior não pede.</span></div>`}
+  </div>`;
+};
+const ruleCount = s => { const r = s.rules || { entry: [], exit: [] }; return r.entry.length + r.exit.length; };
 async function editColumns(d, reload) {
   const kinds = Object.entries(d.kinds);
+  window.__svRuleCtx = d;
   const row = s => html`<li class="sv-colrow" data-id="${s.id || ''}">
     <span class="stage-move"><button type="button" class="icon-btn" data-up aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-down aria-label="Mover para baixo">▼</button></span>
     <input type="text" maxlength="40" value="${s.name || ''}" aria-label="Nome da coluna" required>
     <select aria-label="Tipo de etapa">${kinds.map(([k, l]) => html`<option value="${k}" ${k === (s.kind || 'livre') ? 'selected' : ''}>${l}</option>`)}</select>
     <span class="stage-count">${s.use_count ? `${s.use_count} op.` : 'vazia'}</span>
-    <button type="button" class="icon-btn" data-rm aria-disabled="${s.use_count ? 'true' : 'false'}" aria-label="Excluir coluna" title="${s.use_count ? 'Mova as oportunidades antes de excluir' : 'Excluir'}">✕</button></li>`;
+    <button type="button" class="btn btn-ghost btn-sm sv-rule-tog" data-rules>Exigências (${ruleCount(s)})</button>
+    <button type="button" class="icon-btn" data-rm aria-disabled="${s.use_count ? 'true' : 'false'}" aria-label="Excluir coluna" title="${s.use_count ? 'Mova as oportunidades antes de excluir' : 'Excluir'}">✕</button>
+    ${ruleBox(s, d)}</li>`;
   const r = await sheet({
     title: 'Colunas do funil',
     wide: true,
     submitLabel: 'Salvar colunas',
-    body: html`<p class="muted" style="margin:0 0 8px">Renomeie, reordene ou crie colunas. O <b>tipo de etapa</b> define o que é exigido ao entrar na coluna:
-        Prospecção (cliente, endereço, origem e empresa) · Apresentação (escopo possível, opcional) · Proposta (escopo final e valor; arquivo opcional) ·
-        Negociação (avaliação do cliente) · Contrato fechado (pergunta se cria o contrato) · Contrato perdido (motivo). “Livre” não exige nada além do cadastro.</p>
+    body: html`<p class="muted" style="margin:0 0 8px">Renomeie, reordene ou crie colunas. Em <b>Exigências</b>, escolha o que cada coluna pede <b>para entrar</b>
+        e o que pede <b>para sair e seguir</b> para as próximas (ex.: sair de Apresentação só com o escopo final e o valor). O <b>tipo de etapa</b> sugere as exigências
+        de entrada (Proposta: escopo final e valor · Negociação: também a avaliação do cliente) e define o fechamento: Contrato fechado (pergunta se cria o contrato)
+        e Contrato perdido (motivo).</p>
       <ul class="sv-colist" id="sv-colist">${d.stages.map(row)}</ul>
       <button type="button" class="btn btn-ghost btn-sm" id="sv-col-add">${icon('plus')}Nova coluna</button>`,
     onSubmit: (_data, form) => {
-      const stages = [...form.querySelectorAll('.sv-colrow')].map(li => ({ id: li.dataset.id ? Number(li.dataset.id) : null, name: li.querySelector('input').value, kind: li.querySelector('select').value }));
+      const pick = (li, kind) => [...li.querySelectorAll(`[data-rule="${kind}"]:checked`)].map(i => i.value);
+      const stages = [...form.querySelectorAll('.sv-colrow')].map(li => ({ id: li.dataset.id ? Number(li.dataset.id) : null, name: li.querySelector('input[type=text]').value, kind: li.querySelector('select').value,
+        entry_fields: pick(li, 'entry'), exit_fields: ['ganho', 'perdido'].includes(li.querySelector('select').value) ? [] : pick(li, 'exit') }));
       return api('/sales/stages', { method: 'PUT', body: { stages } });
     },
   });
@@ -430,12 +457,14 @@ document.addEventListener('click', e => {
       <span class="stage-move"><button type="button" class="icon-btn" data-up aria-label="Mover para cima">▲</button><button type="button" class="icon-btn" data-down aria-label="Mover para baixo">▼</button></span>
       <input type="text" maxlength="40" value="" placeholder="Nome da coluna" aria-label="Nome da coluna" required>
       <select aria-label="Tipo de etapa">${['prospeccao', 'apresentacao', 'proposta', 'negociacao', 'ganho', 'perdido', 'livre'].map(k => html`<option value="${k}" ${k === 'livre' ? 'selected' : ''}>${{ prospeccao: 'Prospecção', apresentacao: 'Apresentação', proposta: 'Proposta', negociacao: 'Negociação', ganho: 'Contrato fechado', perdido: 'Contrato perdido', livre: 'Livre (sem exigência extra)' }[k]}</option>`)}</select>
-      <span class="stage-count">nova</span><button type="button" class="icon-btn" data-rm aria-label="Excluir coluna">✕</button></li>`.toString());
+      <span class="stage-count">nova</span><button type="button" class="btn btn-ghost btn-sm sv-rule-tog" data-rules>Exigências (0)</button><button type="button" class="icon-btn" data-rm aria-label="Excluir coluna">✕</button>
+      ${ruleBox({ kind: 'livre', rules: { entry: [], exit: [] } }, window.__svRuleCtx)}</li>`.toString());
     list.lastElementChild.querySelector('input').focus();
     return;
   }
   const li = e.target.closest('.sv-colrow');
   if (!li) return;
+  if (e.target.closest('[data-rules]')) { const b = li.querySelector('.sv-rules'); b.hidden = !b.hidden; return; }
   if (e.target.closest('[data-rm]')) { if (e.target.closest('[data-rm]').getAttribute('aria-disabled') === 'true') toast('Mova as oportunidades desta coluna antes de excluí-la.', 'warn'); else li.remove(); }
   if (e.target.closest('[data-up]') && li.previousElementSibling) li.previousElementSibling.before(li);
   if (e.target.closest('[data-down]') && li.nextElementSibling) li.nextElementSibling.after(li);
@@ -460,7 +489,8 @@ export async function view({ params, state, navigate, render }) {
   const o = await api(`/sales/opportunities/${params.id}`);
   o.files_count = o.proposals.filter(p => p.has_file).length;
   const d = o;
-  const req = requiredFor(o.stage_kind);
+  const curSt = o.stages.find(x => x.id === o.stage_id);
+  const req = curSt ? requiredFor(curSt, curSt, o.stages) : new Set(BASE_REQ);
   const kind = o.stage_kind;
   const showLost = kind === 'perdido' || o.lost_reason_id;
   const stageChip = html`<span class="sv-stage ${KIND_CLS[kind]}">${o.stage_name}</span>`;
@@ -514,7 +544,8 @@ export async function view({ params, state, navigate, render }) {
           ${o.contract_id ? html`<a class="btn btn-ghost" href="#/contratos/${o.contract_id}">${icon('contract')}Contrato ${o.contract_code}</a>` : ''}
           ${canCreate ? html`<button type="button" class="btn btn-primary" id="sv-ct" ${o.can_contracts ? '' : 'aria-disabled="true"'} title="${o.can_contracts ? 'Abre o cadastro do contrato já preenchido' : 'Requer a liberação de Contratos'}">${icon('contract')}Criar contrato</button>` : ''}
           ${o.contract_id ? '' : html`<button type="button" class="icon-btn" id="sv-del" aria-label="Excluir oportunidade" title="Excluir oportunidade">${icon('trash')}</button>`}` })}
-      ${o.missing_here.length ? html`<div class="sv-banner">${icon('alert')}<span>Para ficar em <b>${o.stage_name}</b> falta: ${o.missing_here.map(k => LABEL[k]).join(', ')}.</span></div>` : ''}
+      ${o.missing_here.length ? html`<div class="sv-banner">${icon('alert')}<span>Para ficar em <b>${o.stage_name}</b> falta: ${o.missing_here.map(k => LABEL[k]).join(', ')}.</span></div>`
+        : o.missing_next?.length ? html`<div class="sv-banner is-next">${icon('info')}<span>Para sair de <b>${o.stage_name}</b> e seguir adiante falta: ${o.missing_next.map(k => LABEL[k]).join(', ')}.</span></div>` : ''}
       <nav class="sv-steps" aria-label="Etapas">${o.stages.map((s, i) => html`<button type="button" data-step="${s.id}" class="sv-step ${KIND_CLS[s.kind]} ${s.id === o.stage_id ? 'is-current' : i < curIdx ? 'is-done' : ''}">
         <span>${s.name}</span>${o.notes.filter(n => n.stage_id === s.id).length ? html`<b>${o.notes.filter(n => n.stage_id === s.id).length}</b>` : ''}</button>`)}</nav>
       <div class="sv-detail">
@@ -642,3 +673,18 @@ export async function view({ params, state, navigate, render }) {
     },
   };
 }
+
+// Editor de colunas: trocar o tipo sugere as exigências de entrada do novo tipo; contador acompanha as marcações
+document.addEventListener('change', e => {
+  const li = e.target.closest('.sheet .sv-colrow');
+  if (!li) return;
+  const d = window.__svRuleCtx;
+  if (e.target.matches('select') && d) {
+    const k = e.target.value, def = d.kind_entry[k] || [];
+    li.querySelectorAll('[data-rule="entry"]').forEach(i => { i.checked = def.includes(i.value); });
+    const ex = li.querySelector('[data-rule="exit"]')?.closest('.sv-rule-g');
+    if (ex) ex.hidden = ['ganho', 'perdido'].includes(k);
+  }
+  const n = li.querySelectorAll('[data-rule]:checked').length;
+  const t = li.querySelector('[data-rules]'); if (t) t.textContent = `Exigências (${n})`;
+});

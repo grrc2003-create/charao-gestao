@@ -13,13 +13,50 @@ export const KINDS = {
   prospeccao: 'Prospecção', apresentacao: 'Apresentação', proposta: 'Proposta', negociacao: 'Negociação',
   ganho: 'Contrato fechado', perdido: 'Contrato perdido', livre: 'Livre (sem exigência extra)',
 };
-// Etapas em sequência: entrar numa etapa exige também o que as anteriores pedem
-const LEVEL = { prospeccao: 1, livre: 1, apresentacao: 2, proposta: 3, negociacao: 4, ganho: 3, perdido: 1 };
 export const FIELD_LABEL = {
   client: 'Cliente', address: 'Endereço', source_id: 'Origem (de onde veio)', company: 'Empresa',
+  client_doc: 'CNPJ/CPF', contact_name: 'Contato', phone: 'Telefone', email: 'E-mail', city: 'Cidade', source_detail: 'Detalhe da origem',
+  title: 'Oportunidade (serviço)', possible_scope: 'Escopo possível', owner_id: 'Responsável', notes: 'Observações',
   final_scope: 'Escopo final', proposal_value: 'Valor da proposta', proposal_file: 'Proposta anexada',
-  profile_id: 'Avaliação do cliente para fechamento', lost_reason_id: 'Motivo da perda',
+  profile_id: 'Avaliação do cliente para fechamento', negotiation_notes: 'Observações da negociação', lost_reason_id: 'Motivo da perda',
 };
+// ---------- Exigências por coluna (editáveis) ----------
+// Sempre: cliente, endereço, origem e empresa. Cada coluna tem o que exige para ENTRAR (padrão do tipo de etapa)
+// e o que exige para SAIR e seguir adiante. Ir para a frente (inclusive pulando colunas) pede o que as colunas
+// deixadas para trás exigem para sair; voltar não pede nada além do que a coluna de destino exige para entrar.
+export const BASE_FIELDS = ['client', 'address', 'source_id', 'company'];
+export const RULE_FIELDS = ['client_doc', 'contact_name', 'phone', 'email', 'city', 'source_detail', 'title', 'owner_id', 'possible_scope',
+  'final_scope', 'proposal_value', 'proposal_file', 'profile_id', 'negotiation_notes', 'notes'];
+export const KIND_ENTRY = { proposta: ['final_scope', 'proposal_value'], negociacao: ['final_scope', 'proposal_value', 'profile_id'], ganho: ['final_scope', 'proposal_value'] };
+const parseRule = s => { try { const a = JSON.parse(s); return Array.isArray(a) ? RULE_FIELDS.filter(k => a.includes(k)) : []; } catch { return []; } };
+export const stageRules = s => ({
+  entry: s.entry_fields !== null && s.entry_fields !== undefined ? parseRule(s.entry_fields) : [...(KIND_ENTRY[s.kind] || [])],
+  exit: s.exit_fields !== null && s.exit_fields !== undefined ? parseRule(s.exit_fields) : [],
+});
+const closingKind = k => k === 'ganho' || k === 'perdido';
+// Exigências para a oportunidade ficar/entrar na coluna "to", vindo de "from" (null = cadastro direto na coluna)
+export function requiredFor(to, from, stages = listStages()) {
+  const req = new Set(BASE_FIELDS);
+  if (to.kind === 'perdido') req.add('lost_reason_id');
+  stageRules(to).entry.forEach(k => req.add(k));
+  if (to.kind === 'perdido') return req;
+  const pos = new Map(stages.map((s, i) => [s.id, i]));
+  const ti = pos.get(to.id) ?? stages.length;
+  const fi = from ? pos.get(from.id) ?? -1 : -1;
+  // Para a frente: o que exigem para sair a coluna de origem e as que ficam no caminho (no cadastro direto, todas antes da coluna)
+  if (!from || ti > fi) for (const s of stages) { const i = pos.get(s.id); if (i >= Math.max(fi, 0) && i < ti && !closingKind(s.kind)) stageRules(s).exit.forEach(k => req.add(k)); }
+  return req;
+}
+const hasProposalFile = id => !!(id && one('SELECT 1 FROM sales_proposals WHERE opportunity_id = ? AND stored_name IS NOT NULL LIMIT 1', id));
+export function missingOf(o, req) {
+  const miss = [];
+  for (const k of req) {
+    if (k === 'proposal_file') { if (!hasProposalFile(o.id)) miss.push(k); continue; }
+    const v = o[k];
+    if (k === 'proposal_value' ? !(Number(v) > 0) : (v === null || v === undefined || !String(v).trim())) miss.push(k);
+  }
+  return miss;
+}
 
 export const canSales = user => hasSection(user, 'vendas');
 export function requireSales(user) {
@@ -51,6 +88,8 @@ export function saveStages(ctx, input, ip) {
     name: String(x?.name ?? '').replace(/\s+/g, ' ').trim(),
     kind: oneOf(x?.kind, Object.keys(KINDS), 'Tipo de etapa', 'livre'),
     order: i + 1,
+    entry: Array.isArray(x?.entry_fields) ? RULE_FIELDS.filter(k => x.entry_fields.includes(k)) : undefined,
+    exit: Array.isArray(x?.exit_fields) ? RULE_FIELDS.filter(k => x.exit_fields.includes(k)) : undefined,
   }));
   const seen = new Set();
   for (const x of items) {
@@ -65,17 +104,25 @@ export function saveStages(ctx, input, ip) {
   const keep = new Set(items.filter(x => x.id).map(x => x.id));
   const removed = current.filter(s => !keep.has(s.id));
   for (const s of removed) if (s.use_count) throw badRequest(`A coluna "${s.name}" tem ${s.use_count} oportunidade(s). Mova-as antes de excluir a coluna.`);
-  // Trocar o tipo de uma coluna com oportunidades: só se todas atenderem ao novo tipo
+  // Exigências: lista enviada; sem lista, mantém (ou volta ao padrão do tipo, se o tipo mudou)
+  for (const x of items) {
+    const old = x.id ? byId.get(x.id) : null;
+    x.entry_json = x.entry !== undefined ? JSON.stringify(x.entry) : old && old.kind === x.kind ? old.entry_fields : null;
+    x.exit_json = x.exit !== undefined ? JSON.stringify(x.exit) : old ? old.exit_fields : null;
+  }
+  // Mudar o tipo ou o que a coluna exige para entrar, com oportunidades nela: só se todas atenderem
   for (const x of items.filter(x => x.id)) {
     const old = byId.get(x.id);
-    if (old.kind !== x.kind && old.use_count) {
+    const before = JSON.stringify([...requiredFor(old, old, [old])]);
+    const next = { ...old, kind: x.kind, entry_fields: x.entry_json };
+    if (old.use_count && before !== JSON.stringify([...requiredFor(next, next, [next])])) {
       for (const o of all('SELECT * FROM sales_opportunities WHERE stage_id = ?', x.id)) {
-        const miss = missingFor(o, x.kind);
-        if (miss.length) throw badRequest(`Não é possível mudar o tipo da coluna "${old.name}": a oportunidade ${o.code} não tem ${miss.map(k => FIELD_LABEL[k]).join(', ')}.`);
+        const miss = missingOf(o, requiredFor(next, next, [next]));
+        if (miss.length) throw badRequest(`A coluna "${old.name}" não pode passar a exigir isso agora: a oportunidade ${o.code} não tem ${miss.map(k => FIELD_LABEL[k]).join(', ')}. Complete-a ou mova-a antes.`);
       }
     }
   }
-  const log = { criadas: [], renomeadas: [], tipo: [], excluidas: removed.map(s => s.name) };
+  const log = { criadas: [], renomeadas: [], tipo: [], exigencias: [], excluidas: removed.map(s => s.name) };
   tx(() => {
     for (const s of removed) run('DELETE FROM sales_stages WHERE id = ?', s.id);
     for (const x of items) {
@@ -83,9 +130,11 @@ export function saveStages(ctx, input, ip) {
         const old = byId.get(x.id);
         if (old.name !== x.name) log.renomeadas.push(`${old.name} → ${x.name}`);
         if (old.kind !== x.kind) log.tipo.push(`${x.name}: ${KINDS[old.kind]} → ${KINDS[x.kind]}`);
-        run(`UPDATE sales_stages SET name = ?, kind = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ?`, x.name, x.kind, x.order, x.id);
+        const r0 = stageRules(old), r1 = stageRules({ kind: x.kind, entry_fields: x.entry_json, exit_fields: x.exit_json });
+        if (JSON.stringify(r0) !== JSON.stringify(r1)) log.exigencias.push(`${x.name}: entrar [${r1.entry.map(k => FIELD_LABEL[k]).join(', ') || '—'}] · sair [${r1.exit.map(k => FIELD_LABEL[k]).join(', ') || '—'}]`);
+        run(`UPDATE sales_stages SET name = ?, kind = ?, sort_order = ?, entry_fields = ?, exit_fields = ?, updated_at = datetime('now') WHERE id = ?`, x.name, x.kind, x.order, x.entry_json, x.exit_json, x.id);
       } else {
-        run('INSERT INTO sales_stages (name, kind, sort_order) VALUES (?,?,?)', x.name, x.kind, x.order);
+        run('INSERT INTO sales_stages (name, kind, sort_order, entry_fields, exit_fields) VALUES (?,?,?,?,?)', x.name, x.kind, x.order, x.entry_json, x.exit_json);
         log.criadas.push(x.name);
       }
     }
@@ -96,20 +145,10 @@ export function saveStages(ctx, input, ip) {
 
 // ---------- Exigências por etapa ----------
 const proposalsOf = id => all('SELECT * FROM sales_proposals WHERE opportunity_id = ? ORDER BY rev, id', id);
-export function missingFor(o, kind) {
-  const miss = [];
-  if (!String(o.client || '').trim()) miss.push('client');
-  if (!String(o.address || '').trim()) miss.push('address');
-  if (!o.source_id) miss.push('source_id');
-  if (!o.company) miss.push('company');
-  if (kind === 'perdido') { if (!o.lost_reason_id) miss.push('lost_reason_id'); return miss; }
-  if (LEVEL[kind] >= 3) {
-    if (!String(o.final_scope || '').trim()) miss.push('final_scope');
-    if (!(o.proposal_value > 0)) miss.push('proposal_value');
-  }
-  if (kind === 'negociacao' && !o.profile_id) miss.push('profile_id');
-  return miss;
-}
+// O que falta para a oportunidade ficar na coluna em que está (e, à parte, para sair dela e seguir)
+const stageOf = id => one('SELECT * FROM sales_stages WHERE id = ?', id);
+export const missingHere = o => { const s = stageOf(o.stage_id); return s ? missingOf(o, requiredFor(s, s)) : []; };
+export const missingToAdvance = o => { const s = stageOf(o.stage_id); return s && !closingKind(s.kind) ? missingOf(o, stageRules(s).exit) : []; };
 
 // ---------- Leitura ----------
 const OPP_SELECT = `SELECT o.*, s.name AS stage_name, s.kind AS stage_kind, src.name AS source_name, lr.name AS lost_reason_name,
@@ -128,7 +167,8 @@ export function board(ctx) {
   const stages = listStages();
   const opps = all(`${OPP_SELECT} ORDER BY s.sort_order, o.sort_order, o.id`).map(decorate);
   return {
-    stages: stages.map(s => ({ ...s, kind_label: KINDS[s.kind] })),
+    stages: stages.map(s => ({ ...s, kind_label: KINDS[s.kind], rules: stageRules(s) })),
+    rule_fields: RULE_FIELDS, base_fields: BASE_FIELDS, kind_entry: KIND_ENTRY, field_labels: FIELD_LABEL,
     opportunities: opps,
     kinds: KINDS,
     lists: lists(),
@@ -148,9 +188,10 @@ export function getOpportunity(ctx, id) {
       created_by_name: one('SELECT name FROM users WHERE id = ?', p.created_by)?.name || null })),
     moves: all(`SELECT m.from_stage, m.to_stage, m.created_at, u.name AS user_name FROM sales_moves m LEFT JOIN users u ON u.id = m.user_id
       WHERE m.opportunity_id = ? ORDER BY m.id DESC`, id),
-    missing_here: missingFor(o, o.stage_kind),
+    missing_here: missingHere(o),
+    missing_next: missingToAdvance(o),
     notes: notesOf(ctx, id),
-    stages: listStages().map(s => ({ id: s.id, name: s.name, kind: s.kind })),
+    stages: listStages().map(s => ({ id: s.id, name: s.name, kind: s.kind, sort_order: s.sort_order, rules: stageRules(s) })),
     lists: lists(),
     users: all(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`),
     can_contracts: !!ctx.user.can_contracts,
@@ -190,7 +231,7 @@ function readFields(body, cur = {}) {
   if (has('notes')) d.notes = str(body.notes, { max: 3000, label: 'Observações' });
   return d;
 }
-const missingError = (miss, stageName) => badRequest(`Para ficar em "${stageName}", preencha: ${miss.map(k => FIELD_LABEL[k]).join(', ')}.`, { missing: miss });
+const missingError = (miss, stageName, fromName = null) => badRequest(`${fromName ? `Para sair de "${fromName}" e ir para "${stageName}"` : `Para ficar em "${stageName}"`}, preencha: ${miss.map(k => FIELD_LABEL[k]).join(', ')}.`, { missing: miss });
 
 // Propostas novas enviadas junto (anexo da proposta ou revisão)
 function addProposals(ctx, oppId, list, o) {
@@ -231,7 +272,7 @@ export function createOpportunity(ctx, body, ip) {
     const id = Number(run(`INSERT INTO sales_opportunities (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...vals).lastInsertRowid);
     const o = one('SELECT * FROM sales_opportunities WHERE id = ?', id);
     addProposals(ctx, id, body.proposals, o);
-    const miss = missingFor(one('SELECT * FROM sales_opportunities WHERE id = ?', id), stage.kind);
+    const miss = missingOf(one('SELECT * FROM sales_opportunities WHERE id = ?', id), requiredFor(stage, null));
     if (miss.length) throw missingError(miss, stage.name);
     if (stage.kind === 'perdido' || stage.kind === 'ganho') run(`UPDATE sales_opportunities SET closed_at = datetime('now') WHERE id = ?`, id);
     run('INSERT INTO sales_moves (opportunity_id, from_stage, to_stage, user_id) VALUES (?,?,?,?)', id, null, stage.name, ctx.user.id);
@@ -251,15 +292,16 @@ export function updateOpportunity(ctx, id, body, ip) {
   if (d.company === null) delete d.company;
   const target = body.stage_id !== undefined ? one('SELECT * FROM sales_stages WHERE id = ?', intOrNull(body.stage_id)) : null;
   if (body.stage_id !== undefined && !target) throw badRequest('Coluna inválida.');
-  const stage = target || { id: cur.stage_id, kind: cur.stage_kind, name: cur.stage_name };
+  const curStage = stageOf(cur.stage_id);
+  const stage = target || curStage;
   const moving = stage.id !== cur.stage_id;
   return tx(() => {
     const changed = Object.keys(d).filter(k => (d[k] ?? null) !== (cur[k] ?? null));
     if (changed.length) run(`UPDATE sales_opportunities SET ${changed.map(k => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...changed.map(k => d[k]), id);
     const o = one('SELECT * FROM sales_opportunities WHERE id = ?', id);
     addProposals(ctx, id, body.proposals, o);
-    const miss = missingFor(one('SELECT * FROM sales_opportunities WHERE id = ?', id), stage.kind);
-    if (miss.length) throw missingError(miss, stage.name);
+    const miss = missingOf(one('SELECT * FROM sales_opportunities WHERE id = ?', id), requiredFor(stage, curStage));
+    if (miss.length) throw missingError(miss, stage.name, moving ? curStage.name : null);
     // Posição na coluna (arrastar): renumera a coluna de destino
     if (moving || body.position !== undefined) {
       const others = all('SELECT id FROM sales_opportunities WHERE stage_id = ? AND id <> ? ORDER BY sort_order, id', stage.id, id).map(r => r.id);
@@ -306,7 +348,7 @@ export function deleteProposal(ctx, id, ip) {
   tx(() => {
     run('DELETE FROM sales_proposals WHERE id = ?', id);
     const o = one('SELECT o.*, s.kind, s.name AS stage_name FROM sales_opportunities o JOIN sales_stages s ON s.id = o.stage_id WHERE o.id = ?', p.opportunity_id);
-    const miss = missingFor(o, o.kind);
+    const miss = missingHere(o).filter(k => k === 'proposal_file' || k === 'proposal_value');
     if (miss.length) throw badRequest(`Esta é a única proposta anexada e a coluna "${o.stage_name}" exige uma. Anexe outra antes de excluir.`);
     audit(ctx.user.id, 'sales', p.opportunity_id, 'Proposta excluída', { codigo: p.code, revisao: `R${String(p.rev).padStart(2, '0')}` }, ip);
   });

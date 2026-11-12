@@ -1,7 +1,7 @@
 // Tela individual do usuário: indicadores, comportamento operacional, tarefas próprias e visão da equipe.
 import { html, api, icon, avatar, ROLE, SCOPE, STATUS, STATUS_ORDER, fmtPct, roleLabel } from '../core.js';
 import { ganttSection, bindGanttSections } from './gantt.js';
-import { fold, bindFolds, nOf, checklistFold, pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, STATUS_COLOR, execKpis } from './shared.js';
+import { fold, bindFolds, nOf, checklistFold, pageHead, kpi, donut, taskList, bindCommon, fieldListButton, userRankRow, rankUsers, STATUS_COLOR, execKpis } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
@@ -49,7 +49,7 @@ export async function view({ params, query, setQuery, render, state, panel = fal
         ${kpi({ label: 'Entregas no prazo', value: fmtPct(d.team_summary.on_time_pct), color: STATUS_COLOR.concluida })}
       </div>
       ${fold('integrantes', nOf(d.team.length, 'integrante', 'integrantes'), d.team.filter(m => m.stats?.late).length ? nOf(d.team.filter(m => m.stats?.late).length, 'com atraso', 'com atraso') : '', html`<section class="card"><div class="card-head"><h2>Integrantes</h2><span class="sub">as tarefas são de responsabilidade de cada integrante</span></div>
-        <ul class="rows">${[...d.team].sort((a, b) => (b.stats.on_time_pct ?? -1) - (a.stats.on_time_pct ?? -1)).map((m, i) => userRankRow({ ...m }, i))}</ul></section>`)}
+        <ul class="rows">${rankUsers(d.team).map((m, i) => userRankRow(m, i))}</ul></section>`)}
       <div class="page-head section" style="margin-bottom:10px"><div><h2>Tarefas da equipe</h2><p>${d.team_tasks.length} tarefa(s)</p></div>
         <div class="page-actions"><a class="btn btn-ghost" href="#/imprimir/relatorio?type=equipe&id=${u.id}&level=detalhado">${icon('print')}Relatório da equipe</a></div></div>
       <div class="result-count"><span></span>${orgControl(org)}</div>

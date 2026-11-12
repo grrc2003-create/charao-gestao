@@ -60,7 +60,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
           <a class="btn btn-ghost" href="#/projetos/${p.id}/vinculos">${icon('share')}Mapa de vínculos</a>
           <button type="button" class="btn btn-ghost" data-cal-open>${icon('calendar')}Calendário</button>
           ${alertConf?.can_edit ? html`<button type="button" class="btn btn-ghost" data-pa-edit>${icon('alert')}Alertas</button>` : ''}
-          ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar">${icon('file')}Importar planejamento</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
+          ${p.can_create_task ? html`<a class="btn btn-ghost" href="#/projetos/${p.id}/importar" title="Importar várias tarefas por planilha (planejamento)">${icon('file')}Importar tarefas</a><a class="btn btn-primary" href="#/tarefas/nova?projeto=${p.id}">${icon('plus')}Nova tarefa</a>` : ''}`,
       })}
 
       ${p.schedule ? html`<section class="card section sch-card"><div class="card-head"><h2>${icon('calendar')}Prazo do projeto</h2><span class="sub">pelas tarefas e subtarefas</span></div>

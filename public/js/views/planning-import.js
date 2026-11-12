@@ -53,9 +53,9 @@ export async function importPage({ params, state, navigate }) {
   if (!p.can_create_task) throw new Error('Você não pode criar tarefas neste projeto.');
   const auto = pending && pending.projectId === p.id && Date.now() - pending.at < 120e3 ? pending.file : null;
   return {
-    title: `Importar planejamento · ${p.code}`,
-    html: html`${pageHead({ back: { href: `#/projetos/${p.id}`, label: p.code }, eyebrow: `${p.code} · ${p.name}`, title: 'Importar planejamento',
-        sub: 'Suba o planejamento completo (tarefas, subtarefas, responsáveis, datas e dependências) por planilha. Você confere a prévia antes; nada é gravado sem confirmar.' })}
+    title: `Importar tarefas · ${p.code}`,
+    html: html`${pageHead({ back: { href: `#/projetos/${p.id}`, label: p.code }, eyebrow: `${p.code} · ${p.name}`, title: 'Importar tarefas',
+        sub: 'Suba várias tarefas de uma vez — ou o planejamento completo (subtarefas, responsáveis, datas e dependências) — por planilha. Você confere a prévia antes; nada é gravado sem confirmar.' })}
       <section class="card section">
         <div class="card-body bi-pick">
           <div class="fi-steps">

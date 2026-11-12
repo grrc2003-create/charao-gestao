@@ -48,6 +48,7 @@ export async function view({ state, query, setQuery }) {
           <button type="button" class="btn btn-ghost" id="emit-report">${icon('reports')}Emitir relatório</button>
           ${state.user.role === 'admin' && tasks.length ? html`<button type="button" class="btn btn-ghost" id="bulk-on">${icon('trash')}Excluir em lote</button>` : ''}
           <a class="btn btn-ghost" href="#/recorrencias${f.project ? `?project=${f.project}` : ''}">${icon('history')}Recorrentes</a>
+          <button type="button" class="btn btn-ghost" id="import-tasks">${icon('file')}Importar tarefas</button>
           <a class="btn btn-ghost" href="#/tarefas/nova?tipo=checklist${f.project ? `&projeto=${f.project}` : ''}">${icon('checklist')}Novo check-list</a>
           <a class="btn btn-accent" href="#/tarefas/nova${f.project ? `?projeto=${f.project}` : ''}">${icon('plus')}Nova tarefa</a>`,
       })}
@@ -111,6 +112,18 @@ export async function view({ state, query, setQuery }) {
         e.currentTarget.setAttribute('aria-expanded', String(!adv.hidden));
       });
       // Relatório A4 com exatamente os filtros aplicados na lista
+      // Importar várias tarefas por planilha: escolhe o projeto e abre a importação dele (modelo, prévia e confirmação)
+      root.querySelector('#import-tasks').addEventListener('click', async () => {
+        const open = meta.projects.filter(p => !['concluido', 'cancelado'].includes(p.status));
+        if (!open.length) return toast('Nenhum projeto ativo liberado para você.', 'error');
+        const r = await sheet({ title: 'Importar tarefas', submitLabel: 'Continuar',
+          onSubmit: d => { if (!d.project) throw new Error('Escolha o projeto.'); return d; },
+          body: html`<div class="field"><label class="req" for="imp-p">Projeto que vai receber as tarefas</label>
+              <select id="imp-p" name="project" required>${opt('', 'Selecione o projeto ou área interna', f.project)}${projectOptions(open, f.project, opt)}</select>
+            <span class="hint">Na próxima tela: baixe a planilha modelo do projeto (com classificações, responsáveis, prioridade e comprovação),
+              preencha uma linha por tarefa (pode ter subtarefas, datas e dependências) e envie. Você confere a prévia antes; nada é gravado sem confirmar.</span></div>` });
+        if (r?.project) location.hash = `#/projetos/${r.project}/importar`;
+      });
       root.querySelector('#emit-report').addEventListener('click', async () => {
         const reportable = tasks.filter(t => t.eff_status !== 'cancelada').length;
         const LV = [['resumo', 'Resumo', 'Indicadores e panorama'], ['detalhado', 'Detalhado', 'Indicadores + lista das tarefas'], ['completo', 'Completo com fotos', 'Tudo + registros, fotos e PDFs']];

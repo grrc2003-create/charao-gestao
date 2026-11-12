@@ -39,13 +39,35 @@ function buildTree(people, { externals = true } = {}) {
   return { roots: childrenOf(0), childrenOf };
 }
 
+// ---------- Empresa de cada pessoa no organograma ----------
+// Cor fixa por empresa (ordem do cadastro); destaque só quando há pessoas de mais de uma empresa
+const CO_COLORS = ['#2A3D50', '#B03A2E', '#1F7A4A', '#6C4AB6', '#B7791F', '#0E7490', '#9D174D', '#4D7C0F', '#5D6670'];
+// Nome curto na etiqueta do cartão: as duas primeiras palavras (o nome completo fica na dica)
+const shortName = n => String(n).split(/\s+/).filter(w => !/^[&\-–]$/.test(w)).slice(0, 2).join(' ');
+export function withCompanies(people, meta) {
+  const cos = meta?.companies || [];
+  const color = new Map(cos.map((c, i) => [c.id, CO_COLORS[i % CO_COLORS.length]]));
+  const used = new Map();
+  for (const p of people) {
+    const c = cos.find(x => x.id === p.company_id);
+    p.co = c ? { id: c.id, name: c.name, short: shortName(c.name), color: color.get(c.id) } : { id: 0, name: 'Empresa não informada', short: 'Sem empresa', color: '#9AA5B1' };
+    used.set(p.co.id, { ...p.co, n: (used.get(p.co.id)?.n || 0) + 1 });
+  }
+  const list = [...used.values()].sort((a, b) => (a.id === 0) - (b.id === 0) || cos.findIndex(c => c.id === a.id) - cos.findIndex(c => c.id === b.id));
+  const show = list.length > 1;
+  for (const p of people) p.co.show = show;
+  return { list, show };
+}
+export const companyLegend = cos => html`<div class="org-legend org-co-legend" aria-label="Empresas">${cos.map(c => html`<span><i class="co" style="--cc:${c.color}"></i>${c.name} <b>${c.n}</b></span>`)}</div>`;
+
 function card(p, { childCount = 0, collapsed = false, print = false } = {}) {
   const v = p.vacation;
   const l = p.load;
-  return html`<div class="org-card ${p.is_external ? 'is-ext' : ''} ${p.missing_function ? 'is-missing' : ''}" data-pid="${p.id}" ${print ? '' : html`draggable="true" tabindex="0" role="button" aria-label="${p.name}"`} style="--c:${colorOf(p)}">
+  const co = p.co?.show ? p.co : null;
+  return html`<div class="org-card ${p.is_external ? 'is-ext' : ''} ${p.missing_function ? 'is-missing' : ''}" data-pid="${p.id}" data-co="${co ? co.id : ''}" ${print ? '' : html`draggable="true" tabindex="0" role="button" aria-label="${p.name}${co ? ` · ${co.name}` : ''}"`} style="--c:${colorOf(p)}">
     <div class="org-top"><span class="org-av">${av(p)}</span><div class="org-who"><b>${p.name}</b><small>${roleOf(p)}${p.department ? ` · ${p.department}` : ''}</small></div></div>
     <div class="org-fn ${p.missing_function ? 'warn' : ''}">${p.missing_function ? '⚠ Função não detalhada' : p.job_title}</div>
-    ${p.company ? html`<div class="org-meta">${p.company}</div>` : ''}
+
     <div class="org-tags">
       ${!p.login_enabled ? html`<span class="org-tag">Sem acesso</span>` : ''}
       ${v ? html`<span class="org-tag ${v.now ? 'is-vac' : 'is-vac-soon'}">${v.now ? `De férias até ${dm(v.end_date)}` : `Férias ${dm(v.start_date)}`}</span>` : ''}
@@ -64,15 +86,21 @@ const fieldCard = p => html`<li><div class="org-card org-field" style="--c:#B779
 
 export function treeHtml(people, { collapsed = new Set(), externals = true, field = true, print = false, rootId = null } = {}) {
   const t = buildTree(people, { externals });
-  const node = p => {
+  // Empresa: onde a empresa muda na hierarquia abre-se um bloco tracejado na cor dela, envolvendo a pessoa e a equipe abaixo
+  const node = (p, parentCo) => {
     const ch = t.childrenOf(p.id);
     const fc = field && fieldTotal(p) > 0;
     const n = ch.length + (fc ? 1 : 0);
     const closed = collapsed.has(p.id);
-    return html`<li>${card(p, { childCount: n, collapsed: closed, print })}${n && !closed ? html`<ul>${fc ? fieldCard(p) : ''}${ch.map(node)}</ul>` : ''}</li>`;
+    const co = p.co?.show ? p.co : null;
+    const here = co ? co.id : parentCo;
+    const inner = html`${card(p, { childCount: n, collapsed: closed, print })}${n && !closed ? html`<ul>${fc ? fieldCard(p) : ''}${ch.map(c => node(c, here))}</ul>` : ''}`;
+    return html`<li>${co && co.id !== parentCo
+      ? html`<div class="org-coblk" data-coblk="${co.id}" style="--cc:${co.color}"><span class="org-coblk-h" title="${co.name}">${co.name}</span>${inner}</div>`
+      : inner}</li>`;
   };
   const roots = rootId ? people.filter(p => p.id === rootId) : t.roots;
-  return html`<ul class="org-tree">${roots.map(node)}</ul>`;
+  return html`<ul class="org-tree">${roots.map(r => node(r, undefined))}</ul>`;
 }
 
 function detailBody(p, data, state) {
@@ -107,6 +135,10 @@ function detailBody(p, data, state) {
 const KEY = 'charao-org-collapsed';
 export async function org({ state, render }) {
   const data = await api('/team/org');
+  const cos = withCompanies(data.people, state.meta);
+  let coHi = '';
+  try { coHi = sessionStorage.getItem(`${KEY}-co`) || ''; } catch { /* sem armazenamento */ }
+  if (!cos.list.some(c => String(c.id) === coHi)) coHi = '';
   let collapsed = new Set();
   try { collapsed = new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]')); } catch { /* sem armazenamento */ }
   let externals = true;
@@ -126,6 +158,7 @@ export async function org({ state, render }) {
       <div class="org-bar">
         <input type="search" id="org-q" placeholder="Buscar pessoa…" aria-label="Buscar pessoa no organograma">
         <label class="switch"><input type="checkbox" id="org-ext" ${externals ? 'checked' : ''}>Terceirizados</label>
+        ${cos.show ? html`<select id="org-co" aria-label="Destacar empresa"><option value="">Todas as empresas</option>${cos.list.map(c => html`<option value="${c.id}" ${String(c.id) === coHi ? 'selected' : ''}>Destacar: ${c.name}</option>`)}</select>` : ''}
         ${s.field ? html`<label class="switch"><input type="checkbox" id="org-field" ${field ? 'checked' : ''}>Equipe de campo</label>` : ''}
         <div class="org-zoom only-desktop"><button type="button" class="btn btn-ghost btn-sm" data-z="-1" aria-label="Diminuir">−</button><span id="org-zl">100%</span>
           <button type="button" class="btn btn-ghost btn-sm" data-z="1" aria-label="Aumentar">+</button><button type="button" class="btn btn-ghost btn-sm" data-z="0">Ajustar</button></div>
@@ -133,7 +166,8 @@ export async function org({ state, render }) {
       </div>
       <p class="hint only-desktop" style="margin:0 0 8px">Arraste um cartão sobre outro para mudar o gestor. Clique no cartão para ver função, responsabilidades e equipe.</p>
       <div class="org-legend">${['admin', 'gestor', 'coordenador', 'colaborador'].map(r => html`<span><i style="--c:${ROLE_COLOR[r]}"></i>${ROLE[r]}</span>`)}<span><i class="is-ext" style="--c:#8E44AD"></i>Terceirizado</span>${s.field ? html`<span><i style="--c:#B7791F"></i>Equipe de campo (Folha de Campo)</span>` : ''}</div>
-      <div class="org-wrap card"><div class="org-top-drop" data-drop-root>Solte aqui para deixar sem gestor (topo)</div>
+      ${cos.show ? companyLegend(cos.list) : ''}
+      <div class="org-wrap card ${coHi ? 'co-hi' : ''}" data-co-hi="${coHi}"><div class="org-top-drop" data-drop-root>Solte aqui para deixar sem gestor (topo)</div>
         <div class="org" id="org">${treeHtml(data.people, { collapsed, externals, field })}</div></div>`,
     mount(root) {
       const orgEl = root.querySelector('#org');
@@ -145,7 +179,16 @@ export async function org({ state, render }) {
         else { const w = orgEl.querySelector('.org-tree').scrollWidth; setZoom(Math.min(1, (orgEl.parentElement.clientWidth - 24) / w)); }
       }));
       const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify([...collapsed])); sessionStorage.setItem(`${KEY}-ext`, externals ? '1' : '0'); sessionStorage.setItem(`${KEY}-field`, field ? '1' : '0'); } catch { /* sem armazenamento */ } };
-      const redraw = () => { orgEl.innerHTML = treeHtml(data.people, { collapsed, externals, field }).toString(); save(); bindCards(); };
+      // Destacar uma empresa: as demais ficam apagadas (a hierarquia continua visível)
+      const wrapEl = root.querySelector('.org-wrap');
+      const paintCo = () => {
+        wrapEl.classList.toggle('co-hi', !!coHi);
+        orgEl.querySelectorAll('.org-card[data-pid]').forEach(c => c.classList.toggle('is-dim', !!coHi && c.dataset.co !== coHi));
+        orgEl.querySelectorAll('.org-coblk').forEach(b => b.classList.toggle('is-hi', !!coHi && b.dataset.coblk === coHi));
+        try { sessionStorage.setItem(`${KEY}-co`, coHi); } catch { /* sem armazenamento */ }
+      };
+      root.querySelector('#org-co')?.addEventListener('change', e => { coHi = e.target.value; paintCo(); });
+      const redraw = () => { orgEl.innerHTML = treeHtml(data.people, { collapsed, externals, field }).toString(); save(); bindCards(); paintCo(); };
       root.querySelector('#org-ext').addEventListener('change', e => { externals = e.target.checked; redraw(); });
       root.querySelector('#org-field')?.addEventListener('change', e => { field = e.target.checked; redraw(); });
       root.querySelector('#org-expand').addEventListener('click', () => { collapsed.clear(); redraw(); });
@@ -197,6 +240,7 @@ export async function org({ state, render }) {
       top.addEventListener('dragleave', () => top.classList.remove('is-over'));
       top.addEventListener('drop', e => { e.preventDefault(); top.classList.remove('is-over'); move(Number(e.dataTransfer.getData('text/plain')), null); });
       bindCards();
+      paintCo();
     },
   };
 }

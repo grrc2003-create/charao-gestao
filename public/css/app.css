@@ -4437,3 +4437,16 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
 /* Logo da empresa de quem usa o sistema */
 .sidebar-brand.is-company img { max-height: 72px; width: auto; max-width: 100%; object-fit: contain; display: block; margin: 0 auto; }
 .topbar-brand.is-company img { height: 30px; width: auto; max-width: 150px; object-fit: contain; }
+
+/* Organograma: bloco tracejado por empresa (envolve a pessoa e a equipe dela da mesma empresa) */
+.org-coblk { position: relative; display: flex; flex-direction: column; align-items: center; border: 2px dashed var(--cc); border-radius: 18px;
+  padding: 30px 12px 14px; background: color-mix(in srgb, var(--cc) 6%, transparent); }
+.org-coblk-h { position: absolute; top: 7px; left: 14px; max-width: calc(100% - 28px); font-size: 12px; font-weight: 700; letter-spacing: .02em; color: var(--cc);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.org-coblk.is-hi { border-style: solid; background: color-mix(in srgb, var(--cc) 12%, transparent); }
+.org-co-legend i.co { width: 14px; height: 10px; border-radius: 3px; border: 2px dashed var(--cc); background: color-mix(in srgb, var(--cc) 10%, transparent); }
+.org-co-legend b { color: var(--ink); font-weight: 700; }
+.org-card.is-dim { opacity: .28; filter: grayscale(.6); }
+#org-co { width: auto; max-width: 260px; }
+@media (max-width: 760px) { .org-coblk { display: block; padding: 28px 8px 10px; margin-top: 4px; } }
+@media print { .org-coblk { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }

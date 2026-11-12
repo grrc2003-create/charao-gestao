@@ -3,7 +3,7 @@ import { html, api, icon, fmtDate, todayISO } from '../core.js';
 import { sheet } from '../ui.js';
 import { pageHead, kpi } from './shared.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
-import { treeHtml } from './team.js';
+import { treeHtml, withCompanies, companyLegend } from './team.js';
 import { vacPill, reqPill, vacationSheet, approvalsList, bindApprovals, periodsTable, bindCancel } from './vacation-ui.js';
 
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -69,8 +69,9 @@ export async function view({ query, setQuery, render }) {
 }
 
 // Organograma para impressão (A4 paisagem), inteiro ou de um ramo
-export async function printOrg({ query, setQuery, render }) {
+export async function printOrg({ query, setQuery, render, state }) {
   const data = await api('/team/org');
+  const cos = withCompanies(data.people, state?.meta);
   const rootId = Number(query.get('raiz')) || null;
   const ext = query.get('ext') !== '0';
   const rootP = rootId ? data.people.find(p => p.id === rootId) : null;
@@ -84,6 +85,7 @@ export async function printOrg({ query, setQuery, render }) {
     <div class="doc-stage"><article class="doc org-doc" id="doc">
       <header class="r-header"><img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="r-logo"><div class="r-doctype"><div class="r-kicker">Organograma</div><div class="r-level">${rootP ? `Equipe de ${rootP.name}` : 'Empresa'} · ${fmtDate(todayISO())}</div></div></header>
       <div class="r-rule"></div>
+      ${cos.show ? companyLegend(cos.list) : ''}
       <div class="org-print" id="org-print">${treeHtml(data.people, { externals: ext, print: true, rootId })}</div>
       <footer class="r-footer"><span>Charão Engenharia & Construção · Organograma</span><span>${data.summary.internal} pessoa(s) na equipe · ${data.summary.external} terceirizado(s) · gerado pelo sistema Charão Gestão de Obras</span></footer>
     </article></div>`,

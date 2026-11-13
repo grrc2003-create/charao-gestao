@@ -3681,6 +3681,28 @@ async function main() {
     const qAxFile = await fetch(`${BASE}/api/quote-files/${qAxPdf?.file_id}`, { headers: { cookie: await cookieOf('ana@charao.eng.br') } });
     ok(qAxPdf && /.pdf$/.test(qAxPdf.name) && qAxFile.status === 200 && decodeURIComponent(qAxFile.headers.get('content-disposition') || '').includes(qAxPdf.name), `proposta em PDF abre já com o nome padrão (${qAxPdf?.name})`);
     ok((await login('felipe@charao.eng.br').then(c => c('GET', '/projects/999999/quotes/propostas.zip'))).status === 404, 'zip de projeto sem acesso não baixa');
+    // Frete da proposta: somado ao total e rateado entre os itens pelo valor de cada um (preço × quantidade)
+    const qF1 = (await qA('POST', `/projects/${qP}/quotes/items`, { discipline: 'Frete teste', description: 'Item fictício A (frete)', qty: '2', unit: 'un' })).data.id;
+    const qF2 = (await qA('POST', `/projects/${qP}/quotes/items`, { discipline: 'Frete teste', description: 'Item fictício B (frete)', qty: '1', unit: 'un' })).data.id;
+    const qFR = (await qA('POST', `/projects/${qP}/quotes/requests`, { supplier_id: qS3.id, item_ids: [qF1, qF2], sent_date: qToday, channel: 'E-mail', files: qPng })).data.id;
+    ok((await qA('POST', `/quote-requests/${qFR}/receive`, { prices: [{ item_id: qF1, price: 1000 }], freight: -10 })).status === 400, 'frete negativo é recusado');
+    ok((await qA('POST', `/quote-requests/${qFR}/receive`, { prices: [{ item_id: qF1, price: 1000 }, { item_id: qF2, price: 2000 }], freight: 400 })).status === 200, 'proposta com frete registrada');
+    let qFm = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    const qFo = id => qFm.items.find(i => i.id === id).offers.find(o => o.request_id === qFR);
+    const qFrq = qFm.requests.find(r => r.id === qFR);
+    ok(qFrq.freight === 400 && qFrq.subtotal === 4000 && qFrq.total === 4400, 'total da proposta = itens (preço × quantidade) + frete');
+    ok(qFo(qF1).price === 1100 && qFo(qF1).price_raw === 1000 && qFo(qF1).freight_unit === 100 && qFo(qF2).price === 2200 && qFo(qF2).freight_unit === 200, 'frete rateado proporcionalmente ao valor de cada item');
+    // Relatório (PDF e Excel): memorial do rateio na observação do fornecedor em cada item
+    const qFmap = (await qA('GET', `/projects/${qP}/quotes/map`)).data;
+    const qFobs = id => qFmap.disciplines.flatMap(dd => dd.items).find(i => i.id === id).offers.find(o => o.name === qS3.name).obs;
+    ok(/Frete da proposta R\$\s400,00 rateado pelo valor dos itens \(\+10,00% sobre R\$\s4\.000,00/.test(qFobs(qF1))
+      && /R\$\s1\.000,00 \+ R\$\s100,00 de frete = R\$\s1\.100,00 por unidade · frete deste item R\$\s200,00 \(2 un\)/.test(qFobs(qF1))
+      && /frete deste item R\$\s200,00 \(1 un\)/.test(qFobs(qF2)), 'relatório detalha o rateio do frete na observação de cada item');
+    await qA('POST', `/quote-requests/${qFR}/receive`, { prices: [{ item_id: qF1, price: 1000 }, { item_id: qF2, price: 2000 }], freight: 0 });
+    qFm = (await qA('GET', `/projects/${qP}/quotes`)).data;
+    ok(qFo(qF1).price === 1000 && qFo(qF1).revision === 1 && qFm.requests.find(r => r.id === qFR).freight === 0, 'revisão sem frete: vale o frete da revisão mais recente');
+    await qA('DELETE', `/quote-requests/${qFR}`);
+    for (const id of [qF1, qF2]) await qA('DELETE', `/projects/${qP}/quotes/items/${id}`);
     // limpeza
     for (const it of qM2.items) await qA('DELETE', `/projects/${qP}/quotes/items/${it.id}`);
     for (const r of qM2.requests) await qA('DELETE', `/quote-requests/${r.id}`);

@@ -79,7 +79,7 @@ export async function view({ params, query, setQuery, render }) {
       ${it.offers.length ? html`<ul class="qt-offers">${it.offers.map(o => { const r = reqById.get(o.request_id); return html`<li>
         <div class="qt-of-main"><b>${o.supplier_name}</b><small>enviada ${dm(o.sent_date)}${r.channel ? ` · ${r.channel}` : ''}${r.imported ? ' · importada da planilha' : ''}${r.imported && !r.files.some(f => f.kind === 'envio') ? html` <span class="qt-pill qt-s-wait" title="Use Editar para incluir a data, o meio e a evidência do envio">completar a solicitação</span>` : ''}${r.followups.length ? ` · ${r.followups.length} cobrança(s)` : ''}${r.conditions ? ` · ${r.conditions}` : ''}</small>
           <span class="qt-files">${files(r, 'envio')}${files(r, 'cobranca')}${files(r, 'proposta')}</span></div>
-        <div class="qt-of-st">${stPill(o)}<b class="qt-price">${money(o.price)}${o.revision ? html`<small> R${String(o.revision).padStart(2, '0')}</small>` : ''}</b></div>
+        <div class="qt-of-st">${stPill(o)}<b class="qt-price" ${o.freight_unit > 0 ? html`title="${money(o.price_raw)} + frete rateado ${money(o.freight_unit)}"` : ''}>${money(o.price)}${o.revision ? html`<small> R${String(o.revision).padStart(2, '0')}</small>` : ''}${o.freight_unit > 0 ? html`<small class="qt-frete">inclui frete ${money(o.freight_unit)}</small>` : ''}</b></div>
         ${reqActs(r)}</li>`; })}</ul>` : html`<p class="muted" style="margin:0">Nenhuma solicitação enviada para este item.</p>`}
       ${d.can_edit ? html`<div class="qt-it-acts"><button type="button" class="btn btn-primary btn-sm" data-q-req-item="${it.id}">${icon('send')}Solicitar proposta</button>
         <button type="button" class="btn btn-ghost btn-sm" data-q-edit="${it.id}">${icon('edit')}Editar item</button><button type="button" class="btn btn-ghost btn-sm qt-danger" data-q-del="${it.id}">${icon('trash')}Excluir item</button></div>` : ''}
@@ -210,13 +210,29 @@ async function requestSheet(d, { disc = '', itemId = null } = {}, done) {
 // Proposta recebida (ou revisão): preço por item, datas, condições e arquivo
 async function receiveSheet(d, rq, done) {
   const its = rq.item_ids.map(id => d.items.find(i => i.id === id)).filter(Boolean);
-  const cur = id => d.items.find(i => i.id === id)?.offers.find(o => o.request_id === rq.id)?.price;
+  // Preço digitado (sem o frete rateado)
+  const cur = id => { const o = d.items.find(i => i.id === id)?.offers.find(x => x.request_id === rq.id); return o ? o.price_raw ?? o.price : null; };
+  const qtyOf = id => { const q = Number(d.items.find(i => i.id === id)?.qty); return q > 0 ? q : 1; };
+  setTimeout(() => {
+    const box = [...document.querySelectorAll('.sheet [data-qv-sum]')].pop();
+    if (!box) return;
+    const form = box.closest('form');
+    const calc = () => {
+      const sub = [...form.querySelectorAll('[data-qv-it]')].reduce((s, i) => s + (Number(parseNum(i.value)) || 0) * qtyOf(Number(i.dataset.qvIt)), 0);
+      const fr = Number(parseNum(form.querySelector('#qv-fr').value)) || 0;
+      box.innerHTML = html`Itens ${money(sub)} + frete ${money(fr)} = <b>${money(sub + fr)}</b>${fr > 0 && sub > 0 ? html` · frete rateado: +${String(Math.round((fr / sub) * 10000) / 100).replace('.', ',')}% em cada item` : ''}`.toString();
+    };
+    form.addEventListener('input', calc); calc();
+  }, 60);
   const r = await sheet({
     title: `${rq.status === 'recebida' ? 'Revisão da proposta' : 'Proposta recebida'} · ${rq.supplier_name}`, wide: true,
     body: html`<div class="form-row"><div class="field"><label class="req" for="qv-d">Recebida em</label><input type="date" id="qv-d" name="received_date" required max="${todayISO()}" min="${rq.sent_date}" value="${todayISO()}"></div>
         <div class="field"><label for="qv-v">Validade</label><input type="date" id="qv-v" name="valid_until" value="${rq.valid_until || ''}"></div></div>
       <div class="table-wrap"><table class="data"><thead><tr><th>Item</th><th class="num" style="width:180px">Preço (R$)</th></tr></thead>
         <tbody>${its.map(i => html`<tr><td>${i.description}<small class="muted" style="display:block">${i.discipline}</small></td><td class="num"><input type="text" inputmode="decimal" data-qv-it="${i.id}" value="${cur(i.id) != null ? String(cur(i.id)).replace('.', ',') : ''}" style="text-align:right" placeholder="Sem preço"></td></tr>`)}</tbody></table></div>
+      <div class="form-row"><div class="field"><label for="qv-fr">Frete (R$)</label><input type="text" id="qv-fr" name="freight" inputmode="decimal" value="${rq.freight ? String(rq.freight).replace('.', ',') : ''}" placeholder="0,00" style="text-align:right">
+          <span class="hint">Somado ao valor da proposta e distribuído entre os itens proporcionalmente ao valor de cada um (preço × quantidade).</span></div>
+        <div class="field"><span class="label">Total da proposta</span><div class="qv-sum" data-qv-sum></div></div></div>
       <div class="field"><label for="qv-f">Arquivo da proposta</label><input type="file" id="qv-f" accept="image/*,application/pdf,.pdf" multiple></div>
       <div class="field"><label for="qv-c">Condições e observações</label><input type="text" id="qv-c" name="conditions" maxlength="1000" value="${rq.conditions || ''}" placeholder="Ex.: pagamento 30/60/90, frete incluso"></div>
       ${rq.status === 'recebida' ? html`<p class="hint" style="margin:0">Salvar cria uma nova revisão (R${String((rq.revision ?? 0) + 1).padStart(2, '0')}); vale o preço mais recente.</p>` : ''}`,
@@ -225,7 +241,7 @@ async function receiveSheet(d, rq, done) {
       const prices = [...form.querySelectorAll('[data-qv-it]')].map(i => ({ item_id: Number(i.dataset.qvIt), price: parseNum(i.value) })).filter(p => p.price !== '');
       if (!prices.length) throw new Error('Informe o preço de ao menos um item.');
       const files = await readAttachments(form.querySelector('#qv-f').files || []);
-      return api(`/quote-requests/${rq.id}/receive`, { method: 'POST', body: { ...x, prices, files: files.map(f => ({ data: f.data, name: f.name })) } });
+      return api(`/quote-requests/${rq.id}/receive`, { method: 'POST', body: { ...x, freight: x.freight ? parseNum(x.freight) : 0, prices, files: files.map(f => ({ data: f.data, name: f.name })) } });
     },
   });
   if (r) { toast('Proposta registrada.'); done(); }

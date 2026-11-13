@@ -107,6 +107,18 @@ function loadMap(projectId) {
   // Preço vigente: a revisão mais recente de cada (solicitação, item)
   const prices = new Map();
   for (const p of all(`SELECT qp.* FROM quote_prices qp JOIN quote_requests r ON r.id = qp.request_id WHERE r.project_id = ? ORDER BY qp.revision, qp.id`, projectId)) prices.set(`${p.request_id}|${p.item_id}`, p);
+  // Frete da proposta (revisão mais recente): somado ao total e rateado entre os itens pelo valor de cada um (preço × quantidade)
+  const freights = new Map();
+  for (const f of all(`SELECT qf.* FROM quote_freights qf JOIN quote_requests r ON r.id = qf.request_id WHERE r.project_id = ? ORDER BY qf.revision, qf.id`, projectId)) freights.set(f.request_id, f.amount);
+  const qtyOf = new Map(items.map(i => [i.id, Number(i.qty) > 0 ? Number(i.qty) : 1]));
+  const reqMoney = new Map();
+  for (const [k, p] of prices) {
+    const [rid, iid] = k.split('|').map(Number);
+    const m = reqMoney.get(rid) || { subtotal: 0 };
+    m.subtotal += p.price * (qtyOf.get(iid) || 1);
+    reqMoney.set(rid, m);
+  }
+  const factorOf = rid => { const fr = freights.get(rid) || 0, sub = reqMoney.get(rid)?.subtotal || 0; return fr > 0 && sub > 0 ? fr / sub : 0; };
   const files = new Map();
   for (const f of all(`SELECT f.id, f.request_id, f.followup_id, f.kind, f.revision, f.mime, f.original_name, f.created_at FROM quote_files f JOIN quote_requests r ON r.id = f.request_id WHERE r.project_id = ? ORDER BY f.id`, projectId)) {
     if (!files.has(f.request_id)) files.set(f.request_id, []);
@@ -121,12 +133,15 @@ function loadMap(projectId) {
     ...r, item_ids: reqItems.get(r.id) || [], overdue: r.status === 'enviada' && !!r.due_date && r.due_date < ref,
     files: files.get(r.id) || [], followups: fups.get(r.id) || [],
     revision: Math.max(-1, ...[...prices.values()].filter(p => p.request_id === r.id).map(p => p.revision)),
+    freight: freights.get(r.id) || 0, subtotal: r2(reqMoney.get(r.id)?.subtotal || 0), total: r2((reqMoney.get(r.id)?.subtotal || 0) + (freights.get(r.id) || 0)),
   }));
   const its = items.map(it => {
     const offers = reqs.filter(r => r.item_ids.includes(it.id)).map(r => {
       const p = prices.get(`${r.id}|${it.id}`);
       return { request_id: r.id, supplier_id: r.supplier_id, supplier_name: r.supplier_name, status: r.status, overdue: r.overdue, sent_date: r.sent_date, due_date: r.due_date,
-        received_date: r.received_date, price: p ? p.price : null, revision: p ? p.revision : null };
+        received_date: r.received_date, revision: p ? p.revision : null,
+        // Preço para comparar = preço do fornecedor + frete rateado (por unidade); o digitado fica em price_raw
+        price: p ? r2(p.price * (1 + factorOf(r.id))) : null, price_raw: p ? p.price : null, freight_unit: p ? r2(p.price * factorOf(r.id)) : 0 };
     });
     const got = offers.filter(o => o.price !== null).map(o => o.price);
     return { ...it, offers, received: got.length, requested: offers.length, pending: offers.filter(o => o.status === 'enviada').length,
@@ -253,11 +268,15 @@ export function requestAction(ctx, id, action, body, ip) {
     const rev = (one('SELECT MAX(revision) AS n FROM quote_prices WHERE request_id = ?', id)?.n ?? -1) + 1;
     tx(() => {
       for (const x of prices) run('INSERT INTO quote_prices (request_id, item_id, price, revision, created_by) VALUES (?,?,?,?,?)', id, x.item_id, r2(x.price), rev, ctx.user.id);
+      const freight = b.freight === '' || b.freight === undefined || b.freight === null ? 0 : num(b.freight, 'Frete');
+      if (freight < 0) throw badRequest('O frete não pode ser negativo.');
+      run('INSERT INTO quote_freights (request_id, revision, amount, created_by) VALUES (?,?,?,?)', id, rev, r2(freight || 0), ctx.user.id);
       run(`UPDATE quote_requests SET status = 'recebida', received_date = ?, valid_until = ?, conditions = ?, updated_at = datetime('now') WHERE id = ?`,
         recv, date(b.valid_until, 'Validade'), str(b.conditions, { max: 1000, label: 'Condições' }), id);
       saveFiles(ctx, id, b.files, 'proposta', { revision: rev });
     });
     label = rev ? `Proposta revisada (R${String(rev).padStart(2, '0')})` : 'Proposta recebida';
+    if (Number(b.freight) > 0) label += ` com frete de ${Number(b.freight).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
   } else if (action === 'followup') {
     if (r.status !== 'enviada' && !(r.imported && r.status === 'recebida')) throw badRequest('Só é possível cobrar solicitações aguardando resposta.');
     const d = date(b.date, 'Data da cobrança') || today();
@@ -453,6 +472,16 @@ export function importApply(ctx, projectId, body, ip) {
 // Por disciplina: cabeçalho, linha de colunas (CÓD ORÇ … DADOS, VALOR MEDIANO, EMPRESA 01…) e, para cada item, o bloco
 // PREÇO / NOME / CNPJ / TELEFONE / NOME DO ARQUIVO / OBSERVAÇÃO / ENDEREÇO / SOLICITAÇÃO DE PREÇO / DATA DE ENVIO / DATA DE RECEBIMENTO.
 const SIT = (o, r) => (o.price !== null ? 'RECEBIDO' : o.status === 'declinou' ? 'DECLINOU' : o.status === 'recebida' ? 'SEM PREÇO NO ITEM' : r.overdue ? 'ENVIADO (PRAZO VENCIDO)' : 'ENVIADO');
+// Memorial do rateio do frete (observação do fornecedor em cada item, no PDF e no Excel)
+const brlQ = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const pctQ = v => `${(Math.round(v * 10000) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+function freightMemo(r, o, it) {
+  if (!(r.freight > 0) || o.price_raw === null || o.price_raw === undefined || !(r.subtotal > 0)) return '';
+  const q = Number(it.qty) > 0 ? Number(it.qty) : 1;
+  const unit = it.unit ? ` ${it.unit}` : '';
+  return `Frete da proposta ${brlQ(r.freight)} rateado pelo valor dos itens (+${pctQ(r.freight / r.subtotal)} sobre ${brlQ(r.subtotal)} em itens): `
+    + `${brlQ(o.price_raw)} + ${brlQ(o.freight_unit)} de frete = ${brlQ(o.price)} por unidade · frete deste item ${brlQ(o.freight_unit * q)} (${String(q).replace('.', ',')}${unit})`;
+}
 export function mapData(ctx, projectId) {
   const d = projectQuotes(ctx, projectId);
   const p = one('SELECT code, name, client, location, municipio, uf FROM projects WHERE id = ?', d.project.id);
@@ -490,7 +519,7 @@ export function mapData(ctx, projectId) {
           files = ax.text;
           for (const a of ax.list) { a.items++; if (!a.disciplines.includes(name)) a.disciplines.push(name); }
         }
-        return { name: o.supplier_name, cnpj: r.supplier_cnpj, phone: r.supplier_phone, file: files, obs: [r.conditions, r.valid_until ? `validade ${fmtD(r.valid_until)}` : ''].filter(Boolean).join(' · '),
+        return { name: o.supplier_name, cnpj: r.supplier_cnpj, phone: r.supplier_phone, file: files, obs: [r.conditions, r.valid_until ? `validade ${fmtD(r.valid_until)}` : '', freightMemo(r, o, it)].filter(Boolean).join(' · '),
           address: r.supplier_address, status: SIT(o, r), situation: `${SIT(o, r)}${o.price !== null && r.received_date ? ` ${fmtD(r.received_date)}` : SIT(o, r) === 'ENVIADO' && o.sent_date ? ` ${fmtD(o.sent_date)}` : ''}`, sent: o.sent_date, received: o.price !== null ? r.received_date : null, price: o.price, revision: o.revision };
       });
       return { ...it, offers };

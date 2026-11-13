@@ -765,3 +765,12 @@
 .qa-annex .pdf-pg + .pdf-pg { margin-top: 14px; }
 @media print { .qa-annex .pdf-pg + .pdf-pg { margin-top: 0; break-before: page; page-break-before: always; } .qa-annex .pdf-pg { break-inside: avoid; page-break-inside: avoid; } }
 .qa-idx .qa-orig { display: block; color: #666; font-size: 6.6pt; }
+
+/* Assinatura eletrônica sobre a linha de assinatura */
+.sig-line { position: relative; }
+.sig-img { position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, 7px); max-height: 15mm; max-width: 92%; object-fit: contain; pointer-events: none; }
+.sig-date { position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -1mm); font-weight: 600; color: #14213D; white-space: nowrap; }
+.sig-meta { display: block; font-size: 6.8pt; line-height: 1.3; color: #46535F; margin-top: 1mm; text-align: center; }
+.sig-changed { color: #B03A2E; }
+.sig-acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 4px; }
+@media print { .sig-acts { display: none !important; } }

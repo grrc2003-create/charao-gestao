@@ -4,10 +4,11 @@ import { html, api, fmtDate, fmtDateTime, fmtPct, STATUS } from '../core.js';
 import { recBadge } from './record-icons.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
+import { loadSignatures, sigLine, sigInfo, bindSignatures, signedDate } from './signatures.js';
 
 const KIND_LABEL = { projeto: 'Projeto', conclusao: 'Conclusão', reagendamento: 'Reagendamento', registro: 'Registro', medicao: 'Medição', etapa: 'Classificação' };
 
-export async function view({ params, query, setQuery, render }) {
+export async function view({ params, query, setQuery, render, state }) {
   const withGantt = query.get('gantt') !== '0';
   const gSubs = query.get('gsub') !== '0';
   const withTimeline = query.get('linha') === '1';
@@ -53,6 +54,8 @@ export async function view({ params, query, setQuery, render }) {
   const [h, g] = await Promise.all([api(`/projects/${params.id}/history`, withPhotos ? { query: { fotos: '1' } } : undefined), withGantt ? api('/gantt', { query: { project: params.id } }) : null]);
   const p = h.project;
   const s = h.summary;
+  const S = await loadSignatures([{ type: 'historia', key: String(p.id), fp: `${h.timeline.length}|${JSON.stringify(s)}` }]);
+  const sD = (slot, label, name = '', userId = '') => ({ type: 'historia', key: String(p.id), slot, label, name, userId });
   const kpi = (l, v, sub, c = '#2A3D50') => html`<div class="r-kpi" style="--c:${c}"><div class="r-kpi-l">${l}</div><div class="r-kpi-v">${v}</div>${sub ? html`<div class="r-kpi-s">${sub}</div>` : ''}</div>`;
   const chapters = h.chapters.filter(c => c.paragraphs.length);
   return {
@@ -124,15 +127,16 @@ export async function view({ params, query, setQuery, render }) {
           <td>${e.title}</td><td class="small">${e.detail}</td></tr>`)}</tbody></table></section>` : ''}
 
       <section class="r-section r-sign avoid">
-        <div><span></span>Responsável pela emissão</div>
-        <div><span></span>Responsável técnico / Gestor</div>
+        <div>${sigLine(S, sD('emissor', 'Responsável pela emissão', state?.user?.name, state?.user?.id))}Responsável pela emissão${sigInfo(S, sD('emissor', 'Responsável pela emissão', state?.user?.name, state?.user?.id))}</div>
+        <div>${sigLine(S, sD('gestor', 'Responsável técnico / Gestor', p.lead_name || '', p.lead_id || ''))}Responsável técnico / Gestor${sigInfo(S, sD('gestor', 'Responsável técnico / Gestor', p.lead_name || '', p.lead_id || ''))}</div>
       </section>
       <footer class="r-footer">
         <span>Charão Engenharia & Construção · História do projeto · ${p.code}</span>
         <span>Documento gerado pelo sistema Charão Gestão de Obras a partir das tarefas e dos registros do projeto</span>
       </footer>
     </article></div>`,
-    mount(root) {
+    mount(root, ctx) {
+      bindSignatures(root, S, () => ctx.render());
       setPageFooter(`Charão · História do projeto · ${p.code} · ${p.name}`);
       drawGanttLinks(root);
       bindPrintToolbar(root);

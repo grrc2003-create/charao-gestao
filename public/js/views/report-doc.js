@@ -4,6 +4,7 @@ import { STATUS_COLOR } from './shared.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
 import { periodKey, periodInfo } from './periods.js';
+import { loadSignatures, sigLine, sigInfo, bindSignatures, signedDate } from './signatures.js';
 
 const TYPE_TITLE = { projeto: 'Relatório de Projeto', usuario: 'Relatório Individual', equipe: 'Relatório de Gestor e Equipe', geral: 'Relatório Geral da Operação', tarefas: 'Relatório de Tarefas' };
 const LEVEL_TITLE = { resumo: 'Resumo', detalhado: 'Detalhado', completo: 'Completo com fotos' };
@@ -160,13 +161,17 @@ function evidence(t) {
   </article>`;
 }
 
-export async function view({ query }) {
+export async function view({ query, state }) {
   const q = Object.fromEntries(query);
   // Gantt recolhido: só as tarefas principais (sem as subtarefas)
   const gSubs = q.gsub !== '0';
   const r = await api('/reports', { query: q });
   const s = r.summary;
   const title = TYPE_TITLE[r.type];
+  // Assinaturas: o mesmo relatório = mesmos filtros (nível de detalhe, agrupamento e Gantt não mudam o documento)
+  const sigKey = Object.entries(q).filter(([k, v]) => v !== '' && !['level', 'group', 'gantt', 'gsub', 'fotos'].includes(k)).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('&') || 'geral';
+  const S = await loadSignatures([{ type: 'relatorio', key: sigKey, fp: JSON.stringify(s) }]);
+  const sD = (slot, label, name = '', userId = '') => ({ type: 'relatorio', key: sigKey, slot, label, name, userId });
   const multiProject = r.type !== 'projeto';
   const p = r.scope.project;
 
@@ -266,8 +271,8 @@ export async function view({ query }) {
       </section>` : ''}
 
       <section class="r-section r-sign avoid">
-        <div><span></span>Responsável pela emissão</div>
-        <div><span></span>Responsável técnico / Gestor</div>
+        <div>${sigLine(S, sD('emissor', 'Responsável pela emissão', state?.user?.name, state?.user?.id))}Responsável pela emissão${sigInfo(S, sD('emissor', 'Responsável pela emissão', state?.user?.name, state?.user?.id))}</div>
+        <div>${sigLine(S, sD('gestor', 'Responsável técnico / Gestor'))}Responsável técnico / Gestor${sigInfo(S, sD('gestor', 'Responsável técnico / Gestor'))}</div>
       </section>
       <footer class="r-footer">
         <span>Charão Engenharia & Construção · ${title} · ${r.scope.label}</span>
@@ -297,6 +302,7 @@ export async function view({ query }) {
           : html`<a class="btn btn-ghost btn-sm" href="#/relatorios?type=${r.type}&id=${q.id || ''}&level=${r.level}&group=${r.group}${r.gantt ? '' : '&gantt=0'}${gSubs ? '' : '&gsub=0'}">${icon('edit')}Configurar</a>`}`,
     })}<div class="doc-stage">${doc}</div>`,
     mount(root, ctx) {
+      bindSignatures(root, S, () => ctx.render());
       setPageFooter(`Charão · ${title} · ${r.scope.label}`);
       drawGanttLinks(root);
       bindPrintToolbar(root);

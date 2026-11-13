@@ -3913,6 +3913,41 @@ async function main() {
     ok((await eA('DELETE', `/settings/companies/${pId}/logo`)).status === 200 && (await gL('GET', '/meta')).data.brand === null, 'sem logo: volta ao logo padrão');
   }
 
+  // ---------- Assinatura eletrônica dos documentos (dados fictícios) ----------
+  console.log('Assinatura eletrônica');
+  {
+    const sA = await login('ana@charao.eng.br'), sC = await login('camila@charao.eng.br'), sM = await login('marcos@charao.eng.br');
+    const doc = { type: 'historia', key: '1', slot: 'emissor', slot_label: 'Responsável pela emissão' };
+    ok((await sA('POST', '/signatures', { ...doc, method: 'desenho', signer_name: 'Ana Teste' })).status === 400, 'assinar exige o desenho');
+    ok((await sA('POST', '/signatures', { ...doc, method: 'desenho', data: tinyPng() })).status === 400, 'assinar exige o nome de quem assina');
+    ok((await sA('POST', '/signatures', { ...doc, type: 'xyz', method: 'desenho', signer_name: 'X', data: tinyPng() })).status === 400, 'tipo de documento inválido é recusado');
+    ok((await sA('POST', '/signatures', { type: 'folha', key: '999:999', slot: 'funcionario', method: 'desenho', signer_name: 'X', data: tinyPng() })).status === 404, 'documento inexistente não é assinado');
+    const s1 = await sA('POST', '/signatures', { ...doc, method: 'desenho', signer_name: 'Assinante Teste', signer_doc: '000.000.000-00', data: tinyPng(), fp: 'conteudo-v1' });
+    ok(s1.status === 201 && s1.data.id, 'documento assinado desenhando no aparelho');
+    let q = (await sA('POST', '/signatures/query', { items: [{ type: 'historia', key: '1', fp: 'conteudo-v1' }] })).data;
+    const sig = q.docs['historia:1']?.slots?.emissor;
+    ok(sig && sig.signer_name === 'Assinante Teste' && sig.signer_doc === '000.000.000-00' && sig.method === 'desenho' && !sig.changed && sig.collected_by_name, 'assinatura registrada com quem assinou e quem coletou');
+    ok((await sA('POST', '/signatures/query', { items: [{ type: 'historia', key: '1', fp: 'conteudo-v2' }] })).data.docs['historia:1'].slots.emissor.changed === true, 'documento alterado depois da assinatura é sinalizado');
+    const img = await fetch(BASE + sig.image_url, { headers: { Cookie: await cookieOf('ana@charao.eng.br'), 'X-Requested-With': 'charao-app' } });
+    ok(img.status === 200 && /image\//.test(img.headers.get('content-type')), 'imagem da assinatura servida');
+    // Assinatura salva: só com a senha da própria pessoa
+    ok((await sA('POST', '/signatures', { ...doc, method: 'salva' })).status === 400, 'sem assinatura salva não usa o modo salvo');
+    ok((await sA('PUT', '/me/signature', { data: tinyPng() })).status === 200 && (await sA('GET', '/me/signature')).data.has === true, 'pessoa salva a própria assinatura');
+    ok((await sC('GET', '/signatures/signers')).data.some(u => u.name === 'Ana Charão'), 'pessoas com assinatura salva aparecem para escolher');
+    ok((await sM('POST', '/signatures', { ...doc, slot: 'gestor', method: 'salva', signer_user_id: 1, password: 'senha-errada1' })).status === 400, 'assinatura salva com senha errada é recusada');
+    const s2 = await sM('POST', '/signatures', { ...doc, slot: 'gestor', slot_label: 'Gestor', method: 'salva', signer_user_id: 1, password: PW, fp: 'conteudo-v1' });
+    ok((await sC('POST', '/signatures', { ...doc, slot: 'gestor', method: 'salva', signer_user_id: 1, password: PW })).status === 404, 'quem não acessa o documento não assina');
+    const g2 = (await sA('POST', '/signatures/query', { items: [{ type: 'historia', key: '1', fp: 'conteudo-v1' }] })).data.docs['historia:1'].slots.gestor;
+    ok(s2.status === 201 && g2?.method === 'salva' && g2.signer_user_id === 1 && g2.signer_name === 'Ana Charão' && g2.collected_by_name, 'assinatura salva aplicada no aparelho de outra pessoa com a senha da dona');
+    // Remover: só administrador, com motivo
+    ok((await sC('POST', `/signatures/${s1.data.id}/remove`, { reason: 'teste' })).status === 403, 'só administrador remove assinatura');
+    ok((await sA('POST', `/signatures/${s1.data.id}/remove`, {})).status === 400, 'remover exige motivo');
+    ok((await sA('POST', `/signatures/${s1.data.id}/remove`, { reason: 'Assinatura de teste' })).status === 200
+      && !(await sA('POST', '/signatures/query', { items: [{ type: 'historia', key: '1' }] })).data.docs['historia:1'].slots.emissor, 'assinatura removida sai do documento');
+    ok((await sA('DELETE', '/me/signature')).status === 200 && (await sA('GET', '/me/signature')).data.has === false, 'pessoa remove a assinatura salva (as já feitas continuam)');
+    ok((await sA('POST', '/signatures/query', { items: [{ type: 'historia', key: '1' }] })).data.docs['historia:1'].slots.gestor, 'assinatura já aplicada continua depois de remover a salva');
+  }
+
 }
 
 main()

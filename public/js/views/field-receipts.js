@@ -5,6 +5,7 @@
 import { html, api, fmtDate, todayISO, icon } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { renderPdfPages } from '../pdf-pages.js';
+import { loadSignatures, sigLine, sigInfo, bindSignatures, signedDate } from './signatures.js';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = v => BRL.format(Number(v) || 0);
@@ -81,6 +82,9 @@ export async function view({ params, query, setQuery, render }) {
     setQuery(q); render();
   };
   const periodo = `${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}`;
+  // Assinatura eletrônica de quem recebe (uma por recibo)
+  const sigD = x => ({ type: 'campo', key: `${s.id}:${x.line}`, slot: 'recebedor', label: `Recebedor · ${x.name}`, name: x.name, doc: x.doc || '' });
+  const S = await loadSignatures(list.map(x => ({ type: 'campo', key: `${s.id}:${x.line}`, fp: `${x.name}|${Number(x.amount).toFixed(2)}|${x.ref}|${periodo}` })));
   const recibo = (x, i) => html`<section class="rc-card">
     <header class="rc-head ${showLogo ? '' : 'rc-nologo'}">${showLogo ? html`<img src="/assets/logo.webp" alt="Charão Engenharia & Construção" class="rc-logo">` : ''}
       <div class="rc-title"><b>RECIBO</b><span>Nº ${s.project.code}-${s.code}-${String(i + 1).padStart(2, '0')}</span></div>
@@ -90,7 +94,7 @@ export async function view({ params, query, setQuery, render }) {
     <p class="rc-pay">${x.pix ? html`Forma de pagamento: PIX${x.pix_type ? ` (${x.pix_type})` : ''} ${x.pix}` : 'Forma de pagamento: ____________________'}</p>
     ${obs ? html`<p class="rc-obs">${obs}</p>` : ''}
     <p class="rc-date">${local ? `${local}, ` : '____________________, '}${dataExtenso(data)}.</p>
-    <div class="rc-sign"><span></span><b>${x.name}</b><small>${x.doc ? `CPF/CNPJ: ${x.doc}` : 'CPF/CNPJ: ______________________'}</small></div>
+    <div class="rc-sign">${sigLine(S, sigD(x))}<b>${x.name}</b><small>${x.doc ? `CPF/CNPJ: ${x.doc}` : 'CPF/CNPJ: ______________________'}</small>${sigInfo(S, sigD(x))}</div>
   </section>`;
   const pages = [];
   for (let i = 0; i < list.length; i += 2) pages.push(list.slice(i, i + 2));
@@ -128,6 +132,7 @@ export async function view({ params, query, setQuery, render }) {
     <div class="doc-stage">${pages.length ? pages.map((pg, k) => html`<article class="doc a4 rc-doc">${pg.map((x, j) => html`${j ? html`<div class="rc-cut" aria-hidden="true"><span>✂ recortar</span></div>` : ''}${recibo(x, k * 2 + j)}`)}</article>`)
       : html`<article class="doc a4 rc-doc"><p class="muted">${all.length ? 'Nenhum profissional escolhido.' : modo === 'pago' ? 'Ninguém com pagamento registrado nesta folha.' : 'Nenhum valor a pagar nesta folha.'}</p></article>`}${withProof ? list.map(proofPage) : ''}</div>`,
     mount(root) {
+      bindSignatures(root, S, () => render());
       bindPrintToolbar(root, renderPdfPages(root));
       setPageFooter(`Recibos · ${s.project.code} · ${s.code}`);
       root.querySelector('#rc-data').addEventListener('change', e => go({ data: e.target.value || todayISO() }));

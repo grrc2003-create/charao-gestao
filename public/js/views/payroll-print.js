@@ -3,6 +3,7 @@ import { html, api, fmtDate, icon } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { renderPdfPages } from '../pdf-pages.js';
 import { money, refLabel, refLong } from './payroll.js';
+import { loadSignatures, sigLine, sigInfo, bindSignatures, signedDate } from './signatures.js';
 
 const d2 = d => (d ? fmtDate(d) : '—');
 const short = d => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(2, 4)}` : '');
@@ -74,8 +75,8 @@ function receipt(m, e) {
     <table class="fdm-t fdm-total"><tbody><tr><th>TOTAL</th>${cell(c.total)}</tr></tbody></table>
     <div class="fdm-obs"><b>Observação</b><div class="fdm-obs-box">${obs}</div></div>
     <div class="fdm-sign">
-      <div><span></span>${e.name}</div>
-      <div><span></span>Data</div>
+      <div>${sigLine(SIG, sigD(m, e))}${e.name}${sigInfo(SIG, sigD(m, e))}</div>
+      <div><span class="sig-line">${signedDate(SIG, sigD(m, e)) ? html`<b class="sig-date">${signedDate(SIG, sigD(m, e))}</b>` : ''}</span>Data</div>
     </div>
     <p class="fdm-foot">Pagamento referente à bolsa/valor de ${refLong(m.bolsa.start.slice(0, 7))} e ao adiantamento de VT/VR de ${refLong(m.ref)}${m.pay_date ? ` · pagamento previsto em ${d2(m.pay_date)}` : ''}${e.cost_center ? ` · Centro de custo ${e.cost_center}` : ''}.</p>
   </article>`;
@@ -100,14 +101,23 @@ function proofPage(m, e) {
   </article>`;
 }
 
+// Assinatura eletrônica do funcionário no recibo
+let SIG = null;
+const sigD = (m, e) => ({ type: 'folha', key: `${m.id}:${e.id}`, slot: 'funcionario', label: `Funcionário · ${e.name}`, name: e.name, userId: e.user_id || '' });
+const loadSig = (m, only) => loadSignatures((only ? m.entries.filter(e => e.id === only) : m.entries)
+  .map(e => ({ type: 'folha', key: `${m.id}:${e.id}`, fp: `${e.name}|${Number(e.calc?.total || 0).toFixed(2)}|${m.ref}` })));
+
 export async function view({ params, query }) {
   const m = await api(`/payroll/months/${params.id}`);
-  return page(m, Number(query.get('pessoa')) || null, query, `#/folha/${m.id}`);
+  const only = Number(query.get('pessoa')) || null;
+  SIG = await loadSig(m, only);
+  return page(m, only, query, `#/folha/${m.id}`);
 }
 
 // Meu painel: recibo da própria pessoa (o servidor devolve só o lançamento dela)
 export async function mine({ params, query }) {
   const m = await api(`/me/receipts/folha/${params.id}`);
+  SIG = await loadSig(m, m.entries[0].id);
   return page(m, m.entries[0].id, query, '#/painel');
 }
 
@@ -124,7 +134,8 @@ function page(m, only, query, back) {
         extra: hasProof ? html`<label class="pd-proof-opt"><input type="checkbox" id="pd-proof-on" ${withProof ? 'checked' : ''}>Incluir comprovante de pagamento</label>` : '' })}
       <div class="doc-stage pd-stage ${withProof ? '' : 'pd-noproof'}" id="pd-stage">${list.map(e => html`${receipt(m, e)}${proofPage(m, e)}`)}</div>
       ${m.status === 'aberta' ? html`<p class="no-print muted" style="text-align:center">Folha aberta: os valores ainda podem mudar até o fechamento.</p>` : ''}`,
-    mount(root) {
+    mount(root, ctx) {
+      bindSignatures(root, SIG, () => ctx.render());
       bindPrintToolbar(root, renderPdfPages(root));
       root.querySelector('#pd-proof-on')?.addEventListener('change', e => root.querySelector('#pd-stage').classList.toggle('pd-noproof', !e.target.checked));
     },

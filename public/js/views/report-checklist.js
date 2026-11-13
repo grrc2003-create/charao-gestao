@@ -12,6 +12,7 @@ import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js
 import { RESULT, PHOTO_RULE, matchItem, filterOptions, optLabel } from './checklist-ui.js';
 import { periodKey, periodInfo } from './periods.js';
 import { ganttChart, drawGanttLinks } from './gantt.js';
+import { loadSignatures, sigLine, sigInfo, bindSignatures, signedDate } from './signatures.js';
 
 // Dimensões de agrupamento (combináveis em até 3 níveis). Data = prazo do item.
 // Especialidades na ordem do modelo da obra (definida a cada relatório); fora do modelo depois e "Sem especialidade" por último
@@ -145,6 +146,10 @@ export async function view({ params, query, state }) {
   };
   const withPhotos = query.get('fotos') !== '0';
   const withGantt = query.get('gantt') !== '0';
+  // Assinaturas do check-list (por parte, quando o relatório é separado por responsável/profissional)
+  const S = await loadSignatures([{ type: 'checklist', key: String(t.id), fp: c.items.map(i => `${i.id}:${i.result || ''}:${i.resolved ? 1 : 0}:${i.open_nc ? 1 : 0}`).join(',') }]);
+  const sD = (part, slot, label, name, userId = '') => ({ type: 'checklist', key: String(t.id), slot: `${slot}:${part?.name || 'geral'}`, label: `${label}${part?.name ? ` · ${part.name}` : ''}`, name, userId });
+  const respName = part => ((sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || '');
   const byWorker = query.get('sep') === 'profissional';
   const sep = byWorker || DIMS[query.get('sep')] ? query.get('sep') : '';
   const compact = query.get('fmt') === 'lista';
@@ -277,8 +282,8 @@ export async function view({ params, query, state }) {
       <p class="r-list-sum"><b>${st.total}</b> ${st.total === 1 ? 'item' : 'itens'} · <b>${st.done}</b> concluído(s) · <b>${st.nao_conforme}</b> não conforme(s) em aberto · <b>${st.pending}</b> sem resposta${totalDays ? html` · <b>${String(totalDays).replace('.', ',')}</b> dia(s) de trabalho` : ''}${byWorker && when ? html` · até <b>${fmtDate(when)}</b>` : ''}</p>
       ${levels.length ? groupBy([...part.items].sort((a, b) => (part.order?.get(a.id) ?? a.seq) - (part.order?.get(b.id) ?? b.seq)), levels[0]).map(g => table(g.items, groupRow(g, 0), 1)) : table(part.items, '', 0)}
       ${show('assin') ? html`<div class="r-sign r-list-sign" style="grid-template-columns:repeat(2,1fr)">
-        <div><span></span>${(sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${byWorker && part.name ? 'Profissional' : 'Responsável'}</div></div>
-        <div><span></span> <div class="muted">Data</div></div>
+        <div>${sigLine(S, sD(part, 'responsavel', 'Responsável', respName(part), t.assignee_id))}${(sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${byWorker && part.name ? 'Profissional' : 'Responsável'}</div>${sigInfo(S, sD(part, 'responsavel', 'Responsável', respName(part), t.assignee_id))}</div>
+        <div><span class="sig-line">${signedDate(S, sD(part, 'responsavel', '', '')) ? html`<b class="sig-date">${signedDate(S, sD(part, 'responsavel', '', ''))}</b>` : ''}</span> <div class="muted">Data</div></div>
       </div>` : ''}
       <footer class="r-footer"><span>Charão Engenharia & Construção · Check-list ${t.code}</span><span>Documento gerado pelo sistema Charão Gestão de Obras</span></footer>
     </article>`;
@@ -350,9 +355,9 @@ export async function view({ params, query, state }) {
       ...(rows.length ? [html`${itemsTitle}${rows[0]}`, ...rows.slice(1)] : [itemsTitle]),
       show('assin') ? html`<section class="r-section avoid">
           <div class="r-sign" style="grid-template-columns:repeat(3,1fr)">
-            <div><span></span>${(sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${byWorker && part.name ? 'Profissional' : sep === 'responsavel' ? 'Responsável' : 'Responsável pelo check-list'}</div></div>
-            <div><span></span>${t.reviewer_name || ' '}<div class="muted">Conferente</div></div>
-            <div><span></span> <div class="muted">Cliente / Recebedor</div></div>
+            <div>${sigLine(S, sD(part, 'responsavel', 'Responsável', respName(part), t.assignee_id))}${(sep === 'responsavel' || byWorker) && part.name ? part.name : t.assignee_name || 'Responsável pelo check-list'}<div class="muted">${byWorker && part.name ? 'Profissional' : sep === 'responsavel' ? 'Responsável' : 'Responsável pelo check-list'}</div>${sigInfo(S, sD(part, 'responsavel', 'Responsável', respName(part), t.assignee_id))}</div>
+            <div>${sigLine(S, sD(part, 'conferente', 'Conferente', t.reviewer_name || '', t.reviewer_id))}${t.reviewer_name || ' '}<div class="muted">Conferente</div>${sigInfo(S, sD(part, 'conferente', 'Conferente', t.reviewer_name || '', t.reviewer_id))}</div>
+            <div>${sigLine(S, sD(part, 'cliente', 'Cliente / Recebedor', ''))} <div class="muted">Cliente / Recebedor</div>${sigInfo(S, sD(part, 'cliente', 'Cliente / Recebedor', ''))}</div>
           </div>
         </section>` : '',
     ].filter(Boolean);
@@ -416,6 +421,7 @@ export async function view({ params, query, state }) {
         </div></details>`,
     })}<div class="doc-stage">${parts.map(compact ? listDoc : fullDoc)}</div>`,
     mount(root, ctx) {
+      bindSignatures(root, S, () => ctx.render());
       drawGanttLinks(root);
       setPageFooter(`Charão · Check-list ${t.code} · ${t.project_code}`);
       const photoNote = root.querySelector('[data-photos]');

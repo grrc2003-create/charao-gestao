@@ -24,6 +24,7 @@ import * as FinanceImport from './services/finance-import.js';
 import * as MaisControle from './services/mais-controle.js';
 import * as TaskImport from './services/task-import.js';
 import * as Companies from './services/companies.js';
+import * as Signatures from './services/signatures.js';
 import * as Calendar from './services/calendar.js';
 import * as Deps from './services/dependencies.js';
 import * as Recurrences from './services/recurrences.js';
@@ -395,6 +396,16 @@ api.get('/api/payroll-pay-files/:id', (req, res, { ctx, params }) => sendFile(re
 api.put('/api/payroll/entries/:id', (req, res, { ctx, params, body }) => send(res, 200, Payroll.updateEntry(ctx, intOrNull(params.id), body, clientIp(req))));
 api.delete('/api/payroll/entries/:id', (req, res, { ctx, params }) => send(res, 200, Payroll.removeEntry(ctx, intOrNull(params.id))));
 // ---------- Reembolsos (Meu painel → Folha) ----------
+// ---------- Assinatura eletrônica dos documentos ----------
+api.post('/api/signatures/query', (req, res, { ctx, body }) => send(res, 200, Signatures.querySignatures(ctx, body.items)));
+api.get('/api/signatures/signers', (req, res, { ctx }) => send(res, 200, Signatures.signers(ctx)));
+api.post('/api/signatures', (req, res, { ctx, body }) => send(res, 201, Signatures.signDocument(ctx, body, { ip: clientIp(req), ua: req.headers['user-agent'] })));
+api.post('/api/signatures/:id/remove', (req, res, { ctx, params, body }) => send(res, 200, Signatures.removeSignature(ctx, intOrNull(params.id), body, clientIp(req))));
+api.get('/api/signatures/:id/image', (req, res, { ctx, params }) => sendFile(req, res, Signatures.signatureImage(ctx, intOrNull(params.id))));
+api.get('/api/me/signature', (req, res, { ctx }) => send(res, 200, Signatures.mySignature(ctx)));
+api.put('/api/me/signature', (req, res, { ctx, body }) => send(res, 200, Signatures.saveMySignature(ctx, body, clientIp(req))));
+api.delete('/api/me/signature', (req, res, { ctx }) => send(res, 200, Signatures.removeMySignature(ctx, clientIp(req))));
+api.get('/api/me/signature/image', (req, res, { ctx }) => sendFile(req, res, Signatures.mySignatureImage(ctx)));
 api.get('/api/me/receipts', (req, res, { ctx }) => send(res, 200, myReceipts(ctx)));
 api.get('/api/me/receipts/folha/:id', (req, res, { ctx, params }) => send(res, 200, Payroll.myPayrollMonth(ctx, intOrNull(params.id))));
 api.get('/api/reimbursements/me', (req, res, { ctx }) => send(res, 200, Reimb.myReimbursements(ctx)));

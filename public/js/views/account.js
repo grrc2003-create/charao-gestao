@@ -1,11 +1,13 @@
 import { html, api, icon, avatar, ROLE, SCOPE } from '../core.js';
-import { toast } from '../ui.js';
+import { toast, confirmSheet } from '../ui.js';
 import { pageHead } from './shared.js';
 import { logout } from '../app.js';
 import { avatarEditor, bindAvatarEditor } from './avatar-ui.js';
+import { editMySignature } from './signatures.js';
 
 export async function view({ state, navigate }) {
   const u = state.user;
+  const mySig = await api('/me/signature').catch(() => ({ has: false }));
   return {
     title: 'Minha conta',
     html: html`
@@ -25,6 +27,15 @@ export async function view({ state, navigate }) {
           </div>
         </section>
         <section class="card card-pad">
+          <h2 style="margin-bottom:4px">Minha assinatura</h2>
+          <p class="muted">Desenhe uma vez e use para assinar os documentos com um toque, confirmando a sua senha (inclusive no tablet de outra pessoa).</p>
+          <div class="my-sig">${mySig.has ? html`<img src="${mySig.image_url}" alt="Minha assinatura">` : html`<span class="muted">Nenhuma assinatura salva.</span>`}</div>
+          <div class="page-actions" style="margin-top:10px">
+            <button type="button" class="btn btn-primary" id="sig-edit">${icon('edit')}${mySig.has ? 'Trocar assinatura' : 'Desenhar assinatura'}</button>
+            ${mySig.has ? html`<button type="button" class="btn btn-ghost" id="sig-rm">${icon('trash')}Remover</button>` : ''}
+          </div>
+        </section>
+        <section class="card card-pad">
           <h2 style="margin-bottom:4px">Alterar senha</h2>
           ${u.must_change_password ? html`<div class="notice notice-proto" style="margin:8px 0">${icon('alert')}<span>Sua senha é provisória. Defina uma senha pessoal.</span></div>` : html`<p class="muted">Use ao menos 8 caracteres, com letras e números.</p>`}
           <form class="form" id="pw-form" novalidate>
@@ -36,8 +47,10 @@ export async function view({ state, navigate }) {
           </form>
         </section>
       </div>`,
-    mount(root) {
+    mount(root, ctx) {
       root.querySelector('#logout').addEventListener('click', logout);
+      root.querySelector('#sig-edit').addEventListener('click', async () => { try { if (await editMySignature()) { toast('Assinatura salva.'); ctx.render(); } } catch (e) { toast(e.message, 'error'); } });
+      root.querySelector('#sig-rm')?.addEventListener('click', async () => { if (await confirmSheet('Remover assinatura', 'Remover a sua assinatura salva? As assinaturas já feitas nos documentos continuam valendo.', 'Remover', true)) { await api('/me/signature', { method: 'DELETE' }); toast('Assinatura removida.'); ctx.render(); } });
       bindAvatarEditor(root, u, { self: true });
       const f = root.querySelector('#pw-form');
       const err = f.querySelector('.form-error');

@@ -3,6 +3,7 @@
 import { html, api, fmtDate } from '../core.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 import { money, qty } from './contracts.js';
+import { loadSignatures, sigLine, sigInfo, bindSignatures, signedDate } from './signatures.js';
 
 export async function view({ params, state }) {
   if (!state.meta.can.contracts) throw new Error('Acesso restrito a Contratos.');
@@ -15,6 +16,10 @@ export async function view({ params, state }) {
   const adjs = m.adjustments.length ? m.adjustments : [];
   // Boletim de outra empresa (ex.: LuS): nada da Charão no documento, no rodapé nem no nome do PDF
   const own = (c.company || 'charao') === 'charao';
+  // Assinaturas da empresa e do cliente
+  const sD = (slot, label, name) => ({ type: 'medicao', key: String(m.id), slot, label, name });
+  const S = await loadSignatures([{ type: 'medicao', key: String(m.id), fp: `${m.code}|${T.to_bill}|${m.period_start}|${m.period_end}` }]);
+  const coName = c.company_name || 'Charão Engenharia & Construção';
   return {
     title: `Boletim ${m.code}`,
     docTitle: own ? null : `Boletim ${m.code} - ${c.client} - ${c.company_name}`,
@@ -58,12 +63,13 @@ export async function view({ params, state }) {
           ${c.payment_info ? html`<div class="bm-pay"><b>CONTA PARA PAGAMENTO</b><div>${c.payment_info}</div></div>` : ''}
         </div>
         <div class="bm-sign">
-          <div><span></span>${c.company_name || 'Charão Engenharia & Construção'}</div>
-          <div><span></span>${c.client}</div>
+          <div>${sigLine(S, sD('empresa', `Empresa · ${coName}`, ''))}${coName}${sigInfo(S, sD('empresa', `Empresa · ${coName}`, ''))}</div>
+          <div>${sigLine(S, sD('cliente', `Cliente · ${c.client}`, ''))}${c.client}${sigInfo(S, sD('cliente', `Cliente · ${c.client}`, ''))}</div>
         </div>
       </article>
     </div>`,
-    mount(root) {
+    mount(root, ctx) {
+      bindSignatures(root, S, () => ctx.render());
       bindPrintToolbar(root);
       setPageFooter(`Boletim ${m.code} · ${c.client} · ${own ? 'emitido pelo Charão Gestão' : c.company_name}`);
     },

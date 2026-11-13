@@ -61,7 +61,9 @@ export async function view({ params, query, setQuery, render }) {
   const pagDoc = pref('pagdoc');
   const showLogo = pref('logo') !== '0';
   const obs = pref('obs');
-  const local = pref('local');
+  // Cidade: a da obra (cadastro do projeto); digitar outra no campo "Local" vale para este recibo
+  const projCity = s.project.municipio ? `${s.project.municipio}${s.project.uf ? `/${s.project.uf}` : ''}` : '';
+  const local = query.has('local') ? query.get('local') : projCity;
   const modo = query.get('valor') === 'pago' ? 'pago' : 'folha';
   const off = new Set((query.get('sem') || '').split(',').filter(Boolean));
   // Quem recebe na folha: pessoas (diárias) e empreitadas medidas

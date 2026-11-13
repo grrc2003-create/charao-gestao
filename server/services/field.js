@@ -408,7 +408,7 @@ export function getSheet(ctx, id) {
   const inContracts = new Set(c.contracts.map(x => x.contract_id));
   const open = s.status === 'aberta';
   return {
-    id: s.id, code: fcCode(s.seq), project: { id: p.id, code: p.code, name: p.name, client: p.client },
+    id: s.id, code: fcCode(s.seq), project: { id: p.id, code: p.code, name: p.name, client: p.client, municipio: p.municipio || null, uf: p.uf || null },
     start_date: s.start_date, end_date: s.end_date, days: daysOf(s.start_date, s.end_date), status: s.status, activities: s.activities,
     closed_at: s.closed_at, closed_by_name: s.closed_by ? one('SELECT name FROM users WHERE id = ?', s.closed_by)?.name : null,
     people: money ? c.people : c.people.map(e => strip(e, MONEY_PEOPLE)),

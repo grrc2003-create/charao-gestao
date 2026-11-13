@@ -368,7 +368,9 @@ export function listSheets(ctx, projectId) {
   const overview = projects.filter(p => !projectId || p.id === projectId).map(p => {
     const list = sheets.filter(s => s.project_id === p.id);
     const o = { ...p, sheets: list.length, open: list.filter(s => s.status === 'aberta').length, last: list[0] ? { id: list[0].id, code: list[0].code, start_date: list[0].start_date, end_date: list[0].end_date, status: list[0].status } : null,
-      diarias: r2(list.reduce((a, s) => a + s.diarias, 0)), workers: wk.get(p.id) || 0, contracts: emp.get(p.id) || 0 };
+      diarias: r2(list.reduce((a, s) => a + s.diarias, 0)), workers: wk.get(p.id) || 0, contracts: emp.get(p.id) || 0,
+      // Período coberto pelas folhas da obra (base do total do cartão): início da primeira a fim da última
+      first_date: list.map(s => s.start_date).filter(Boolean).sort()[0] || null, last_date: list.map(s => s.end_date).filter(Boolean).sort().at(-1) || null };
     if (!money) return o;
     o.debts = debtTotals(p.id);
     const pend = list.filter(s => s.payment && s.payment.status !== 'paga');

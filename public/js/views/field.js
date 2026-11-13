@@ -35,6 +35,7 @@ function obrasView(d) {
     ${o.client ? html`<div class="pf-mper">${o.client}</div>` : ''}
     <div class="pf-mper">${o.last ? `Última: ${o.last.code} · ${dm(o.last.start_date)} a ${dm(o.last.end_date)}` : 'Nenhuma folha ainda'}</div>
     ${mny && o.sheets ? html`<div class="pf-mtotal">${money(o.total)}</div>` : ''}
+    ${o.sheets && o.first_date ? html`<div class="fc-operiod">${mny ? 'Total de' : 'Período:'} ${fmtDate(o.first_date)} a ${fmtDate(o.last_date)}</div>` : ''}
     <div class="pf-mfoot"><span>${o.sheets} folha(s)</span><span>${n2(o.diarias)} diária(s)</span>${o.workers ? html`<span>${o.workers} profissional(is)</span>` : ''}${o.contracts ? html`<span>${o.contracts} empreitada(s)</span>` : ''}
       ${mny && o.pending ? html`<span class="fc-pay">A pagar ${money(o.pending)}</span>` : ''}</div>
   </a>`;

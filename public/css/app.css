@@ -4464,3 +4464,9 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
 
 /* Folha de Campo: período coberto pelo total do cartão da obra */
 .fc-operiod { font-size: 12.5px; color: var(--muted); margin-top: -2px; font-variant-numeric: tabular-nums; }
+
+/* Folha de Campo: reabrir com pagamentos já feitos */
+.fc-reopen-list { list-style: none; margin: 6px 0 10px; padding: 0; display: grid; gap: 4px; }
+.fc-reopen-list li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--navy-50); font-size: 14px; }
+.fc-reopen-list.fc-over li { background: #FDECEA; }
+.fc-reopen-list b { font-variant-numeric: tabular-nums; white-space: nowrap; }

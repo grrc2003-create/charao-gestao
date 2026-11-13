@@ -2925,7 +2925,7 @@ async function main() {
   const fcPg1 = (await fcAna('GET', '/field/payments?obra=2')).data;
   ok(!fcPg1.people.find(p => p.worker_id === fcP.id) && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.payment.status === 'pendente', 'pessoa marcada como paga sai da lista a pagar; folha segue pendente até todos serem pagos');
   ok((await fcAna('GET', '/field/payments?obra=2&pagos=1')).data.people.find(p => p.worker_id === fcP.id).items[0].paid_at === '2026-09-18', 'histórico de pagos com a data');
-  ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com alguém marcado como pago, a folha não reabre');
+  ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com alguém marcado como pago, reabrir exige o motivo');
   await fcAna('POST', '/field/paid', { lines: [lH, lC], paid_date: '2026-09-19' });
   const fcPgS = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data;
   const fcPgIt = (await fcAna('GET', '/finance/obligations')).data;
@@ -2944,7 +2944,17 @@ async function main() {
   const fcPartIt = fcPartPay.items.find(i => i.line === lP);
   ok(fcPartIt.state === 'pending' && fcPartIt.amount === fcDueP - 100 && fcPartIt.paid_amount === 100 && fcPartPay.paid >= 100, 'Pagamentos: o já pago conta como pago e só o restante fica a pagar');
   ok((await fcAna('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 200 && (await fcJul('GET', `/field-pay-files/${fcPartS.payments[0].files[0].id}`)).status === 403, 'comprovante do pagamento abre só para a seção');
-  ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com pagamento parcial registrado, a folha não reabre');
+  ok((await fcAna('POST', `/field/sheets/${fcS.id}/reopen`)).status === 400, 'com pagamento parcial registrado, reabrir exige o motivo');
+  // Reabrir para corrigir com pagamento já feito: o pagamento e o comprovante continuam; quem recebeu não sai da folha
+  const fcRo = await fcAna('POST', `/field/sheets/${fcS.id}/reopen`, { reason: 'Correção de teste' });
+  const fcRoP = fcRo.data?.people?.find(e => e.worker_id === fcP.id);
+  ok(fcRo.status === 200 && fcRo.data.status === 'aberta' && fcRoP.paid_amount === 100 && fcRoP.payments[0].files.length === 1 && !fcRo.data.payment, 'reabre com motivo: pagamento e comprovante mantidos, pagamento do Financeiro retirado');
+  ok((await fcAna('PUT', `/field/sheets/${fcS.id}`, { people: [] })).status === 400, 'quem já recebeu não pode sair da folha reaberta');
+  ok((await fcAna('DELETE', `/field/sheets/${fcS.id}`)).status === 400 && fcRo.data.can.delete === false, 'folha reaberta com pagamentos não pode ser excluída');
+  const fcRc = (await fcAna('POST', `/field/sheets/${fcS.id}/close`, { pay_date: '2026-09-18' })).data;
+  const fcOw = (fcRc.owing || []).find(o => o.name === fcRoP.name);
+  ok(fcRc.status === 'fechada' && fcRc.payment && fcOw && fcOw.paid === 100 && fcOw.rest === fcDueP - 100 && !(fcRc.overpaid || []).length, 'fechar de novo: confere quem já recebeu e mostra a diferença a pagar');
+  ok((await fcAna('GET', `/field/sheets/${fcS.id}`)).data.people.find(e => e.worker_id === fcP.id).paid_amount === 100, 'pagamento parcial continua valendo depois de reabrir e fechar');
   // Meus comprovantes: profissional ligado ao usuário do sistema
   const fcJulId = (await fcJul('GET', '/auth/me')).data.user.id;
   const fcWk = id => fcAna('GET', '/field/workers').then(r => r.data.workers.find(w => w.id === id));

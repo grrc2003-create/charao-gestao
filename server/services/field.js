@@ -425,7 +425,7 @@ export function getSheet(ctx, id) {
     available_contracts: open ? listContracts(ctx, p.id).filter(x => x.status === 'andamento' && !inContracts.has(x.id) && x.balance_pct > 0) : [],
     services: [...new Set([...all('SELECT name FROM project_stages WHERE project_id = ? ORDER BY sort_order, name', p.id).map(r => r.name),
       ...all('SELECT DISTINCT e.service FROM field_sheet_people e JOIN field_sheets f ON f.id = e.sheet_id WHERE f.project_id = ? AND e.service IS NOT NULL', p.id).map(r => r.service)])],
-    can: { money, edit: open, close: money && open, reopen: money && !open, delete: open },
+    can: { money, edit: open, close: money && open, reopen: money && !open, delete: open && !linesPaid(s.id) },
   };
 }
 
@@ -462,7 +462,11 @@ export function saveSheet(ctx, id, body, ip) {
         else run('INSERT INTO field_sheet_people (sheet_id, worker_id, days, service, client_paid, adjust, adjust_note) VALUES (?,?,?,?,?,?,?)', s.id, wid, JSON.stringify(days), service, clientPaid, adjust, adjustNote);
         keep.add(wid);
       }
-      for (const e of all('SELECT id, worker_id FROM field_sheet_people WHERE sheet_id = ?', s.id)) if (!keep.has(e.worker_id)) run('DELETE FROM field_sheet_people WHERE id = ?', e.id);
+      for (const e of all('SELECT e.id, e.worker_id, e.paid_at, w.name FROM field_sheet_people e JOIN field_workers w ON w.id = e.worker_id WHERE e.sheet_id = ?', s.id)) {
+        if (keep.has(e.worker_id)) continue;
+        if (e.paid_at || one('SELECT 1 FROM field_payments WHERE sheet_id = ? AND line = ?', s.id, `p${e.id}`)) throw badRequest(`${e.name} já recebeu pagamento nesta folha e não pode sair dela. Corrija os dias e valores, ou feche a folha e desfaça o pagamento antes.`);
+        run('DELETE FROM field_sheet_people WHERE id = ?', e.id);
+      }
     }
     if (contracts) {
       const keep = new Set();
@@ -479,7 +483,11 @@ export function saveSheet(ctx, id, body, ip) {
         else run('INSERT INTO field_sheet_contracts (sheet_id, contract_id, pct, client_paid, notes) VALUES (?,?,?,?,?)', s.id, cid, pct, clientPaid, notes);
         keep.add(cid);
       }
-      for (const x of all('SELECT id, contract_id FROM field_sheet_contracts WHERE sheet_id = ?', s.id)) if (!keep.has(x.contract_id)) run('DELETE FROM field_sheet_contracts WHERE id = ?', x.id);
+      for (const x of all('SELECT x.id, x.contract_id, x.paid_at, c.service FROM field_sheet_contracts x JOIN field_contracts c ON c.id = x.contract_id WHERE x.sheet_id = ?', s.id)) {
+        if (keep.has(x.contract_id)) continue;
+        if (x.paid_at || one('SELECT 1 FROM field_payments WHERE sheet_id = ? AND line = ?', s.id, `c${x.id}`)) throw badRequest(`A empreitada "${x.service}" já recebeu pagamento nesta folha e não pode sair dela. Corrija o % medido, ou feche a folha e desfaça o pagamento antes.`);
+        run('DELETE FROM field_sheet_contracts WHERE id = ?', x.id);
+      }
     }
     run(`UPDATE field_sheets SET updated_at = datetime('now') WHERE id = ?`, s.id);
   });
@@ -525,6 +533,8 @@ export function setSheetPeriod(ctx, id, body, ip) {
 export function deleteSheet(ctx, id, ip) {
   const { s } = loadSheet(ctx, id);
   openOnly(s);
+  // Folha reaberta com pagamentos registrados: excluir apagaria os pagamentos e comprovantes
+  if (linesPaid(s.id)) throw badRequest('Esta folha tem pagamentos registrados e não pode ser excluída. Corrija os valores e feche de novo.');
   run('DELETE FROM field_sheets WHERE id = ?', s.id);
   audit(ctx.user.id, 'field', s.id, 'Folha de campo excluída', { folha: fcCode(s.seq), obra: s.project_id }, ip);
   return { ok: true };
@@ -564,23 +574,67 @@ export function closeSheet(ctx, id, body, ip) {
     run(`UPDATE field_sheets SET status = 'fechada', snapshot = ?, pay_date = ?, obligation_id = ?, closed_at = ?, closed_by = ?, updated_at = datetime('now') WHERE id = ?`,
       JSON.stringify(snap), payDate, obligation, new Date().toISOString(), ctx.user.id, s.id);
   });
-  audit(ctx.user.id, 'field', s.id, 'Folha de campo fechada', { folha: `${p.code} ${fcCode(s.seq)}`, pagamento: amount }, ip);
-  return { ...getSheet(ctx, s.id), generated: amount > 0 };
+  const rec = reconcilePaid(s.id, ctx.user.id);
+  audit(ctx.user.id, 'field', s.id, 'Folha de campo fechada', { folha: `${p.code} ${fcCode(s.seq)}`, pagamento: amount,
+    ...(rec.owing.length ? { diferenca_a_pagar: rec.owing.map(o => `${o.name}: ${brl(o.rest)}`) } : {}),
+    ...(rec.over.length ? { pago_a_mais: rec.over.map(o => `${o.name}: ${brl(o.extra)}`) } : {}) }, ip);
+  return { ...getSheet(ctx, s.id), generated: amount > 0, overpaid: rec.over, owing: rec.owing };
 }
 
 // Reabrir: só se o pagamento não foi registrado; remove o pagamento pendente gerado
-export function reopenSheet(ctx, id, ip) {
+// Reabrir para corrigir. Com pessoas já pagas (no todo ou em parte), os pagamentos e comprovantes continuam registrados
+// por pessoa e o motivo é obrigatório; no novo fechamento cada pessoa é conferida (diferença a pagar ou pago a mais).
+// Só não reabre se o pagamento da folha toda foi baixado direto no Financeiro (sem o registro por pessoa).
+export function reopenSheet(ctx, id, body, ip) {
   requireMoney(ctx);
   const { s, p } = loadSheet(ctx, id);
   if (s.status !== 'fechada') throw badRequest('A folha já está aberta.');
-  if (s.obligation_id && obligationPaid(s.obligation_id)) throw badRequest('O pagamento desta folha já foi registrado no Financeiro. Desfaça o pagamento antes de reabrir.');
-  if (linesPaid(s.id)) throw badRequest('Há pessoas marcadas como pagas nesta folha. Desfaça esses pagamentos antes de reabrir.');
+  const c = computeSheet(s);
+  const lines = [...c.people.map(e => ({ ref: `p${e.id}`, table: 'field_sheet_people', id: e.id, name: e.name, company: e.company, paid_at: e.paid_at, paid_amount: e.paid_amount, has_rows: e.payments.length > 0 })),
+    ...c.contracts.map(x => ({ ref: `c${x.id}`, table: 'field_sheet_contracts', id: x.id, name: x.worker_name, company: x.company, paid_at: x.paid_at, paid_amount: x.paid_amount, has_rows: x.payments.length > 0 }))];
+  const due = lines.filter(l => l.company > 0);
+  if (s.obligation_id && obligationPaid(s.obligation_id) && !(due.length && due.every(l => l.paid_at))) {
+    throw badRequest('O pagamento da folha toda foi baixado direto no Financeiro (sem marcar cada pessoa). Desfaça esse pagamento no Financeiro antes de reabrir.');
+  }
+  const paidLines = lines.filter(l => l.paid_amount > 0.005);
+  const reason = str(body?.reason, { max: 500, label: 'Motivo da reabertura' });
+  if (paidLines.length && !reason) throw badRequest('Informe o motivo da reabertura (há pessoas já pagas nesta folha).');
   tx(() => {
-    if (s.obligation_id) removeObligationInternal(s.obligation_id, ctx.user.id, `Folha de Campo ${p.code} ${fcCode(s.seq)} reaberta para correção`);
+    // Pagos antes do registro por pessoa (sem valor guardado): registra o valor pago na época, para não se perder na correção
+    for (const l of paidLines.filter(x => x.paid_at && !x.has_rows)) {
+      const batch = Number(run('INSERT INTO field_pay_batches (paid_date, total, notes, created_by) VALUES (?,?,?,?)', l.paid_at, l.paid_amount, 'Pagamento registrado antes da reabertura da folha (valor da época)', ctx.user.id).lastInsertRowid);
+      run('INSERT INTO field_payments (batch_id, sheet_id, line, amount, paid_date, created_by) VALUES (?,?,?,?,?,?)', batch, s.id, l.ref, l.paid_amount, l.paid_at, ctx.user.id);
+    }
+    if (s.obligation_id) {
+      // Parcela baixada só porque todos foram marcados como pagos: os pagamentos ficam registrados por pessoa
+      for (const it of all(`SELECT id FROM finance_items WHERE obligation_id = ? AND status = 'paga'`, s.obligation_id)) unpayItemInternal(it.id, ctx.user.id, `Folha de Campo ${p.code} ${fcCode(s.seq)} reaberta para correção`);
+      removeObligationInternal(s.obligation_id, ctx.user.id, `Folha de Campo ${p.code} ${fcCode(s.seq)} reaberta para correção${reason ? `: ${reason}` : ''}`);
+    }
     run(`UPDATE field_sheets SET status = 'aberta', snapshot = NULL, obligation_id = NULL, closed_at = NULL, closed_by = NULL, updated_at = datetime('now') WHERE id = ?`, s.id);
   });
-  audit(ctx.user.id, 'field', s.id, 'Folha de campo reaberta', { folha: `${p.code} ${fcCode(s.seq)}` }, ip);
+  audit(ctx.user.id, 'field', s.id, paidLines.length ? 'Folha de campo reaberta com pagamentos já feitos' : 'Folha de campo reaberta', {
+    folha: `${p.code} ${fcCode(s.seq)}`, ...(reason ? { motivo: reason } : {}),
+    ...(paidLines.length ? { pagamentos_mantidos: paidLines.map(l => `${l.name}: ${brl(l.paid_amount)}`) } : {}) }, ip);
   return getSheet(ctx, s.id);
+}
+
+// Depois de fechar: confere cada pessoa com o que já recebeu (paga = pagamentos cobrem o valor; senão volta a ter saldo)
+function reconcilePaid(sheetId, userId) {
+  const s = one('SELECT * FROM field_sheets WHERE id = ?', sheetId);
+  const c = computeSheet(s);
+  const over = [], owing = [];
+  for (const [table, list, nameOf] of [['field_sheet_people', c.people, e => e.name], ['field_sheet_contracts', c.contracts, x => x.worker_name]]) {
+    for (const l of list) {
+      if (!(l.paid_amount > 0.005)) continue;
+      const company = Math.max(0, l.company);
+      const last = l.payments.map(p => p.paid_date).sort().pop() || l.paid_at || today();
+      if (l.paid_amount + PAY_EPS >= company) { if (!l.paid_at) run(`UPDATE ${table} SET paid_at = ?, paid_by = ? WHERE id = ?`, last, userId, l.id); }
+      else { if (l.paid_at) run(`UPDATE ${table} SET paid_at = NULL, paid_by = NULL WHERE id = ?`, l.id); owing.push({ name: nameOf(l), paid: l.paid_amount, due: company, rest: r2(company - l.paid_amount) }); }
+      if (l.paid_amount > company + PAY_EPS) over.push({ name: nameOf(l), paid: l.paid_amount, due: company, extra: r2(l.paid_amount - company) });
+    }
+  }
+  syncSheetPayment(one('SELECT * FROM field_sheets WHERE id = ?', sheetId), userId);
+  return { over, owing };
 }
 
 // ---------- Consolidado da obra: por profissional e por empreitada ----------

@@ -389,6 +389,9 @@ export async function view({ params, navigate, render }) {
           ${s.can.reopen ? html`<button type="button" class="btn btn-ghost" data-reopen>${icon('edit')}Reabrir</button>` : ''}`,
       })}
       ${!mny ? html`<div class="notice section">${icon('info')}<span>Inclua a pessoa e marque os dias em que ela compareceu (toque: 1 → ½ → vazio). Para corrigir, toque no nome dela na lista. Valores e fechamento ficam com o escritório.</span></div>` : ''}
+      ${mny && edit && [...(s.people || []), ...(s.contracts || [])].some(x => (x.paid_amount || 0) > 0.005) ? html`<div class="notice notice-warn section">${icon('alert')}<span><b>Folha reaberta com pagamentos já feitos:</b>
+        ${[...(s.people || []).map(e => [e.name, e.paid_amount]), ...(s.contracts || []).map(x => [x.worker_name, x.paid_amount])].filter(([, v]) => (v || 0) > 0.005).map(([n, v]) => `${n} (${money(v)})`).join(', ')}.
+        Esses pagamentos continuam registrados. Ao fechar, cada pessoa é conferida com o novo valor.</span></div>` : ''}
       <div class="pf-kpis section" id="fc-tot">${totals()}</div>
       <section class="card section"><div class="card-head"><h2>${icon('reports')}Resumo da folha</h2></div><div class="card-body fr-grid" id="fc-sum"></div></section>
       ${mny ? html`<section class="card section fp-card"><div class="card-head"><h2>${icon('wallet')}${edit ? 'A pagar nesta folha' : 'Pagamentos desta folha'}</h2><span id="fc-paytot" class="fp-tot"></span>
@@ -603,7 +606,20 @@ export async function view({ params, navigate, render }) {
           submitLabel: 'Fechar e gerar pagamento',
           onSubmit: f => api(`/field/sheets/${s.id}/close`, { method: 'POST', body: f }),
         });
-        if (ok) { toast(ok.generated ? 'Folha fechada. Pagamento gerado no Financeiro.' : 'Folha fechada (sem valor a pagar pela empresa).'); render(); }
+        if (ok) {
+          toast(ok.generated ? 'Folha fechada. Pagamento gerado no Financeiro.' : 'Folha fechada (sem valor a pagar pela empresa).');
+          // Conferência dos pagamentos já feitos (folha reaberta e corrigida)
+          if (ok.owing?.length || ok.overpaid?.length) {
+            await sheet({ title: 'Conferência dos pagamentos já feitos', submitLabel: 'Entendi',
+              body: html`${ok.owing?.length ? html`<p style="margin-top:0"><b>Ainda a pagar</b> a quem já recebeu parte do valor:</p>
+                  <ul class="fc-reopen-list">${ok.owing.map(o => html`<li><span>${o.name} · recebeu ${money(o.paid)} de ${money(o.due)}</span><b>${money(o.rest)}</b></li>`)}</ul>` : ''}
+                ${ok.overpaid?.length ? html`<p><b>Pago a mais</b> (o valor diminuiu na correção):</p>
+                  <ul class="fc-reopen-list fc-over">${ok.overpaid.map(o => html`<li><span>${o.name} · recebeu ${money(o.paid)}, devido ${money(o.due)}</span><b>+${money(o.extra)}</b></li>`)}</ul>
+                  <p class="muted">Combine a devolução ou desconte numa próxima folha (por exemplo, como ajuste ou dívida do profissional).</p>` : ''}`,
+              onSubmit: () => true });
+          }
+          render();
+        }
       });
       // Editar o período (só com a folha aberta). Salva antes o que estiver pendente.
       root.querySelector('[data-period]')?.addEventListener('click', async () => {
@@ -645,8 +661,22 @@ export async function view({ params, navigate, render }) {
         } catch (ex) { toast(ex.message, 'error'); }
       });
       root.querySelector('[data-reopen]')?.addEventListener('click', async () => {
-        if (!(await confirmSheet('Reabrir a folha', 'O pagamento pendente gerado por esta folha será removido do Financeiro e gerado de novo no próximo fechamento. Se já foi pago, desfaça o pagamento antes.', 'Reabrir', true))) return;
-        try { await api(`/field/sheets/${s.id}/reopen`, { method: 'POST' }); toast('Folha reaberta.'); render(); } catch (ex) { toast(ex.message, 'error'); }
+        // Quem já recebeu nesta folha (no todo ou em parte): os pagamentos continuam registrados; o motivo é obrigatório
+        const paidL = [...(s.people || []).map(e => ({ name: e.name, paid: e.paid_amount || 0 })), ...(s.contracts || []).map(x => ({ name: x.worker_name, paid: x.paid_amount || 0 }))].filter(x => x.paid > 0.005);
+        if (!paidL.length) {
+          if (!(await confirmSheet('Reabrir a folha', 'O pagamento pendente gerado por esta folha será removido do Financeiro e gerado de novo no próximo fechamento.', 'Reabrir', true))) return;
+          try { await api(`/field/sheets/${s.id}/reopen`, { method: 'POST' }); toast('Folha reaberta.'); render(); } catch (ex) { toast(ex.message, 'error'); }
+          return;
+        }
+        const ok = await sheet({ title: `Reabrir a folha ${s.code}`, submitLabel: 'Reabrir para corrigir', danger: true,
+          body: html`<p class="muted" style="margin-top:0">Já receberam nesta folha:</p>
+            <ul class="fc-reopen-list">${paidL.map(x => html`<li><span>${x.name}</span><b>${money(x.paid)}</b></li>`)}</ul>
+            <p class="muted">Os pagamentos e comprovantes <b>continuam registrados</b>. Quem já recebeu não pode sair da folha, mas dias e valores podem ser corrigidos.
+              Ao fechar de novo, cada pessoa é conferida: se o valor aumentar, a diferença fica a pagar; se diminuir e ela tiver recebido a mais, aparece o aviso.
+              O pagamento no Financeiro é removido e gerado de novo no fechamento.</p>
+            <div class="field"><label class="req" for="fc-rr">Motivo da reabertura</label><textarea id="fc-rr" name="reason" rows="2" maxlength="500" required placeholder="Ex.: diária do João lançada errada"></textarea></div>`,
+          onSubmit: f => { if (!String(f.reason || '').trim()) throw new Error('Informe o motivo da reabertura.'); return api(`/field/sheets/${s.id}/reopen`, { method: 'POST', body: f }); } });
+        if (ok) { toast('Folha reaberta para correção. Os pagamentos feitos continuam registrados.'); render(); }
       });
       // Aviso ao sair com alterações não salvas
       const onLeave = e => { if (dirty && root.isConnected) { e.preventDefault(); e.returnValue = ''; } };

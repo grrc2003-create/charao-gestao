@@ -18,8 +18,31 @@ const allowed = (user, r) => !!user?.[RESTRICTED_FLAG[r.restricted]];
 export const restrictedProjectIds = () => new Set(restrictedRows().map(r => r.id));
 export const hiddenProjectIds = user => new Set(restrictedRows().filter(r => !allowed(user, r)).map(r => r.id));
 
+// Empresas que a pessoa pode ver, quando marcadas no cadastro (users.visible_company_ids):
+// null = sem escolha (regra padrão); Set = a própria empresa + as marcadas. Administradores veem todas.
+export function chosenCompanies(user) {
+  if (!user || isAdmin(user) || user.visible_company_ids == null) return null;
+  let list;
+  try { list = JSON.parse(user.visible_company_ids); } catch { return null; }
+  if (!Array.isArray(list)) return null;
+  const own = user.company_id !== undefined ? user.company_id : one('SELECT company_id FROM users WHERE id = ?', user.id)?.company_id;
+  return new Set([...list.map(Number), own].filter(Boolean));
+}
+
 // null = todos os projetos; Set = apenas os ids listados
 export function accessibleProjectIds(user) {
+  const ids = baseProjectIds(user);
+  // Empresas escolhidas: projetos das demais empresas ficam escondidos (Contratos e Financeiro seguem a própria liberação)
+  const cos = chosenCompanies(user);
+  if (!cos) return ids;
+  const out = new Set();
+  for (const p of all('SELECT id, company_id, restricted FROM projects')) {
+    if (ids !== null && !ids.has(p.id)) continue;
+    if (p.restricted > 0 || !p.company_id || cos.has(p.company_id)) out.add(p.id);
+  }
+  return out;
+}
+function baseProjectIds(user) {
   const restricted = restrictedRows();
   const hidden = new Set(restricted.filter(r => !allowed(user, r)).map(r => r.id));
   if (isAdmin(user) || user.access_scope === 'total') {
@@ -82,6 +105,8 @@ export function canSeeTask(ctx, t) {
   if (isAdmin(user)) return true;
   if (isProjectLead(ctx, t)) return true;
   if (t.assignee_id === user.id || t.creator_id === user.id) return true;
+  // Empresas escolhidas no cadastro: tarefas de projetos das demais empresas ficam escondidas
+  if (!canAccessProject(user, t.project_id, ctx.projects) && hiddenByCompany(ctx, t.project_id)) return false;
   if (t.assignee_id && ctx.team.has(t.assignee_id)) return true; // gestor acompanha a equipe
   if (ctx.checklist?.has(t.id)) return true; // responsável por itens do check-list
   if (!canAccessProject(user, t.project_id, ctx.projects)) return false;
@@ -145,16 +170,32 @@ function viewerCompany(ctx) {
   }
   return ctx._vco;
 }
+function hiddenByCompany(ctx, projectId) {
+  const cos = ctx._cos !== undefined ? ctx._cos : (ctx._cos = chosenCompanies(ctx.user));
+  if (!cos) return false;
+  if (!ctx._pco) ctx._pco = new Map(all('SELECT id, company_id, restricted FROM projects').map(p => [p.id, p]));
+  const p = ctx._pco.get(projectId);
+  return !!p && !(p.restricted > 0) && !!p.company_id && !cos.has(p.company_id);
+}
+// Empresas cujas pessoas a pessoa enxerga: null = todas; Set = só estas
+export function visibleCompanies(ctx) {
+  if (!ctx?.user || isAdmin(ctx.user)) return null;
+  if (ctx._vcs !== undefined) return ctx._vcs;
+  const cos = chosenCompanies(ctx.user);
+  if (cos) return (ctx._vcs = cos);
+  const c = companyRestriction(ctx);
+  return (ctx._vcs = c ? new Set([c]) : null);
+}
 export function companyRestriction(ctx) {
   if (!ctx?.user || isAdmin(ctx.user)) return null;
   const c = viewerCompany(ctx);
   return c && c.kind !== 'grupo' ? c.id : null;
 }
 export function sameCompanyOk(ctx, userId) {
-  const c = companyRestriction(ctx);
-  if (!c || userId === ctx.user.id) return true;
+  const cos = visibleCompanies(ctx);
+  if (!cos || userId === ctx.user.id) return true;
   if (!ctx._uco) ctx._uco = new Map(all('SELECT id, company_id FROM users').map(r => [r.id, r.company_id]));
-  return ctx._uco.get(userId) === c;
+  return cos.has(ctx._uco.get(userId));
 }
 
 export function canSeeUser(ctx, userId) {

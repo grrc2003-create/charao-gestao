@@ -94,7 +94,7 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <div class="field"><label for="email" id="email-label">E-mail (login)</label><input id="email" name="email" type="email" maxlength="160" value="${u.email || ''}" autocomplete="off"></div>
           </div>
           <div class="field"><label for="company_id">Empresa</label><select id="company_id" name="company_id">${companyOptions(state.meta, u.company_id ?? (ext ? '' : (state.meta.my_company || (state.meta.companies || []).find(c => c.is_default)?.id)), { empty: ext ? 'Não informada' : '' })}</select>
-            <span class="hint">Empresa à qual a pessoa pertence. Não muda o acesso; quem é de empresa de fora do grupo vê só as pessoas da própria empresa. Cadastre empresas em <b>Configurações → Empresas</b>.</span></div>
+            <span class="hint">Empresa à qual a pessoa pertence. Não muda o acesso; quem é de empresa de fora do grupo vê só as pessoas da própria empresa (dá para mudar em <b>Empresas que pode ver</b>). Cadastre empresas em <b>Configurações → Empresas</b>.</span></div>
           <div class="form-row">
             <div class="field"><label for="job_title">Cargo / função</label><input id="job_title" name="job_title" type="text" maxlength="120" value="${u.job_title || ''}"></div>
             <div class="field"><label for="phone">Telefone</label><input id="phone" name="phone" type="tel" maxlength="40" value="${u.phone || ''}"></div>
@@ -126,6 +126,15 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
             <div class="checks">${projects.map(p => html`<label><input type="checkbox" name="project" value="${p.id}" ${projectSet.has(p.id) ? 'checked' : ''}><span class="mono muted">${p.code}</span>${p.name}</label>`)}</div>
             <span class="hint" id="proj-hint"></span></div>
         </fieldset>
+
+        ${isAdminMe ? html`<fieldset class="fieldset form" id="co-fs"><legend>Empresas que pode ver</legend>
+          <div class="segmented seg-2">
+            <label><input type="radio" name="co_mode" value="padrao" ${u.visible_companies == null ? 'checked' : ''}>Padrão<small>Quem é do grupo vê todas as empresas; quem é de fora vê só a própria.</small></label>
+            <label><input type="radio" name="co_mode" value="escolher" ${u.visible_companies != null ? 'checked' : ''}>Escolher empresas<small>Vê a própria empresa e as marcadas abaixo.</small></label>
+          </div>
+          <div class="field" id="co-list"><div class="checks">${(state.meta.companies_all || []).map(c => html`<label data-co="${c.id}"><input type="checkbox" name="vis_co" value="${c.id}" ${(u.visible_companies || []).includes(c.id) ? 'checked' : ''}>${c.name}<span class="muted co-own" style="font-size:12px" hidden>empresa da pessoa (sempre vê)</span>${c.active ? '' : html`<span class="muted" style="font-size:12px">inativa</span>`}</label>`)}</div>
+            <span class="hint">Das empresas não marcadas ficam escondidas as pessoas (organograma, equipe, listas e responsáveis) e também os projetos e as tarefas, mesmo que o projeto esteja liberado acima. A pessoa continua vendo as tarefas atribuídas a ela. Contratos e Financeiro seguem as seções liberadas. Administradores sempre veem todas.</span></div>
+        </fieldset>` : ''}
 
         <fieldset class="fieldset form int-only" ${ext ? 'hidden' : ''} id="sec-fs"><legend>Seções liberadas</legend>
           <span class="hint">Marque as seções que esta pessoa pode abrir. O que não estiver marcado some do menu e fica bloqueado. A própria tela do usuário (com o Planejamento da semana) e as tarefas atribuídas a ela sempre abrem.</span>
@@ -187,6 +196,18 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         root.querySelector('#scope-seg').style.display = hasLogin ? '' : 'none';
         root.querySelector('#proj-access').style.display = hasLogin && scope === 'total' ? 'none' : '';
         root.querySelector('#total-internal').style.display = hasLogin && scope === 'total' ? '' : 'none';
+        // Empresas que pode ver: a própria sempre marcada; escondido para administradores
+        const coFs = root.querySelector('#co-fs');
+        if (coFs) {
+          coFs.style.display = role === 'admin' ? 'none' : '';
+          const choose = f.querySelector('[name=co_mode]:checked')?.value === 'escolher';
+          root.querySelector('#co-list').style.display = choose ? '' : 'none';
+          const own = f.querySelector('#company_id').value;
+          coFs.querySelectorAll('[data-co]').forEach(l => {
+            const isOwn = l.dataset.co === own, cb = l.querySelector('input');
+            cb.disabled = isOwn; if (isOwn) cb.checked = true; l.querySelector('.co-own').hidden = !isOwn;
+          });
+        }
       };
       f.addEventListener('change', sync);
       sync();
@@ -210,6 +231,8 @@ export async function form({ params, query, state, navigate, reloadMeta }) {
         data.total_internal = root.querySelector('#ti').checked ? 1 : 0;
         delete data.project;
         if (editing) data.active = f.querySelector('[name=active]').checked;
+        if (f.querySelector('#co-fs') && data.role !== 'admin') data.visible_companies = data.co_mode === 'escolher' ? [...f.querySelectorAll('[name=vis_co]:checked:not(:disabled)')].map(c => Number(c.value)) : 'padrao';
+        delete data.co_mode; delete data.vis_co;
         if (data.role === 'terceirizado' || (editing && ext)) data.login_enabled = f.querySelector('#login_enabled').checked;
         err.hidden = true;
         try {

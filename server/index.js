@@ -10,7 +10,7 @@ import {
   checkLoginRate, registerLoginFailure, clearLoginFailures, hashPassword, validatePasswordStrength,
 } from './lib/auth.js';
 import { seedDemo } from './demo-data.js';
-import { accessContext, canAccessProject, canSeeUser, companyRestriction, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
+import { accessContext, canAccessProject, canSeeUser, companyRestriction, visibleCompanies, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
 import { evolution } from './services/evolution.js';
 import * as Projects from './services/projects.js';
@@ -290,7 +290,9 @@ api.get('/api/meta', (req, res, { ctx }) => {
   send(res, 200, {
     projects, users,
     // Empresas (Configurações → Empresas): seleção no cadastro de pessoas e projetos e filtros
-    companies: Companies.listCompanies().map(c => ({ id: c.id, name: c.name, kind: c.kind, is_default: c.is_default })),
+    companies: Companies.listCompanies().filter(c => { const v = visibleCompanies(ctx); return !v || v.has(c.id); }).map(c => ({ id: c.id, name: c.name, kind: c.kind, is_default: c.is_default })),
+    // Todas as empresas (administrador): marcar no cadastro as empresas que cada pessoa pode ver
+    ...(isAdmin(ctx.user) ? { companies_all: Companies.listCompanies({ includeInactive: true }).map(c => ({ id: c.id, name: c.name, kind: c.kind, active: c.active })) } : {}),
     my_company: companyRestriction(ctx),
     // Logo do sistema para quem está usando: o da empresa da pessoa (se tiver); senão, o padrão
     brand: Companies.brandFor(one('SELECT company_id FROM users WHERE id = ?', ctx.user.id)),

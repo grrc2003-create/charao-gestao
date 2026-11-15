@@ -34,7 +34,7 @@ export function resolveCompany(input, current = null) {
 export const companyLabel = id => { const c = companyById(id); return c && c.group_key !== 'charao' ? c.name : null; };
 
 // Grava a empresa da pessoa (company_id + rótulo). Aceita o nome digitado (terceirizado, formulário antigo): procura ou cadastra.
-export function applyUserCompany(userId, body, { fallback = null, only = null } = {}) {
+export function applyUserCompany(userId, body, { fallback = null, only = null, allowed = null } = {}) {
   const u = one('SELECT id, company_id, is_external FROM users WHERE id = ?', userId);
   if (!u) return;
   let id;
@@ -44,6 +44,8 @@ export function applyUserCompany(userId, body, { fallback = null, only = null } 
   if (!id && !u.is_external) id = defaultCompanyId();
   // Quem é de empresa de fora do grupo só cadastra pessoas na própria empresa
   if (only && id !== only) { if (body.company_id !== undefined || typeof body.company === 'string') throw badRequest('Você só pode cadastrar pessoas da sua empresa.'); id = only; }
+  // Empresas escolhidas no cadastro de quem está cadastrando: só nas empresas que ele vê
+  if (allowed && id && !allowed.has(id) && id !== u.company_id) throw badRequest('Você só pode cadastrar pessoas das empresas que você vê.');
   run('UPDATE users SET company_id = ?, company = ? WHERE id = ?', id, companyLabel(id), userId);
 }
 function findOrCreateByName(name, kind) {

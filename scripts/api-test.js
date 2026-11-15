@@ -3943,6 +3943,32 @@ async function main() {
     const lgF = await fetch(BASE + lg.logo_url, { headers: { Cookie: await cookieOf('gestor.parceira@teste.com', 'parceira12345'), 'X-Requested-With': 'charao-app' } });
     ok(lgF.status === 200 && /image\//.test(lgF.headers.get('content-type')), 'arquivo do logo servido');
     ok((await eA('DELETE', `/settings/companies/${pId}/logo`)).status === 200 && (await gL('GET', '/meta')).data.brand === null, 'sem logo: volta ao logo padrão');
+    // Empresas que cada pessoa pode ver (só administrador marca; a própria empresa sempre)
+    const vG = await eA('POST', '/users', { name: 'Gestor Escolha Teste', email: 'gestor.escolha@teste.com', role: 'gestor', access_scope: 'total', company_id: charaoId, password: 'escolha12345', visible_companies: [], sections: ['dashboard', 'projetos', 'tarefas', 'cadastro_usuarios'] });
+    ok(vG.status === 201 && (await eA('GET', `/users/${vG.data.id}`)).data.user.visible_companies?.length === 0, 'empresas visíveis gravadas no cadastro (só a própria)');
+    let vL = await login('gestor.escolha@teste.com', 'escolha12345');
+    let vM = (await vL('GET', '/meta')).data;
+    ok(!vM.projects.some(p => p.id === prP.data.id) && vM.projects.some(p => p.company_id === charaoId) && vM.users.every(u => u.company_id === charaoId) && vM.companies.every(c => c.id === charaoId),
+      'só a própria empresa: projetos e pessoas das outras empresas somem (mesmo com acesso total)');
+    ok((await vL('GET', `/projects/${prP.data.id}`)).status !== 200 && (await vL('GET', `/users/${cP.data.id}`)).status === 404, 'projeto e pessoa de empresa não marcada não abrem');
+    ok((await vL('GET', '/tasks')).data.every(t => t.project_company_id !== pId), 'tarefas de projetos de empresa não marcada somem');
+    ok((await vL('POST', '/projects', { name: 'Obra Escondida Teste', client: 'X', company_id: pId })).status === 400, 'não cria projeto em empresa que não vê');
+    ok((await eA('PUT', `/users/${vG.data.id}`, { visible_companies: [pId] })).status === 200, 'administrador libera outra empresa');
+    vL = await login('gestor.escolha@teste.com', 'escolha12345');
+    vM = (await vL('GET', '/meta')).data;
+    ok(vM.projects.some(p => p.id === prP.data.id) && vM.users.some(u => u.company_id === pId) && vM.users.some(u => u.company_id === charaoId) && !vM.users.some(u => u.company_id && u.company_id !== pId && u.company_id !== charaoId),
+      'empresa marcada: vê a própria e a liberada, e nenhuma outra');
+    ok((await gL('PUT', `/users/${vG.data.id}`, { visible_companies: 'padrao' })).status === 403, 'só administrador altera as empresas visíveis');
+    ok((await eA('PUT', `/users/${vG.data.id}`, { visible_companies: [99999] })).status === 400, 'empresa inexistente na lista é recusada');
+    // Parceira com outra empresa liberada passa a ver também as pessoas dela
+    ok((await eA('PUT', `/users/${gP.data.id}`, { visible_companies: [charaoId], sections: ['dashboard', 'projetos', 'tarefas', 'cadastro_usuarios'] })).status === 200, 'pessoa de fora do grupo com a Charão liberada');
+    const gL2 = await login('gestor.parceira@teste.com', 'parceira12345');
+    ok((await gL2('GET', '/meta')).data.users.some(u => u.company_id === charaoId) && (await gL2('GET', '/users/1')).status === 200, 'de fora do grupo: vê também as pessoas da empresa liberada');
+    ok((await eA('PUT', `/users/${vG.data.id}`, { visible_companies: 'padrao' })).status === 200 && (await eA('PUT', `/users/${gP.data.id}`, { visible_companies: 'padrao' })).status === 200, 'volta ao padrão');
+    vL = await login('gestor.escolha@teste.com', 'escolha12345');
+    vM = (await vL('GET', '/meta')).data;
+    ok(vM.projects.some(p => p.id === prP.data.id) && vM.users.some(u => u.company_id === pId) && (await eA('GET', `/users/${vG.data.id}`)).data.user.visible_companies === null, 'padrão: quem é do grupo volta a ver todas as empresas');
+    ok((await (await login('gestor.parceira@teste.com', 'parceira12345'))('GET', '/users/1')).status === 404, 'padrão: quem é de fora volta a ver só a própria');
   }
 
   // ---------- Assinatura eletrônica dos documentos (dados fictícios) ----------

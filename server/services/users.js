@@ -2,7 +2,7 @@
 import { all, one, run, tx } from '../db.js';
 import { impactOfAssignee } from './dependencies.js';
 import { badRequest, forbidden, notFound, str, oneOf, intOrNull } from '../lib/http.js';
-import { companyRestriction, sameCompanyOk, canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf, requireSection } from '../lib/permissions.js';
+import { companyRestriction, visibleCompanies, sameCompanyOk, canSeeUser, canSeePersonalData, requireAdmin, teamIds, isAdmin, canCreateTaskIn, userHasProjectAccess, SECTIONS, sectionsOf, requireSection } from '../lib/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordStrength, destroyUserSessions } from '../lib/auth.js';
 import { userStats, summarize, monthlyTrend, rescheduleContributors } from './metrics.js';
 import { listVisible, execWorkDays } from './tasks.js';
@@ -16,10 +16,13 @@ import { checklistDashboard } from './checklist.js';
 export const ROLES = ['admin', 'gestor', 'coordenador', 'colaborador'];
 export const SCOPES = ['total', 'projetos', 'proprias'];
 
-const PUBLIC_FIELDS = 'id, name, email, role, access_scope, total_internal, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, company_id, login_enabled, can_contracts, can_finance, sections, home, department, admission_date, responsibilities';
+const PUBLIC_FIELDS = 'id, name, email, role, access_scope, total_internal, manager_id, job_title, phone, active, must_change_password, last_login_at, created_at, is_external, company, company_id, login_enabled, can_contracts, can_finance, sections, home, department, admission_date, responsibilities, visible_company_ids';
 
 export function publicUser(ctx, u) {
   const out = { ...u, section_list: [...sectionsOf(u)] };
+  // Empresas que pode ver: só administradores enxergam a configuração
+  if (isAdmin(ctx.user)) { try { out.visible_companies = u.visible_company_ids == null ? null : JSON.parse(u.visible_company_ids); } catch { out.visible_companies = null; } }
+  delete out.visible_company_ids;
   delete out.sections;
   delete out.password_hash;
   if (isPlaceholderEmail(out.email)) out.email = null;
@@ -182,7 +185,8 @@ export function createUser(ctx, body, ip) {
       const id = Number(r.lastInsertRowid);
       for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
       run('UPDATE users SET total_internal = ? WHERE id = ?', readTotalInternal(body), id);
-      applyUserCompany(id, body, { only: companyRestriction(ctx) });
+      applyUserCompany(id, body, { only: companyRestriction(ctx), allowed: visibleCompanies(ctx) });
+      applyVisibleCompanies(ctx, id, body, ip);
       audit(ctx.user.id, 'user', id, d.login_enabled ? 'Terceirizado cadastrado (com acesso ao sistema)' : 'Terceirizado cadastrado (sem login)',
         { nome: d.name, empresa: d.company || '—', lider: one('SELECT name FROM users WHERE id = ?', d.manager_id).name, projetos: projectIds }, ip);
       return id;
@@ -198,7 +202,8 @@ export function createUser(ctx, body, ip) {
     const id = Number(r.lastInsertRowid);
     for (const p of projectIds) run('INSERT INTO user_project_access (user_id, project_id) VALUES (?,?)', id, p);
     run('UPDATE users SET total_internal = ? WHERE id = ?', readTotalInternal(body), id);
-    applyUserCompany(id, body, { fallback: companyRestriction(ctx), only: companyRestriction(ctx) });
+    applyUserCompany(id, body, { fallback: companyRestriction(ctx), only: companyRestriction(ctx), allowed: visibleCompanies(ctx) });
+    applyVisibleCompanies(ctx, id, body, ip);
     audit(ctx.user.id, 'user', id, 'Usuário criado', { email: d.email, perfil: d.role, escopo: d.access_scope, internos: !!readTotalInternal(body), projetos: projectIds, contratos: !!d.can_contracts, financeiro: !!d.can_finance }, ip);
     return id;
   });
@@ -208,7 +213,7 @@ export function updateUser(ctx, id, body, ip) {
   requireCadastro(ctx, one('SELECT * FROM users WHERE id = ?', id), body);
   const u = one('SELECT * FROM users WHERE id = ?', id);
   if (!u) throw notFound('Usuário não encontrado.');
-  if (u.is_external) { const r = updateExternal(ctx, u, body, ip); applyUserCompany(u.id, body, { only: companyRestriction(ctx) }); return r; }
+  if (u.is_external) { const r = updateExternal(ctx, u, body, ip); applyUserCompany(u.id, body, { only: companyRestriction(ctx), allowed: visibleCompanies(ctx) }); applyVisibleCompanies(ctx, u.id, body, ip); return r; }
   if (body.role === 'terceirizado') throw badRequest('Um usuário interno não pode ser convertido em terceirizado. Cadastre um novo terceirizado.');
   if (body.manager_id && one('SELECT is_external FROM users WHERE id = ?', intOrNull(body.manager_id))?.is_external) throw badRequest('Um terceirizado não pode ser gestor de outro usuário.');
   // Pessoa sem acesso (cadastrada na Gestão da Equipe): o acesso é liberado informando e-mail e senha provisória
@@ -258,8 +263,27 @@ export function updateUser(ctx, id, body, ip) {
     }, ip);
     // Encerra sessões ao desativar ou ao reduzir permissões, forçando novo login
     if (!active || permChanged) destroyUserSessions(id);
-    applyUserCompany(id, body, { only: companyRestriction(ctx) });
+    applyUserCompany(id, body, { only: companyRestriction(ctx), allowed: visibleCompanies(ctx) });
+    applyVisibleCompanies(ctx, id, body, ip);
   });
+}
+
+// Empresas que a pessoa pode ver (só administradores alteram). 'padrao'/null = regra padrão; lista = a própria + as marcadas.
+function applyVisibleCompanies(ctx, id, body, ip) {
+  if (body.visible_companies === undefined) return;
+  if (!isAdmin(ctx.user)) throw forbidden('Somente administradores alteram as empresas que cada pessoa pode ver.');
+  const u = one('SELECT id, role, company_id, visible_company_ids FROM users WHERE id = ?', id);
+  let val = null;
+  if (Array.isArray(body.visible_companies) && u.role !== 'admin') {
+    const ids = [...new Set(body.visible_companies.map(intOrNull).filter(Boolean))].filter(x => x !== u.company_id).sort((a, b) => a - b);
+    for (const c of ids) if (!one('SELECT id FROM companies WHERE id = ?', c)) throw badRequest('Empresa inválida na lista de empresas visíveis.');
+    val = JSON.stringify(ids);
+  } else if (body.visible_companies !== null && body.visible_companies !== 'padrao') throw badRequest('Lista de empresas visíveis inválida.');
+  if (val === u.visible_company_ids) return;
+  run('UPDATE users SET visible_company_ids = ? WHERE id = ?', val, id);
+  const names = v => (v == null ? 'padrão' : ['própria', ...JSON.parse(v).map(c => one('SELECT name FROM companies WHERE id = ?', c)?.name || c)].join(', '));
+  audit(ctx.user.id, 'user', id, 'Empresas visíveis alteradas', { antes: names(u.visible_company_ids), depois: names(val) }, ip);
+  destroyUserSessions(id);
 }
 
 function ensureAnotherAdmin(exceptId) {

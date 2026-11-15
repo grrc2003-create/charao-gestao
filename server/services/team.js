@@ -2,7 +2,7 @@
 // setor e admissão). Pessoas sem acesso ao sistema também entram (cadastradas aqui, sem login).
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, date, intOrNull } from '../lib/http.js';
-import { isAdmin, requireSection, hasSection, teamIds, sameCompanyOk, companyRestriction } from '../lib/permissions.js';
+import { isAdmin, requireSection, hasSection, teamIds, sameCompanyOk, companyRestriction, visibleCompanies } from '../lib/permissions.js';
 import { applyUserCompany } from './companies.js';
 import { audit } from './audit.js';
 import { today } from './metrics.js';
@@ -182,7 +182,7 @@ export function createMember(ctx, body, ip) {
     const r = run(`INSERT INTO users (name, email, password_hash, role, access_scope, manager_id, job_title, phone, login_enabled, sections, responsibilities, department, admission_date, vacation_since, work_days, work_shift, employment)
       VALUES (?,?,?, 'colaborador', 'proprias', ?, ?, ?, 0, '[]', ?, ?, ?, ?, ?, ?, ?)`, d.name, placeholderEmail(), NO_LOGIN, d.manager_id, d.job_title, d.phone, d.responsibilities, d.department, d.admission_date, d.vacation_since, d.work_days, d.work_shift, d.employment);
     const nid = Number(r.lastInsertRowid);
-    applyUserCompany(nid, body, { fallback: companyRestriction(ctx), only: companyRestriction(ctx) });
+    applyUserCompany(nid, body, { fallback: companyRestriction(ctx), only: companyRestriction(ctx), allowed: visibleCompanies(ctx) });
     audit(ctx.user.id, 'user', nid, 'Pessoa cadastrada na Gestão da Equipe (sem acesso ao sistema)', { nome: d.name, funcao: d.job_title }, ip);
     return nid;
   });
@@ -208,7 +208,7 @@ export function updateMember(ctx, id, body, ip) {
       const active = body.active === undefined ? u.active : body.active ? 1 : 0;
       run('UPDATE users SET name = ?, phone = ?, active = ? WHERE id = ?', d.name, d.phone, active, id);
     }
-    applyUserCompany(id, body, { only: companyRestriction(ctx) });
+    applyUserCompany(id, body, { only: companyRestriction(ctx), allowed: visibleCompanies(ctx) });
     audit(ctx.user.id, 'user', id, 'Cadastro da equipe atualizado', { nome: d.name || u.name, funcao: d.job_title, setor: d.department, admissao: d.admission_date, vinculo: d.employment, jornada: d.work_days, turno: d.work_shift }, ip);
   });
   return getMember(ctx, id);

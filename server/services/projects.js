@@ -2,7 +2,7 @@
 import { projectSchedule } from './schedule.js';
 import { all, one, run, tx } from '../db.js';
 import { badRequest, forbidden, notFound, str, oneOf, date, intOrNull } from '../lib/http.js';
-import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin, companyRestriction } from '../lib/permissions.js';
+import { canAccessProject, canManageProject, usersWithProjectAccess, isAdmin, companyRestriction, chosenCompanies } from '../lib/permissions.js';
 import { summarize, monthlyTrend, rescheduleContributors } from './metrics.js';
 import { listVisible, listCancelled, execSummary } from './tasks.js';
 import { audit } from './audit.js';
@@ -157,7 +157,9 @@ export function createProject(ctx, body, ip) {
   if (!canManageProject(ctx, null)) throw forbidden('Apenas administradores e gestores podem cadastrar projetos.');
   const { d, memberIds } = readProjectBody(body);
   // Sem empresa escolhida: a empresa de quem cria (se for de fora do grupo) ou a principal
-  if (!d.company_id) d.company_id = companyRestriction(ctx) || defaultCompanyId();
+  const cos = chosenCompanies(ctx.user);
+  if (!d.company_id) d.company_id = companyRestriction(ctx) || (cos && !cos.has(defaultCompanyId()) ? one('SELECT company_id FROM users WHERE id = ?', ctx.user.id)?.company_id : null) || defaultCompanyId();
+  if (cos && !cos.has(d.company_id)) throw badRequest('Escolha uma das empresas que você pode ver.');
   const kind = body.kind === 'interno' ? 'interno' : 'obra';
   return tx(() => {
     const code = nextCode(kind);
@@ -186,6 +188,7 @@ export function updateProject(ctx, id, body, ip) {
   if (!canManageProject(ctx, id)) throw forbidden('Você não pode editar este projeto.');
   const { d, memberIds } = readProjectBody({ ...p, ...body, kind: p.kind, member_ids: body.member_ids ?? members(id).map(m => m.id) }, p.type_id, p.company_id);
   if (!d.company_id) d.company_id = p.company_id || defaultCompanyId();
+  { const cos = chosenCompanies(ctx.user); if (cos && d.company_id !== p.company_id && !cos.has(d.company_id)) throw badRequest('Escolha uma das empresas que você pode ver.'); }
   tx(() => {
     run(`UPDATE projects SET name=?, client=?, location=?, description=?, status=?, start_date=?, end_date=?, actual_end_date=?,
       lead_id=?, specialty_template_id=?, uf=?, municipio=?, ibge_code=?, type_id=?, field_control=?, has_quotes=?, has_master_list=?, company_id=?, updated_at=? WHERE id=?`,

@@ -229,13 +229,16 @@ export async function askContract(o, d, navigate) {
 }
 
 // ---------- Quadro (Kanban) ----------
+// Escopo no cartão (final ou, se ainda não tiver, o possível): texto longo fica parcialmente oculto e aparece inteiro ao passar o mouse
+const scopeOf = o => String(o.final_scope || o.possible_scope || '').trim();
 const card = (o, s) => {
   const dd = daysSince(o.stage_since);
   return html`<li class="sv-card ${o.missing?.length ? 'is-missing' : ''}" draggable="true" data-id="${o.id}">
     <a class="sv-card-link" href="#/vendas/${o.id}">
       <div class="sv-card-top"><span class="mono sv-code">${o.code}</span>${coBadge(o.company)}</div>
-      <b class="sv-client">${o.client}</b>
-      ${o.title ? html`<span class="sv-title">${o.title}</span>` : ''}
+      <b class="sv-client" title="${o.client}">${o.client}</b>
+      ${o.title ? html`<span class="sv-title" title="${o.title}">${o.title}</span>` : ''}
+      ${scopeOf(o) ? html`<span class="sv-scope" title="${scopeOf(o)}"><i>Escopo</i> ${scopeOf(o)}</span>` : ''}
       ${o.notes_count ? html`<span class="sv-ncount" title="${o.notes_count} observação(ões)">${icon('note')}${o.notes_count}</span>` : ''}
       ${o.final_value ? html`<span class="sv-value">${money(o.final_value)}${o.discount_pct ? html`<small>−${pctTxt(o.discount_pct)}</small>` : ''}</span>` : ''}
       <div class="sv-tags">

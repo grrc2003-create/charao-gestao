@@ -4482,3 +4482,8 @@ a.qt-kpi:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--q) ins
 
 /* Vendas: indicadores e análises abaixo do funil */
 .sv-below { margin-top: 22px; }
+
+/* Vendas: cliente, serviço e escopo no cartão; texto longo parcialmente oculto (inteiro ao passar o mouse) */
+.sv-client { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sv-scope { font-size: 11.5px; color: var(--ink-2); line-height: 1.3; overflow-wrap: anywhere; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sv-scope i { font-style: normal; font-weight: 650; color: var(--muted); }

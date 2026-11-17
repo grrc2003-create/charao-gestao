@@ -275,8 +275,6 @@ export async function board({ state, query, setQuery, render, navigate }) {
       ${pageHead({ eyebrow: 'Gestão da Empresa', title: 'Vendas e Prospecção', sub: 'Funil de oportunidades: arraste os cartões entre as colunas. O que cada etapa exige é pedido ao mover.',
         actions: html`<button type="button" class="btn btn-ghost" id="sv-cols">${icon('settings')}Colunas</button>
           <button type="button" class="btn btn-primary" id="sv-new">${icon('plus')}Nova oportunidade</button>` })}
-      ${salesKpis(visible, d.stages)}
-      ${salesAnalytics(visible, d.stages)}
       <div class="sv-filter">
         <div class="chips" role="group" aria-label="Empresa">${chip('', 'Todas')}${chip('charao', 'Charão')}${chip('lus', 'LuS')}</div>
         <label class="search sv-search">${icon('search')}<input type="search" id="sv-q" value="${q}" placeholder="Buscar cliente, código, cidade…" aria-label="Buscar oportunidade"></label>
@@ -295,7 +293,10 @@ export async function board({ state, query, setQuery, render, navigate }) {
               ${list.length ? '' : html`<li class="sv-empty">Arraste um cartão para cá</li>`}</ul>
           </section>`;
         })}
-      </div>`,
+      </div>
+      <!-- Indicadores e análises abaixo do funil (o funil fica no topo da página) -->
+      <div class="sv-below">${salesKpis(visible, d.stages)}
+      ${salesAnalytics(visible, d.stages)}</div>`,
     mount(root) {
       bindAnalytics(root);
       const byId = new Map(d.opportunities.map(o => [o.id, o]));

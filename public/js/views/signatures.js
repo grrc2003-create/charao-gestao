@@ -148,18 +148,105 @@ export function bindSignatures(root, S, reload) {
   });
 }
 
+// ---------- Assinatura carregada do computador (foto ou escaneada) ----------
+// Lê PNG/JPG/WEBP, tira o fundo claro (opcional), recorta ao redor do traço e reduz para no máximo 900 px de largura.
+const MAX_UPLOAD = 15 * 1024 * 1024;
+async function loadImageFile(file) {
+  if (!file) throw new Error('Escolha o arquivo da assinatura.');
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error('Use uma imagem PNG, JPG ou WEBP.');
+  if (file.size > MAX_UPLOAD) throw new Error('Imagem grande demais (máximo 15 MB).');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } catch { throw new Error('Não foi possível abrir esta imagem.'); }
+  finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+function imageToSignature(img, removeBg) {
+  const k0 = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * k0)), h = Math.max(1, Math.round(img.naturalHeight * k0));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  cx.drawImage(img, 0, 0, w, h);
+  const id = cx.getImageData(0, 0, w, h), d = id.data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    if (removeBg) {
+      // Fundo claro (papel) fica transparente; tons intermediários ficam semitransparentes para a borda do traço não serrilhar
+      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const a = lum >= 215 ? 0 : lum <= 150 ? 255 : Math.round(255 * (215 - lum) / 65);
+      d[i + 3] = Math.min(d[i + 3], a);
+    }
+    if (d[i + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return null;
+  cx.putImageData(id, 0, 0);
+  const pad = 8, sx = Math.max(0, x0 - pad), sy = Math.max(0, y0 - pad), sw = Math.min(w, x1 + pad) - sx, sh = Math.min(h, y1 + pad) - sy;
+  let k = Math.min(1, 900 / sw), out;
+  for (;;) { // garante o limite de tamanho do servidor
+    out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(sw * k)); out.height = Math.max(1, Math.round(sh * k));
+    out.getContext('2d').drawImage(c, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    const url = out.toDataURL('image/png');
+    if (url.length < 1_000_000 || k < 0.2) return url;
+    k *= 0.75;
+  }
+}
+
 // ---------- Minha assinatura salva (Minha conta) ----------
 export async function editMySignature() {
-  let pad = null;
+  let pad = null, img = null, upload = null;
   setTimeout(() => {
     const box = document.querySelector('.sheet .sig-sheet');
     if (!box) return;
     pad = signaturePad(box.querySelector('.sig-pad'));
     box.querySelector('[data-sig-clear]').addEventListener('click', () => pad.clear());
+    const prev = box.querySelector('.sig-up-prev'), err = box.querySelector('.sig-up-err');
+    const redraw = () => {
+      upload = img ? imageToSignature(img, box.querySelector('[name=remove_bg]').checked) : null;
+      prev.innerHTML = upload ? `<img src="${upload}" alt="Prévia da assinatura">` : '<span class="muted">A prévia aparece aqui.</span>';
+      if (img && !upload) err.textContent = 'Não encontrei traço na imagem. Desmarque "Tirar o fundo branco" ou use outra imagem.';
+    };
+    box.querySelector('[name=sig_file]').addEventListener('change', async e => {
+      err.textContent = '';
+      try { img = await loadImageFile(e.target.files[0]); } catch (ex) { img = null; err.textContent = ex.message; e.target.value = ''; }
+      redraw();
+    });
+    box.querySelector('[name=remove_bg]').addEventListener('change', redraw);
+    const sync = () => {
+      const m = box.querySelector('[name=src]:checked')?.value || 'desenho';
+      box.querySelector('.sig-draw').hidden = m !== 'desenho';
+      box.querySelector('.sig-upload').hidden = m !== 'arquivo';
+    };
+    box.querySelectorAll('[name=src]').forEach(r => r.addEventListener('change', sync));
+    sync();
   }, 80);
   const r = await sheet({ title: 'Minha assinatura', submitLabel: 'Salvar assinatura', wide: true,
-    body: html`<div class="sig-sheet">${padHtml()}<p class="hint">Fica guardada só para você. Para usar num documento, você confirma a sua senha.</p></div>`,
-    onSubmit: () => { if (!pad || pad.isEmpty()) throw new Error('Assine dentro do quadro.'); return { data: pad.toDataURL() }; } });
+    body: html`<div class="sig-sheet">
+      <div class="segmented"><label><input type="radio" name="src" value="desenho" checked>Desenhar<small>no quadro, com o dedo ou a caneta</small></label>
+        <label><input type="radio" name="src" value="arquivo">Carregar do computador<small>foto ou imagem escaneada</small></label></div>
+      <div class="sig-draw">${padHtml()}</div>
+      <div class="sig-upload" hidden>
+        <div class="field"><label for="sig-file">Imagem da assinatura (PNG, JPG ou WEBP)</label><input type="file" id="sig-file" name="sig_file" accept="image/png,image/jpeg,image/webp"></div>
+        <label class="switch"><input type="checkbox" name="remove_bg" checked>Tirar o fundo branco (papel)</label>
+        <div class="my-sig sig-up-prev" style="margin-top:10px"><span class="muted">A prévia aparece aqui.</span></div>
+        <div class="form-error sig-up-err" aria-live="polite"></div>
+        <span class="hint">Dica: assine em papel branco com caneta escura e fotografe de perto, com boa luz. O sistema recorta e ajusta o tamanho.</span>
+      </div>
+      <p class="hint">Fica guardada só para você. Para usar num documento, você confirma a sua senha.</p></div>`,
+    onSubmit: f => {
+      if (f.src === 'arquivo') {
+        if (!img) throw new Error('Escolha a imagem da assinatura.');
+        if (!upload) throw new Error('Não encontrei traço na imagem. Desmarque "Tirar o fundo branco" ou use outra imagem.');
+        return { data: upload, source: 'arquivo' };
+      }
+      if (!pad || pad.isEmpty()) throw new Error('Assine dentro do quadro.');
+      return { data: pad.toDataURL(), source: 'desenho' };
+    } });
   if (!r) return false;
   await api('/me/signature', { method: 'PUT', body: r });
   return true;

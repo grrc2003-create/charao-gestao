@@ -159,7 +159,7 @@ export function saveMySignature(ctx, body, ip) {
   const old = one('SELECT signature_file FROM users WHERE id = ?', ctx.user.id)?.signature_file;
   run(`UPDATE users SET signature_file = ?, signature_updated_at = ? WHERE id = ?`, stored, new Date().toISOString(), ctx.user.id);
   if (old) deleteStored(old); // as assinaturas já feitas têm cópia própria
-  audit(ctx.user.id, 'user', ctx.user.id, 'Assinatura salva atualizada', {}, ip);
+  audit(ctx.user.id, 'user', ctx.user.id, 'Assinatura salva atualizada', { origem: body.source === 'arquivo' ? 'imagem carregada do computador' : 'desenhada no quadro' }, ip);
   return mySignature(ctx);
 }
 export function removeMySignature(ctx, ip) {

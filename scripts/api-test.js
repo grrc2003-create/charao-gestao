@@ -4062,6 +4062,8 @@ async function main() {
     ok(img.status === 200 && /image\//.test(img.headers.get('content-type')), 'imagem da assinatura servida');
     // Assinatura salva: só com a senha da própria pessoa
     ok((await sA('POST', '/signatures', { ...doc, method: 'salva' })).status === 400, 'sem assinatura salva não usa o modo salvo');
+    ok((await sA('PUT', '/me/signature', { data: tinyPng(), source: 'arquivo' })).status === 200 && (await sA('GET', '/me/signature')).data.has === true, 'pessoa carrega a assinatura de uma imagem do computador');
+    ok((await sA('PUT', '/me/signature', { data: 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64'), source: 'arquivo' })).status === 400, 'arquivo que não é imagem de verdade é recusado');
     ok((await sA('PUT', '/me/signature', { data: tinyPng() })).status === 200 && (await sA('GET', '/me/signature')).data.has === true, 'pessoa salva a própria assinatura');
     ok((await sC('GET', '/signatures/signers')).data.some(u => u.name === 'Ana Charão'), 'pessoas com assinatura salva aparecem para escolher');
     ok((await sM('POST', '/signatures', { ...doc, slot: 'gestor', method: 'salva', signer_user_id: 1, password: 'senha-errada1' })).status === 400, 'assinatura salva com senha errada é recusada');

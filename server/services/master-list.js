@@ -111,6 +111,7 @@ export function saveTypes(ctx, input, ip, proj = null) {
   const removed = current.filter(t => !keep.has(t.id));
   for (const t of removed) if (t.use_count) throw badRequest(`"${t.name}" está em ${t.use_count} projeto(s) da Lista Mestra. Inative-o em vez de excluir.`);
   const log = { criados: [], alterados: [], excluidos: removed.map(t => t.name) };
+  const oldDefault = proj ? null : rawTypes(null);
   tx(() => {
     for (const t of removed) run('DELETE FROM ml_types WHERE id = ?', t.id);
     for (const x of items.filter(x => x.id)) run('UPDATE ml_types SET name = ? WHERE id = ?', `~tmp~${x.id}`, x.id);
@@ -131,6 +132,8 @@ export function saveTypes(ctx, input, ip, proj = null) {
         else run('INSERT INTO ml_type_stages (type_id, name, active, sort_order) VALUES (?, ?, ?, ?)', tid, s.name, s.active, s.order);
       }
     }
+    // Padrão alterado: repassa às obras que já têm a Lista Mestra
+    if (!proj) log.obras = propagateDefault(oldDefault);
     if (proj) audit(ctx.user.id, 'project', proj.id, 'Lista Mestra: tipos de projeto e etapas da obra atualizados', log, ip);
     else audit(ctx.user.id, 'settings', null, 'Lista Mestra: formato padrão de tipos e etapas atualizado', log, ip);
   });
@@ -416,4 +419,103 @@ export function exportXlsx(ctx, { projectId = null } = {}) {
     { name: 'Histórico', rows: hs, header: true, freeze: true, widths: [11, 30, 34, 28, 26, 11, 11, 30, 60, 22], styles: { 8: 2 } },
   ]);
   return { buffer, filename: `lista-mestra${proj ? `-${proj.code}` : ''}-${t}.xlsx` };
+}
+
+// ---------- Formato padrão → obras ----------
+// O padrão (Configurações) repassa as mudanças às obras que já têm cópia dos tipos:
+// · tipo/etapa novo no padrão entra nas obras (na mesma posição da sequência);
+// · renomear/ativar/inativar no padrão vale na obra só onde a obra não mudou aquele item por conta própria;
+// · excluído do padrão sai da obra (ou fica inativo, se a obra já tem datas nele);
+// · tipos e etapas criados na própria obra não são mexidos.
+// old = padrão antes da alteração (null = só acrescenta o que falta, usado uma vez para alinhar as obras).
+const same = (a, b) => String(a || '').toLocaleLowerCase('pt-BR') === String(b || '').toLocaleLowerCase('pt-BR');
+function rawTypes(projectId) {
+  const types = all('SELECT id, src_id, name, active, sort_order, (SELECT COUNT(*) FROM ml_items i WHERE i.type_id = ml_types.id) AS use_count FROM ml_types WHERE IFNULL(project_id, 0) = ? ORDER BY sort_order, id', projectId || 0);
+  for (const t of types) {
+    t.stages = all(`SELECT s.id, s.src_id, s.name, s.active, s.sort_order,
+        (SELECT COUNT(*) FROM ml_item_stages x WHERE x.stage_id = s.id AND (x.planned_date IS NOT NULL OR x.done_date IS NOT NULL OR x.base_date IS NOT NULL))
+          + (SELECT COUNT(*) FROM ml_changes c WHERE c.stage_id = s.id) AS use_count
+      FROM ml_type_stages s WHERE s.type_id = ? ORDER BY s.sort_order, s.id`, t.id);
+  }
+  return types;
+}
+// Coloca o novo item logo depois do item da obra ligado ao anterior do padrão (ou no início) e renumera
+function placeAfter(list, item, prevLinkedId) {
+  const at = prevLinkedId ? list.findIndex(x => x.id === prevLinkedId) + 1 : 0;
+  list.splice(at > 0 ? at : prevLinkedId ? list.length : 0, 0, item);
+}
+export function propagateDefault(old = null) {
+  const def = rawTypes(null);
+  const oldById = new Map((old || []).map(t => [t.id, t]));
+  const projects = all('SELECT DISTINCT project_id AS id FROM ml_types WHERE project_id IS NOT NULL').map(r => r.id);
+  const removedTypes = (old || []).filter(o => !def.some(d => d.id === o.id));
+  let changes = 0;
+  for (const pid of projects) {
+    const pts = rawTypes(pid);
+    const link = d => pts.find(t => t.src_id === d.id) || pts.find(t => !t.src_id && same(t.name, d.name));
+    // Excluídos do padrão
+    for (const o of removedTypes) {
+      const pt = pts.find(t => t.src_id === o.id);
+      if (!pt) continue;
+      if (pt.use_count) { if (pt.active) { run('UPDATE ml_types SET active = 0 WHERE id = ?', pt.id); changes++; } }
+      else { run('DELETE FROM ml_types WHERE id = ?', pt.id); pts.splice(pts.indexOf(pt), 1); changes++; }
+    }
+    let prevType = null;
+    for (const d of def) {
+      const o = oldById.get(d.id);
+      let pt = link(d);
+      if (!pt) {
+        if (pts.some(t => same(t.name, d.name))) { prevType = null; continue; } // nome já usado na obra por outro tipo
+        const id = Number(run('INSERT INTO ml_types (project_id, src_id, name, active, sort_order) VALUES (?,?,?,?,0)', pid, d.id, d.name, d.active).lastInsertRowid);
+        for (const s of d.stages) run('INSERT INTO ml_type_stages (type_id, src_id, name, active, sort_order) VALUES (?,?,?,?,?)', id, s.id, s.name, s.active, s.sort_order);
+        pt = { id, src_id: d.id, name: d.name, active: d.active, stages: [] };
+        placeAfter(pts, pt, prevType);
+        prevType = id; changes++;
+        continue;
+      }
+      if (!pt.src_id) run('UPDATE ml_types SET src_id = ? WHERE id = ?', d.id, pt.id);
+      if (o && o.name !== d.name && pt.name === o.name && !pts.some(t => t.id !== pt.id && same(t.name, d.name))) { run('UPDATE ml_types SET name = ? WHERE id = ?', d.name, pt.id); changes++; }
+      if (o && o.active !== d.active && pt.active === o.active) { run('UPDATE ml_types SET active = ? WHERE id = ?', d.active, pt.id); changes++; }
+      // Etapas
+      const ps = pt.stages;
+      const removedStages = o ? o.stages.filter(os => !d.stages.some(ds => ds.id === os.id)) : [];
+      for (const os of removedStages) {
+        const s = ps.find(x => x.src_id === os.id);
+        if (!s) continue;
+        if (s.use_count) { if (s.active) { run('UPDATE ml_type_stages SET active = 0 WHERE id = ?', s.id); changes++; } }
+        else { run('DELETE FROM ml_type_stages WHERE id = ?', s.id); ps.splice(ps.indexOf(s), 1); changes++; }
+      }
+      let prevStage = null, added = false;
+      for (const ds of d.stages) {
+        const os = o?.stages.find(x => x.id === ds.id);
+        let s = ps.find(x => x.src_id === ds.id) || ps.find(x => !x.src_id && same(x.name, ds.name));
+        if (!s) {
+          if (ps.some(x => same(x.name, ds.name))) { prevStage = null; continue; }
+          const id = Number(run('INSERT INTO ml_type_stages (type_id, src_id, name, active, sort_order) VALUES (?,?,?,?,0)', pt.id, ds.id, ds.name, ds.active).lastInsertRowid);
+          s = { id, src_id: ds.id, name: ds.name, active: ds.active };
+          placeAfter(ps, s, prevStage);
+          added = true; changes++;
+        } else {
+          if (!s.src_id) run('UPDATE ml_type_stages SET src_id = ? WHERE id = ?', ds.id, s.id);
+          if (os && os.name !== ds.name && s.name === os.name && !ps.some(x => x.id !== s.id && same(x.name, ds.name))) { run('UPDATE ml_type_stages SET name = ? WHERE id = ?', ds.name, s.id); changes++; }
+          if (os && os.active !== ds.active && s.active === os.active) { run('UPDATE ml_type_stages SET active = ? WHERE id = ?', ds.active, s.id); changes++; }
+        }
+        prevStage = s.id;
+      }
+      if (added) ps.forEach((s, i) => run('UPDATE ml_type_stages SET sort_order = ? WHERE id = ?', i + 1, s.id));
+      // A obra precisa de ao menos uma etapa ativa no tipo
+      if (ps.length && !all('SELECT 1 FROM ml_type_stages WHERE type_id = ? AND active = 1 LIMIT 1', pt.id).length) run('UPDATE ml_type_stages SET active = 1 WHERE id = ?', ps[0].id);
+      prevType = pt.id;
+    }
+    pts.forEach((t, i) => run('UPDATE ml_types SET sort_order = ? WHERE id = ?', i + 1, t.id));
+  }
+  return { projects: projects.length, changes };
+}
+
+// Uma vez por banco (marcado pela migração 101): alinha as obras com o que já existe no padrão
+export function syncPendingDefault() {
+  if (!one(`SELECT 1 FROM app_settings WHERE key = 'ml_sync_pending'`)) return;
+  try {
+    tx(() => { const r = propagateDefault(null); run(`DELETE FROM app_settings WHERE key = 'ml_sync_pending'`); console.log(`[lista mestra] obras alinhadas ao padrão: ${r.projects} obra(s), ${r.changes} ajuste(s)`); });
+  } catch (e) { console.error('[lista mestra]', e.message); }
 }

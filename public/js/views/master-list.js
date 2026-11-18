@@ -359,7 +359,7 @@ export const typesSection = (types, { project = null } = {}) => html`<section cl
   <div class="card-head"><h2>${icon('checklist')}${project ? `Tipos de projeto e etapas · ${project.code}` : 'Lista Mestra: formato padrão de tipos e etapas'}</h2><span class="sub">${types.filter(t => t.active).length} tipo(s) ativo(s)</span></div>
   <form class="card-body form" id="ml-types-form" novalidate>
     <p class="muted" style="margin:0">${project ? html`Formato desta obra: começou como cópia do padrão (Configurações) e pode ser ajustado só aqui. Alterar o nome ou a ordem vale para todos os projetos daquele tipo nesta obra; etapa nova aparece sem datas.`
-      : html`Formato padrão: cada obra que liga a Lista Mestra recebe uma cópia destes tipos e etapas e pode ajustá-la na própria obra. Mudar o padrão vale para as próximas obras (as que já têm a Lista Mestra mantêm o formato delas).`}
+      : html`Formato padrão: cada obra que liga a Lista Mestra recebe uma cópia destes tipos e etapas e pode ajustá-la na própria obra. Ao salvar aqui, as mudanças também vão para as obras que já usam a Lista Mestra (tipos e etapas novos, nomes e ativo/inativo); o que a obra criou ou ajustou por conta própria é mantido.`}
       Etapas e tipos já usados não podem ser excluídos — inative-os.</p>
     <ul class="ml-types" id="ml-types">${types.map(t => typeLi(t))}</ul>
     <div><button type="button" class="btn btn-ghost" id="ml-type-add">${icon('plus')}Novo tipo de projeto</button></div>

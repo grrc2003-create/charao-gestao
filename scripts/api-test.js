@@ -3942,9 +3942,22 @@ async function main() {
     ok(mAfter.stages.length === 8 && mAfter.stages[1].name === 'Estudo preliminar (EP)' && mAfter.stages[1].done_date && !mAfter.stages[7].planned_date, 'renomear e incluir etapas na obra vale para os projetos dela, sem perder as datas');
     ok(!(await mA('GET', '/settings/master-list-types')).data.some(t => t.name === 'Paisagismo') && (await mA('GET', '/settings/master-list-types')).data.find(t => t.name === 'Arquitetura').stages[1].name === 'Estudo preliminar', 'mudar a obra não mexe no formato padrão');
     ok((await mA('PUT', '/projects/1/master-list-types', { types: mSave.data.filter(t => t.id !== mArq.id) })).status === 400, 'tipo em uso não pode ser excluído');
-    // Mudar o padrão vale para as próximas obras; a que já tem a Lista Mestra mantém o formato dela
+    // Mudar o padrão repassa às obras que já têm a Lista Mestra, mantendo o que a obra ajustou por conta própria
     await mA('PUT', '/settings/master-list-types', { types: [...mDef, { name: 'Topografia', stages: [{ name: 'Levantamento' }] }] });
-    ok(!(await mA('GET', '/projects/1/master-list-types')).data.types.some(t => t.name === 'Topografia'), 'novo tipo no padrão não entra na obra que já tem o formato próprio');
+    let pTy = (await mA('GET', '/projects/1/master-list-types')).data.types;
+    ok(pTy.some(t => t.name === 'Topografia' && t.stages.some(x => x.name === 'Levantamento')), 'novo tipo no padrão entra na obra que já usa a Lista Mestra');
+    ok(pTy.some(t => t.name === 'Paisagismo') && pTy.find(t => t.name === 'Arquitetura').stages.some(x => x.name === 'Estudo preliminar (EP)'), 'o que a obra criou ou renomeou por conta própria é mantido');
+    let dNow = (await mA('GET', '/settings/master-list-types')).data;
+    const dArq = dNow.find(t => t.name === 'Arquitetura');
+    await mA('PUT', '/settings/master-list-types', { types: dNow.map(t => (t.name === 'Topografia' ? { ...t, name: 'Topografia e cadastro' } : t.id === dArq.id ? { ...t, stages: [t.stages[0], { name: 'Viabilidade' }, ...t.stages.slice(1)] } : t)) });
+    pTy = (await mA('GET', '/projects/1/master-list-types')).data.types;
+    const pArq = pTy.find(t => t.name === 'Arquitetura');
+    ok(pTy.some(t => t.name === 'Topografia e cadastro') && !pTy.some(t => t.name === 'Topografia'), 'renomear no padrão renomeia na obra');
+    ok(pArq.stages.some(x => x.name === 'Viabilidade') && pArq.stages.some(x => x.name === 'Estudo preliminar (EP)'), 'etapa nova no padrão entra na obra, sem desfazer o nome ajustado na obra');
+    dNow = (await mA('GET', '/settings/master-list-types')).data;
+    await mA('PUT', '/settings/master-list-types', { types: dNow.filter(t => t.name !== 'Topografia e cadastro') });
+    ok(!(await mA('GET', '/projects/1/master-list-types')).data.types.some(t => t.name.startsWith('Topografia')), 'tipo excluído do padrão (sem uso na obra) sai da obra');
+    await mA('PUT', '/settings/master-list-types', { types: [...(await mA('GET', '/settings/master-list-types')).data, { name: 'Topografia', stages: [{ name: 'Levantamento' }] }] });
     ok((await mA('PUT', '/projects/3', { has_master_list: 1 })).status === 200 && (await mA('GET', '/master-list?project=3')).data.types.some(t => t.name === 'Topografia'), 'obra que liga a Lista Mestra recebe a cópia do padrão atual');
     await mA('PUT', '/projects/3', { has_master_list: 0 });
     const mX = await fetch(BASE + '/api/master-list/export.xlsx?project=1', { headers: { Cookie: await cookieOf('ana@charao.eng.br'), 'X-Requested-With': 'charao-app' } });

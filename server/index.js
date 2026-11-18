@@ -899,6 +899,8 @@ runRecurrences();
 setInterval(runRecurrences, 60 * 60 * 1000).unref();
 // Espaço e uso: uma foto do disco por dia (para o gráfico de crescimento em Configurações)
 Storage.dailySnapshot();
+// Lista Mestra: uma vez, acrescenta às obras o que já existe no formato padrão e falta nelas
+MasterList.syncPendingDefault();
 setInterval(Storage.dailySnapshot, 6 * 60 * 60 * 1000).unref();
 
 server.listen(PORT, () => console.log(`Charão Gestão rodando em http://localhost:${PORT}${DEMO ? ' (modo demonstração)' : ''}`));

@@ -149,7 +149,16 @@ export async function view({ state, query, setQuery, render }) {
 
   const maxCat = Math.max(1, ...d.categories.map(c => c.expected));
   const paidPct = T.expected ? Math.round((T.paid / T.expected) * 100) : 0;
+  // Charão: contas atrasadas, vencendo hoje ou tudo pago no mês
+  const sitN = k => items.filter(i => i.situation === k).length;
+  const lateN = sitN('atrasada'), todayN = sitN('hoje');
+  const mood = !items.length ? { tone: 'espera', text: 'Nenhuma conta neste mês.' }
+    : lateN ? { tone: 'insatisfacao', text: `${lateN} ${lateN === 1 ? 'conta atrasada' : 'contas atrasadas'} neste mês.` }
+      : todayN ? { tone: 'atencao', text: `${todayN} ${todayN === 1 ? 'conta vence' : 'contas vencem'} hoje.` }
+        : paidPct >= 100 ? { tone: 'parabens', text: 'Tudo pago neste mês!' }
+          : { tone: 'parabens', text: `Nada atrasado · ${paidPct}% do previsto já pago.` };
   return {
+    mood,
     title: 'Financeiro',
     html: html`
       ${pageHead({

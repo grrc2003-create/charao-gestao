@@ -269,10 +269,20 @@ export async function board({ state, query, setQuery, render, navigate }) {
     o.next = st && !closingKind(st.kind) && !o.missing.length ? missingOf(o, rulesOf(st).exit) : [];
   }
   const byStage = new Map(d.stages.map(s => [s.id, visible.filter(o => o.stage_id === s.id)]));
+  // Charão: oportunidades paradas há mais de 30 dias e ganhas no filtro
+  const kindOf = o => d.stages.find(x => x.id === o.stage_id)?.kind;
+  const openOpp = visible.filter(o => !['ganho', 'perdido'].includes(kindOf(o)));
+  const stale = openOpp.filter(o => daysSince(o.stage_since) > 30).length;
+  const won = visible.filter(o => kindOf(o) === 'ganho').length;
+  const mood = !visible.length ? { tone: 'espera', text: q || empresa ? 'Nenhuma oportunidade neste filtro.' : 'Funil vazio por enquanto.' }
+    : stale ? { tone: 'atencao', text: `${stale} ${stale === 1 ? 'oportunidade parada' : 'oportunidades paradas'} há mais de 30 dias na mesma etapa.` }
+      : won ? { tone: 'parabens', text: `${won} ${won === 1 ? 'oportunidade ganha' : 'oportunidades ganhas'} no funil!` }
+        : { tone: 'parabens', text: `Funil andando: ${openOpp.length} em negociação.` };
   const sum = l => l.reduce((s, o) => s + (o.final_value || 0), 0);
   const chip = (val, label) => html`<button type="button" class="chip co-chip ${val ? `co-${val}` : ''}" data-empresa="${val}" aria-pressed="${String(empresa === val)}">${label}</button>`;
 
   return {
+    mood,
     title: 'Vendas e Prospecção',
     html: html`
       ${pageHead({ eyebrow: 'Gestão da Empresa', title: 'Vendas e Prospecção', sub: 'Funil de oportunidades: arraste os cartões entre as colunas. O que cada etapa exige é pedido ao mover.',

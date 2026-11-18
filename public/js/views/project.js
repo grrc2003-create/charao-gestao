@@ -1,4 +1,5 @@
 import { html, api, icon, PROJECT_STATUS, STATUS, STATUS_ORDER, fmtDate, fmtPct, progress, avatar } from '../core.js';
+import { moodSummary } from '../mood.js';
 import { quotesCard, quotesKpi } from './quotes.js';
 import { projectCard as masterListCard, bindItems as bindMasterList } from './master-list.js';
 import { evaluateAlerts, alertMap, alertsBanner, alertsSheet } from './project-alerts.js';
@@ -46,6 +47,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
     : null;
 
   return {
+    mood: moodSummary(p.summary, ' neste projeto'),
     title: `${p.code} · ${p.name}`,
     html: html`
       ${pageHead({

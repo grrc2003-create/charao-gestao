@@ -36,6 +36,12 @@ export async function view({ state, navigate }) {
           </div>
         </section>
         <section class="card card-pad">
+          <div class="profile-head"><img src="/assets/mascote/espera.png" alt="" width="56" height="56" style="flex:none"><div><h2 style="margin-bottom:2px">Charão</h2>
+            <p class="muted" style="margin:0">O mascote reage à tela aberta e aos filtros (atrasos, conferências, tudo em dia).</p></div></div>
+          <label class="switch" style="margin-top:12px"><input type="checkbox" id="charao-react" ${u.charao_reactions !== 0 ? 'checked' : ''}>Reagir às telas e aos filtros</label>
+          <span class="hint">Desligado, ele fica em espera nas telas. Os avisos de tarefas continuam aparecendo.</span>
+        </section>
+        <section class="card card-pad">
           <h2 style="margin-bottom:4px">Alterar senha</h2>
           ${u.must_change_password ? html`<div class="notice notice-proto" style="margin:8px 0">${icon('alert')}<span>Sua senha é provisória. Defina uma senha pessoal.</span></div>` : html`<p class="muted">Use ao menos 8 caracteres, com letras e números.</p>`}
           <form class="form" id="pw-form" novalidate>
@@ -52,6 +58,11 @@ export async function view({ state, navigate }) {
       root.querySelector('#sig-edit').addEventListener('click', async () => { try { if (await editMySignature()) { toast('Assinatura salva.'); ctx.render(); } } catch (e) { toast(e.message, 'error'); } });
       root.querySelector('#sig-rm')?.addEventListener('click', async () => { if (await confirmSheet('Remover assinatura', 'Remover a sua assinatura salva? As assinaturas já feitas nos documentos continuam valendo.', 'Remover', true)) { await api('/me/signature', { method: 'DELETE' }); toast('Assinatura removida.'); ctx.render(); } });
       bindAvatarEditor(root, u, { self: true });
+      root.querySelector('#charao-react').addEventListener('change', async e => {
+        const on = e.target.checked;
+        try { const r = await api('/me/prefs', { method: 'PUT', body: { charao_reactions: on } }); u.charao_reactions = r.charao_reactions; toast(on ? 'Charão vai reagir às telas.' : 'Reações às telas desligadas.'); }
+        catch (ex) { e.target.checked = !on; toast(ex.message, 'err'); }
+      });
       const f = root.querySelector('#pw-form');
       const err = f.querySelector('.form-error');
       f.addEventListener('submit', async e => {

@@ -32,8 +32,15 @@ export async function list({ state, query, setQuery }) {
       ${p.lead_name || p.start_date || p.end_date || p.schedule ? html`<div class="stat-inline sch-line">${p.lead_name ? html`<span>${icon('user')} ${p.lead_name}</span>` : ''}${scheduleLine(p)}</div>` : ''}
     </div></a>`;
 
+  // Charão: projetos (do filtro) com tarefas atrasadas
+  const shownP = projects.filter(groups[filter] || groups.ativos);
+  const lateP = shownP.filter(p => p.summary?.late);
+  const mood = !shownP.length ? { tone: 'espera', text: 'Nenhum projeto neste filtro.' }
+    : lateP.length ? { tone: 'insatisfacao', text: `${lateP.length} ${lateP.length === 1 ? 'projeto' : 'projetos'} com tarefas atrasadas${lateP.length <= 2 ? `: ${lateP.map(p => p.code).join(', ')}` : ''}.` }
+      : { tone: 'parabens', text: `Nenhum projeto com atraso (${shownP.length} ${shownP.length === 1 ? 'projeto' : 'projetos'}).` };
   return {
     title: 'Projetos',
+    mood,
     html: html`
       ${pageHead({
         eyebrow: 'Cadastro e acompanhamento',

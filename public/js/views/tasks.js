@@ -2,6 +2,7 @@ import { html, api, icon, STATUS, STATUS_ORDER, PRIORITY } from '../core.js';
 import { sheet, toast, setBlocked } from '../ui.js';
 import { pageHead, taskList, bindCommon, STATUS_COLOR, projectOptions, companiesIn } from './shared.js';
 import { readOrg, saveOrg, orgControl } from './periods.js';
+import { moodTasks } from '../mood.js';
 
 const DUE = { '': 'Qualquer prazo', vencidas: 'Vencidas', hoje: 'Vencem hoje', '7d': 'Próximos 7 dias', '30d': 'Próximos 30 dias', sem_prazo: 'Sem prazo', reagendadas: 'Reagendadas', ja_atrasadas: 'Ficaram atrasadas alguma vez', corretivas: 'Repactuadas após vencer', cronicas: 'Crônicas (muitos reagendamentos)', concluidas_atraso: 'Concluídas com atraso' };
 
@@ -37,8 +38,10 @@ export async function view({ state, query, setQuery }) {
     ? html`${selProject.stages.map(s => opt(s.id, s.name, f.stage))}`
     : html`${meta.projects.filter(p => p.stages.length).map(p => html`<optgroup label="${p.code} · ${p.name}">${p.stages.map(s => opt(s.id, s.name, f.stage))}</optgroup>`)}`;
 
+  const filtered = !!(f.q || f.status.length || ['project', 'assignee', 'priority', 'due', 'nivel', 'stage', 'kind', 'tipo', 'empresa'].some(k => f[k]));
   return {
     title: 'Tarefas',
+    mood: moodTasks(tasks, filtered ? ' neste filtro' : ''),
     html: html`
       ${pageHead({
         eyebrow: 'Execução e pendências',

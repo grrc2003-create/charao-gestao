@@ -102,7 +102,11 @@ export async function view({ state, query, setQuery, render }) {
           <span class="fy-mrow-v"><b>${money(c.months[k])}</b></span></div>`)}</div>` : ''}`;
   };
 
+  // Charão: contas atrasadas no ano (ou tudo em dia)
+  const mood = T.late ? { tone: 'insatisfacao', text: `${T.late} ${T.late === 1 ? 'conta atrasada' : 'contas atrasadas'} no ano (${money(T.late_amount)} previsto).` }
+    : { tone: 'parabens', text: 'Nenhuma conta atrasada no ano!' };
   return {
+    mood,
     title: 'Financeiro',
     html: html`${pageHead({ eyebrow: 'Acesso restrito · Gestão da Empresa', title: 'Financeiro',
         sub: 'Planejamento anual: previsto de cada tarefa mês a mês e o real lançado. Clique na célula para lançar o real ou ajustar o previsto.',

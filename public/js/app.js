@@ -3,7 +3,8 @@ import { api, html, icon, avatar, setAvatars, ROLE, brandMark } from './core.js'
 import { toast } from './ui.js';
 import './required.js';
 import { autoPdfButtons } from './section-pdf.js';
-import { startAlerts, refreshAlerts } from './alerts.js';
+import { startAlerts, refreshAlerts, screenMood } from './alerts.js';
+import { moodFromDom } from './mood.js';
 import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';
@@ -404,6 +405,8 @@ export async function render() {
     if (v.title) { document.title = v.docTitle || `${v.title} · ${state.meta?.brand?.name || 'Charão'}`; setCurrentTitle(v.title); }
     if (!printMode) window.scrollTo(0, same ? keepY : 0);
     v.mount?.(root, ctx);
+    // Charão reage à tela e aos filtros (a tela pode informar a reação; senão, lê as situações mostradas)
+    if (!printMode) setTimeout(() => { if (token === renderToken) screenMood(v.mood !== undefined ? v.mood : moodFromDom(root), path, state.user?.charao_reactions !== 0); }, 350);
     if (same) {
       root.style.minHeight = '';
       requestAnimationFrame(() => { if (token === renderToken && Math.abs(window.scrollY - keepY) > 2) window.scrollTo(0, keepY); });

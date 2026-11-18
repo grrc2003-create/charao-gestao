@@ -1,4 +1,5 @@
 import { html, api, icon, statusBadge, fmtDateTime, dueInfo, fmtPct, plural } from '../core.js';
+import { moodSummary } from '../mood.js';
 import { fold, bindFolds, nOf, checklistFold, pageHead, kpiBlock, donut, projectRow, userRankRow, rankUsers, bindCommon, kpi, stackBar, STATUS_COLOR, execInline, companiesIn } from './shared.js';
 import { deadlineSection, deadlineTable } from './deadlines.js';
 import { checklistSection, bindChecklistCards } from './checklist-cards.js';
@@ -62,6 +63,7 @@ export async function view({ state, query, setQuery }) {
   const cos = companiesIn(state.meta, state.meta.projects.map(p => p.company_id));
   const u = state.user;
   const s = d.summary;
+  const mood = moodSummary(s, empresa ? ' nesta empresa' : ' na empresa');
   const firstName = u.name.split(' ')[0];
   const ranking = rankUsers(d.users);
   const projects = [...d.projects].sort((a, b) => (a.status === 'concluido') - (b.status === 'concluido') || b.summary.late - a.summary.late);
@@ -82,6 +84,7 @@ export async function view({ state, query, setQuery }) {
   const rkLate = ranking.filter(x => x.stats?.late).length;
   const impEnd = impactRank.slice(0, 5).filter(r => r.project_end_days > 0).length;
   return {
+    mood,
     title: 'Dashboard',
     html: html`
       ${pageHead({

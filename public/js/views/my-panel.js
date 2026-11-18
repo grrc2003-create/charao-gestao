@@ -1,6 +1,7 @@
 // Meu painel: o dashboard da própria pessoa — indicadores, planejamento da semana, atrasadas e próximos dias;
 // para quem tem equipe abaixo, a análise de desempenho da equipe. Atalho para a Visão da empresa (se liberada).
 import { html, api, icon, statusBadge, dueInfo, fmtPct, fmtDate } from '../core.js';
+import { moodSummary } from '../mood.js';
 import { toast, sheet, lightbox } from '../ui.js';
 import { fold, bindFolds, nOf, checklistFold, pageHead, kpi, execKpis, userRankRow, rankUsers, stackBar, bindCommon, STATUS_COLOR } from './shared.js';
 import { deadlineTable } from './deadlines.js';
@@ -19,6 +20,8 @@ export async function view({ state, query, setQuery, render }) {
   const myRc = await api('/me/receipts').catch(() => ({ items: [] }));
   const [d, vac, reimb, rq, abs] = await Promise.all([api(`/users/${me.id}`), api('/vacations/me').catch(() => null), api('/reimbursements/me').catch(() => null), api('/review-queue').catch(() => []), me.is_external ? null : api('/absences/me').catch(() => null)]);
   const s = d.stats;
+  const reviewN = Array.isArray(rq) ? rq.length : 0;
+  const mood = moodSummary(s, ' nas suas tarefas', { awaiting: reviewN, awaitingText: `${reviewN} ${reviewN === 1 ? 'entrega esperando' : 'entregas esperando'} você conferir.` });
   const first = me.name.split(' ')[0];
   const can = state.meta.can;
   const sec = k => !can.sections || can.sections.includes(k);
@@ -104,6 +107,7 @@ export async function view({ state, query, setQuery, render }) {
       ${deadlineTable(team.filter(m => m.stats.with_due).map(m => ({ label: m.name, s: m.stats, href: `#/usuarios/${m.id}` })), 'Integrante')}</div></section>`) : ''}` : '';
 
   return {
+    mood,
     title: 'Meu painel',
     html: html`
       ${pageHead({

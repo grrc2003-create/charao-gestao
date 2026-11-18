@@ -50,7 +50,7 @@ import * as Sales from './services/sales.js';
 import { readStored } from './services/files.js';
 import { audit, listAudit } from './services/audit.js';
 import { countsInIndicators, rescheduleContributors, summarize, userStats, today, daysBetween, monthlyTrend, deadlineDetail, isDeadlineView } from './services/metrics.js';
-import { all } from './db.js';
+import { all, run } from './db.js';
 
 migrate();
 bootstrap();
@@ -407,6 +407,13 @@ api.post('/api/signatures', (req, res, { ctx, body }) => send(res, 201, Signatur
 api.post('/api/signatures/:id/remove', (req, res, { ctx, params, body }) => send(res, 200, Signatures.removeSignature(ctx, intOrNull(params.id), body, clientIp(req))));
 api.get('/api/signatures/:id/image', (req, res, { ctx, params }) => sendFile(req, res, Signatures.signatureImage(ctx, intOrNull(params.id))));
 api.get('/api/me/signature', (req, res, { ctx }) => send(res, 200, Signatures.mySignature(ctx)));
+// Preferências pessoais: reações do Charão às telas (os avisos de tarefas continuam)
+api.put('/api/me/prefs', (req, res, { ctx, body }) => {
+  if (!('charao_reactions' in body)) throw badRequest('Nada para salvar.');
+  const on = [true, 1, '1', 'true', 'on'].includes(body.charao_reactions) ? 1 : 0;
+  run('UPDATE users SET charao_reactions = ? WHERE id = ?', on, ctx.user.id);
+  send(res, 200, { charao_reactions: on });
+});
 api.put('/api/me/signature', (req, res, { ctx, body }) => send(res, 200, Signatures.saveMySignature(ctx, body, clientIp(req))));
 api.delete('/api/me/signature', (req, res, { ctx }) => send(res, 200, Signatures.removeMySignature(ctx, clientIp(req))));
 api.get('/api/me/signature/image', (req, res, { ctx }) => sendFile(req, res, Signatures.mySignatureImage(ctx)));

@@ -13,6 +13,8 @@ let timer = null, playTimer = null, bubbleTimer = null;
 let known = null;          // ids de avisos já vistos nesta sessão (para reagir só aos novos)
 let list = [];
 let playId = 0;
+let alertBusyUntil = 0;     // reação a aviso novo tem prioridade sobre a reação à tela
+const lastMood = new Map(); // última reação por tela (só reage quando o resultado muda)
 
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } } };
 
@@ -86,9 +88,23 @@ export async function refreshAlerts() {
   // Reage ao aviso novo mais recente (ou, ao entrar no sistema, ao mais recente pendente)
   const react = first ? data[0] : fresh[0];
   if (react && !root.hidden) {
+    alertBusyUntil = Date.now() + 6500;
     play(react.tone);
     bubble(fresh.length > 1 || (first && data.length > 1) ? `${first ? data.length : fresh.length} avisos novos` : `${react.kind_label} · ${react.code}`);
   }
+}
+
+// Reação à tela aberta e aos filtros (pode ser desligada em Minha conta). Mesmo resultado na mesma tela não repete.
+export function screenMood(m, key, enabled = true) {
+  if (!enabled || !m) return;
+  const sig = `${m.tone}|${m.text}`;
+  if (lastMood.get(key) === sig) return;
+  lastMood.set(key, sig);
+  const root = document.getElementById('charao');
+  if (!root || root.hidden || !root.querySelector('.ch-panel')?.hidden) return;
+  if (Date.now() < alertBusyUntil) return;
+  if (m.tone !== 'espera') play(m.tone);
+  bubble(m.text);
 }
 
 // Chamado ao montar o layout: liga o mascote e atualiza a cada minuto (e ao voltar para a aba)

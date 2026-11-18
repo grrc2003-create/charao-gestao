@@ -209,6 +209,10 @@ async function main() {
     ok(st.data.areas.reduce((n, a) => n + a.bytes, 0) === st.data.files_bytes, 'espaço: áreas somam o total de fotos/anexos');
     ok((await ricardo('GET', '/settings/storage')).status === 403 && (await ricardo('GET', '/settings/storage/github')).status === 403, 'espaço: só administrador vê');
   }
+  // Charão: reações às telas ligadas por padrão; cada pessoa desliga/liga em Minha conta
+  ok((await ricardo('GET', '/auth/me')).data.user.charao_reactions === 1, 'Charão: reações às telas ligadas por padrão');
+  ok((await ricardo('PUT', '/me/prefs', { charao_reactions: false })).data.charao_reactions === 0 && (await ricardo('GET', '/auth/me')).data.user.charao_reactions === 0, 'Charão: pessoa desliga as reações');
+  ok((await ricardo('PUT', '/me/prefs', { charao_reactions: true })).data.charao_reactions === 1, 'Charão: pessoa religa as reações');
   t = (await ricardo('POST', `/tasks/${tid}/actions/approve`, { comment: 'Ok' })).data;
   ok(t.status === 'concluida' && t.on_time === true, 'gestor aprova; entrega no prazo');
   const actions = t.history.map(h => h.action);

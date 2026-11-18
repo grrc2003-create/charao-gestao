@@ -165,7 +165,8 @@ export async function view({ state, query, setQuery }) {
           setBlocked(root.querySelector('#bulk-go'), sel.size ? '' : 'Marque ao menos uma tarefa para excluir.');
         };
         const setOn = v => { on = v; bar.hidden = !v; root.classList.toggle('is-selecting', v); if (!v) sel.clear(); paint(); };
-        root.querySelector('#bulk-on').addEventListener('click', () => setOn(!on));
+        // Filtro sem tarefas: o botão "Excluir em lote" não aparece (antes isso quebrava a tela)
+        root.querySelector('#bulk-on')?.addEventListener('click', () => setOn(!on));
         root.querySelector('#bulk-off').addEventListener('click', () => setOn(false));
         root.querySelector('#bulk-all').addEventListener('click', () => { tasks.forEach(t => sel.add(t.id)); paint(); });
         root.addEventListener('click', e => {

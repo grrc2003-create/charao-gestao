@@ -4620,3 +4620,8 @@ body:has(.sticky-actions) .charao { bottom: calc(var(--bottombar-h) + env(safe-a
 /* Espaço livre no fim da página para o conteúdo (botões de salvar) poder rolar acima do Charão */
 .app-mode #view { padding-bottom: calc(var(--bottombar-h) + 96px + env(safe-area-inset-bottom)); }
 @media (min-width: 1024px) { .app-mode #view { padding-bottom: 130px; } }
+
+/* Charão parado na pose da tela: leve respiração para não parecer congelado */
+@keyframes ch-breathe { 0%, 100% { transform: scale(1.3) translateY(0); } 50% { transform: scale(1.32) translateY(-2px); } }
+.ch-btn img.ch-hold { animation: ch-breathe 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ch-btn img.ch-hold { animation: none; } }

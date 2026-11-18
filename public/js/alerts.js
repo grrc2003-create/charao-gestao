@@ -1,6 +1,7 @@
 // Charão, o mascote dos avisos: fica no canto da tela, reage quando chega aviso novo e abre o painel de avisos.
 // Estados: espera (padrão, em repetição) · parabens (sucesso) · atencao (alertas) · insatisfacao (reprovação/atraso).
-// Cada reação toca uma vez e volta à espera. Com "reduzir movimento" no aparelho, usa as poses paradas.
+// Cada reação toca uma vez e o Charão PERMANECE na pose da tela/filtro em que você está (espera quando não há o que comentar).
+// Com "reduzir movimento" no aparelho, usa as poses paradas.
 import { api, html, icon, fmtDateTime } from './core.js';
 import { toast } from './ui.js';
 
@@ -18,12 +19,29 @@ const lastMood = new Map(); // última reação por tela (só reage quando o res
 
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } } };
 
+let screenTone = 'espera'; // pose da tela atual (fica até mudar a tela ou o resultado do filtro)
+let playing = false;
+
+// Pose de descanso: a da tela atual (parada, com leve respiração) ou a espera animada
+function rest() {
+  const img = document.querySelector('#charao .ch-img');
+  if (!img) return;
+  playing = false;
+  const t = STATES[screenTone] ? screenTone : 'espera';
+  const src = t === 'espera' && !reduced.matches ? `${BASE}espera.webp` : `${BASE}${t}.png`;
+  if (!img.src.endsWith(src)) img.src = src;
+  img.classList.toggle('ch-hold', t !== 'espera');
+}
+
 function play(state) {
   const img = document.querySelector('#charao .ch-img');
   if (!img || !STATES[state]) return;
   clearTimeout(playTimer);
+  if (state === 'espera') return rest();
+  playing = true;
+  img.classList.remove('ch-hold');
   img.src = reduced.matches ? `${BASE}${state}.png` : `${BASE}${state}.webp?p=${++playId}`;
-  if (state !== 'espera') playTimer = setTimeout(() => play('espera'), STATES[state] + 200);
+  playTimer = setTimeout(rest, STATES[state] + 200);
 }
 
 function bubble(text) {
@@ -96,14 +114,15 @@ export async function refreshAlerts() {
 
 // Reação à tela aberta e aos filtros (pode ser desligada em Minha conta). Mesmo resultado na mesma tela não repete.
 export function screenMood(m, key, enabled = true) {
-  if (!enabled || !m) return;
-  const sig = `${m.tone}|${m.text}`;
-  if (lastMood.get(key) === sig) return;
-  lastMood.set(key, sig);
+  // A pose acompanha a tela sempre; animação e balão só quando o resultado muda
+  screenTone = enabled && m && STATES[m.tone] ? m.tone : 'espera';
   const root = document.getElementById('charao');
-  if (!root || root.hidden || !root.querySelector('.ch-panel')?.hidden) return;
-  if (Date.now() < alertBusyUntil) return;
-  if (m.tone !== 'espera') play(m.tone);
+  const sig = enabled && m ? `${m.tone}|${m.text}` : null;
+  const changed = !!sig && lastMood.get(key) !== sig;
+  if (sig) lastMood.set(key, sig);
+  if (!root || root.hidden) return;
+  if (!changed || !root.querySelector('.ch-panel')?.hidden || Date.now() < alertBusyUntil) { if (!playing) rest(); return; }
+  play(screenTone);
   bubble(m.text);
 }
 
@@ -146,7 +165,7 @@ export function startAlerts() {
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') setOpen(false); });
   document.addEventListener('click', e => { if (!e.target.closest('#charao')) setOpen(false); });
-  reduced.addEventListener?.('change', () => play('espera'));
+  reduced.addEventListener?.('change', rest);
   refreshAlerts();
   clearInterval(timer);
   timer = setInterval(() => { if (!document.hidden) refreshAlerts(); }, 60000);

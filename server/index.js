@@ -13,6 +13,7 @@ import { seedDemo } from './demo-data.js';
 import { accessContext, canAccessProject, canSeeUser, companyRestriction, visibleCompanies, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
 import * as TaskAlerts from './services/task-alerts.js';
+import * as Storage from './services/storage.js';
 import { evolution } from './services/evolution.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
@@ -798,6 +799,9 @@ api.get('/api/recurrence-files/:id', (req, res, { ctx, params }) => {
 api.get('/api/settings/reasons', (req, res, { ctx, query }) =>
   send(res, 200, Settings.listReasons({ includeInactive: query.get('all') === '1' && canManageSettings(ctx.user) })));
 api.get('/api/settings/general', (req, res) => send(res, 200, Settings.getGeneral()));
+// Espaço e uso (só administradores): disco de dados do Render e repositório no GitHub
+api.get('/api/settings/storage', (req, res, { ctx }) => { if (!isAdmin(ctx.user)) throw forbidden(); send(res, 200, Storage.diskReport()); });
+api.get('/api/settings/storage/github', async (req, res, { ctx, query }) => { if (!isAdmin(ctx.user)) throw forbidden(); send(res, 200, await Storage.githubReport({ fresh: query.get('fresh') === '1' })); });
 api.put('/api/settings/general', (req, res, { ctx, body }) => send(res, 200, Settings.saveGeneral(ctx, body, clientIp(req))));
 api.put('/api/settings/reasons', (req, res, { ctx, body }) => send(res, 200, Settings.saveReasons(ctx, body.reasons, clientIp(req))));
 api.get('/api/settings/specialties', (req, res) => send(res, 200, Settings.listSpecialtyTemplates()));
@@ -886,6 +890,9 @@ const runRecurrences = () => {
 };
 runRecurrences();
 setInterval(runRecurrences, 60 * 60 * 1000).unref();
+// Espaço e uso: uma foto do disco por dia (para o gráfico de crescimento em Configurações)
+Storage.dailySnapshot();
+setInterval(Storage.dailySnapshot, 6 * 60 * 60 * 1000).unref();
 
 server.listen(PORT, () => console.log(`Charão Gestão rodando em http://localhost:${PORT}${DEMO ? ' (modo demonstração)' : ''}`));
 // Mais Controle: sincronização semanal automática (segunda a partir das 8h; confere a cada 30 min se já é hora)

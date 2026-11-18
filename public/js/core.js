@@ -149,6 +149,7 @@ const ICONS = {
   note: svg('<path d="M5 4h14v12l-4 4H5z"/><path d="M15 20v-4h4M8 9h8M8 13h5"/>'),
   send: svg('<path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/>'),
   check: svg('<path d="m5 12 5 5L20 7"/>'),
+  disk: svg('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'),
   bell: svg('<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
   x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   calendar: svg('<rect x="3" y="5" width="18" height="16" rx="1.5"/><path d="M3 10h18M8 3v4M16 3v4"/>'),

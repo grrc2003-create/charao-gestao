@@ -201,6 +201,14 @@ async function main() {
     const wHist = (await ricardo('GET', `/tasks/${wt.data.id}`)).data.history.map(h => h.action);
     ok(wHist.includes('Alertas da tarefa configurados') && wHist.includes('Alertas da tarefa removidos'), 'configuração dos alertas fica no histórico');
   }
+  // Espaço e uso (Configurações): só administradores
+  {
+    const st = await ana('GET', '/settings/storage');
+    ok(st.status === 200 && st.data.db_bytes > 0 && Number.isInteger(st.data.files_count) && Array.isArray(st.data.areas) && st.data.history.length >= 1, 'espaço: banco, fotos/anexos e histórico diário');
+    ok(st.data.disk === null || (st.data.disk.total > 0 && st.data.disk.used <= st.data.disk.total && ['ok', 'atencao', 'critico'].includes(st.data.disk.level)), 'espaço: disco com total, usado e faixa');
+    ok(st.data.areas.reduce((n, a) => n + a.bytes, 0) === st.data.files_bytes, 'espaço: áreas somam o total de fotos/anexos');
+    ok((await ricardo('GET', '/settings/storage')).status === 403 && (await ricardo('GET', '/settings/storage/github')).status === 403, 'espaço: só administrador vê');
+  }
   t = (await ricardo('POST', `/tasks/${tid}/actions/approve`, { comment: 'Ok' })).data;
   ok(t.status === 'concluida' && t.on_time === true, 'gestor aprova; entrega no prazo');
   const actions = t.history.map(h => h.action);

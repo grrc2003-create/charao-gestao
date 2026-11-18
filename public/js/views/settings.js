@@ -3,6 +3,46 @@ import { html, api, icon } from '../core.js';
 import { REC_ICONS, recBadge } from './record-icons.js';
 import { toast } from '../ui.js';
 import { pageHead } from './shared.js';
+import { storageCard, bindStorage } from './storage-ui.js';
+// Menu das configurações: uma seção por vez (sem precisar rolar a tela). Grupos e nomes curtos por seção.
+const CFG_MENU = [
+  ['Sistema', [['storage-card', 'Espaço e uso'], ['general-card', 'Indicadores de prazo'], ['cal-card', 'Calendário de trabalho'], ['reasons-card', 'Justificativas de reagendamento']]],
+  ['Empresas e projetos', [['co-card', 'Empresas'], ['types-card', 'Tipos de projeto'], ['ml-types-card', 'Lista Mestra'], ['rtypes-card', 'Tipos de registro'],
+    ['stage-tpl-card', 'Modelos de classificação'], ['specs-card', 'Especialidades do check-list']]],
+  ['Contratos', [['ctypes-card', 'Tipos de contrato']]],
+  ['Vendas', [['sl-source-card', 'Origens'], ['sl-loss-card', 'Motivos de perda'], ['sl-profile-card', 'Avaliações do cliente']]],
+];
+let cfgCurrent = null; // seção aberta (continua a mesma depois de salvar)
+
+function bindCfgMenu(root, query) {
+  const panels = root.querySelector('.cfg-panels');
+  const nav = root.querySelector('.cfg-menu');
+  if (!panels || !nav) return;
+  const cards = new Map([...panels.querySelectorAll(':scope > section.card[id]')].map(c => [c.id, c]));
+  const groups = CFG_MENU.map(([g, items]) => [g, items.filter(([id]) => cards.has(id))]).filter(([, items]) => items.length);
+  const listed = new Set(groups.flatMap(([, items]) => items.map(([id]) => id)));
+  // Seções novas que ainda não estão no menu entram em "Outras", com o título do cartão
+  const extra = [...cards.keys()].filter(id => !listed.has(id)).map(id => [id, cards.get(id).querySelector('h2')?.textContent.trim() || id]);
+  if (extra.length) groups.push(['Outras', extra]);
+  nav.innerHTML = groups.map(([g, items]) => html`<div class="cfg-group"><span class="cfg-gt">${g}</span>${items.map(([id, label]) => html`<button type="button" class="cfg-item" data-cfg="${id}">${label}</button>`)}</div>`).join('');
+  const show = (id, { scroll = false } = {}) => {
+    if (!cards.has(id)) id = groups[0][1][0][0];
+    cfgCurrent = id;
+    cards.forEach((c, k) => { c.hidden = k !== id; });
+    nav.querySelectorAll('[data-cfg]').forEach(b => {
+      const on = b.dataset.cfg === id;
+      b.classList.toggle('active', on);
+      if (on) { b.setAttribute('aria-current', 'true'); if (nav.scrollWidth > nav.clientWidth) nav.scrollLeft = b.offsetLeft - 16; } else b.removeAttribute('aria-current');
+    });
+    if (scroll) {
+      const top = panels.closest('.cfg-layout').getBoundingClientRect().top + window.scrollY - 70;
+      if (window.scrollY > top) window.scrollTo({ top: Math.max(0, top) });
+    }
+  };
+  nav.addEventListener('click', e => { const b = e.target.closest('[data-cfg]'); if (b) show(b.dataset.cfg, { scroll: true }); });
+  show(query?.get('secao') || cfgCurrent);
+}
+
 import { typesSection, bindTypesSection } from './master-list.js';
 
 const reasonItem = r => html`<li class="stage-item reason-item ${r.active ? '' : 'is-inactive'}" data-id="${r.id || ''}">
@@ -72,6 +112,8 @@ export async function view({ state, reloadMeta, query }) {
     ${c.group_key || c.people || c.projects ? html`<span class="co-rm-ph"></span>` : html`<button type="button" class="icon-btn" data-co-rm aria-label="Excluir empresa">✕</button>`}
   </li>`;
   const mlTypes = await api('/settings/master-list-types').catch(() => null);
+  // Espaço e uso (Render e GitHub): só administradores
+  const storage = state.user.role === 'admin' ? await api('/settings/storage').catch(() => null) : null;
   const ctTypes = state.meta.can.contracts ? await api('/settings/contract-types', { query: { all: '1' } }).catch(() => null) : null;
   const SALES_CARDS = [['source', 'Origens das oportunidades', 'De onde o cliente veio (indicação, site, Instagram…). Escolhida no cadastro da oportunidade.', 'Nova origem (ex.: Feira)'],
     ['loss', 'Motivos de perda', 'Lista do “Contrato perdido”: o motivo é obrigatório e há um campo de observação para detalhar.', 'Novo motivo (ex.: Cliente desistiu)'],
@@ -83,7 +125,9 @@ export async function view({ state, reloadMeta, query }) {
     html: html`
       ${pageHead({ eyebrow: 'Cadastros gerais do sistema', title: 'Configurações',
         sub: 'Cadastros válidos para todos os projetos. As classificações (Grupo/Local/Etapa) de cada projeto ficam no cadastro dele — aqui você mantém modelos para aplicar.' })}
-      <section class="card" style="max-width:900px;margin-bottom:16px">
+      <div class="cfg-layout"><nav class="cfg-menu" aria-label="Seções das configurações"></nav><div class="cfg-panels">
+      ${storageCard(storage)}
+      <section class="card" id="general-card" style="max-width:900px;margin-bottom:16px">
         <div class="card-head"><h2>${icon('alert')}Indicadores de prazo</h2></div>
         <form class="card-body form" id="general-form" novalidate>
           <div class="field" style="max-width:420px"><label for="chronic">Tarefa crônica a partir de quantos reagendamentos?</label>
@@ -217,8 +261,11 @@ export async function view({ state, reloadMeta, query }) {
           <div class="form-error" hidden></div>
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check')}Salvar justificativas</button></div>
         </form>
-      </section>`,
+      </section>
+      </div></div>`,
     mount(root, ctx) {
+      bindCfgMenu(root, query);
+      bindStorage(root);
       // Modelos (especialidades do check-list e classificações): mesma edição, endpoints diferentes
       const bindTemplates = (formSel, listSel, addSel, kind, endpoint, okMsg) => {
         const sf = root.querySelector(formSel);

@@ -5,6 +5,7 @@ import { recurrenceFieldset, bindRecurrence } from './recurrence-fields.js';
 import { renderDraft, itemForm, bindItemForm, PHOTO_RULE, projectSpecialties, teamTotal, brl } from './checklist-ui.js';
 import { renderImpactPreview } from './deps-ui.js';
 import { dayOffWarn } from '../dayoff.js';
+import { watchField, bindWatchField, readWatchField } from './notify-ui.js';
 
 const PROOF_HELP = {
   nenhuma: 'Envio para conferência sem anexos obrigatórios',
@@ -124,6 +125,8 @@ export async function view({ params, query, state, navigate }) {
           <span class="hint">Fotos do local, croquis, trechos de projeto ou PDFs (até 8 MB cada). Fotos são reduzidas automaticamente para envio.</span>
         </fieldset>` : ''}
 
+        ${!editing ? watchField((state.meta.users || []).filter(u => u.active && u.login_enabled !== 0).map(u => ({ id: u.id, name: u.name, job_title: u.job_title, involved: false, self: u.id === state.user.id }))) : ''}
+
         <div class="form-error" hidden></div>
         <div class="form-actions">
           <a class="btn btn-ghost" href="${editing ? `#/tarefas/${t.id}` : parent ? `#/tarefas/${parent.id}` : '#/tarefas'}">Cancelar</a>
@@ -132,6 +135,7 @@ export async function view({ params, query, state, navigate }) {
       </form>`,
     mount(root) {
       const f = root.querySelector('#task-form');
+      bindWatchField(root);
       const err = f.querySelector('.form-error');
       // Tarefa recorrente: o prazo passa a ser o da 1ª ocorrência; início previsto vem da duração
       const rec = root.querySelector('#rec-fs') ? bindRecurrence(root, f, {
@@ -363,6 +367,8 @@ export async function view({ params, query, state, navigate }) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
         err.hidden = true;
+        let watch = null;
+        try { watch = readWatchField(f, data); } catch (ex) { err.textContent = ex.message; err.hidden = false; return; }
         const btn = f.querySelector('[type=submit]');
         btn.disabled = true;
         try {
@@ -392,11 +398,13 @@ export async function view({ params, query, state, navigate }) {
               delete data.proof_type;
             }
             if (!typeIs() && rec?.enabled()) {
+              if (watch?.user_ids.length) throw new Error('Os alertas da tarefa ainda não valem para tarefas recorrentes: desmarque os alertas ou configure-os depois em cada tarefa gerada.');
               const r = await api('/recurrences', { method: 'POST', body: { ...data, ...rec.read() } });
               toast(r.generated ? `Recorrência criada: ${r.generated} ocorrência(s) já gerada(s).` : 'Recorrência criada. As ocorrências serão geradas conforme a antecedência.');
               navigate(`/recorrencias/${r.id}`);
               return;
             }
+            if (watch?.user_ids.length) data.alerts = watch;
             const r = await api('/tasks', { method: 'POST', body: data });
             for (const batch of rest) await api(`/tasks/${r.id}/items`, { method: 'POST', body: { items: batch } });
             toast(data.task_type === 'checklist' ? 'Check-list criado.' : 'Tarefa criada.');

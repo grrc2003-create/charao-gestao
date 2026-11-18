@@ -3,6 +3,7 @@ import { api, html, icon, avatar, setAvatars, ROLE, brandMark } from './core.js'
 import { toast } from './ui.js';
 import './required.js';
 import { autoPdfButtons } from './section-pdf.js';
+import { startAlerts, refreshAlerts } from './alerts.js';
 import { trackRoute, updateCurrent, setCurrentTitle, clearNav } from './navhist.js';
 import * as Login from './views/login.js';
 import * as Dashboard from './views/dashboard.js';
@@ -304,12 +305,14 @@ function shell() {
       <a href="#/" class="topbar-brand ${brand ? 'is-company' : ''}" aria-label="Início">${brand ? html`<img src="${brand.logo}" alt="${brand.name}"><span><small>Gestão de Obras</small></span>` : html`${brandMark(30)}<span><b>CHARÃO</b><small>Gestão de Obras</small></span>`}</a>
       <a href="#/conta" class="topbar-user" aria-label="Minha conta">${avatar(u.name, 'sm', u.id)}</a>
     </header>
+    <div id="charao" class="charao"></div>
     <main id="view" tabindex="-1"></main>
     <nav class="bottombar" aria-label="Navegação">
       ${mob.bar.map(([href, label, ic]) => html`<a href="#${href}" data-nav="${href}">${icon(ic)}<span>${SHORT[label] || label}</span></a>`)}
       ${mob.more.length ? html`<a href="#" data-more data-more-paths="${mob.more.map(m => m[0]).join(' ')}" role="button">${icon('more')}<span>Mais</span></a>` : ''}
     </nav>`.toString();
   app.querySelector('[data-more]')?.addEventListener('click', e => { e.preventDefault(); openMoreMenu(mob.more); });
+  startAlerts();
   fitSidebar();
   // Logo, foto e fontes carregam depois: refaz o ajuste quando mudam de tamanho
   if (window.ResizeObserver) {
@@ -382,6 +385,7 @@ export async function render() {
     shell();
   }
   markNav(path);
+  if (!printMode) refreshAlerts();
   const root = document.getElementById('view');
   if (!root.dataset.pdf) { root.dataset.pdf = '1'; autoPdfButtons(root); }
   // Mesma tela atualizada (salvou algo, mudou filtro/ano): mantém a posição da página e o conteúdo até o novo chegar.

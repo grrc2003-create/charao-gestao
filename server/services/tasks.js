@@ -12,6 +12,7 @@ import { workingDaysBetween, vacationsOverlapping, dayOffReason } from './calend
 import { taskDependencies, itemDependencies, applyShift, applyPull, projectEndOf, impactOfTask, shiftedOfTask, scheduleAround } from './dependencies.js';
 import { syncFromTask, monthTaskOf } from './finance.js';
 import { syncAbsenceTask } from './absences.js';
+import { readNotify, sendNotify } from './task-alerts.js';
 import { originOfTask, recordsOfTask } from './records.js';
 import { readItems, insertItems, teamForCopy, checklistView, checklistCheck, checklistStoredFiles, answeredCount, PHOTO_RULES, PHOTO_RULE_LABEL } from './checklist.js';
 
@@ -827,7 +828,8 @@ export function setProgress(ctx, id, body = {}) {
     if (v === 100) {
       const can = permissionsFor(ctx, rawTask(id));
       const finish = body.finish === 'conclude' && can.conclude_directly ? 'conclude' : can.submit ? 'submit' : can.conclude_directly ? 'conclude' : null;
-      if (finish) transition(ctx, id, finish, { start_date: body.start_date, comment: body.comment, done_date: body.done_date });
+      if (finish) transition(ctx, id, finish, { start_date: body.start_date, comment: body.comment, done_date: body.done_date,
+        notify_ids: body.notify_ids, notify_kind: body.notify_kind, notify_note: body.notify_note });
     }
     if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
@@ -938,6 +940,8 @@ export function transition(ctx, id, action, body = {}) {
   if (['submit', 'approve', 'conclude', 'reopen', 'return'].includes(action) && monthTaskOf(id)) {
     throw badRequest('Esta é a lista do mês do Financeiro: ela avança com os checks e conclui sozinha quando todas as despesas estiverem resolvidas (pagas ou sem despesa no mês).');
   }
+  // Aviso de conclusão (opcional): pessoas escolhidas por quem conclui/entrega
+  const notify = ['submit', 'approve', 'conclude'].includes(action) ? readNotify(ctx, t, body) : null;
   tx(() => {
     switch (action) {
       case 'start':
@@ -1033,6 +1037,7 @@ export function transition(ctx, id, action, body = {}) {
         throw badRequest('Ação desconhecida.');
     }
     if (['approve', 'conclude', 'reopen'].includes(action)) { syncFromTask(id, action, ctx.user.id); syncAbsenceTask(id, action, ctx.user.id); }
+    sendNotify(ctx, id, notify);
     if (t.parent_id) syncParentStatus(t.parent_id, ctx.user.id);
   });
 }

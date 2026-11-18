@@ -153,7 +153,54 @@ async function main() {
   ok((await marcos('POST', `/tasks/${tid}/actions/submit`, SD)).data.status === 'aguardando_conferencia', 'enviada para conferência');
   ok((await ricardo('POST', `/tasks/${tid}/actions/return`, {})).status === 400, 'devolução exige motivo');
   ok((await ricardo('POST', `/tasks/${tid}/actions/return`, { comment: 'Ajustar foto' })).data.status === 'em_andamento', 'gestor devolve para ajustes');
-  await marcos('POST', `/tasks/${tid}/actions/submit`, SD);
+  // Aviso de conclusão: quem entrega escolhe pessoas para avisar ("Concluí" ou "Concluí com ressalvas")
+  const nOpts = (await marcos('GET', `/tasks/${tid}/notify-options`)).data;
+  const ricOpt = nOpts.find(u => u.name.startsWith('Ricardo'));
+  ok(ricOpt?.involved && !nOpts.some(u => u.name.startsWith('Marcos')), 'avisar: quem pediu/líder aparece na lista (mesmo sem ver o perfil) e a própria pessoa não');
+  ok((await marcos('POST', `/tasks/${tid}/actions/submit`, { ...SD, notify_ids: [99999] })).status === 400, 'avisar: pessoa fora da lista é recusada');
+  ok((await marcos('POST', `/tasks/${tid}/actions/submit`, { ...SD, notify_ids: [ricOpt.id], notify_kind: 'ressalvas' })).status === 400
+    && (await marcos('GET', `/tasks/${tid}`)).data.status === 'em_andamento', 'avisar: "com ressalvas" exige descrever as ressalvas (e nada muda)');
+  ok((await marcos('POST', `/tasks/${tid}/actions/submit`, { ...SD, notify_ids: [ricOpt.id], notify_kind: 'ressalvas', notify_note: 'Falta limpar o local.' })).data.status === 'aguardando_conferencia', 'entrega com aviso "com ressalvas"');
+  const ricAl = (await ricardo('GET', '/alerts')).data.filter(x => x.task_id === tid);
+  ok(ricAl.length === 1 && ricAl[0].kind === 'ressalvas' && ricAl[0].note === 'Falta limpar o local.' && ricAl[0].sender_name.startsWith('Marcos') && ricAl[0].can_open, 'aviso aparece para quem foi escolhido');
+  ok(!(await marcos('GET', '/alerts')).data.some(x => x.task_id === tid), 'aviso não aparece para quem enviou');
+  ok((await marcos('POST', `/alerts/${ricAl[0].id}/seen`)).status === 404, 'só quem recebeu marca "Ciente"');
+  ok((await ricardo('POST', `/alerts/${ricAl[0].id}/seen`)).status === 200 && !(await ricardo('GET', '/alerts')).data.some(x => x.task_id === tid), '"Ciente" tira o aviso do topo');
+  const nHist = (await ricardo('GET', `/tasks/${tid}`)).data.history.map(h => h.action);
+  ok(nHist.includes('Aviso de conclusão enviado') && nHist.includes('Aviso de conclusão: ciente'), 'aviso e "Ciente" ficam no histórico da tarefa');
+  // Alertas configurados na tarefa (nenhum por padrão): eventos escolhidos na criação, para quem foi escolhido
+  {
+    const tz = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+    const tomorrow = tz(new Date(Date.now() + 86400e3));
+    const ricId = (await ricardo('GET', '/auth/me')).data.user.id;
+    const base = { project_id: 1, title: 'Teste alertas da tarefa', description: 'x', assignee_id: 4, due_date: tomorrow, priority: 'media', proof_type: 'nenhuma' };
+    const nTasks = (await ricardo('GET', '/tasks')).data.length;
+    ok((await ricardo('POST', '/tasks', { ...base, alerts: { events: ['status'], user_ids: [99999] } })).status === 400
+      && (await ricardo('GET', '/tasks')).data.length === nTasks, 'alertas com pessoa fora da lista: recusado e a tarefa não é criada');
+    ok((await ricardo('POST', '/tasks', { ...base, alerts: { events: ['status'], user_ids: [] } })).status === 400 && (await ricardo('GET', '/tasks')).data.length === nTasks, 'alertas com evento e sem quem recebe: recusado');
+    const plain = await ricardo('POST', '/tasks', base);
+    ok(plain.status === 201 && (await ricardo('GET', `/tasks/${plain.data.id}/alerts-config`)).data.users.length === 0, 'sem marcar nada: tarefa criada sem alertas (padrão)');
+    const wt = await ricardo('POST', '/tasks', { ...base, alerts: { events: ['status', 'prazo', 'avanco', 'alteracao'], due_days: 3, user_ids: [ricId] } });
+    const cfg = (await ricardo('GET', `/tasks/${wt.data.id}/alerts-config`)).data;
+    ok(wt.status === 201 && cfg.users.length === 1 && cfg.users[0].id === ricId && cfg.events.length === 4 && cfg.due_days === 3 && cfg.can_edit, 'alertas escolhidos na criação ficam gravados na tarefa');
+    const mine = () => ricardo('GET', '/alerts').then(r => r.data.filter(x => x.task_id === wt.data.id));
+    ok((await mine()).some(x => x.kind === 'prazo' && x.kind_label === 'Prazo em 1 dia(s)' && x.tone === 'atencao'), 'prazo dentro dos dias escolhidos: alerta de prazo');
+    ok((await mine()).filter(x => x.kind === 'prazo').length === 1, 'alerta de prazo não se repete');
+    await marcos('POST', `/tasks/${wt.data.id}/progress`, { progress: 50, ...SD });
+    let al = await mine();
+    ok(al.some(x => x.kind === 'avanco' && x.kind_label === 'Avanço: 50%' && x.sender_name.startsWith('Marcos')) && al.some(x => x.kind === 'status' && x.kind_label === 'Status: Em andamento'), 'avanço e mudança de status avisam quem foi escolhido');
+    await marcos('POST', `/tasks/${wt.data.id}/progress`, { progress: 60 });
+    al = await mine();
+    ok(al.filter(x => x.kind === 'avanco').length === 1 && al.some(x => x.kind_label === 'Avanço: 60%'), 'avisos do mesmo tipo não se acumulam: o mais recente substitui');
+    ok(!(await marcos('GET', '/alerts')).data.some(x => x.task_id === wt.data.id), 'quem não foi escolhido não recebe');
+    await ricardo('POST', `/tasks/${wt.data.id}/assignee`, { assignee_id: 1 }).catch(() => null);
+    ok(!(await mine()).some(x => x.kind === 'alteracao'), 'a própria ação não avisa quem a fez');
+    ok((await marcos('PUT', `/tasks/${wt.data.id}/alerts-config`, { events: ['status'], user_ids: [4] })).status === 403, 'só quem gerencia a tarefa altera os alertas');
+    ok((await ricardo('PUT', `/tasks/${wt.data.id}/alerts-config`, { events: [], user_ids: [] })).data.users.length === 0, 'alertas removidos');
+    ok((await ricardo('POST', '/alerts/seen-all')).status === 200 && (await ricardo('GET', '/alerts')).data.length === 0, '"Ciente em todos" limpa os avisos');
+    const wHist = (await ricardo('GET', `/tasks/${wt.data.id}`)).data.history.map(h => h.action);
+    ok(wHist.includes('Alertas da tarefa configurados') && wHist.includes('Alertas da tarefa removidos'), 'configuração dos alertas fica no histórico');
+  }
   t = (await ricardo('POST', `/tasks/${tid}/actions/approve`, { comment: 'Ok' })).data;
   ok(t.status === 'concluida' && t.on_time === true, 'gestor aprova; entrega no prazo');
   const actions = t.history.map(h => h.action);

@@ -4,6 +4,7 @@ import { toast, sheet, confirmSheet, readAttachments, pickAttachments, batchBySi
 import { pageHead, NAV_SEQ_KEY, doneToggle, bindDoneToggle, execInline } from './shared.js';
 import { replaceNextRoute } from '../navhist.js';
 import { pctBar, progressSheet, bindProgressSheet, startField, doneDateField } from './progress-ui.js';
+import { loadNotifyOptions, notifyField, bindNotifyField, withNotify, watchField, bindWatchField, readWatchField } from './notify-ui.js';
 import { depsBlock, waitingNotice, bindDeps, renderImpactPreview, impactBox } from './deps-ui.js';
 import { checklistSection, bindChecklist, PHOTO_RULE, checklistReportLink, projectSpecialties } from './checklist-ui.js';
 import { recordPickItem, pickSheet, chooseType, recStatus } from './records.js';
@@ -28,6 +29,8 @@ export async function view(ctx) {
     t._specs = sp.list;
     t._specsOwn = sp.own;
   }
+  // Alertas configurados na tarefa (quem recebe e quais eventos)
+  t._watch = await api(`/tasks/${t.id}/alerts-config`).catch(() => null);
   return build(t, ctx);
 }
 
@@ -309,6 +312,14 @@ function build(t, ctx) {
           <div class="who">${r.user_name || '—'} · ${fmtDateTime(r.created_at)}</div></li>`)}</ol></div>
       </section>` : ''}
 
+      ${t._watch && (t._watch.can_edit || t._watch.users.length) ? html`<section class="card block" id="task-alerts" aria-labelledby="blk-alerts">
+        <header class="block-head"><span class="step" style="background:var(--navy-700)">${icon('bell')}</span><h2 id="blk-alerts">Alertas da tarefa</h2>
+          ${t._watch.can_edit ? html`<button type="button" class="btn btn-ghost btn-sm right" data-act="alerts">${icon('settings')}Configurar</button>` : ''}</header>
+        <div class="block-body">${t._watch.users.length
+          ? html`<p style="margin:0 0 4px">${t._watch.label}</p><p class="muted" style="margin:0;font-size:13px">Recebem: ${t._watch.users.map(u => u.name).join(', ')}</p>`
+          : html`<p class="muted" style="margin:0">Nenhum alerta configurado. Use <b>Configurar</b> para o Charão avisar sobre status, prazo, avanço ou alterações.</p>`}</div>
+      </section>` : ''}
+
       <details class="card block block-fold block-hist">
         <summary class="block-head"><span class="step" style="background:var(--steel)">${icon('history')}</span><h2>Histórico</h2>
           <span class="right muted" style="font-size:12px">${t.history.length} registro(s) · <span class="fold-hint">ver histórico</span></span><span class="fold-chev" aria-hidden="true">${icon('chevron')}</span></summary>
@@ -399,12 +410,24 @@ function mount(root, t, ctx) {
         ...(t.can.submit ? [{ k: 'submit', label: html`Enviar para conferência → <b>Aguardando conferência</b>`, warn: blockers ? `Antes de salvar 100%: ${blockers}.` : '' }] : []),
         ...(t.can.conclude_directly ? [{ k: 'conclude', label: html`Concluir diretamente → <b>Concluída</b>`, warn: subPend ? `Antes: conclua ${subPend} subtarefa(s) pendente(s).` : '' }] : []),
       ];
-      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart, finish, doneField: doneDateField(t) });
+      const nOpts = finish.length ? await loadNotifyOptions(t.id) : [];
+      const pending = progressSheet({ title: t.parent_id ? 'Avanço da subtarefa' : 'Avanço da tarefa', current: t.progress_pct ?? null, what: t.parent_id ? 'a subtarefa' : 'a tarefa', askStart: needStart, finish, doneField: doneDateField(t), notify: notifyField(nOpts) });
       bindProgressSheet();
+      bindNotifyField();
       const r = await pending;
       if (r) run(() => api(`/tasks/${t.id}/progress`, { method: 'POST', body: r }), r.progress === null ? 'Avanço removido.'
         : r.progress === 100 && r.finish === 'conclude' ? 'Avanço 100%: tarefa concluída.'
           : r.progress === 100 && r.finish === 'submit' ? 'Avanço 100%: tarefa enviada para conferência (Aguardando conferência).' : `Avanço: ${r.progress}%.`);
+    },
+    alerts: async () => {
+      setTimeout(() => bindWatchField(document.querySelector('.sheet')), 0);
+      const r = await sheet({
+        title: 'Alertas da tarefa',
+        body: watchField(t._watch.options, t._watch, { legend: false }),
+        submitLabel: 'Salvar alertas',
+        onSubmit: (d, f) => api(`/tasks/${t.id}/alerts-config`, { method: 'PUT', body: readWatchField(f) }),
+      });
+      if (r) { toast(r.users.length ? 'Alertas da tarefa salvos.' : 'Alertas da tarefa removidos.'); ctx.render(); }
     },
     parentdates: () => run(() => api(`/tasks/${t.id}/parent-dates`, { method: 'POST' }), 'Datas da tarefa principal aplicadas.'),
     // Duplicar a tarefa (com subtarefas / itens do check-list); responsáveis e prazos só se marcados
@@ -501,15 +524,19 @@ function mount(root, t, ctx) {
     refs: () => upload('referencia'),
     start: () => run(() => api(`/tasks/${t.id}/actions/start`, { method: 'POST' }), 'Execução iniciada.'),
     submit: async () => {
+      const nOpts = await loadNotifyOptions(t.id);
+      bindNotifyField();
       const r = await sheet({
         title: 'Enviar para conferência',
-        body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${dueNote}${needStart ? startField() : ''}${doneDateField(t)}`,
+        body: html`<p class="muted" style="margin:0 0 10px">A tarefa ficará bloqueada para edição até a conferência.</p>${dueNote}${needStart ? startField() : ''}${doneDateField(t)}${notifyField(nOpts)}`,
         submitLabel: 'Enviar',
-        onSubmit: d => api(`/tasks/${t.id}/actions/submit`, { method: 'POST', body: d }),
+        onSubmit: (d, f) => api(`/tasks/${t.id}/actions/submit`, { method: 'POST', body: withNotify(d, f) }),
       });
       if (r) { toast(r.done_date_status === 'pendente' ? 'Enviada para conferência. A data informada aguarda autorização.' : 'Enviada para conferência.'); refresh(r); }
     },
     approve: async () => {
+      const nOpts = await loadNotifyOptions(t.id);
+      bindNotifyField();
       // "Negar — usar outra data" mostra o campo da data (e o torna obrigatório)
       setTimeout(() => document.querySelectorAll('[name=date_decision]').forEach(x => x.addEventListener('change', () => {
         const box = document.querySelector('[data-other-date]');
@@ -529,9 +556,9 @@ function mount(root, t, ctx) {
               <label class="switch"><input type="radio" name="date_decision" value="outra"><span>Negar — usar outra data</span></label>
               <div class="field" data-other-date hidden><label for="dd2">Outra data de conclusão</label><input type="date" id="dd2" name="decided_date" max="${reg}" ${t.start_date ? html`min="${t.start_date}"` : ''}></div>
             </fieldset>`;
-          })() : ''}${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+          })() : ''}${dueNote}${needStart ? startField() : ''}<div class="field"><label for="c">Comentário (opcional)</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>${notifyField(nOpts)}`,
         submitLabel: 'Aprovar',
-        onSubmit: d => api(`/tasks/${t.id}/actions/approve`, { method: 'POST', body: d }),
+        onSubmit: (d, f) => api(`/tasks/${t.id}/actions/approve`, { method: 'POST', body: withNotify(d, f) }),
       });
       if (r) { toast('Tarefa concluída.'); refresh(r); }
     },
@@ -546,12 +573,14 @@ function mount(root, t, ctx) {
       if (r) { toast('Tarefa devolvida ao responsável.', 'warn'); refresh(r); }
     },
     conclude: async () => {
+      const nOpts = await loadNotifyOptions(t.id);
+      bindNotifyField();
       const r = await sheet({
         title: 'Concluir diretamente',
         body: html`<p class="muted">Use quando a conferência já foi feita pessoalmente. A ação fica registrada no histórico.</p>
-          ${dueNote}${needStart ? startField() : ''}${!t.delivered_at ? doneDateField(t, { superior: true }) : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>`,
+          ${dueNote}${needStart ? startField() : ''}${!t.delivered_at ? doneDateField(t, { superior: true }) : ''}<div class="field"><label for="c">Comentário</label><textarea id="c" name="comment" rows="3" maxlength="1000"></textarea></div>${notifyField(nOpts)}`,
         submitLabel: 'Concluir',
-        onSubmit: d => api(`/tasks/${t.id}/actions/conclude`, { method: 'POST', body: d }),
+        onSubmit: (d, f) => api(`/tasks/${t.id}/actions/conclude`, { method: 'POST', body: withNotify(d, f) }),
       });
       if (r) { toast('Tarefa concluída.'); refresh(r); }
     },

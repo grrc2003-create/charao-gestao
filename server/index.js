@@ -12,6 +12,7 @@ import {
 import { seedDemo } from './demo-data.js';
 import { accessContext, canAccessProject, canSeeUser, companyRestriction, visibleCompanies, isAdmin, requireAdmin, canManageSettings, isManagerRole, sectionsOf, hasSection, requireSection } from './lib/permissions.js';
 import * as Tasks from './services/tasks.js';
+import * as TaskAlerts from './services/task-alerts.js';
 import { evolution } from './services/evolution.js';
 import * as Projects from './services/projects.js';
 import * as Users from './services/users.js';
@@ -615,7 +616,13 @@ api.get('/api/projects/:id/assignees', (req, res, { ctx, params }) => send(res, 
 
 // ---------- Tarefas ----------
 api.get('/api/tasks', (req, res, { ctx, query }) => { requireSection(ctx.user, 'tarefas'); send(res, 200, Tasks.filterTasks(ctx, Tasks.taskFilters(k => query.getAll(k)))); });
-api.post('/api/tasks', (req, res, { ctx, body }) => send(res, 201, { id: Tasks.createTask(ctx, body) }));
+api.post('/api/tasks', (req, res, { ctx, body }) => {
+  // Alertas desta tarefa (opcionais, nenhum por padrão): validados antes de criar
+  const watch = TaskAlerts.readWatchForNew(ctx, body);
+  const id = Tasks.createTask(ctx, body);
+  if (watch?.ids.length) TaskAlerts.saveWatch(ctx, id, watch);
+  send(res, 201, { id });
+});
 api.get('/api/tasks/:id', (req, res, { ctx, params }) => send(res, 200, Tasks.getTask(ctx, intOrNull(params.id))));
 api.patch('/api/tasks/:id', (req, res, { ctx, params, body }) => {
   Tasks.updateTask(ctx, intOrNull(params.id), body);
@@ -692,6 +699,17 @@ api.post('/api/tasks/:id/correct-dates', (req, res, { ctx, params, body }) => {
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
 });
 api.post('/api/tasks/:id/duplicate', (req, res, { ctx, params, body }) => send(res, 201, Tasks.duplicateTask(ctx, intOrNull(params.id), body)));
+// Aviso de conclusão: pessoas que podem ser avisadas, avisos pendentes de quem está usando e "Ciente"
+api.get('/api/tasks/:id/notify-options', (req, res, { ctx, params }) => send(res, 200, TaskAlerts.notifyOptions(ctx, Tasks.loadVisible(ctx, intOrNull(params.id)))));
+api.get('/api/alerts', (req, res, { ctx }) => send(res, 200, TaskAlerts.myAlerts(ctx)));
+api.post('/api/alerts/seen-all', (req, res, { ctx }) => { TaskAlerts.markAllSeen(ctx); send(res, 200, { ok: true }); });
+api.get('/api/tasks/:id/alerts-config', (req, res, { ctx, params }) => send(res, 200, TaskAlerts.getWatch(ctx, Tasks.loadVisible(ctx, intOrNull(params.id)))));
+api.put('/api/tasks/:id/alerts-config', (req, res, { ctx, params, body }) => {
+  const t = Tasks.loadVisible(ctx, intOrNull(params.id));
+  TaskAlerts.updateWatch(ctx, t, body);
+  send(res, 200, TaskAlerts.getWatch(ctx, t));
+});
+api.post('/api/alerts/:id/seen', (req, res, { ctx, params }) => { TaskAlerts.markSeen(ctx, intOrNull(params.id)); send(res, 200, { ok: true }); });
 api.post('/api/tasks/:id/actions/:action', (req, res, { ctx, params, body }) => {
   Tasks.transition(ctx, intOrNull(params.id), params.action, body);
   send(res, 200, Tasks.getTask(ctx, intOrNull(params.id)));
@@ -827,7 +845,8 @@ function serveStatic(req, res, pathname) {
   res.writeHead(200, {
     ...SECURITY_HEADERS,
     'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
-    'Cache-Control': rel === '/index.html' ? 'no-cache' : 'no-cache',
+    // Mascote: imagens pesadas que quase nunca mudam ficam em cache por 1 dia
+    'Cache-Control': rel.startsWith('/assets/mascote/') ? 'public, max-age=86400' : 'no-cache',
   });
   fs.createReadStream(file).pipe(res);
 }

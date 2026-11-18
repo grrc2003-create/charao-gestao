@@ -1,5 +1,6 @@
 // Avanço parcial (%) opcional: barra e janela para informar (tarefa, subtarefa e item de check-list)
 import { html, icon, todayISO } from '../core.js';
+import { withNotify } from './notify-ui.js';
 import { sheet } from '../ui.js';
 
 export const pctBar = (pct, { small = false } = {}) => html`<span class="pg ${small ? 'pg-sm' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct ?? 0}">
@@ -18,7 +19,7 @@ export const doneDateField = (t, { superior = false } = {}) => html`<div class="
   <span class="hint">${superior ? 'Opcional. Fica registrada como a data da conclusão, com os dias de atraso de preenchimento.'
     : 'Opcional. Se a execução terminou antes de hoje, informe o dia: ele precisa ser autorizado por quem confere. Autorizado, conta para o prazo e fica registrado o atraso de preenchimento.'}</span></div>`;
 
-export function progressSheet({ title = 'Avanço da tarefa', current = null, what = 'a tarefa', askStart = false, finish = [], at100 = '', doneField = '' } = {}) {
+export function progressSheet({ title = 'Avanço da tarefa', current = null, what = 'a tarefa', askStart = false, finish = [], at100 = '', doneField = '', notify = '' } = {}) {
   const v = current ?? 0;
   return sheet({
     title,
@@ -32,12 +33,17 @@ export function progressSheet({ title = 'Avanço da tarefa', current = null, wha
       <div class="pg-100" hidden>
         ${finish.length ? html`<div class="notice">${icon('info')}<span><b>100% = execução terminada.</b> Ao salvar, o status muda para:</span></div>
           ${finish.map((f, i) => html`<label class="switch pg-finish"><input type="radio" name="finish" value="${f.k}" ${i === 0 ? 'checked' : ''}><span>${f.label}</span></label>
-            ${f.warn ? html`<span class="hint pg-warn">${f.warn}</span>` : ''}`)}${doneField}`
+            ${f.warn ? html`<span class="hint pg-warn">${f.warn}</span>` : ''}`)}${doneField}${notify}`
         : html`<div class="notice">${icon('info')}<span>${at100 || 'Com 100%, o status não muda automaticamente.'}</span></div>`}
       </div>
       ${current !== null ? html`<label class="switch"><input type="checkbox" name="clear" value="1">Remover o avanço (voltar a "não informado")</label>` : ''}
     </div>`,
-    onSubmit: data => ({ progress: data.clear ? null : data.progress === '' ? null : Number(data.progress), ...(data.start_date ? { start_date: data.start_date } : {}), ...(data.finish ? { finish: data.finish } : {}), ...(data.done_date ? { done_date: data.done_date } : {}) }),
+    onSubmit: (data, form) => {
+      const pct = data.clear ? null : data.progress === '' ? null : Number(data.progress);
+      // Aviso de conclusão: só vale quando o avanço vai a 100% (a tarefa sai da execução)
+      const n = pct === 100 && form ? withNotify({}, form) : {};
+      return { progress: pct, ...(data.start_date ? { start_date: data.start_date } : {}), ...(data.finish ? { finish: data.finish } : {}), ...(data.done_date ? { done_date: data.done_date } : {}), ...n };
+    },
   });
 }
 

@@ -195,8 +195,19 @@ export async function view({ query, setQuery, render }) {
       <tr class="frp-tot"><td class="frp-n">Pessoas no dia</td>${s.days.map(d => html`<td>${s.people.filter(e => Number(e.days[d]) > 0).length || ''}</td>`)}<td></td><td class="frp-s">${n2(s.people.reduce((a, e) => a + e.diarias, 0))}</td></tr></tbody></table></div>`;
   const bar = (v, max) => html`<div class="frb"><span style="width:${max ? Math.min(100, (v / max) * 100) : 0}%"></span></div>`;
 
+  // Nome do arquivo ao salvar o PDF (vem do título da página): obra, período, folhas, filtro e conteúdo
+  // Curto: "Rel FC PRJ-001 21-09 a 25-10-26 FC02 FC01 +Contrato" (ano só no fim quando é o mesmo)
+  const dd = d => `${d.slice(8, 10)}-${d.slice(5, 7)}`, yy = d => d.slice(2, 4);
+  const pIni = de || (sheets.length ? sheets.map(s => s.start_date).sort()[0] : ''), pFim = ate || (sheets.length ? sheets.map(s => s.end_date).sort().at(-1) : '');
+  const perTxt = !pIni && !pFim ? '' : !pIni ? `até ${dd(pFim)}-${yy(pFim)}` : !pFim ? `desde ${dd(pIni)}-${yy(pIni)}`
+    : yy(pIni) === yy(pFim) ? `${dd(pIni)} a ${dd(pFim)}-${yy(pFim)}` : `${dd(pIni)}-${yy(pIni)} a ${dd(pFim)}-${yy(pFim)}`;
+  const fc = s => s.code.replace('-', '');
+  const fcTxt = !sheets.length ? '' : sheets.length <= 3 ? sheets.map(fc).join(' ') : `${fc(sheets[0])}-${fc(sheets.at(-1))} (${sheets.length})`;
+  const fileTitle = ['Rel FC', p.code, perTxt, fcTxt, pessoa ? allPeople.get(pessoa)?.name.split(' ')[0] : '', funcao, lab ? '+Contrato' : '']
+    .filter(Boolean).join(' ').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 100);
   return {
     title: `Relatório da Folha de Campo · ${p.code}`,
+    docTitle: fileTitle,
     html: html`${printToolbar({ back: `#/campo?obra=${obra}`, title: `Relatório da Folha de Campo — ${p.code} · ${p.name}`, extra })}
     <div class="doc-stage"><article class="doc a4 fr-doc">
       ${coverHtml()}

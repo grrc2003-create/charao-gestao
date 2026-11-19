@@ -245,11 +245,11 @@ function bindMeasurements(root, m, obra, render) {
 }
 
 // ---------- Contrato de mão de obra: encontro de contas com o fornecedor (medido × pago nas folhas) ----------
-const pctTxt = v => `${Math.round(Number(v) || 0)}%`;
-const signed = v => `${v > 0.004 ? '+\u00a0' : v < -0.004 ? '−\u00a0' : ''}${money(Math.abs(v))}`;
-const saldoTxt = v => (v > 0.004 ? 'a Charão deve ao fornecedor' : v < -0.004 ? 'o fornecedor recebeu a mais' : 'contas batendo');
-const saldoCls = v => (v > 0.004 ? 'lc-pos' : v < -0.004 ? 'lc-neg' : '');
-const howLong = p => {
+export const pctTxt = v => `${Math.round(Number(v) || 0)}%`;
+export const signed = v => `${v > 0.004 ? '+\u00a0' : v < -0.004 ? '−\u00a0' : ''}${money(Math.abs(v))}`;
+export const saldoTxt = v => (v > 0.004 ? 'a Charão deve ao fornecedor' : v < -0.004 ? 'o fornecedor recebeu a mais' : 'contas batendo');
+export const saldoCls = v => (v > 0.004 ? 'lc-pos' : v < -0.004 ? 'lc-neg' : '');
+export const howLong = p => {
   if (!p || !p.days) return null;
   if (p.days >= 45) return `${p.months >= 3 ? Math.round(p.months) : n2(Math.round(p.months * 10) / 10)} meses (${p.days} dias)`;
   if (p.days >= 14) return `${Math.round(p.weeks)} semanas (${p.days} dias)`;
@@ -264,11 +264,11 @@ function laborSection(L) {
     <p class="muted card-body">A mão de obra desta obra tem contrato com um fornecedor? Cadastre o fornecedor e o valor. Em cada folha você lança a medição do fornecedor do período,
       e esta tela vira o resumo do encontro de contas: medido × pago nas folhas, com gráfico do acumulado.</p></section>`;
 }
-const BRLs = v => { const a = Math.abs(v); return a >= 1e6 ? `R$ ${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : a >= 1e3 ? `R$ ${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: a >= 1e5 ? 0 : 1 })} mil` : money(v); };
+export const BRLs = v => { const a = Math.abs(v); return a >= 1e6 ? `R$ ${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : a >= 1e3 ? `R$ ${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: a >= 1e5 ? 0 : 1 })} mil` : money(v); };
 const niceTop = v => { if (v <= 0) return 1000; const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map(m => m * p).find(x => x >= v); };
 const r2c = v => Math.round(v * 100) / 100;
 // ---- Gráfico por data: semanal, quinzenal ou mensal ----
-const GRAN = { semanal: 'Semanal', quinzenal: 'Quinzenal', mensal: 'Mensal' };
+export const GRAN = { semanal: 'Semanal', quinzenal: 'Quinzenal', mensal: 'Mensal' };
 const MESC = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 let lcGran = null; // escolha da pessoa (fica enquanto navega)
 const isoD = d => d.toISOString().slice(0, 10);
@@ -295,7 +295,7 @@ const bucketLabel = (end, g) => {
   return dm(end);
 };
 // Lançamentos com data: folha paga (fim do período da folha), BM (data da medição), retrabalho descontado e aditivo
-function laborEvents(c) {
+export function laborEvents(c) {
   const ev = [];
   for (const r of c.rows) {
     for (const s of r.sheets) ev.push({ date: s.end_date, kind: 'folha', paid: s.total, text: `${s.code} (${dm(s.start_date)}–${dm(s.end_date)}) paga`, amount: s.total });
@@ -308,7 +308,7 @@ function laborEvents(c) {
   }
   return ev.sort((a, b) => a.date.localeCompare(b.date));
 }
-function autoGran(ev) {
+export function autoGran(ev) {
   if (!ev.length) return 'quinzenal';
   const span = (dt(ev.at(-1).date) - dt(ev[0].date)) / 86400e3;
   return span <= 70 ? 'semanal' : span <= 200 ? 'quinzenal' : 'mensal';
@@ -327,7 +327,7 @@ function laborSeries(c, g) {
     return { label: bucketLabel(end, g), ini, end, med, paid, events: here };
   })];
 }
-function laborChart(c, g) {
+export function laborChart(c, g) {
   const pts = laborSeries(c, g);
   const W = 760, H = 270, L = 72, R = 96, T = 16, B = 34;
   const iw = W - L - R, ih = H - T - B;

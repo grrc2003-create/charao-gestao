@@ -1,7 +1,8 @@
 // Relatório detalhado da Folha de Campo (A4): obra, período, profissional e função como filtros; partes escolhidas
 // na barra (presença por dia de cada pessoa, equipe por dia, por pessoa, por serviço/função, empreitadas, medição do
 // terceiro, atividades e pagamentos). Valores só para quem tem a seção Folha de Campo.
-import { html, api, icon, fmtDate, fmtDateTime } from '../core.js';
+import { html, raw, api, icon, fmtDate, fmtDateTime } from '../core.js';
+import { laborChart, laborEvents, autoGran, GRAN, signed, saldoCls, saldoTxt, howLong, pctTxt } from './field.js';
 import { toast, isPdfFile } from '../ui.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 
@@ -19,7 +20,7 @@ const keepCls = rows => (rows <= KEEP_ROWS ? 'avoid' : 'fr-flow');
 
 // Partes do relatório: [chave, rótulo, só com valores]
 const PARTS = [
-  ['pres', 'Presença por dia'], ['dia', 'Equipe por dia'], ['pes', 'Por pessoa'], ['serv', 'Por serviço e função'],
+  ['ctr', 'Contrato de mão de obra', true], ['pres', 'Presença por dia'], ['dia', 'Equipe por dia'], ['pes', 'Por pessoa'], ['serv', 'Por serviço e função'],
   ['emp', 'Empreitadas'], ['med', 'Comparação com a medição', true], ['div', 'Dívidas anteriores', true], ['bm', 'BM anexado', true], ['comp', 'Comprovantes de pagamento', true], ['pag', 'Pagamentos', true], ['ativ', 'Atividades'],
 ];
 
@@ -96,6 +97,8 @@ export async function view({ query, setQuery, render }) {
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
   const [sheets, meas, dv] = await Promise.all([Promise.all(list.map(s => api(`/field/sheets/${s.id}`))), mny && (on('med') || on('bm')) ? api('/field/measurements', { query: { obra } }) : null,
     mny && on('div') ? api('/field/debts', { query: { obra } }) : null]);
+  const lab = mny && on('ctr') ? (await api('/field/labor', { query: { obra } }).catch(() => null))?.contract || null : null;
+  const graf = GRAN[query.get('graf')] ? query.get('graf') : '';
   // BM das medições que cobrem alguma folha do relatório (ou todas, sem filtro de período)
   const inReport = new Set(sheets.map(s => s.id));
   // Em ordem cronológica das medições
@@ -169,7 +172,7 @@ export async function view({ query, setQuery, render }) {
   const periodo = sheets.length ? `${fmtDate(sheets.map(s => s.start_date).sort()[0])} a ${fmtDate(sheets.map(s => s.end_date).sort().at(-1))}` : '—';
 
   // Filtros e partes (barra, fora da impressão)
-  const go = over => { const q = { obra, por: porFolhas ? 'folhas' : '', de, ate, folhas: pickedOk ? [...picked].join(',') : '', pessoa: pessoa || '', funcao, sem: [...off].join(','), ...over }; setQuery(q); render(); };
+  const go = over => { const q = { obra, por: porFolhas ? 'folhas' : '', de, ate, folhas: pickedOk ? [...picked].join(',') : '', pessoa: pessoa || '', funcao, sem: [...off].join(','), graf, ...over }; setQuery(q); render(); };
   const wide = window.matchMedia('(min-width: 721px)').matches;
   const extra = html`<details class="fr-opts" ${wide ? 'open' : ''}><summary>Filtros e partes do relatório</summary><div class="fr-optl"><label class="pt-opt">Obra <select id="fr-obra">${sh.projects.map(x => html`<option value="${x.id}" ${x.id === obra ? 'selected' : ''}>${x.code}</option>`)}</select></label>
     <label class="pt-opt">Filtrar por <select id="fr-por"><option value="">Período</option><option value="folhas" ${porFolhas ? 'selected' : ''}>Folhas</option></select></label>
@@ -177,7 +180,8 @@ export async function view({ query, setQuery, render }) {
       : html`<label class="pt-opt">De <input type="date" id="fr-de" value="${de}"></label><label class="pt-opt">Até <input type="date" id="fr-ate" value="${ate}"></label>`}
     <label class="pt-opt">Pessoa <select id="fr-pes"><option value="">Todas</option>${[...allPeople.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map(x => html`<option value="${x.id}" ${x.id === pessoa ? 'selected' : ''}>${x.name}</option>`)}</select></label>
     <label class="pt-opt">Função <select id="fr-fun"><option value="">Todas</option>${roles.map(r => html`<option ${r === funcao ? 'selected' : ''}>${r}</option>`)}</select></label>
-    ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}</div></details>
+    ${PARTS.filter(([, , m]) => mny || !m).map(([k, l]) => html`<label class="pt-opt"><input type="checkbox" data-part="${k}" ${on(k) ? 'checked' : ''}>${l}</label>`)}
+    ${lab ? html`<label class="pt-opt">Gráfico do contrato <select id="fr-graf"><option value="">Automático</option>${Object.entries(GRAN).map(([k, l]) => html`<option value="${k}" ${graf === k ? 'selected' : ''}>${l}</option>`)}</select></label>` : ''}</div></details>
     ${cover ? html`<span class="pt-opt fr-cover-on">${icon('file')}Carta: ${cover.name} <button type="button" class="fp-undo" id="fr-cover-rm">remover</button></span>`
       : html`<label class="btn btn-ghost btn-sm fr-cover-btn">${icon('file')}Carta de apresentação (PDF)<input type="file" id="fr-cover" accept="application/pdf,.pdf" hidden></label>`}`;
 
@@ -232,6 +236,8 @@ export async function view({ query, setQuery, render }) {
             <tr class="fr-comp-t"><td colspan="2">Total pago a mais</td><td class="num">${money(meas.totals.paid_more + prior)}</td></tr>
           </tbody></table></div>`;
       })()}` : ''}</section>
+
+      ${lab ? laborReport(lab, graf, kpi) : ''}
 
       ${on('pres') ? html`<section class="r-section"><h3 class="r-h">Presença por dia</h3>
         <p class="small muted fr-leg"><span class="frl q1">1</span> diária <span class="frl qh">½</span> meia diária <span class="frl we"></span> fim de semana</p>
@@ -331,6 +337,7 @@ export async function view({ query, setQuery, render }) {
         go({ folhas: ids.length === obraSheets.length ? '' : ids.join(',') });
       }));
       root.querySelector('#fr-pes').addEventListener('change', e => go({ pessoa: e.target.value }));
+      root.querySelector('#fr-graf')?.addEventListener('change', e => go({ graf: e.target.value }));
       root.querySelector('#fr-fun').addEventListener('change', e => go({ funcao: e.target.value }));
       root.querySelectorAll('[data-part]').forEach(c => c.addEventListener('change', () => {
         if (c.checked) off.delete(c.dataset.part); else off.add(c.dataset.part);
@@ -338,4 +345,66 @@ export async function view({ query, setQuery, render }) {
       }));
     },
   };
+}
+
+// ---------- Contrato de mão de obra no relatório (encontro de contas com o fornecedor, contrato até hoje) ----------
+function laborReport(c, graf, kpi) {
+  const g = graf || autoGran(laborEvents(c));
+  const ch = c.rows.length || c.entries.length ? laborChart(c, g) : null;
+  const r2 = v => Math.round(v * 100) / 100;
+  const paidAll = r2(c.paid + (c.start?.paid || 0)), left = r2(c.value - paidAll);
+  const paidPct = c.value > 0 ? r2((paidAll / c.value) * 100) : 0;
+  const gap = r2(c.measured_pct - paidPct);
+  const p = c.projection;
+  const adds = c.entries.filter(e => e.kind === 'aditivo'), rws = c.entries.filter(e => e.kind === 'retrabalho');
+  const bar = (label, pct, val, color, note) => html`<div class="frc-pb"><div class="frc-pb-t"><b>${label}</b> <span>${pctTxt(pct)}</span> <small>${money(val)} de ${money(c.value)}${note ? ` · ${note}` : ''}</small></div>
+    <div class="frc-pb-b"><span style="width:${Math.min(100, Math.max(0, pct))}%;background:${color}"></span></div></div>`;
+  return html`<section class="r-section lc-resumo frc"><h3 class="r-h">Contrato de mão de obra · ${c.supplier}</h3>
+    <p class="small muted" style="margin:0 0 8px">Encontro de contas do contrato até hoje: o que o fornecedor mediu × o que foi pago nas folhas (pelo cliente e pela Charão).${c.supplier_doc ? ` CPF/CNPJ ${c.supplier_doc}.` : ''}</p>
+    <div class="r-kpis frc-kpis avoid">
+      ${kpi('Contrato', money(c.value), c.additions ? `${money(c.total)} + aditivos` : 'sem aditivos')}
+      ${kpi('Medido pelo fornecedor', money(c.measured_total), `${pctTxt(c.measured_pct)} do contrato`, '#2a78d6')}
+      ${kpi('Pago nas folhas', money(c.paid), `${c.rows.reduce((a, x) => a + x.sheets.length, 0)} folha(s)`, '#eb6834')}
+      ${kpi('Falta do contrato', left < -0.004 ? signed(left) : money(left), left < -0.004 ? 'pago acima do contrato' : `${pctTxt(c.value ? (left / c.value) * 100 : 0)} ainda a pagar`, '#2A3D50')}
+      ${kpi('Saldo do fornecedor', signed(c.balance), saldoTxt(c.balance), c.balance < -0.004 ? '#C0392B' : c.balance > 0.004 ? '#1F6B41' : '#2A3D50')}
+    </div>
+    <div class="frc-bars avoid">
+      ${bar('Contrato medido', c.measured_pct, c.measured_total, '#2a78d6', `falta medir ${money(c.to_measure)}`)}
+      ${bar('Pago em folha', paidPct, paidAll, '#eb6834', c.start?.paid ? `inclui ${money(c.start.paid)} antes da ${c.start_sheet?.code || 'conta'}` : '')}
+      <p class="small" style="margin:2px 0 0"><b>${Math.abs(gap) < 0.5 ? 'Medido e pago em folha andando juntos.' : gap < 0 ? `A folha está ${pctTxt(-gap)} do contrato à frente da medição.` : `A medição está ${pctTxt(gap)} do contrato à frente da folha.`}</b></p>
+    </div>
+    ${ch ? html`<div class="frc-chart avoid"><h4 class="fr-h4">Acumulado (${GRAN[g].toLowerCase()}): medido × pago nas folhas</h4>
+      <p class="small muted frc-leg"><i style="background:#2a78d6"></i>Medido (− retrabalhos descontados) <i style="background:#eb6834"></i>Pago nas folhas <i class="frc-dash"></i>Valor final do contrato <i style="background:rgba(31,107,65,.3)"></i>Medido acima <i style="background:rgba(192,57,43,.3)"></i>Folha acima da medição</p>
+      ${raw(ch.svg)}${ch.y0 ? html`<p class="small muted" style="margin:2px 0 0">O eixo vertical começa em ${money(ch.y0)} para mostrar melhor a diferença.</p>` : ''}</div>` : ''}
+    <div class="avoid"><h4 class="fr-h4">Posição do contrato do fornecedor</h4>
+    <table class="r-table frc-pos"><tbody>
+      <tr><td>Valor original do contrato</td><td class="num">${money(c.total)}</td></tr>
+      <tr><td>Aditivos (${adds.length})</td><td class="num">${c.additions ? signed(c.additions) : money(0)}</td></tr>
+      <tr class="fr-sum"><td>Valor atualizado do contrato</td><td class="num">${money(c.value)}</td></tr>
+      <tr><td>Medido pelo fornecedor (acumulado)${c.prior_measured ? ` · inclui ${money(c.prior_measured)} antes da ${c.start_sheet?.code || 'conta'}` : ''}</td><td class="num">${money(c.measured_total)} (${pctTxt(c.measured_pct)})</td></tr>
+      <tr class="fr-sum"><td>Falta medir</td><td class="num">${money(c.to_measure)}</td></tr>
+      <tr><td>Pago nas folhas (acumulado)${c.pending ? ` · ${money(c.pending)} ainda sem medição` : ''}</td><td class="num">${money(c.paid)}</td></tr>
+      <tr class="fr-sum"><td>Falta do contrato pelo pago em folha (valor atualizado − pago)</td><td class="num">${left < -0.004 ? signed(left) : money(left)}</td></tr>
+      <tr><td>Medido − pago nas folhas</td><td class="num">${signed(c.measured - c.paid)}</td></tr>
+      ${c.prior_balance ? html`<tr><td>Saldo anterior do fornecedor${c.start_sheet ? ` (antes da ${c.start_sheet.code})` : ''}</td><td class="num">${signed(c.prior_balance)}</td></tr>` : ''}
+      ${c.deducted ? html`<tr><td>Retrabalhos descontados do fornecedor</td><td class="num">${signed(-c.deducted)}</td></tr>` : ''}
+      <tr class="fr-sum"><td>Saldo do fornecedor · ${saldoTxt(c.balance)}</td><td class="num ${c.balance < -0.004 ? 'late' : ''}">${signed(c.balance)}</td></tr>
+      ${c.noted ? html`<tr><td class="muted">Retrabalhos só registrados (não descontados)</td><td class="num muted">${money(c.noted)}</td></tr>` : ''}
+    </tbody></table>
+    ${p && howLong(p) ? html`<p class="small" style="margin:6px 0 0">No ritmo da última folha (${p.base}: ${money(p.per_day)} pago por dia), o que falta medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</p>` : ''}</div>
+    <div class="${adds.length + 2 <= KEEP_ROWS ? 'avoid' : 'fr-flow'}"><h4 class="fr-h4">Contrato e aditivos</h4>
+    <table class="r-table"><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th></tr></thead><tbody>
+      <tr><td class="small nowrap">—</td><td><b>Contrato original</b> · ${c.supplier}</td><td class="num">${money(c.total)}</td></tr>
+      ${adds.map(e => html`<tr><td class="small nowrap">${fmtDate(e.ref_date)}</td><td>Aditivo · ${e.description}</td><td class="num">${signed(e.amount)}</td></tr>`)}
+      <tr class="fr-sum"><td colspan="2">Valor atualizado do contrato</td><td class="num">${money(c.value)}</td></tr></tbody></table></div>
+    ${rws.length ? html`<div class="${keepCls(rws.length + 2)}"><h4 class="fr-h4">Retrabalhos e gastos extras do fornecedor</h4>
+    <table class="r-table"><thead><tr><th>Data</th><th>O que aconteceu</th><th class="num">Valor</th><th>Desconta do fornecedor</th></tr></thead><tbody>
+      ${rws.map(e => html`<tr><td class="small nowrap">${fmtDate(e.ref_date)}</td><td>${e.description}</td><td class="num">${money(e.amount)}</td><td class="small">${e.deduct ? 'Sim' : 'Não (só registrado)'}</td></tr>`)}
+      <tr class="fr-sum"><td colspan="2">Descontado do fornecedor</td><td class="num">${money(c.deducted)}</td><td></td></tr></tbody></table></div>` : ''}
+    ${c.rows.length ? html`<div class="${keepCls(c.rows.length + 2)}"><h4 class="fr-h4">Folhas × medição do fornecedor</h4>
+    <table class="r-table"><thead><tr><th>Folha</th><th>Período</th><th class="num">Pago na folha</th><th class="num">Medido</th><th class="num">Diferença</th><th class="num">Saldo acumulado</th></tr></thead><tbody>
+      ${c.rows.map(x => html`<tr><td class="nowrap"><b>${x.sheets.map(y => y.code).join(', ') || 'Medição avulsa'}</b></td><td class="small nowrap">${dm(x.start_date)}${x.end_date !== x.start_date ? ` a ${dm(x.end_date)}` : ''}</td>
+        <td class="num">${money(x.paid)}</td><td class="num">${x.measured === null ? 'aguardando' : money(x.measured)}</td><td class="num">${x.diff === null ? '—' : signed(x.diff)}</td><td class="num ${x.diff_acc < -0.004 ? 'late' : ''}">${signed(x.diff_acc)}</td></tr>`)}
+      <tr class="fr-sum"><td colspan="2">Total</td><td class="num">${money(c.paid)}</td><td class="num">${money(c.measured)}</td><td class="num">${signed(c.measured - c.paid)}</td><td></td></tr></tbody></table></div>` : ''}
+  </section>`;
 }

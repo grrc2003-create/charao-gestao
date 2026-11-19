@@ -4811,3 +4811,20 @@ body:has(.sticky-actions) .charao { bottom: calc(var(--bottombar-h) + env(safe-a
 .lc-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .lc-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .lc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Relatório da Folha de Campo: contrato de mão de obra */
+.frc .frc-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.frc .r-kpi-v { white-space: nowrap; }
+.frc-bars { display: grid; gap: 6px; margin: 10px 0; }
+.frc-pb-t { font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.frc-pb-t small { color: #5B6773; }
+.frc-pb-b { height: 9px; border-radius: 999px; background: #E9E6DF; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.frc-pb-b span { display: block; height: 100%; border-radius: 999px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.frc-chart { margin: 8px 0 10px; }
+.frc-chart .ct-svg { min-width: 0; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.frc-leg { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; margin: 0 0 4px; }
+.frc-leg i { display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin-right: 4px; vertical-align: middle; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.frc-leg i.frc-dash { background: repeating-linear-gradient(90deg, #2A3D50 0 4px, transparent 4px 7px); }
+.frc-pos td:first-child { width: 75%; }
+.frc .r-kpi-v { font-size: 14px; }
+.frc .r-kpi { min-width: 0; padding-left: 8px; padding-right: 6px; }

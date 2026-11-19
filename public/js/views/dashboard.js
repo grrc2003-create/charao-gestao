@@ -63,7 +63,8 @@ export async function view({ state, query, setQuery }) {
   const cos = companiesIn(state.meta, state.meta.projects.map(p => p.company_id));
   const u = state.user;
   const s = d.summary;
-  const mood = moodSummary(s, empresa ? ' nesta empresa' : ' na empresa');
+  const mood = moodSummary(s, empresa ? ' nesta empresa' : ' na empresa',
+    { late: d.late || [], more: { label: 'Ver todas as atrasadas em Tarefas', href: `#/tarefas?status=atrasada${empresa ? `&empresa=${encodeURIComponent(empresa)}` : ''}` } });
   const firstName = u.name.split(' ')[0];
   const ranking = rankUsers(d.users);
   const projects = [...d.projects].sort((a, b) => (a.status === 'concluido') - (b.status === 'concluido') || b.summary.late - a.summary.late);

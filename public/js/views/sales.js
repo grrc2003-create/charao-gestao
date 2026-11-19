@@ -272,10 +272,13 @@ export async function board({ state, query, setQuery, render, navigate }) {
   // Charão: oportunidades paradas há mais de 30 dias e ganhas no filtro
   const kindOf = o => d.stages.find(x => x.id === o.stage_id)?.kind;
   const openOpp = visible.filter(o => !['ganho', 'perdido'].includes(kindOf(o)));
-  const stale = openOpp.filter(o => daysSince(o.stage_since) > 30).length;
+  const staleL = openOpp.filter(o => daysSince(o.stage_since) > 30).sort((a, b) => daysSince(b.stage_since) - daysSince(a.stage_since));
+  const stale = staleL.length;
   const won = visible.filter(o => kindOf(o) === 'ganho').length;
   const mood = !visible.length ? { tone: 'espera', text: q || empresa ? 'Nenhuma oportunidade neste filtro.' : 'Funil vazio por enquanto.' }
-    : stale ? { tone: 'atencao', text: `${stale} ${stale === 1 ? 'oportunidade parada' : 'oportunidades paradas'} há mais de 30 dias na mesma etapa.` }
+    : stale ? { tone: 'atencao', text: `${stale} ${stale === 1 ? 'oportunidade parada' : 'oportunidades paradas'} há mais de 30 dias na mesma etapa.`, total: stale,
+      points: staleL.slice(0, 30).map(o => ({ label: `${o.code} · ${o.client || o.title || 'Oportunidade'}`,
+        sub: `${daysSince(o.stage_since)} dias em ${d.stages.find(x => x.id === o.stage_id)?.name || 'mesma etapa'}`, href: `#/vendas/${o.id}` })) }
       : won ? { tone: 'parabens', text: `${won} ${won === 1 ? 'oportunidade ganha' : 'oportunidades ganhas'} no funil!` }
         : { tone: 'parabens', text: `Funil andando: ${openOpp.length} em negociação.` };
   const sum = l => l.reduce((s, o) => s + (o.final_value || 0), 0);

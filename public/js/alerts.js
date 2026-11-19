@@ -20,6 +20,7 @@ const lastMood = new Map(); // última reação por tela (só reage quando o res
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } } };
 
 let screenTone = 'espera'; // pose da tela atual (fica até mudar a tela ou o resultado do filtro)
+let screenInfo = null;      // o que o Charão apontou na tela (atenção/insatisfação), listado ao clicar nele
 let playing = false;
 
 // Pose de descanso: a da tela atual (parada, com leve respiração) ou a espera animada
@@ -32,6 +33,8 @@ function rest() {
   if (!img.src.endsWith(src)) img.src = src;
   img.classList.toggle('ch-hold', t !== 'espera');
 }
+
+const root0 = () => document.getElementById('charao');
 
 function play(state) {
   const img = document.querySelector('#charao .ch-img');
@@ -66,6 +69,38 @@ const item = a => html`<div class="al-item al-${a.tone}" data-alert="${a.id}">
   </div>
 </div>`;
 
+// Pontos da tela atual (tarefas atrasadas, contas, oportunidades paradas...) com atalho para cada um
+function pointsHtml() {
+  const m = screenInfo;
+  if (!m) return '';
+  const pts = m.points || [];
+  const rest = Math.max(0, (m.total || pts.length) - pts.length);
+  return html`<section class="ch-pts ch-pts-${m.tone}" aria-label="O que o Charão viu nesta tela">
+    <div class="ch-pts-head"><img src="${BASE}${m.tone}.png" alt="" width="40" height="40"><div><small>Nesta tela</small><b>${m.text}</b></div></div>
+    ${pts.length ? html`<ul class="ch-pts-list">${pts.map((p, i) => html`<li><button type="button" class="ch-pt" data-pt="${i}">
+      <span class="ch-pt-t"><b>${p.label}</b>${p.sub ? html`<small>${p.sub}</small>` : ''}</span><span class="ch-pt-go">${p.href ? 'Abrir' : 'Ir até'} ›</span></button></li>`)}</ul>` : ''}
+    ${rest ? html`<p class="ch-pts-rest">e mais ${rest}.</p>` : ''}
+    ${m.more ? html`<a class="btn btn-ghost btn-sm ch-pts-more" href="${m.more.href}" data-open-task>${m.more.label}</a>` : ''}
+  </section>`;
+}
+
+// Vai até o ponto: abre a outra tela, ou rola até o item desta tela e destaca
+function goPoint(i) {
+  const p = screenInfo?.points?.[i];
+  if (!p) return;
+  setOpen(false);
+  if (p.href) { location.hash = p.href.replace(/^#/, ''); return; }
+  const all = [...document.querySelectorAll(p.sel)];
+  const el = all.find(e => e.offsetParent !== null);
+  if (!el) { if (all[0]) all[0].click(); else toast('Este item não está mais na tela.'); return; }
+  el.scrollIntoView({ behavior: reduced.matches ? 'auto' : 'smooth', block: 'center' });
+  el.classList.remove('ch-flash');
+  void el.offsetWidth;
+  el.classList.add('ch-flash');
+  setTimeout(() => el.classList.remove('ch-flash'), 2600);
+  if (el.matches('button, a, [tabindex]')) el.focus({ preventScroll: true });
+}
+
 function drawPanel() {
   const root = document.getElementById('charao');
   if (!root) return;
@@ -75,8 +110,9 @@ function drawPanel() {
   badge.hidden = !n;
   badge.textContent = n > 9 ? '9+' : String(n);
   root.querySelector('.ch-btn').setAttribute('aria-label', n ? `Charão: ${n} aviso(s). Abrir avisos` : 'Charão: nenhum aviso. Abrir avisos');
-  root.querySelector('.ch-list').innerHTML = (n ? html`${list.map(item)}`
-    : html`<div class="ch-empty">Tudo em dia por aqui. Quando chegar um aviso de tarefa, eu te chamo.</div>`).toString();
+  root.querySelector('.ch-list').innerHTML = html`${pointsHtml()}${screenInfo && n ? html`<h3 class="ch-sec">Avisos de tarefas</h3>` : ''}${n ? html`${list.map(item)}`
+    : screenInfo ? html`<div class="ch-empty ch-empty-sm">Nenhum aviso de tarefa para você.</div>`
+      : html`<div class="ch-empty">Tudo em dia por aqui. Quando chegar um aviso de tarefa, eu te chamo.</div>`}`.toString();
   root.querySelector('[data-seen-all]').hidden = n < 2;
   root.querySelector('.ch-count').textContent = n ? `${n} aviso(s)` : 'sem avisos';
 }
@@ -84,6 +120,7 @@ function drawPanel() {
 function setOpen(open) {
   const root = document.getElementById('charao');
   if (!root) return;
+  if (open) drawPanel(); // mostra o que o Charão está vendo na tela agora
   root.querySelector('.ch-panel').hidden = !open;
   root.querySelector('.ch-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
   if (open) root.querySelector('.ch-bubble').hidden = true;
@@ -116,6 +153,8 @@ export async function refreshAlerts() {
 export function screenMood(m, key, enabled = true) {
   // A pose acompanha a tela sempre; animação e balão só quando o resultado muda
   screenTone = enabled && m && STATES[m.tone] ? m.tone : 'espera';
+  screenInfo = screenTone === 'atencao' || screenTone === 'insatisfacao' ? m : null;
+  if (root0()?.querySelector('.ch-panel')?.hidden === false) drawPanel();
   const root = document.getElementById('charao');
   const sig = enabled && m ? `${m.tone}|${m.text}` : null;
   const changed = !!sig && lastMood.get(key) !== sig;
@@ -144,6 +183,8 @@ export function startAlerts() {
   root.addEventListener('click', async e => {
     if (e.target.closest('.ch-btn') || e.target.closest('.ch-bubble')) return setOpen(root.querySelector('.ch-panel').hidden);
     if (e.target.closest('[data-ch-close]') || e.target.closest('[data-open-task]')) return setOpen(false);
+    const pt = e.target.closest('[data-pt]');
+    if (pt) return goPoint(Number(pt.dataset.pt));
     if (e.target.closest('[data-ch-hide]')) {
       store.set(HIDE_KEY, String(list.reduce((m, a) => Math.max(m, a.id), 0) || 1));
       setOpen(false);

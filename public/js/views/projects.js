@@ -36,7 +36,10 @@ export async function list({ state, query, setQuery }) {
   const shownP = projects.filter(groups[filter] || groups.ativos);
   const lateP = shownP.filter(p => p.summary?.late);
   const mood = !shownP.length ? { tone: 'espera', text: 'Nenhum projeto neste filtro.' }
-    : lateP.length ? { tone: 'insatisfacao', text: `${lateP.length} ${lateP.length === 1 ? 'projeto' : 'projetos'} com tarefas atrasadas${lateP.length <= 2 ? `: ${lateP.map(p => p.code).join(', ')}` : ''}.` }
+    : lateP.length ? { tone: 'insatisfacao', text: `${lateP.length} ${lateP.length === 1 ? 'projeto' : 'projetos'} com tarefas atrasadas${lateP.length <= 2 ? `: ${lateP.map(p => p.code).join(', ')}` : ''}.`,
+      total: lateP.length,
+      points: [...lateP].sort((a, b) => b.summary.late - a.summary.late).slice(0, 30)
+        .map(p => ({ label: `${p.code} · ${p.name}`, sub: `${p.summary.late} ${p.summary.late === 1 ? 'tarefa atrasada' : 'tarefas atrasadas'}`, href: `#/projetos/${p.id}` })) }
       : { tone: 'parabens', text: `Nenhum projeto com atraso (${shownP.length} ${shownP.length === 1 ? 'projeto' : 'projetos'}).` };
   return {
     title: 'Projetos',

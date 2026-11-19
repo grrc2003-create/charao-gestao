@@ -4625,3 +4625,27 @@ body:has(.sticky-actions) .charao { bottom: calc(var(--bottombar-h) + env(safe-a
 @keyframes ch-breathe { 0%, 100% { transform: scale(1.3) translateY(0); } 50% { transform: scale(1.32) translateY(-2px); } }
 .ch-btn img.ch-hold { animation: ch-breathe 3.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ch-btn img.ch-hold { animation: none; } }
+
+/* Charão: ao clicar nele com atenção/insatisfação, lista o que viu na tela e leva até cada ponto */
+.ch-pts { display: grid; gap: 8px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.ch-pts-atencao { border-color: var(--orange-200, #f3c9a6); background: var(--orange-50); }
+.ch-pts-insatisfacao { border-color: var(--st-atrasada); background: var(--st-atrasada-bg); }
+.ch-pts-head { display: flex; align-items: center; gap: 10px; }
+.ch-pts-head img { width: 40px; height: 40px; flex: none; }
+.ch-pts-head div { display: grid; line-height: 1.25; min-width: 0; }
+.ch-pts-head small { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+.ch-pts-head b { font-size: 14px; color: var(--ink); }
+.ch-pts-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ch-pt { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font: inherit; text-align: left; cursor: pointer; color: var(--ink); }
+.ch-pt:hover, .ch-pt:focus-visible { border-color: var(--navy-700); }
+.ch-pt-t { display: grid; min-width: 0; margin-right: auto; line-height: 1.25; }
+.ch-pt-t b { font-size: 13.5px; font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-pt-t small { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-pt-go { flex: none; font-size: 12.5px; font-weight: 650; color: var(--navy-700); }
+.ch-pts-rest { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.ch-pts-more { justify-self: start; }
+.ch-sec { margin: 6px 2px 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+.ch-empty-sm { padding: 8px 12px; font-size: 13px; }
+@keyframes ch-flash { 0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); } 20%, 60% { box-shadow: 0 0 0 4px rgba(217, 119, 6, .55); } }
+.ch-flash { animation: ch-flash 1.2s ease-in-out 2; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) { .ch-flash { animation: none; outline: 3px solid var(--orange-700); outline-offset: 2px; } }

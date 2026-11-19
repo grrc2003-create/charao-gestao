@@ -135,7 +135,7 @@ export async function view({ state, query, setQuery, render }) {
     ['paga', 'Pagas no mês', inMonth.filter(i => i.situation === 'paga')],
     ['antes', 'Sem pagamento (antes do início do controle)', inMonth.filter(i => i.situation === 'antes')],
   ];
-  const row = i => html`<li class="fin-row ${SIT[i.situation].cls}">
+  const row = i => html`<li class="fin-row ${SIT[i.situation].cls}" data-fin="${i.id}">
     <div class="fin-row-main"><b>${i.title}</b><small>${i.category} · ${i.frequency_label}${i.assignee_name ? ` · ${i.assignee_name}` : ''}</small></div>
     <div class="fin-row-due"><span>${fmtDate(i.due_date)}</span>${sitBadge(i.situation)}${i.situation === 'a_conferir' ? html`<small>registrar até ${fmtDate(i.task_limit)}</small>` : ''}</div>
     <div class="fin-row-val"><b>${money(i.status === 'paga' ? (i.paid_amount ?? i.amount_expected) : i.amount_expected)}</b>${i.status === 'paga' ? html`<small>pago em ${fmtDate(i.paid_date)}</small>` : i.estimated ? html`<small class="fin-est">valor estimado</small>` : i.variable ? html`<small>valor variável</small>` : ''}${i.payroll_ref ? html`<small>Folha ${i.payroll_ref.slice(5, 7)}/${i.payroll_ref.slice(0, 4)} vinculada</small>` : ''}</div>
@@ -152,9 +152,11 @@ export async function view({ state, query, setQuery, render }) {
   // Charão: contas atrasadas, vencendo hoje ou tudo pago no mês
   const sitN = k => items.filter(i => i.situation === k).length;
   const lateN = sitN('atrasada'), todayN = sitN('hoje');
+  const finPts = k => items.filter(i => i.situation === k).slice(0, 30)
+    .map(i => ({ label: i.title, sub: `${money(i.amount_expected)} · vence ${fmtDate(i.due_date)}${i.assignee_name ? ` · ${i.assignee_name}` : ''}`, sel: `.fin-row[data-fin="${i.id}"]` }));
   const mood = !items.length ? { tone: 'espera', text: 'Nenhuma conta neste mês.' }
-    : lateN ? { tone: 'insatisfacao', text: `${lateN} ${lateN === 1 ? 'conta atrasada' : 'contas atrasadas'} neste mês.` }
-      : todayN ? { tone: 'atencao', text: `${todayN} ${todayN === 1 ? 'conta vence' : 'contas vencem'} hoje.` }
+    : lateN ? { tone: 'insatisfacao', text: `${lateN} ${lateN === 1 ? 'conta atrasada' : 'contas atrasadas'} neste mês.`, points: finPts('atrasada'), total: lateN }
+      : todayN ? { tone: 'atencao', text: `${todayN} ${todayN === 1 ? 'conta vence' : 'contas vencem'} hoje.`, points: finPts('hoje'), total: todayN }
         : paidPct >= 100 ? { tone: 'parabens', text: 'Tudo pago neste mês!' }
           : { tone: 'parabens', text: `Nada atrasado · ${paidPct}% do previsto já pago.` };
   return {

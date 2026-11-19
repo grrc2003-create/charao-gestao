@@ -47,7 +47,7 @@ export async function view({ params, query, setQuery, render, navigate }) {
     : null;
 
   return {
-    mood: moodSummary(p.summary, ' neste projeto'),
+    mood: moodSummary(p.summary, ' neste projeto', { late: p.tasks.filter(t => t.eff_status === 'atrasada'), more: { label: 'Ver as atrasadas em Tarefas', href: `#/tarefas?project=${p.id}&status=atrasada` } }),
     title: `${p.code} · ${p.name}`,
     html: html`
       ${pageHead({

@@ -21,7 +21,6 @@ export async function view({ state, query, setQuery, render }) {
   const [d, vac, reimb, rq, abs] = await Promise.all([api(`/users/${me.id}`), api('/vacations/me').catch(() => null), api('/reimbursements/me').catch(() => null), api('/review-queue').catch(() => []), me.is_external ? null : api('/absences/me').catch(() => null)]);
   const s = d.stats;
   const reviewN = Array.isArray(rq) ? rq.length : 0;
-  const mood = moodSummary(s, ' nas suas tarefas', { awaiting: reviewN, awaitingText: `${reviewN} ${reviewN === 1 ? 'entrega esperando' : 'entregas esperando'} você conferir.` });
   const first = me.name.split(' ')[0];
   const can = state.meta.can;
   const sec = k => !can.sections || can.sections.includes(k);
@@ -30,6 +29,10 @@ export async function view({ state, query, setQuery, render }) {
   const late = open.filter(t => t.eff_status === 'atrasada').sort((a, b) => b.days_late - a.days_late);
   const soon = open.filter(t => t.eff_status !== 'atrasada' && t.days_to_due !== null && t.days_to_due <= 7).sort((a, b) => a.days_to_due - b.days_to_due);
   const review = d.tasks.filter(t => t.eff_status === 'aguardando_conferencia');
+  const mood = moodSummary(s, ' nas suas tarefas', {
+    awaiting: reviewN, awaitingText: `${reviewN} ${reviewN === 1 ? 'entrega esperando' : 'entregas esperando'} você conferir.`,
+    late, review: Array.isArray(rq) ? rq : [], more: { label: 'Ver minhas atrasadas em Tarefas', href: `#/tarefas?status=atrasada&assignee=${me.id}` },
+  });
 
   const taskRow = (t, who = false) => {
     const due = dueInfo(t);

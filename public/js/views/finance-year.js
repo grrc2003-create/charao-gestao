@@ -103,7 +103,9 @@ export async function view({ state, query, setQuery, render }) {
   };
 
   // Charão: contas atrasadas no ano (ou tudo em dia)
-  const mood = T.late ? { tone: 'insatisfacao', text: `${T.late} ${T.late === 1 ? 'conta atrasada' : 'contas atrasadas'} no ano (${money(T.late_amount)} previsto).` }
+  const lateCells = d.groups.flatMap(g => g.rows.flatMap(r => r.cells.map((c, i) => c?.status === 'atrasada' ? { r, c, i } : null).filter(Boolean)));
+  const mood = T.late ? { tone: 'insatisfacao', text: `${T.late} ${T.late === 1 ? 'conta atrasada' : 'contas atrasadas'} no ano (${money(T.late_amount)} previsto).`, total: lateCells.length,
+    points: lateCells.slice(0, 30).map(({ r, c, i }) => ({ label: `${r.title} · ${MESES[i]}`, sub: `previsto ${money(c.planned)} · vence ${fmtDate(c.due_date)}`, sel: `[data-o="${r.id}"][data-i="${i}"]` })) }
     : { tone: 'parabens', text: 'Nenhuma conta atrasada no ano!' };
   return {
     mood,

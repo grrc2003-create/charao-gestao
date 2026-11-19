@@ -2969,6 +2969,42 @@ async function main() {
   const fcSumP = fcSum.workers.find(w => w.worker_id === fcP.id);
   ok(fcSum.sheets === 2 && fcSumP.diarias === 5 && fcSumP.company_pending === 1500 && fcSum.totals.pending === fcCl2.payment.amount && fcSum.contracts.find(c => c.id === fcC.id).measured_pct === 100, 'consolidado da obra: diárias, a pagar e empreitada');
   ok((await fcJul('GET', '/field/summary?obra=2')).status === 403, 'consolidado com valores só para a seção');
+  // Contrato de mão de obra: encontro de contas (medição do fornecedor × pago na folha), aditivos e retrabalhos
+  {
+    const lcT1 = (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.totals.total, lcT2 = (await fcAna('GET', `/field/sheets/${fcS2.id}`)).data.totals.total;
+    ok((await fcJul('GET', '/field/labor?obra=2')).status === 403 && (await fcJul('PUT', '/field/labor', { project_id: 2, supplier: 'X', total: 1 })).status === 403, 'contrato de mão de obra: só a seção Folha de Campo');
+    ok((await fcAna('PUT', '/field/labor', { project_id: 2, supplier: 'Empreiteira Teste', total: 0 })).status === 400 && (await fcAna('PUT', '/field/labor', { project_id: 2, total: 1000 })).status === 400, 'contrato exige fornecedor e valor');
+    let L = (await fcAna('PUT', '/field/labor', { project_id: 2, supplier: 'Empreiteira Teste', total: 100000 })).data.contract;
+    ok(L.rows.length === 2 && L.pending_sheets === 2 && Math.abs(L.pending - (lcT1 + lcT2)) < 0.01 && Math.abs(L.balance + lcT1 + lcT2) < 0.01 && L.to_measure === 100000, 'sem medição: folhas aguardando medição já contam como pagas (saldo negativo)');
+    ok((await fcJul('GET', `/field/sheets/${fcS.id}`)).data.labor === null && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.labor.supplier === 'Empreiteira Teste', 'a folha mostra o contrato só para a seção');
+    const m1 = (await fcAna('PUT', `/field/sheets/${fcS.id}/measurement`, { amount: lcT1 + 500 })).data;
+    ok(m1.labor.measurement.amount === lcT1 + 500 && !m1.labor.measurement.shared, 'medição do fornecedor lançada na própria folha');
+    L = (await fcAna('GET', '/field/labor?obra=2')).data.contract;
+    const r1 = L.rows.find(r => r.sheets.some(x => x.id === fcS.id));
+    ok(r1.diff === 500 && Math.abs(L.balance - (500 - lcT2)) < 0.01 && L.measured === lcT1 + 500 && L.pending_sheets === 1, 'medido acima do pago na folha; a folha sem medição pesa no saldo');
+    const lastRow = L.rows.at(-1);
+    ok(r1.measured_acc === lcT1 + 500 && Math.abs(lastRow.paid_acc - (lcT1 + lcT2)) < 0.01 && Math.abs(lastRow.diff_acc - L.balance) < 0.01, 'acumulado folha a folha (medido × pago) para o gráfico');
+    await fcAna('PUT', `/field/sheets/${fcS2.id}/measurement`, { amount: lcT2 - 800, ref_date: '2026-09-20' });
+    L = (await fcAna('GET', '/field/labor?obra=2')).data.contract;
+    ok(L.balance === -300 && L.pending_sheets === 0 && Math.abs(L.to_measure - (100000 - (lcT1 + lcT2 - 300))) < 0.01 && L.projection?.per_day > 0, 'acumulado: medido − pago das folhas; falta medir e prazo pelo ritmo da medição');
+    await fcAna('PUT', `/field/sheets/${fcS2.id}/measurement`, { amount: lcT2 });
+    ok((await fcAna('GET', '/field/labor?obra=2')).data.contract.balance === 500 && (await fcAna('GET', '/field/measurements?obra=2')).data.measurements.filter(m => m.supplier === 'Empreiteira Teste').length === 2, 'corrigir a medição da folha atualiza a mesma medição (aparece em Medição do terceiro)');
+    L = (await fcAna('POST', '/field/labor/entries', { project_id: 2, kind: 'aditivo', amount: 20000, ref_date: '2026-09-20', description: 'Aditivo teste' })).data.contract;
+    ok(L.value === 120000 && L.balance === 500, 'aditivo aumenta o valor do contrato (não mexe no saldo do encontro)');
+    L = (await fcAna('POST', '/field/labor/entries', { project_id: 2, kind: 'retrabalho', amount: 300, ref_date: '2026-09-21', description: 'Reboco refeito (falha do fornecedor)' })).data.contract;
+    const rw = L.entries.find(e => e.kind === 'retrabalho');
+    ok(L.noted === 300 && L.balance === 500 && !rw.deduct, 'retrabalho sem desconto fica só registrado');
+    L = (await fcAna('PUT', `/field/labor-entries/${rw.id}`, { deduct: true })).data.contract;
+    ok(L.deducted === 300 && L.balance === 200, 'retrabalho válido para desconto abate do saldo do fornecedor');
+    ok((await fcAna('POST', '/field/labor/entries', { project_id: 2, kind: 'retrabalho', amount: 10, ref_date: '2026-09-21' })).status === 400
+      && (await fcAna('POST', '/field/labor/entries', { project_id: 2, kind: 'retrabalho', amount: 10, ref_date: '2026-09-21', description: 'x', files: [{ name: 'a.txt', data: 'data:text/plain;base64,eA==' }] })).status === 400, 'retrabalho exige descrição; anexo só PDF ou foto');
+    L = (await fcAna('PUT', '/field/labor', { project_id: 2, supplier: 'Empreiteira Teste', total: 100000, start_sheet_id: fcS2.id, prior_measured: 30000, prior_balance: -1000 })).data.contract;
+    ok(L.rows.length === 1 && L.measured_total === 30000 + lcT2 && L.balance === -1000 - 300, 'obra já em andamento: já medido e saldo anteriores + conta a partir da folha escolhida');
+    ok((await fcAna('DELETE', `/field/sheets/${fcS2.id}`)).status === 400, 'folha inicial do contrato não pode ser excluída');
+    const lcMeas = (await fcAna('GET', '/field/measurements?obra=2')).data.measurements.filter(m => m.supplier === 'Empreiteira Teste');
+    for (const m of lcMeas) await fcAna('DELETE', `/field/measurements/${m.id}`);
+    ok((await fcAna('DELETE', '/field/labor/2')).data.contract === null && (await fcAna('GET', `/field/sheets/${fcS.id}`)).data.labor === null, 'contrato removido; folhas não mudam');
+  }
   const fcPay = (await fcAna('GET', '/field/payments?obra=2')).data;
   const fcPayP = fcPay.people.find(p => p.worker_id === fcP.id), fcPayE = fcPay.people.find(p => p.worker_id === fcE.id);
   ok(fcPayP.pending === 1500 && !fcPayP.pix && fcPayP.items[0].state === 'pending' && fcPayE.pending === 2000 && fcPayE.open === 3000 && fcPayE.pix === 'pix-ficticio-2', 'pagamentos: quem recebe, quanto (a pagar e previsto) e o PIX (sem PIX quando o cadastro não tem)');

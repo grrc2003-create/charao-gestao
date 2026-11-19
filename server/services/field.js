@@ -412,6 +412,7 @@ export function getSheet(ctx, id) {
   return {
     id: s.id, code: fcCode(s.seq), project: { id: p.id, code: p.code, name: p.name, client: p.client, municipio: p.municipio || null, uf: p.uf || null },
     start_date: s.start_date, end_date: s.end_date, days: daysOf(s.start_date, s.end_date), status: s.status, activities: s.activities,
+    labor: sheetLabor(ctx, s), // contrato de mão de obra: medição do fornecedor desta folha (só a seção Folha de Campo)
     closed_at: s.closed_at, closed_by_name: s.closed_by ? one('SELECT name FROM users WHERE id = ?', s.closed_by)?.name : null,
     people: money ? c.people : c.people.map(e => strip(e, MONEY_PEOPLE)),
     contracts: money ? c.contracts : c.contracts.map(x => strip(x, MONEY_CONTRACT)),
@@ -535,6 +536,7 @@ export function deleteSheet(ctx, id, ip) {
   openOnly(s);
   // Folha reaberta com pagamentos registrados: excluir apagaria os pagamentos e comprovantes
   if (linesPaid(s.id)) throw badRequest('Esta folha tem pagamentos registrados e não pode ser excluída. Corrija os valores e feche de novo.');
+  if (one('SELECT 1 FROM field_labor_contracts WHERE start_sheet_id = ?', s.id)) throw badRequest('O contrato de mão de obra começa a conta nesta folha. Troque a folha inicial no contrato antes de excluí-la.');
   run('DELETE FROM field_sheets WHERE id = ?', s.id);
   audit(ctx.user.id, 'field', s.id, 'Folha de campo excluída', { folha: fcCode(s.seq), obra: s.project_id }, ip);
   return { ok: true };
@@ -1204,4 +1206,238 @@ export function debtFileForUser(ctx, fileId) {
   if (!f) throw notFound('Arquivo não encontrado.');
   loadDebt(ctx, f.debt_id);
   return f;
+}
+// ---------- Contrato de mão de obra da obra: encontro de contas com o fornecedor ----------
+// A obra define se tem contrato (fornecedor + valor). Cada folha paga é comparada com a medição do fornecedor do mesmo
+// período (a medição do terceiro, lançada na própria folha): medido − pago = saldo do fornecedor
+// (positivo: a empresa deve a ele; negativo: ele recebeu a mais). Folhas ainda sem medição ficam "aguardando medição".
+// Aditivo aumenta o valor do contrato; retrabalho por falha do fornecedor (pago pelo cliente) desconta do saldo dele
+// só quando marcado como válido para desconto. Obra já em andamento: já medido e saldo anteriores + folha inicial.
+const LABOR_KINDS = { aditivo: 'Aditivo', retrabalho: 'Retrabalho / gasto extra' };
+const DAY_MS = 86400e3;
+const isoAdd = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+const calDays = s => Math.round((Date.parse(`${s.end_date}T00:00:00Z`) - Date.parse(`${s.start_date}T00:00:00Z`)) / DAY_MS) + 1;
+const pctOf = (a, b) => (b > 0 ? r2((a / b) * 100) : 0);
+const laborRow = projectId => one('SELECT * FROM field_labor_contracts WHERE project_id = ?', projectId);
+const laborFiles = id => all('SELECT id, mime, size, original_name FROM field_labor_entry_files WHERE entry_id = ? ORDER BY id', id);
+const measSheets = id => all('SELECT sheet_id FROM field_measurement_sheets WHERE measurement_id = ?', id).map(r => r.sheet_id);
+
+// Folhas que entram na conta (a partir da folha inicial, se houver)
+function laborSheets(c, projectId) {
+  const list = all('SELECT * FROM field_sheets WHERE project_id = ? ORDER BY start_date, id', projectId);
+  const i = c?.start_sheet_id ? list.findIndex(s => s.id === c.start_sheet_id) : 0;
+  return list.slice(Math.max(0, i));
+}
+
+export function laborContract(ctx, projectId) {
+  requireMoney(ctx);
+  const p = requireProject(ctx, projectId);
+  const c = laborRow(p.id);
+  const allSheets = all('SELECT id, seq, start_date, end_date, status FROM field_sheets WHERE project_id = ? ORDER BY start_date, id', p.id);
+  const base = {
+    sheets_options: allSheets.map(s => ({ id: s.id, code: fcCode(s.seq), start_date: s.start_date, end_date: s.end_date, status: s.status })),
+    suppliers: all(`SELECT DISTINCT supplier FROM field_measurements WHERE project_id = ? AND supplier IS NOT NULL AND supplier <> '' ORDER BY supplier`, p.id).map(r => r.supplier),
+  };
+  if (!c) return { contract: null, ...base };
+  const sheets = laborSheets(c, p.id);
+  const ids = new Set(sheets.map(s => s.id));
+  const startDate = sheets[0]?.start_date || null;
+  const tot = new Map(sheets.map(s => [s.id, computeSheet(s).totals.total]));
+  const code = new Map(sheets.map(s => [s.id, fcCode(s.seq)]));
+  const meas = all('SELECT * FROM field_measurements WHERE project_id = ? ORDER BY ref_date, id', p.id)
+    .map(m => ({ ...m, sheet_ids: measSheets(m.id), files: all('SELECT id FROM field_measurement_files WHERE measurement_id = ?', m.id).length }))
+    .filter(m => m.sheet_ids.some(id => ids.has(id)) || (!m.sheet_ids.length && (!c.start_sheet_id || !startDate || m.ref_date >= startDate)));
+  // Linhas do encontro de contas: folha (ou grupo de folhas da mesma medição) × medição
+  const rows = [], done = new Set();
+  // Folha na linha do encontro: código, situação, período e valor pago (para o gráfico por data)
+  const shOut = x => ({ id: x.id, code: code.get(x.id), status: x.status, start_date: x.start_date, end_date: x.end_date, total: tot.get(x.id) });
+  for (const s of sheets) {
+    if (done.has(s.id)) continue;
+    const m = meas.find(x => x.sheet_ids.includes(s.id));
+    if (!m) { done.add(s.id); rows.push({ sheets: [shOut(s)], start_date: s.start_date, end_date: s.end_date, days: calDays(s), paid: tot.get(s.id), measured: null, diff: null }); continue; }
+    const grp = sheets.filter(x => m.sheet_ids.includes(x.id));
+    grp.forEach(x => done.add(x.id));
+    const paid = r2(grp.reduce((a, x) => a + tot.get(x.id), 0));
+    rows.push({ sheets: grp.map(shOut), start_date: grp[0].start_date, end_date: grp.at(-1).end_date,
+      days: grp.reduce((a, x) => a + calDays(x), 0), paid, measured: m.amount, diff: r2(m.amount - paid), measurement: { id: m.id, ref_date: m.ref_date, files: m.files } });
+  }
+  for (const m of meas.filter(x => !x.sheet_ids.length)) rows.push({ sheets: [], start_date: m.ref_date, end_date: m.ref_date, days: 0, paid: 0, measured: m.amount, diff: m.amount, measurement: { id: m.id, ref_date: m.ref_date, files: m.files } });
+  const entries = all('SELECT * FROM field_labor_entries WHERE contract_id = ? ORDER BY ref_date, id', c.id)
+    .map(e => ({ id: e.id, kind: e.kind, kind_label: LABOR_KINDS[e.kind], ref_date: e.ref_date, amount: e.amount, description: e.description, deduct: !!e.deduct, files: laborFiles(e.id) }));
+  const additions = r2(entries.filter(e => e.kind === 'aditivo').reduce((a, e) => a + e.amount, 0));
+  const deducted = r2(entries.filter(e => e.kind === 'retrabalho' && e.deduct).reduce((a, e) => a + e.amount, 0));
+  const noted = r2(entries.filter(e => e.kind === 'retrabalho' && !e.deduct).reduce((a, e) => a + e.amount, 0));
+  const measuredRows = rows.filter(r => r.measured !== null);
+  const pendingRows = rows.filter(r => r.measured === null);
+  const measured = r2(measuredRows.reduce((a, r) => a + r.measured, 0));
+  const paidMeasured = r2(measuredRows.reduce((a, r) => a + r.paid, 0));
+  const pending = r2(pendingRows.reduce((a, r) => a + r.paid, 0));
+  const value = r2(c.total + additions);
+  // Acumulado folha a folha (base do gráfico e da tabela): começa no já medido/saldo anteriores
+  rows.sort((a, b) => a.end_date.localeCompare(b.end_date));
+  let mAcc = r2(c.prior_measured), pAcc = r2(c.prior_measured - c.prior_balance);
+  for (const r of rows) {
+    mAcc = r2(mAcc + (r.measured || 0)); pAcc = r2(pAcc + r.paid);
+    Object.assign(r, { measured_acc: mAcc, paid_acc: pAcc, diff_acc: r2(mAcc - pAcc), measured_pct: pctOf(mAcc, value) });
+  }
+  // Saldo do fornecedor = tudo o que ele mediu − tudo o que foi pago nas folhas (+ saldo anterior − retrabalhos descontados).
+  // Folha ainda sem medição já conta como paga (a folha está à frente da medição até o BM chegar).
+  const balance = r2(c.prior_balance + measured - paidMeasured - pending - deducted);
+  const measuredTotal = r2(c.prior_measured + measured);
+  const toMeasure = r2(value - measuredTotal);
+  // Prazo: o que falta medir ÷ medição por dia corrido da última folha medida
+  const lastM = [...measuredRows].reverse().find(r => r.days > 0 && r.measured > 0);
+  const perDay = lastM ? r2(lastM.measured / lastM.days) : 0;
+  const days = perDay && toMeasure > 0 ? Math.ceil(toMeasure / perDay) : 0;
+  const lastEnd = sheets.at(-1)?.end_date || null;
+  return {
+    ...base,
+    contract: {
+      id: c.id, supplier: c.supplier, supplier_doc: c.supplier_doc, total: c.total, notes: c.notes, prior_measured: c.prior_measured, prior_balance: c.prior_balance,
+      start_sheet: c.start_sheet_id ? base.sheets_options.find(o => o.id === c.start_sheet_id) || null : null,
+      additions, value, measured, measured_total: measuredTotal, to_measure: toMeasure, measured_pct: pctOf(measuredTotal, value),
+      paid: r2(paidMeasured + pending), paid_measured: paidMeasured, pending, pending_sheets: pendingRows.reduce((a, r) => a + r.sheets.length, 0),
+      deducted, noted, balance,
+      projection: lastM ? { base: lastM.sheets.map(x => x.code).join(', ') || 'medição', per_day: perDay, days, weeks: r2(days / 7), months: r2(days / 30.44), end_date: lastEnd && days ? isoAdd(lastEnd, days) : null } : null,
+      start: { measured: r2(c.prior_measured), paid: r2(c.prior_measured - c.prior_balance) },
+      rows, entries,
+    },
+  };
+}
+
+export function saveLaborContract(ctx, body, ip) {
+  requireMoney(ctx);
+  const b = body || {};
+  const p = requireProject(ctx, intOrNull(b.project_id));
+  const total = num(b.total, 'Valor do contrato', { max: 1e10 });
+  if (!total) throw badRequest('Informe o valor do contrato de mão de obra.');
+  const supplier = str(b.supplier, { max: 160, required: true, label: 'Fornecedor' });
+  const startId = intOrNull(b.start_sheet_id);
+  if (startId && !one('SELECT 1 FROM field_sheets WHERE id = ? AND project_id = ?', startId, p.id)) throw badRequest('Folha inicial inválida para esta obra.');
+  const priorMeasured = startId ? num(b.prior_measured, 'Já medido antes', { max: 1e10 }) : 0;
+  const priorBalance = startId ? num(b.prior_balance, 'Saldo anterior do fornecedor', { min: -1e10, max: 1e10 }) : 0;
+  if (priorMeasured > total) throw badRequest('O já medido antes não pode passar do valor do contrato.');
+  const d = { supplier, supplier_doc: str(b.supplier_doc, { max: 30, label: 'CPF/CNPJ' }), notes: str(b.notes, { max: 1000, label: 'Observações' }) };
+  const cur = laborRow(p.id);
+  if (cur) run(`UPDATE field_labor_contracts SET supplier=?, supplier_doc=?, total=?, start_sheet_id=?, prior_measured=?, prior_balance=?, notes=?, updated_at=datetime('now') WHERE id=?`,
+    d.supplier, d.supplier_doc, total, startId, priorMeasured, priorBalance, d.notes, cur.id);
+  else run('INSERT INTO field_labor_contracts (project_id, supplier, supplier_doc, total, start_sheet_id, prior_measured, prior_balance, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?)',
+    p.id, d.supplier, d.supplier_doc, total, startId, priorMeasured, priorBalance, d.notes, ctx.user.id);
+  audit(ctx.user.id, 'field', p.id, cur ? 'Contrato de mão de obra atualizado' : 'Contrato de mão de obra cadastrado', { obra: p.code, fornecedor: d.supplier, valor: total }, ip);
+  return laborContract(ctx, p.id);
+}
+
+export function deleteLaborContract(ctx, projectId, ip) {
+  requireMoney(ctx);
+  const p = requireProject(ctx, projectId);
+  const c = laborRow(p.id);
+  if (!c) throw notFound('Contrato de mão de obra não encontrado.');
+  const files = all('SELECT f.stored_name FROM field_labor_entry_files f JOIN field_labor_entries e ON e.id = f.entry_id WHERE e.contract_id = ?', c.id);
+  run('DELETE FROM field_labor_contracts WHERE id = ?', c.id);
+  for (const f of files) deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', p.id, 'Contrato de mão de obra removido', { obra: p.code, fornecedor: c.supplier, valor: c.total }, ip);
+  return laborContract(ctx, p.id);
+}
+
+// Lançamentos opcionais: aditivo e retrabalho/gasto extra (com comprovante ou foto)
+function addLaborFiles(ctx, entryId, files) {
+  const list = Array.isArray(files) ? files.slice(0, 10) : [];
+  for (const f of list) {
+    if (!/^data:(application\/pdf|image\/(png|jpeg|webp));base64,/.test(String(f?.data || ''))) throw badRequest('Anexe PDF ou foto (JPG, PNG ou WEBP).');
+    const saved = saveImageFromDataUrl(f.data);
+    if (!['application/pdf', 'image/png', 'image/jpeg', 'image/webp'].includes(saved.mime)) { deleteStored(saved.stored_name); throw badRequest('Anexe PDF ou foto (JPG, PNG ou WEBP).'); }
+    run('INSERT INTO field_labor_entry_files (entry_id, stored_name, mime, size, original_name, uploaded_by) VALUES (?,?,?,?,?,?)', entryId, saved.stored_name, saved.mime, saved.size, cleanFileName(f.name), ctx.user.id);
+  }
+}
+function readLaborEntry(b, kind) {
+  if (!LABOR_KINDS[kind]) throw badRequest('Tipo de lançamento inválido.');
+  const rw = kind === 'retrabalho';
+  const amount = rw ? num(b.amount, 'Valor do retrabalho', { max: 1e10 }) : num(b.amount, 'Valor do aditivo', { min: -1e10, max: 1e10 });
+  if (!amount) throw badRequest(rw ? 'Informe o valor do retrabalho / gasto extra.' : 'Informe o valor do aditivo (negativo para redução).');
+  const refDate = date(b.ref_date, 'Data');
+  if (!refDate) throw badRequest('Informe a data.');
+  return { amount, ref_date: refDate, deduct: rw && [true, 1, '1', 'true', 'on'].includes(b.deduct) ? 1 : 0,
+    description: str(b.description, { max: 1000, required: true, label: rw ? 'O que aconteceu' : 'Motivo do aditivo' }) };
+}
+function loadLaborEntry(ctx, id) {
+  requireMoney(ctx);
+  const e = one('SELECT e.*, c.project_id, c.supplier FROM field_labor_entries e JOIN field_labor_contracts c ON c.id = e.contract_id WHERE e.id = ?', id);
+  if (!e) throw notFound('Lançamento não encontrado.');
+  return { e, p: requireProject(ctx, e.project_id) };
+}
+export function addLaborEntry(ctx, body, ip) {
+  requireMoney(ctx);
+  const b = body || {};
+  const p = requireProject(ctx, intOrNull(b.project_id));
+  const c = laborRow(p.id);
+  if (!c) throw badRequest('Cadastre o contrato de mão de obra antes.');
+  const kind = String(b.kind || '');
+  const d = readLaborEntry(b, kind);
+  tx(() => {
+    const id = Number(run('INSERT INTO field_labor_entries (contract_id, kind, ref_date, amount, description, deduct, created_by) VALUES (?,?,?,?,?,?,?)', c.id, kind, d.ref_date, d.amount, d.description, d.deduct, ctx.user.id).lastInsertRowid);
+    addLaborFiles(ctx, id, b.files);
+  });
+  audit(ctx.user.id, 'field', p.id, kind === 'aditivo' ? 'Aditivo no contrato de mão de obra' : 'Retrabalho do fornecedor lançado',
+    { fornecedor: c.supplier, valor: d.amount, descricao: d.description, ...(kind === 'retrabalho' ? { desconta: d.deduct ? 'sim' : 'não' } : {}) }, ip);
+  return laborContract(ctx, p.id);
+}
+export function updateLaborEntry(ctx, id, body, ip) {
+  const { e, p } = loadLaborEntry(ctx, id);
+  const b = body || {};
+  const d = readLaborEntry({ ref_date: e.ref_date, amount: e.amount, description: e.description, deduct: !!e.deduct, ...b }, e.kind);
+  tx(() => {
+    run(`UPDATE field_labor_entries SET ref_date=?, amount=?, description=?, deduct=?, updated_at=datetime('now') WHERE id=?`, d.ref_date, d.amount, d.description, d.deduct, e.id);
+    addLaborFiles(ctx, e.id, b.files);
+  });
+  audit(ctx.user.id, 'field', p.id, e.kind === 'aditivo' ? 'Aditivo do contrato de mão de obra alterado' : 'Retrabalho do fornecedor alterado',
+    { fornecedor: e.supplier, valor: d.amount, ...(e.kind === 'retrabalho' ? { desconta: d.deduct ? 'sim' : 'não' } : {}) }, ip);
+  return laborContract(ctx, p.id);
+}
+export function deleteLaborEntry(ctx, id, ip) {
+  const { e, p } = loadLaborEntry(ctx, id);
+  const files = all('SELECT stored_name FROM field_labor_entry_files WHERE entry_id = ?', e.id);
+  run('DELETE FROM field_labor_entries WHERE id = ?', e.id);
+  for (const f of files) deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', p.id, `${LABOR_KINDS[e.kind]} excluído do contrato de mão de obra`, { fornecedor: e.supplier, valor: e.amount, descricao: e.description }, ip);
+  return laborContract(ctx, p.id);
+}
+export function removeLaborEntryFile(ctx, id, fileId, ip) {
+  const { e, p } = loadLaborEntry(ctx, id);
+  const f = one('SELECT * FROM field_labor_entry_files WHERE id = ? AND entry_id = ?', fileId, e.id);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  run('DELETE FROM field_labor_entry_files WHERE id = ?', f.id);
+  deleteStored(f.stored_name);
+  audit(ctx.user.id, 'field', p.id, 'Anexo removido do lançamento do contrato de mão de obra', { arquivo: f.original_name }, ip);
+  return laborContract(ctx, p.id);
+}
+export function laborFileForUser(ctx, fileId) {
+  const f = one('SELECT * FROM field_labor_entry_files WHERE id = ?', fileId);
+  if (!f) throw notFound('Arquivo não encontrado.');
+  loadLaborEntry(ctx, f.entry_id);
+  return f;
+}
+
+// Na folha: medição do fornecedor do período (cria/atualiza a medição do terceiro ligada só a esta folha)
+export function sheetLabor(ctx, s) {
+  if (!canFieldMoney(ctx.user)) return null;
+  const c = laborRow(s.project_id);
+  if (!c || !laborSheets(c, s.project_id).some(x => x.id === s.id)) return null;
+  const mid = one('SELECT measurement_id FROM field_measurement_sheets WHERE sheet_id = ?', s.id)?.measurement_id;
+  const m = mid ? one('SELECT * FROM field_measurements WHERE id = ?', mid) : null;
+  const shared = m ? measSheets(m.id).length > 1 : false;
+  return { supplier: c.supplier, measurement: m ? { id: m.id, ref_date: m.ref_date, amount: m.amount, shared,
+    files: all('SELECT id, mime, original_name FROM field_measurement_files WHERE measurement_id = ? ORDER BY id', m.id) } : null };
+}
+export function setSheetMeasurement(ctx, id, body, ip) {
+  requireMoney(ctx);
+  const { s } = loadSheet(ctx, id);
+  const c = laborRow(s.project_id);
+  if (!c) throw badRequest('Esta obra não tem contrato de mão de obra.');
+  const b = body || {};
+  const mid = one('SELECT measurement_id FROM field_measurement_sheets WHERE sheet_id = ?', s.id)?.measurement_id;
+  const m = mid ? one('SELECT * FROM field_measurements WHERE id = ?', mid) : null;
+  if (m && measSheets(m.id).length > 1) throw badRequest(`Esta folha está na medição de ${m.ref_date.split('-').reverse().join('/')} junto com outras folhas. Altere em "Medição do terceiro".`);
+  const fields = { project_id: s.project_id, supplier: m?.supplier || c.supplier, ref_date: b.ref_date || m?.ref_date || s.end_date, amount: b.amount, notes: m?.notes ?? null, sheet_ids: [s.id], files: b.files };
+  const r = m ? updateMeasurement(ctx, m.id, fields, ip) : createMeasurement(ctx, fields, ip);
+  return { measurement_id: r.id, labor: sheetLabor(ctx, s) };
 }

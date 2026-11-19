@@ -1,6 +1,6 @@
 // Folha de Campo: folhas por obra (diárias da mão de obra própria e % das empreitadas), profissionais, empreitadas e consolidado.
 // Valores, documento e PIX aparecem só para quem tem a seção Folha de Campo (que também fecha a folha e gera o pagamento).
-import { html, api, icon, fmtDate, todayISO } from '../core.js';
+import { html, raw, api, icon, fmtDate, todayISO } from '../core.js';
 import { toast, sheet, confirmSheet, readAttachments, batchBySize, isPdfFile } from '../ui.js';
 import { pageHead } from './shared.js';
 import { pixButton, bindPixButtons } from '../pix.js';
@@ -244,15 +244,408 @@ function bindMeasurements(root, m, obra, render) {
   root.querySelectorAll('[data-meas-ed]').forEach(b => b.addEventListener('click', () => measForm(m, m.measurements.find(x => x.id === Number(b.dataset.measEd)), obra, ch => ch && render())));
 }
 
+// ---------- Contrato de mão de obra: encontro de contas com o fornecedor (medido × pago nas folhas) ----------
+const pctTxt = v => `${Math.round(Number(v) || 0)}%`;
+const signed = v => `${v > 0.004 ? '+\u00a0' : v < -0.004 ? '−\u00a0' : ''}${money(Math.abs(v))}`;
+const saldoTxt = v => (v > 0.004 ? 'a Charão deve ao fornecedor' : v < -0.004 ? 'o fornecedor recebeu a mais' : 'contas batendo');
+const saldoCls = v => (v > 0.004 ? 'lc-pos' : v < -0.004 ? 'lc-neg' : '');
+const howLong = p => {
+  if (!p || !p.days) return null;
+  if (p.days >= 45) return `${p.months >= 3 ? Math.round(p.months) : n2(Math.round(p.months * 10) / 10)} meses (${p.days} dias)`;
+  if (p.days >= 14) return `${Math.round(p.weeks)} semanas (${p.days} dias)`;
+  return `${p.days} ${p.days === 1 ? 'dia' : 'dias'}`;
+};
+const laborFile = f => html`<a class="fm-file" href="/api/field-labor-files/${f.id}" target="_blank" rel="noopener">${icon(f.mime === 'application/pdf' ? 'file' : 'image')}${f.original_name || (f.mime === 'application/pdf' ? 'comprovante.pdf' : 'foto')}</a>`;
+const openLc = new Set(); // detalhes abertos continuam abertos ao atualizar
+function laborSection(L) {
+  if (L.contract) return '';
+  return html`<section class="card section lc-card"><div class="card-head"><h2>${icon('contract')}Contrato de mão de obra</h2>
+      <button type="button" class="btn btn-ghost btn-sm" data-lc-edit>${icon('plus')}Cadastrar contrato</button></div>
+    <p class="muted card-body">A mão de obra desta obra tem contrato com um fornecedor? Cadastre o fornecedor e o valor. Em cada folha você lança a medição do fornecedor do período,
+      e esta tela vira o resumo do encontro de contas: medido × pago nas folhas, com gráfico do acumulado.</p></section>`;
+}
+const BRLs = v => { const a = Math.abs(v); return a >= 1e6 ? `R$ ${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : a >= 1e3 ? `R$ ${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: a >= 1e5 ? 0 : 1 })} mil` : money(v); };
+const niceTop = v => { if (v <= 0) return 1000; const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map(m => m * p).find(x => x >= v); };
+const r2c = v => Math.round(v * 100) / 100;
+// ---- Gráfico por data: semanal, quinzenal ou mensal ----
+const GRAN = { semanal: 'Semanal', quinzenal: 'Quinzenal', mensal: 'Mensal' };
+const MESC = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+let lcGran = null; // escolha da pessoa (fica enquanto navega)
+const isoD = d => d.toISOString().slice(0, 10);
+const dt = s => new Date(`${s}T12:00:00Z`);
+const addD = (s, n) => { const d = dt(s); d.setUTCDate(d.getUTCDate() + n); return isoD(d); };
+// Fim do período que contém a data
+function bucketEnd(s, g) {
+  const d = dt(s);
+  if (g === 'semanal') { const w = d.getUTCDay(); return addD(s, (7 - w) % 7); } // domingo
+  const y = d.getUTCFullYear(), m = d.getUTCMonth();
+  const last = isoD(new Date(Date.UTC(y, m + 1, 0, 12)));
+  if (g === 'quinzenal' && d.getUTCDate() <= 15) return `${s.slice(0, 8)}15`;
+  return last;
+}
+function bucketStart(end, g) {
+  if (g === 'semanal') return addD(end, -6);
+  if (g === 'mensal') return `${end.slice(0, 8)}01`;
+  return end.slice(8) === '15' ? `${end.slice(0, 8)}01` : `${end.slice(0, 8)}16`;
+}
+const bucketLabel = (end, g) => {
+  const m = MESC[Number(end.slice(5, 7)) - 1], yy = end.slice(2, 4);
+  if (g === 'mensal') return `${m}/${yy}`;
+  if (g === 'quinzenal') return `${end.slice(8) === '15' ? '1ª' : '2ª'} qz ${m}`;
+  return dm(end);
+};
+// Lançamentos com data: folha paga (fim do período da folha), BM (data da medição), retrabalho descontado e aditivo
+function laborEvents(c) {
+  const ev = [];
+  for (const r of c.rows) {
+    for (const s of r.sheets) ev.push({ date: s.end_date, kind: 'folha', paid: s.total, text: `${s.code} (${dm(s.start_date)}–${dm(s.end_date)}) paga`, amount: s.total });
+    if (r.measured !== null) ev.push({ date: r.measurement.ref_date, kind: 'bm', med: r.measured, text: `medição de ${fmtDate(r.measurement.ref_date)}${r.sheets.length ? ` (${r.sheets.map(x => x.code).join(', ')})` : ''}`, amount: r.measured });
+  }
+  for (const e of c.entries) {
+    if (e.kind === 'retrabalho' && e.deduct) ev.push({ date: e.ref_date, kind: 'retrabalho', med: -e.amount, text: `descontado · ${e.description}`, amount: -e.amount });
+    else if (e.kind === 'retrabalho') ev.push({ date: e.ref_date, kind: 'info', text: `Retrabalho só registrado · ${e.description}`, amount: e.amount, info: true });
+    else ev.push({ date: e.ref_date, kind: 'info', text: `Aditivo no contrato · ${e.description}`, amount: e.amount, info: true });
+  }
+  return ev.sort((a, b) => a.date.localeCompare(b.date));
+}
+function autoGran(ev) {
+  if (!ev.length) return 'quinzenal';
+  const span = (dt(ev.at(-1).date) - dt(ev[0].date)) / 86400e3;
+  return span <= 70 ? 'semanal' : span <= 200 ? 'quinzenal' : 'mensal';
+}
+function laborSeries(c, g) {
+  const ev = laborEvents(c);
+  const start = { label: 'Início', med: c.start.measured, paid: c.start.paid, events: [], first: true };
+  if (!ev.length) return [start];
+  const ends = [];
+  for (let e = bucketEnd(ev[0].date, g); e <= bucketEnd(ev.at(-1).date, g); e = bucketEnd(addD(e, 1), g)) ends.push(e);
+  let med = start.med, paid = start.paid;
+  return [start, ...ends.map(end => {
+    const ini = bucketStart(end, g);
+    const here = ev.filter(x => x.date >= ini && x.date <= end);
+    for (const x of here) { med = r2c(med + (x.med || 0)); paid = r2c(paid + (x.paid || 0)); }
+    return { label: bucketLabel(end, g), ini, end, med, paid, events: here };
+  })];
+}
+function laborChart(c, g) {
+  const pts = laborSeries(c, g);
+  const W = 760, H = 270, L = 72, R = 96, T = 16, B = 34;
+  const iw = W - L - R, ih = H - T - B;
+  const max = niceTop(Math.max(...pts.flatMap(p => [p.med, p.paid])));
+  const x = i => L + (pts.length > 1 ? (i / (pts.length - 1)) * iw : iw / 2);
+  const y = v => T + ih - (Math.max(0, v) / max) * ih;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  // Áreas entre as linhas, cortadas no cruzamento: verde = medido acima (a Charão deve), vermelho = folha acima
+  const areas = [];
+  const seg = (x1, m1, p1, x2, m2, p2, d) => (Math.abs(d) < 0.005 ? '' : `<path class="${d > 0 ? 'lc-ar-pos' : 'lc-ar-neg'}" d="M${x1},${y(m1)} L${x2},${y(m2)} L${x2},${y(p2)} L${x1},${y(p1)} Z"/>`);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], da = a.med - a.paid, db = b.med - b.paid;
+    if (da * db < 0) {
+      const t = da / (da - db), xm = x(i) + t * (x(i + 1) - x(i)), vm = a.med + t * (b.med - a.med);
+      areas.push(seg(x(i), a.med, a.paid, xm, vm, vm, da), seg(xm, vm, vm, x(i + 1), b.med, b.paid, db));
+    } else areas.push(seg(x(i), a.med, a.paid, x(i + 1), b.med, b.paid, da + db));
+  }
+  const line = (k, cls) => `<polyline class="${cls}" points="${pts.map((p, i) => `${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ')}"/>`;
+  const dots = (k, cls) => pts.map((p, i) => (p.first || p.events.some(e => !e.info) ? `<circle class="${cls}" cx="${x(i)}" cy="${y(p[k])}" r="${pts.length > 30 ? 2.5 : 4}"/>` : '')).join('');
+  const last = pts.at(-1), li = pts.length - 1;
+  const ly = [y(last.med), y(last.paid)];
+  if (Math.abs(ly[0] - ly[1]) < 14) { const mid = (ly[0] + ly[1]) / 2; const up = last.med >= last.paid; ly[0] = mid + (up ? -8 : 8); ly[1] = mid + (up ? 8 : -8); }
+  const step = Math.ceil(pts.length / 9);
+  const bw = pts.length > 1 ? iw / (pts.length - 1) : iw;
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="ct-svg lc-svg" role="img" aria-label="Medido acumulado e pago nas folhas acumulado por período">
+    ${ticks.map(t => `<line class="g-grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="g-ytick" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${BRLs(t)}</text>`).join('')}
+    <line class="g-base" x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}"/>
+    ${areas.join('')}
+    ${pts.map((p, i) => ((li - i) % step === 0 || i === 0 ? `<text class="g-xtick" x="${x(i)}" y="${H - 12}" text-anchor="middle">${p.label}</text>` : '')).join('')}
+    <line class="g-cross" x1="0" x2="0" y1="${T}" y2="${T + ih}" visibility="hidden"/>
+    ${line('paid', 'lc-ln-pago')}${line('med', 'lc-ln-med')}
+    ${dots('paid', 'lc-dt-pago')}${dots('med', 'lc-dt-med')}
+    <text class="g-peak" x="${x(li) + 8}" y="${ly[0] + 4}">${BRLs(last.med)}</text>
+    <text class="g-peak" x="${x(li) + 8}" y="${ly[1] + 4}">${BRLs(last.paid)}</text>
+    ${pts.map((p, i) => `<rect class="g-hit" data-pt="${i}" x="${x(i) - bw / 2}" y="${T}" width="${bw}" height="${ih}" tabindex="0"/>`).join('')}
+  </svg>`;
+  return { svg, pts };
+}
+// Barras de %: o contrato é 100%; medido × pago em folha
+function laborBars(c) {
+  const w = v => Math.min(100, Math.max(0, v));
+  const paidPct = c.value > 0 ? r2c((c.paid / c.value) * 100) : 0;
+  const row = (label, pct, val, cls, note) => html`<div class="lc-pb"><div class="lc-pb-top"><span>${label}</span><b>${pctTxt(pct)}</b><small>${money(val)} de ${money(c.value)}${note ? ` · ${note}` : ''}</small></div>
+    <div class="lc-pb-bar" role="img" aria-label="${label}: ${pctTxt(pct)} do contrato"><span class="${cls}" style="width:${w(pct)}%"></span>${pct > 100 ? html`<i class="lc-pb-over">acima do contrato</i>` : ''}</div></div>`;
+  const gap = r2c(c.measured_pct - paidPct);
+  return html`<div class="lc-pbars">
+    ${row('Contrato medido', c.measured_pct, c.measured_total, 'lc-k-med', `falta medir ${money(c.to_measure)}`)}
+    ${row('Pago em folha', paidPct, c.paid, 'lc-k-pago', c.pending ? `${money(c.pending)} ainda sem medição` : '')}
+    <p class="lc-pb-cmp ${gap < -0.5 ? 'lc-neg' : gap > 0.5 ? 'lc-pos' : ''}">${Math.abs(gap) < 0.5 ? 'Medido e pago em folha andando juntos.'
+      : gap < 0 ? `A folha está ${pctTxt(-gap)} do contrato à frente da medição.` : `A medição está ${pctTxt(gap)} do contrato à frente da folha.`}</p></div>`;
+}
+function laborResumo(c) {
+  const p = c.projection;
+  const g = lcGran || autoGran(laborEvents(c));
+  const ch = c.rows.length || c.entries.length ? laborChart(c, g) : null;
+  return html`<section class="card section lc-card lc-resumo"><div class="card-head">
+      <h2>${icon('dashboard')}<span class="lc-title"><span>Resumo do contrato de mão de obra</span><small>Fornecedor: ${c.supplier}${c.supplier_doc ? ` · ${c.supplier_doc}` : ''}</small></span></h2></div>
+    <div class="lc-kpis">
+      <div><span>Contrato</span><b>${money(c.value)}</b><small>${c.additions ? `${money(c.total)} + aditivos` : 'sem aditivos'}</small></div>
+      <div><span>Medido pelo fornecedor</span><b>${money(c.measured_total)}</b><small>${pctTxt(c.measured_pct)} do contrato</small></div>
+      <div><span>Pago nas folhas</span><b>${money(c.paid)}</b><small>${c.rows.reduce((a, r) => a + r.sheets.length, 0)} folha(s)${c.pending_sheets ? ` · ${c.pending_sheets} sem medição` : ''}</small></div>
+      <div class="lc-sal ${saldoCls(c.balance)}"><span>Saldo do fornecedor</span><b>${signed(c.balance)}</b><small>${saldoTxt(c.balance)}</small></div>
+    </div>
+    <div class="card-body lc-body">
+      ${laborBars(c)}
+      ${ch ? html`<div class="lc-chart-head"><h3 class="fm-subh">Acumulado: medido × pago nas folhas</h3>
+          <div class="chips lc-gran" role="group" aria-label="Período do gráfico">${Object.entries(GRAN).map(([k, l]) => html`<button type="button" class="chip" data-lc-gran="${k}" aria-pressed="${k === g}">${l}</button>`)}</div></div>
+        <ul class="ct-legend lc-legend2"><li><i class="ln-key lc-k-med"></i>Medido (− retrabalhos descontados)</li><li><i class="ln-key lc-k-pago"></i>Pago nas folhas</li>
+          <li><i class="lc-k-area lc-ar-pos"></i>Medido acima (a Charão deve)</li><li><i class="lc-k-area lc-ar-neg"></i>Folha acima da medição</li></ul>
+        <div class="ct-chart-box lc-chart">${raw(ch.svg)}<div class="ct-tip lc-tip" hidden></div></div>
+        <p class="hint lc-hint">Passe o mouse (ou toque) num ponto para ver as folhas, BMs e retrabalhos daquele período. A folha entra na data de fim do período dela; o BM, na data da medição.</p>`
+        : html`<p class="muted">O gráfico aparece com a primeira folha da obra. Lance a medição do fornecedor dentro de cada folha.</p>`}
+      <h3 class="fm-subh">Posição do contrato do fornecedor</h3>
+      <div class="lc-rt"><table class="fc-table lc-pos-table"><tbody>
+        <tr><td>Valor original do contrato</td><td class="num">${money(c.total)}</td></tr>
+        <tr><td>Aditivos (${c.entries.filter(e => e.kind === 'aditivo').length})</td><td class="num">${c.additions ? signed(c.additions) : money(0)}</td></tr>
+        <tr class="lc-tot"><td>Valor atualizado do contrato</td><td class="num">${money(c.value)}</td></tr>
+        <tr><td>Medido pelo fornecedor (acumulado)${c.prior_measured ? html` <small>inclui ${money(c.prior_measured)} antes da ${c.start_sheet?.code || 'conta'}</small>` : ''}</td><td class="num">${money(c.measured_total)} <small>(${pctTxt(c.measured_pct)})</small></td></tr>
+        <tr class="lc-tot"><td>Falta medir</td><td class="num">${money(c.to_measure)}</td></tr>
+        <tr><td>Pago nas folhas (acumulado)${c.pending ? html` <small>${money(c.pending)} ainda sem medição</small>` : ''}</td><td class="num">${money(c.paid)}</td></tr>
+        <tr><td>Medido − pago nas folhas</td><td class="num ${saldoCls(c.measured - c.paid)}">${signed(c.measured - c.paid)}</td></tr>
+        ${c.prior_balance ? html`<tr><td>Saldo anterior do fornecedor${c.start_sheet ? ` (antes da ${c.start_sheet.code})` : ''}</td><td class="num ${saldoCls(c.prior_balance)}">${signed(c.prior_balance)}</td></tr>` : ''}
+        ${c.deducted ? html`<tr><td>Retrabalhos descontados do fornecedor</td><td class="num lc-neg">${signed(-c.deducted)}</td></tr>` : ''}
+        <tr class="lc-tot lc-final"><td>Saldo do fornecedor <small>${saldoTxt(c.balance)}</small></td><td class="num ${saldoCls(c.balance)}">${signed(c.balance)}</td></tr>
+        ${c.noted ? html`<tr class="lc-muted"><td>Retrabalhos só registrados (não descontados)</td><td class="num">${money(c.noted)}</td></tr>` : ''}
+      </tbody></table></div>
+      ${p && howLong(p) ? html`<p class="lc-say">${icon('calendar')}<span>No ritmo da última medição (${p.base}: ${money(p.per_day)} por dia), o que falta medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</span></p>` : ''}
+    </div></section>`;
+}
+function laborContractCard(c) {
+  const add = c.entries.filter(e => e.kind === 'aditivo');
+  return html`<section class="card section lc-card"><div class="card-head"><h2>${icon('contract')}Contrato e aditivos</h2>
+      <button type="button" class="btn btn-ghost btn-sm" data-lc-new="aditivo">${icon('plus')}Novo aditivo</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-lc-edit>${icon('edit')}Editar contrato</button></div>
+    <div class="lc-rt"><table class="fc-table lc-ct-table"><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th><th></th></tr></thead><tbody>
+      <tr><td data-label="Data">—</td><td data-label="Descrição" class="lc-wide"><b>Contrato original</b> · ${c.supplier}${c.notes ? html`<small class="lc-sub">${c.notes}</small>` : ''}</td><td data-label="Valor" class="num">${money(c.total)}</td><td class="lc-act"></td></tr>
+      ${add.map(e => html`<tr><td data-label="Data">${fmtDate(e.ref_date)}</td><td data-label="Descrição" class="lc-wide">Aditivo · ${e.description}${e.files.length ? html`<span class="lc-sub fm-files">${e.files.map(laborFile)}</span>` : ''}</td>
+        <td data-label="Valor" class="num">${signed(e.amount)}</td><td class="lc-act"><button type="button" class="icon-btn" data-lc-ed="${e.id}" aria-label="Editar aditivo">${icon('edit')}</button></td></tr>`)}
+    </tbody><tfoot><tr class="lc-tot"><td class="lc-hide-s"></td><td data-label="" class="lc-wide">Valor atualizado do contrato</td><td data-label="Total" class="num">${money(c.value)}</td><td class="lc-act"></td></tr></tfoot></table></div></section>`;
+}
+function laborReworkCard(c) {
+  const rw = c.entries.filter(e => e.kind === 'retrabalho');
+  return html`<section class="card section lc-card"><div class="card-head"><h2>${icon('alert')}Retrabalhos e gastos extras do fornecedor</h2>
+      <button type="button" class="btn btn-ghost btn-sm" data-lc-new="retrabalho">${icon('plus')}Novo retrabalho</button></div>
+    ${rw.length ? html`<div class="lc-rt"><table class="fc-table lc-ct-table"><thead><tr><th>Data</th><th>O que aconteceu</th><th class="num">Valor</th><th>Desconta do fornecedor?</th><th></th></tr></thead><tbody>
+      ${rw.map(e => html`<tr><td data-label="Data">${fmtDate(e.ref_date)}</td><td data-label="O que aconteceu" class="lc-wide">${e.description}${e.files.length ? html`<span class="lc-sub fm-files">${e.files.map(laborFile)}</span>` : ''}</td><td data-label="Valor" class="num">${money(e.amount)}</td>
+        <td data-label="Desconta do fornecedor?"><label class="switch lc-ded"><input type="checkbox" data-lc-ded="${e.id}" ${e.deduct ? 'checked' : ''}>${e.deduct ? 'Sim' : 'Não'}</label></td>
+        <td class="lc-act"><button type="button" class="icon-btn" data-lc-ed="${e.id}" aria-label="Editar retrabalho">${icon('edit')}</button></td></tr>`)}
+    </tbody><tfoot><tr class="lc-tot"><td class="lc-hide-s"></td><td data-label="" class="lc-wide">Descontado do fornecedor${c.noted ? html` <small>(+ ${money(c.noted)} só registrado)</small>` : ''}</td><td data-label="Total" class="num">${money(c.deducted)}</td><td class="lc-hide-s"></td><td class="lc-act"></td></tr></tfoot></table></div>`
+      : html`<p class="muted card-body">Gasto pago pelo cliente por falha do fornecedor. Marque "desconta do fornecedor" quando for válido; aí o valor sai do saldo dele.</p>`}</section>`;
+}
+// Folhas da obra em tabela, com o que foi pago, a medição do fornecedor e os totais (em tela estreita, cada folha vira um bloco)
+function laborSheetsTable(c, sheets) {
+  const byId = new Map();
+  for (const r of c.rows) r.sheets.forEach((x, i) => byId.set(x.id, { r, first: i === 0, n: r.sheets.length }));
+  const list = [...sheets].sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
+  const inC = list.filter(s => byId.has(s.id));
+  const tot = { paid: inC.reduce((a, s) => a + s.totals.total, 0), client: inC.reduce((a, s) => a + s.totals.client, 0), diarias: inC.reduce((a, s) => a + s.diarias, 0) };
+  return html`<div class="lc-rt lc-sheets"><table class="fc-table lc-sh-table"><thead><tr><th>Folha</th><th>Período</th><th>Situação</th><th class="num">Diárias</th><th class="num">Pago na folha</th><th class="num">Medido</th><th class="num">Diferença</th><th class="num">Saldo acumulado</th><th>Pagamento</th></tr></thead>
+    <tbody>${list.map(s => {
+      const k = byId.get(s.id);
+      const r = k?.r;
+      return html`<tr class="${!k ? 'lc-out' : r.measured === null ? 'lc-row-wait' : ''}"><td class="lc-key"><a href="#/campo/${s.id}"><b>${s.code}</b></a> <span class="lc-key-per">${dm(s.start_date)}–${dm(s.end_date)}</span></td>
+        <td data-label="Período" class="lc-hide-s">${dm(s.start_date)}–${dm(s.end_date)}</td><td data-label="Situação">${stTag(s.status)}</td>
+        <td data-label="Diárias" class="num">${n2(s.diarias)}</td><td data-label="Pago na folha" class="num">${money(s.totals.total)}</td>
+        ${!k ? html`<td data-label="Medição" class="num muted" colspan="3">antes do contrato</td>`
+          : r.measured === null ? html`<td data-label="Medido" class="num"><a href="#/campo/${s.id}" class="lc-wait-link">aguardando</a></td><td data-label="Diferença" class="num">—</td><td data-label="Saldo acumulado" class="num ${saldoCls(r.diff_acc)}">${signed(r.diff_acc)}</td>`
+          : k.n > 1 && !k.first ? html`<td data-label="Medido" class="num muted" colspan="2">mesma medição da ${r.sheets[0].code}</td><td class="num lc-hide-s"></td>`
+          : html`<td data-label="Medido" class="num">${money(r.measured)}${k.n > 1 ? html`<small class="lc-sub">cobre ${r.sheets.map(x => x.code).join(', ')}</small>` : ''}</td><td data-label="Diferença" class="num ${saldoCls(r.diff)}">${signed(r.diff)}</td><td data-label="Saldo acumulado" class="num ${saldoCls(r.diff_acc)}">${signed(r.diff_acc)}</td>`}
+        <td data-label="Pagamento">${payTag(s.payment) || html`<span class="muted">—</span>`}</td></tr>`;
+    })}</tbody>
+    <tfoot><tr class="lc-tot"><td class="lc-key" colspan="3">Total no contrato (${inC.length} folha${inC.length === 1 ? '' : 's'})</td><td data-label="Diárias" class="num">${n2(tot.diarias)}</td><td data-label="Pago na folha" class="num">${money(tot.paid)}</td>
+      <td data-label="Medido" class="num">${money(c.measured)}</td><td data-label="Medido − pago" class="num ${saldoCls(c.measured - c.paid)}">${signed(c.measured - c.paid)}</td><td class="num lc-hide-s"></td><td data-label="Cliente pagou" class="${tot.client ? '' : 'lc-hide-s'}">${tot.client ? money(tot.client) : ''}</td></tr></tfoot></table></div>`;
+}
+function bindLaborChart(root, c, render) {
+  root.querySelectorAll('[data-lc-gran]').forEach(b => b.addEventListener('click', () => { lcGran = b.dataset.lcGran; render(); }));
+  const box = root.querySelector('.lc-chart');
+  if (!box) return;
+  const tip = box.querySelector('.ct-tip'), cross = box.querySelector('.g-cross');
+  const pts = laborSeries(c, lcGran || autoGran(laborEvents(c)));
+  const ICON = { folha: 'Folha', bm: 'BM', retrabalho: 'Retrabalho', info: '' };
+  const show = r => {
+    const p = pts[Number(r.dataset.pt)];
+    const cx = Number(r.getAttribute('x')) + Number(r.getAttribute('width')) / 2;
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
+    const d = p.med - p.paid;
+    tip.innerHTML = html`<div class="ct-tip-h">${p.first ? 'Início do contrato' : `${p.label} · ${dm(p.ini)} a ${dm(p.end)}`}</div>
+      <div class="ct-tip-r"><i class="ln lc-k-med"></i><b>${money(p.med)}</b><span>medido acumulado</span></div>
+      <div class="ct-tip-r"><i class="ln lc-k-pago"></i><b>${money(p.paid)}</b><span>pago acumulado</span></div>
+      <div class="ct-tip-r"><i class="ln" style="background:transparent"></i><b class="${saldoCls(d)}">${signed(d)}</b><span>${d < -0.004 ? 'folha acima da medição' : d > 0.004 ? 'medido acima' : 'empatado'}</span></div>
+      ${p.first ? (c.prior_measured || c.prior_balance ? html`<div class="lc-tip-ev"><span>Já medido e saldo de antes da ${c.start_sheet?.code || 'conta'}</span></div>` : '')
+        : html`<div class="lc-tip-sub">Neste período</div>${p.events.length ? p.events.map(e => html`<div class="lc-tip-ev ${e.info ? 'is-info' : ''}"><span>${ICON[e.kind] ? html`<em>${ICON[e.kind]}</em> ` : ''}${e.text.length > 70 ? `${e.text.slice(0, 68)}…` : e.text}</span><b>${e.kind === 'folha' ? money(e.amount) : signed(e.amount)}</b></div>`)
+          : html`<div class="lc-tip-ev is-info"><span>nenhum lançamento</span></div>`}`}`.toString();
+    tip.hidden = false;
+    const br = box.getBoundingClientRect(), rr = r.getBoundingClientRect();
+    tip.style.left = `${Math.min(br.width - tip.offsetWidth - 4, Math.max(4, rr.left - br.left + rr.width / 2 + 12))}px`;
+  };
+  box.querySelectorAll('.g-hit').forEach(r => { r.addEventListener('pointerenter', () => show(r)); r.addEventListener('focus', () => show(r)); r.addEventListener('click', () => show(r)); });
+  box.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+}
+function laborForm(L, obra, done) {
+  const c = L.contract;
+  const mid = !!c?.start_sheet;
+  let del = false;
+  setTimeout(() => {
+    const box = document.querySelector('.sheet .lc-form');
+    if (!box) return;
+    const sync = () => { box.querySelector('.lc-mid').hidden = !box.querySelector('[name=midway]').checked; };
+    box.querySelector('[name=midway]').addEventListener('change', sync); sync();
+    box.querySelector('[data-lc-del]')?.addEventListener('click', () => { del = true; box.closest('.sheet').querySelector('[data-close]').click(); });
+  }, 60);
+  return sheet({
+    title: c ? 'Contrato de mão de obra' : 'Cadastrar contrato de mão de obra', wide: true, submitLabel: 'Salvar contrato',
+    body: html`<div class="lc-form">
+      <div class="form-row"><div class="field"><label class="req" for="lc-s">Fornecedor</label><input type="text" id="lc-s" name="supplier" maxlength="160" required list="lc-sup" value="${c?.supplier || ''}" placeholder="Empresa ou pessoa contratada">
+          <datalist id="lc-sup">${(L.suppliers || []).map(v => html`<option value="${v}">`)}</datalist></div>
+        <div class="field"><label for="lc-d">CPF/CNPJ</label><input type="text" id="lc-d" name="supplier_doc" maxlength="30" value="${c?.supplier_doc || ''}"></div></div>
+      <div class="field"><label class="req" for="lc-t">Valor do contrato (R$)</label><input type="number" id="lc-t" name="total" step="0.01" min="0" inputmode="decimal" required value="${c ? c.total : ''}">
+        <span class="hint">Se o valor mudar depois, lance um aditivo.</span></div>
+      <label class="switch"><input type="checkbox" name="midway" ${mid ? 'checked' : ''}>A obra já começou antes do sistema</label>
+      <div class="lc-mid" hidden>
+        <div class="field"><label class="req" for="lc-st">A conta começa na folha</label><select id="lc-st" name="start_sheet_id">${L.sheets_options.length ? '' : html`<option value="">(ainda não há folhas)</option>`}
+          ${[...L.sheets_options].reverse().map(o => html`<option value="${o.id}" ${c?.start_sheet?.id === o.id ? 'selected' : ''}>${o.code} · ${dm(o.start_date)} a ${dm(o.end_date)}</option>`)}</select></div>
+        <div class="form-row"><div class="field"><label for="lc-pm">Já medido antes (R$)</label><input type="number" id="lc-pm" name="prior_measured" step="0.01" min="0" inputmode="decimal" value="${c?.prior_measured || ''}"></div>
+          <div class="field"><label for="lc-pb">Saldo do fornecedor até ali (R$)</label><input type="number" id="lc-pb" name="prior_balance" step="0.01" inputmode="decimal" value="${c?.prior_balance || ''}">
+            <span class="hint">Positivo: a Charão devia a ele. Negativo: ele tinha recebido a mais.</span></div></div>
+      </div>
+      <div class="field"><label for="lc-n">Observações</label><textarea id="lc-n" name="notes" rows="2" maxlength="1000">${c?.notes || ''}</textarea></div>
+      ${c ? html`<button type="button" class="btn btn-ghost btn-sm pf-danger" data-lc-del>${icon('trash')}Remover contrato</button>` : ''}
+    </div>`,
+    async onSubmit(f) {
+      const m = !!f.midway;
+      if (m && !f.start_sheet_id) throw new Error('Escolha a folha em que a conta começa (crie a folha antes, se ainda não existe).');
+      const r = await api('/field/labor', { method: 'PUT', body: { project_id: obra, supplier: f.supplier, supplier_doc: f.supplier_doc, total: f.total, notes: f.notes,
+        start_sheet_id: m ? f.start_sheet_id : null, prior_measured: m ? f.prior_measured : 0, prior_balance: m ? f.prior_balance : 0 } });
+      toast('Contrato de mão de obra salvo.');
+      return r;
+    },
+  }).then(async r => {
+    if (!del) return done(!!r);
+    if (!await confirmSheet('Remover contrato de mão de obra', 'Remover o contrato, os aditivos e os retrabalhos? As folhas e as medições continuam.', 'Remover', true)) return done(false);
+    try { await api(`/field/labor/${obra}`, { method: 'DELETE' }); toast('Contrato removido.'); done(true); } catch (ex) { toast(ex.message, 'error'); done(false); }
+  });
+}
+function laborEntryForm(obra, supplier, kind, e, done) {
+  const rw = kind === 'retrabalho';
+  let del = false;
+  setTimeout(() => {
+    const box = document.querySelector('.sheet .le-form');
+    if (!box) return;
+    box.querySelectorAll('[data-le-rmf]').forEach(b => b.addEventListener('click', async () => {
+      try { await api(`/field/labor-entries/${e.id}/files/${b.dataset.leRmf}`, { method: 'DELETE' }); b.parentElement.remove(); toast('Anexo removido.'); } catch (ex) { toast(ex.message, 'error'); }
+    }));
+    box.querySelector('[data-le-del]')?.addEventListener('click', () => { del = true; box.closest('.sheet').querySelector('[data-close]').click(); });
+  }, 60);
+  return sheet({
+    title: `${e ? 'Editar' : 'Lançar'} ${rw ? 'retrabalho / gasto extra' : 'aditivo'}`, wide: true, submitLabel: e ? 'Salvar' : 'Lançar',
+    body: html`<div class="le-form lc-form">
+      <p class="muted" style="margin:0">${rw ? `Gasto pago pelo cliente por falha de ${supplier} (refazer serviço, material perdido, outra equipe…).` : `Aumento do valor do contrato a favor de ${supplier}. Para redução, use valor negativo.`}</p>
+      <div class="form-row"><div class="field"><label class="req" for="le-v">Valor (R$)</label><input type="number" id="le-v" name="amount" step="0.01" ${rw ? 'min="0"' : ''} inputmode="decimal" required value="${e ? e.amount : ''}"></div>
+        <div class="field"><label class="req" for="le-d">Data</label><input type="date" id="le-d" name="ref_date" required value="${e?.ref_date || todayISO()}"></div></div>
+      <div class="field"><label class="req" for="le-t">${rw ? 'O que aconteceu' : 'Motivo do aditivo'}</label><textarea id="le-t" name="description" rows="3" maxlength="1000" required>${e?.description || ''}</textarea></div>
+      ${rw ? html`<label class="switch"><input type="checkbox" name="deduct" ${e?.deduct ? 'checked' : ''}>Válido para desconto do fornecedor</label>
+        <span class="hint">Marcado, o valor sai do saldo do fornecedor. Desmarcado, fica só registrado (dá para marcar depois).</span>` : ''}
+      <div class="field"><label for="le-f">Comprovante ou fotos (PDF, JPG, PNG)</label><input type="file" id="le-f" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp" multiple>
+        ${e?.files.length ? html`<div class="fm-files fm-files-ed">${e.files.map(f => html`<span>${laborFile(f)}<button type="button" class="icon-btn" data-le-rmf="${f.id}" aria-label="Remover ${f.original_name || 'anexo'}">${icon('x')}</button></span>`)}</div>` : ''}</div>
+      ${e ? html`<button type="button" class="btn btn-ghost btn-sm pf-danger" data-le-del>${icon('trash')}Excluir lançamento</button>` : ''}
+    </div>`,
+    async onSubmit(f, form) {
+      const picked = [...(form.querySelector('#le-f').files || [])];
+      const bad = picked.find(y => !isPdfFile(y) && !/^image\/(jpeg|png|webp)$/.test(y.type));
+      if (bad) throw new Error(`Anexe PDF ou foto ("${bad.name}" não é).`);
+      const files = await readAttachments(picked);
+      const body = { project_id: obra, kind, amount: f.amount, ref_date: f.ref_date, description: f.description, deduct: !!f.deduct, files };
+      const r = await api(e ? `/field/labor-entries/${e.id}` : '/field/labor/entries', { method: e ? 'PUT' : 'POST', body });
+      toast(e ? 'Lançamento salvo.' : rw ? 'Retrabalho lançado.' : 'Aditivo lançado.');
+      return r;
+    },
+  }).then(async r => {
+    if (!del) return done(!!r);
+    if (!await confirmSheet('Excluir lançamento', `Excluir ${rw ? 'o retrabalho' : 'o aditivo'} de ${money(e.amount)}? Os anexos também são apagados.`, 'Excluir', true)) return done(false);
+    try { await api(`/field/labor-entries/${e.id}`, { method: 'DELETE' }); toast('Lançamento excluído.'); done(true); } catch (ex) { toast(ex.message, 'error'); done(false); }
+  });
+}
+function bindLabor(root, L, obra, render) {
+  const c = L.contract;
+  if (c) bindLaborChart(root, c, render);
+  root.querySelectorAll('[data-lc-det]').forEach(d => d.addEventListener('toggle', () => { if (d.open) openLc.add(d.dataset.lcDet); else openLc.delete(d.dataset.lcDet); }));
+  root.querySelectorAll('[data-lc-edit]').forEach(b => b.addEventListener('click', () => laborForm(L, obra, ch => ch && render())));
+  if (!c) return;
+  root.querySelectorAll('[data-lc-new]').forEach(b => b.addEventListener('click', () => laborEntryForm(obra, c.supplier, b.dataset.lcNew, null, ch => ch && render())));
+  root.querySelectorAll('[data-lc-ed]').forEach(b => b.addEventListener('click', () => { const e = c.entries.find(x => x.id === Number(b.dataset.lcEd)); laborEntryForm(obra, c.supplier, e.kind, e, ch => ch && render()); }));
+  root.querySelectorAll('[data-lc-ded]').forEach(b => b.addEventListener('change', async () => {
+    try { await api(`/field/labor-entries/${b.dataset.lcDed}`, { method: 'PUT', body: { deduct: b.checked } }); toast(b.checked ? 'Retrabalho descontado do fornecedor.' : 'Retrabalho só registrado (sem desconto).'); render(); }
+    catch (ex) { b.checked = !b.checked; toast(ex.message, 'error'); }
+  }));
+}
+// Na folha: medição do fornecedor do período × pago nesta folha
+const bmFile = f => html`<a class="fm-file" href="/api/field-measurement-files/${f.id}" target="_blank" rel="noopener">${icon('file')}${f.original_name || 'BM.pdf'}</a>`;
+function sheetLaborCard(s) {
+  const lb = s.labor, m = lb.measurement;
+  return html`<section class="card section lc-card lc-sheet"><div class="card-head"><h2>${icon('contract')}<span class="lc-title"><span>Encontro de contas</span><small>Contrato de mão de obra · ${lb.supplier}</small></span></h2></div>
+    <div class="card-body lc-body">
+      ${m?.shared ? html`<p class="lc-say">${icon('info')}<span>Esta folha está na medição de <b>${fmtDate(m.ref_date)}</b> (${money(m.amount)}) junto com outras folhas. Para alterar, use "Medição do terceiro" na obra.</span></p>` : html`
+      <div class="lc-cmp">
+        <div><span>Pago nesta folha</span><b id="lc-paid">—</b></div>
+        <label><span>Medição do fornecedor (R$)</span><input type="number" id="lc-mv" step="0.01" min="0" inputmode="decimal" value="${m ? m.amount : ''}" placeholder="valor do BM"></label>
+        <div><span>Diferença</span><b id="lc-diff">—</b><small id="lc-difft"></small></div>
+      </div>
+      <div class="form-row"><label class="fc-payd">Data da medição<input type="date" id="lc-md" value="${m?.ref_date || s.end_date}"></label>
+        <label class="fc-payd">Anexar BM (PDF)<input type="file" id="lc-mf" accept="application/pdf,.pdf" multiple></label></div>
+      ${m?.files.length ? html`<div class="fm-files">${m.files.map(bmFile)}</div>` : ''}
+      <div><button type="button" class="btn btn-primary btn-sm" id="lc-msave">${icon('check')}${m ? 'Salvar medição' : 'Lançar medição'}</button></div>`}
+    </div></section>`;
+}
+function bindSheetLabor(root, s, paidNow) {
+  const v = root.querySelector('#lc-mv');
+  if (!v) return () => {};
+  const upd = () => {
+    const paid = paidNow();
+    root.querySelector('#lc-paid').textContent = money(paid);
+    const d = v.value === '' ? null : num(v.value) - paid;
+    const el = root.querySelector('#lc-diff');
+    el.textContent = d === null ? '—' : signed(d);
+    el.className = d === null ? '' : saldoCls(d);
+    root.querySelector('#lc-difft').textContent = d === null ? 'lance a medição do período' : saldoTxt(d);
+  };
+  v.addEventListener('input', upd);
+  root.querySelector('#lc-msave').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    if (v.value === '' || num(v.value) <= 0) return toast('Informe o valor da medição do fornecedor.', 'error');
+    const picked = [...(root.querySelector('#lc-mf').files || [])];
+    const notPdf = picked.find(x => !isPdfFile(x));
+    if (notPdf) return toast(`O BM precisa ser PDF ("${notPdf.name}" não é).`, 'error');
+    btn.disabled = true;
+    try {
+      const files = await readAttachments(picked);
+      await api(`/field/sheets/${s.id}/measurement`, { method: 'PUT', body: { amount: v.value, ref_date: root.querySelector('#lc-md').value, files } });
+      toast(files.length ? 'Medição e BM salvos.' : 'Medição do fornecedor salva.');
+      root.querySelector('#lc-mf').value = '';
+      btn.innerHTML = `${icon('check')}Salvar medição`;
+      btn.disabled = false;
+    } catch (ex) { toast(ex.message, 'error'); btn.disabled = false; }
+  });
+  upd();
+  return upd;
+}
+
 // ---------- Folhas da obra (resumo + folhas) ----------
 export async function list({ query, navigate, state, render }) {
   const obra = Number(query.get('obra')) || 0;
   const d = await api('/field/sheets', { query: { obra: obra || '' } });
   if (!obra || !d.projects.some(p => p.id === obra)) return obrasView(d);
   const mny = d.can_money;
-  const [meas, debts] = mny ? await Promise.all([api('/field/measurements', { query: { obra } }), api('/field/debts', { query: { obra } })]) : [null, null];
+  const [meas, debts, labor] = mny ? await Promise.all([api('/field/measurements', { query: { obra } }), api('/field/debts', { query: { obra } }), api('/field/labor', { query: { obra } })]) : [null, null, null];
   const measOf = new Map((meas?.sheets || []).filter(x => x.measurement_id).map(x => [x.id, x.measurement_id]));
   const o = d.overview.find(x => x.id === obra);
+  const lc = labor?.contract || null; // obra com contrato de mão de obra: a tela abre pelo resumo do encontro de contas
   const projOpts = sel => d.projects.map(p => html`<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${p.code} · ${p.name}</option>`);
   const kp = (l, v, sub) => html`<div><span>${l}</span><b>${v}</b>${sub ? html`<small>${sub}</small>` : ''}</div>`;
   return {
@@ -267,6 +660,10 @@ export async function list({ query, navigate, state, render }) {
       })}
       ${fieldTabs('folhas', mny ? obra : 0)}
       <div class="fc-filter section"><label for="fc-obra">Obra</label><select id="fc-obra"><option value="">Todas as obras</option>${projOpts(obra)}</select></div>
+      ${lc ? html`${laborResumo(lc)}${laborContractCard(lc)}${laborReworkCard(lc)}
+      <div class="lc-sh-head section"><h2 class="fc-h2">Folhas</h2><span class="muted">pago na folha × medição do fornecedor, com o saldo acumulado</span></div>
+      ${d.sheets.length ? laborSheetsTable(lc, d.sheets) : html`<div class="empty-state"><h2>Nenhuma folha nesta obra</h2><p>Crie a folha do período e lance a medição do fornecedor dentro dela.</p></div>`}
+      <details class="section fc-more"><summary>Outros controles da obra: resumo, medição do terceiro, dívidas anteriores e folhas em cartões</summary>
       <section class="card section fc-resumo"><div class="card-head"><h2>${icon('dashboard')}Resumo da obra</h2></div>
         <div class="pf-kpis">
           ${kp('Folhas', o.sheets, o.open ? `${o.open} aberta(s)` : o.sheets ? 'todas fechadas' : '')}
@@ -276,6 +673,28 @@ export async function list({ query, navigate, state, render }) {
           ${mny ? html`${kp('Total das folhas', money(o.total))}${kp('Em folhas abertas', money(o.in_open))}${kp('A pagar', money(o.pending))}${kp('Pago', money(o.paid))}` : ''}
           ${mny && (o.debts.empresa_deve || o.debts.profissional_deve) ? html`${kp('Empresa deve (anterior)', money(o.debts.empresa_deve), 'dívida anterior em aberto')}${kp('Devem à empresa (anterior)', money(o.debts.profissional_deve), 'dívida anterior em aberto')}` : ''}
         </div></section>
+      ${meas ? measSection(meas, debts) : ''}
+      <h2 class="fc-h2 section">Folhas em cartões</h2>
+      ${d.sheets.length ? html`<div class="pf-months">${d.sheets.map(s => html`<a class="pf-mcard" href="#/campo/${s.id}">
+          <div class="pf-mtop"><b>${s.project_code} · ${s.code}</b>${stTag(s.status)}</div>
+          <div class="pf-mper">${s.project_name}</div>
+          <div class="pf-mper">${fmtDate(s.start_date)} a ${fmtDate(s.end_date)}</div>
+          ${mny ? html`<div class="pf-mtotal">${money(s.totals.total)}</div>` : html`<div class="pf-mtotal">${n2(s.diarias)} diária(s)</div>`}
+          <div class="pf-mfoot"><span>${s.people} pessoa(s)</span>${s.contracts ? html`<span>${s.contracts} empreitada(s)</span>` : ''}${mny ? html`<span>${n2(s.diarias)} diária(s)</span>${s.totals.client ? html`<span>Cliente ${money(s.totals.client)}</span>` : ''}${payTag(s.payment)}` : ''}
+            ${measOf.has(s.id) ? html`<span class="fc-mtag">${icon('file')}Na medição do terceiro</span>` : ''}</div>
+        </a>`)}</div>`
+        : html`<div class="empty-state"><h2>Nenhuma folha${obra ? ' nesta obra' : ''}</h2><p>Crie a folha do período: marque as diárias de cada pessoa por dia e o % executado das empreitadas.</p></div>`}
+      </details>` : html`
+      <section class="card section fc-resumo"><div class="card-head"><h2>${icon('dashboard')}Resumo da obra</h2></div>
+        <div class="pf-kpis">
+          ${kp('Folhas', o.sheets, o.open ? `${o.open} aberta(s)` : o.sheets ? 'todas fechadas' : '')}
+          ${kp('Diárias', n2(o.diarias), o.last ? `última ${o.last.code}` : '')}
+          ${kp('Profissionais', o.workers, html`<a href="#/campo/profissionais?obra=${obra}">ver lista</a>`)}
+          ${kp('Empreitadas', o.contracts, html`<a href="#/campo/empreitadas?obra=${obra}">em andamento</a>`)}
+          ${mny ? html`${kp('Total das folhas', money(o.total))}${kp('Em folhas abertas', money(o.in_open))}${kp('A pagar', money(o.pending))}${kp('Pago', money(o.paid))}` : ''}
+          ${mny && (o.debts.empresa_deve || o.debts.profissional_deve) ? html`${kp('Empresa deve (anterior)', money(o.debts.empresa_deve), 'dívida anterior em aberto')}${kp('Devem à empresa (anterior)', money(o.debts.profissional_deve), 'dívida anterior em aberto')}` : ''}
+        </div></section>
+      ${labor ? laborSection(labor) : ''}
       ${meas ? measSection(meas, debts) : ''}
       <h2 class="fc-h2 section">Folhas</h2>
       ${d.sheets.length ? html`<div class="pf-months">${d.sheets.map(s => html`<a class="pf-mcard" href="#/campo/${s.id}">
@@ -287,10 +706,12 @@ export async function list({ query, navigate, state, render }) {
             ${measOf.has(s.id) ? html`<span class="fc-mtag">${icon('file')}Na medição do terceiro</span>` : ''}</div>
         </a>`)}</div>`
         : html`<div class="empty-state"><h2>Nenhuma folha${obra ? ' nesta obra' : ''}</h2><p>Crie a folha do período: marque as diárias de cada pessoa por dia e o % executado das empreitadas.</p></div>`}
+`}
       <button type="button" class="fab" data-new aria-label="Nova folha">${icon('plus')}</button>`,
     mount(root) {
       root.querySelector('#fc-obra').addEventListener('change', e => navigate(`/campo${e.target.value ? `?obra=${e.target.value}` : ''}`));
       if (!mny) root.querySelectorAll('[data-money-tab]').forEach(x => x.remove());
+      if (labor) bindLabor(root, labor, obra, render);
       if (meas) bindMeasurements(root, meas, obra, render);
       if (debts) bindDebts(root, debts, obra, render);
       root.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
@@ -398,6 +819,7 @@ export async function view({ params, navigate, render }) {
           <button type="button" class="btn btn-ghost btn-sm" id="fc-paycopy" data-copy="" data-copy-msg="Lista de pagamentos copiada.">${icon('file')}Copiar lista</button></div>
         ${s.payment ? html`<p class="card-body fp-state">${icon('wallet')}No Financeiro: <b>${money(s.payment.amount)}</b> · vence ${fmtDate(s.payment.due_date)} · ${s.payment.status === 'paga' ? html`<span class="fc-pay fc-pay-ok">Pago</span>` : html`<span class="fc-pay">A pagar</span>`}</p>` : ''}
         <ul class="fp-list" id="fc-pay"></ul>${addBar}</section>` : ''}
+      ${s.labor ? sheetLaborCard(s) : ''}
       <datalist id="fc-services">${s.services.map(x => html`<option value="${x}">`)}</datalist>
       ${!mny ? html`<section class="card section">
         <div class="card-head"><h2>${icon('users')}Mão de obra própria</h2><span class="sub">${st.people.length}</span></div>
@@ -482,9 +904,11 @@ export async function view({ params, navigate, render }) {
           <div class="fr-block"><h3>Por função</h3>${fun.length ? html`<ul class="fr-list">${fun.map(g => html`<li><div><span>${g.name}</span><b>${mny ? money(g.value) : `${n2(g.diarias)} diária(s)`}</b></div><small>${g.people} pessoa(s) · ${n2(g.diarias)} diária(s)</small></li>`)}</ul>` : html`<p class="muted">—</p>`}</div>
           ${pay}`.toString();
       };
+      const lcUpd = s.labor ? bindSheetLabor(root, s, () => st.people.reduce((a, e) => a + pCalc(e).total, 0) + st.contracts.reduce((a, c) => a + cCalc(c).amount, 0)) : () => {};
       const refresh = () => {
         sumBox();
         payBox();
+        lcUpd();
         root.querySelector('#fc-tot').innerHTML = totals().toString();
         for (const e of st.people) { const el = root.querySelector(`[data-calc="${e.worker_id}"]`); if (el) el.innerHTML = personCalc(e).toString(); }
         for (const c of st.contracts) {

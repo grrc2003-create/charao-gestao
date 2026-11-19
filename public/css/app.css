@@ -4649,3 +4649,159 @@ body:has(.sticky-actions) .charao { bottom: calc(var(--bottombar-h) + env(safe-a
 @keyframes ch-flash { 0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); } 20%, 60% { box-shadow: 0 0 0 4px rgba(217, 119, 6, .55); } }
 .ch-flash { animation: ch-flash 1.2s ease-in-out 2; border-radius: 8px; }
 @media (prefers-reduced-motion: reduce) { .ch-flash { animation: none; outline: 3px solid var(--orange-700); outline-offset: 2px; } }
+
+/* Folha de Campo: contrato de mão de obra (encontro de contas medido × pago) */
+.lc-card .card-head { gap: 8px; flex-wrap: wrap; }
+.lc-card .card-head > h2 { margin-right: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 719px) { .lc-card .card-head > h2 { flex-basis: 100%; } .lc-card .card-head > .btn { flex: 1 1 auto; justify-content: center; } }
+.lc-title { display: inline-grid; line-height: 1.2; min-width: 0; }
+.lc-title small { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.lc-body { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.lc-body > * { min-width: 0; }
+.lc-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.lc-lbl { flex-basis: 100%; font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); font-weight: 650; }
+.lc-big { font-size: 28px; line-height: 1.1; color: var(--navy-700); }
+.lc-of { font-size: 14px; color: var(--ink-2); }
+.lc-pos { color: var(--st-concluida) !important; }
+.lc-neg { color: var(--st-atrasada) !important; }
+.lc-facts { list-style: none; margin: 0; padding: 0; display: grid; font-size: 13.5px; }
+.lc-facts li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.lc-facts li span { color: var(--ink-2); min-width: 0; }
+.lc-facts li b { flex: none; }
+.lc-facts li small { color: var(--muted); font-weight: 500; }
+.lc-facts li.lc-sum { border-bottom: 0; }
+.lc-facts li.lc-sum span, .lc-facts li.lc-sum b { color: var(--ink); font-weight: 700; }
+.lc-facts li.lc-wait span, .lc-facts li.lc-wait b { color: var(--orange-700); }
+.lc-bar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.lc-fin { display: block; height: 100%; border-radius: 999px; background: var(--navy-700); }
+.lc-say { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); font-size: 14px; line-height: 1.45; }
+.lc-say > svg { flex: none; margin-top: 3px; color: var(--navy-700); }
+.lc-say.lc-warn { background: var(--orange-50); color: var(--orange-700); }
+.lc-say.lc-warn > svg { color: inherit; }
+.lc-table td, .lc-table th { white-space: nowrap; }
+.lc-table tfoot td { border-top: 2px solid var(--line); }
+.lc-row-wait td { color: var(--muted); }
+.lc-hint { margin: -4px 0 0; }
+.lc-det summary { cursor: pointer; font-weight: 650; font-size: 13.5px; color: var(--navy-700); padding: 4px 0; }
+.lc-entries { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.lc-entry { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 4px; }
+.lc-e-top { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.lc-e-kind { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--navy-700); }
+.lc-retrabalho .lc-e-kind { color: var(--orange-700); }
+.lc-e-val { margin-left: auto; }
+.lc-e-desc { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.lc-e-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.lc-e-acts .btn { margin-left: auto; }
+.lc-ded { font-size: 13px; }
+.lc-notes { margin: 0; font-size: 13px; }
+.lc-form { display: grid; gap: 12px; }
+.lc-mid[hidden] { display: none; }
+.lc-cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.lc-cmp > div, .lc-cmp > label { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.lc-cmp span { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+.lc-cmp b { font-size: 18px; }
+.lc-cmp small { font-size: 12px; color: var(--ink-2); }
+.lc-cmp input { font-size: 16px; }
+@media (max-width: 719px) { .lc-cmp { grid-template-columns: minmax(0, 1fr); } }
+
+/* Contrato de mão de obra: resumo com gráfico do acumulado, posição do contrato, contrato/aditivos e folhas em tabela */
+.lc-resumo { --s-med: #2a78d6; --s-fat: #eb6834; --grid: #ECE9E2; --axis: #C9C4BA; }
+.lc-kpis { padding: 0 16px; }
+.lc-kpis .lc-sal b { font-size: 22px; }
+.lc-kpis .lc-sal.lc-pos b, .lc-kpis .lc-sal.lc-pos small { color: var(--st-concluida); }
+.lc-kpis .lc-sal.lc-neg b, .lc-kpis .lc-sal.lc-neg small { color: var(--st-atrasada); }
+.lc-chart-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.lc-chart-head .fm-subh { padding: 0; }
+.lc-legend2 { margin: 0; }
+.lc-k-med { background: var(--s-med) !important; }
+.lc-k-pago { background: var(--s-fat) !important; }
+.ct-legend i.ln-key { display: inline-block; width: 16px; height: 3px; border-radius: 2px; margin: 0; }
+.ct-legend i.lc-k-area { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin: 0; }
+.lc-svg .lc-ln-med { fill: none; stroke: var(--s-med); stroke-width: 2.5px; stroke-linejoin: round; stroke-linecap: round; }
+.lc-svg .lc-ln-pago { fill: none; stroke: var(--s-fat); stroke-width: 2.5px; stroke-linejoin: round; stroke-linecap: round; }
+.lc-svg .lc-dt-med { fill: var(--s-med); stroke: #fff; stroke-width: 2px; }
+.lc-svg .lc-dt-pago { fill: var(--s-fat); stroke: #fff; stroke-width: 2px; }
+.lc-ar-pos { fill: rgba(31, 107, 65, .14); background: rgba(31, 107, 65, .3); }
+.lc-ar-neg { fill: rgba(192, 57, 43, .14); background: rgba(192, 57, 43, .3); }
+.lc-tip-pos { color: var(--st-concluida); }
+.lc-pos-table td { padding: 8px 12px; }
+.lc-pos-table td:first-child { color: var(--ink-2); white-space: normal; }
+.lc-pos-table td.num, .lc-ct-table td.num, .lc-ct-table th.num, .lc-sh-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-pos-table small, .lc-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+.lc-pos-table .lc-tot td, .lc-ct-table .lc-tot td, .lc-sh-table .lc-tot td { font-weight: 700; color: var(--ink); border-top: 2px solid var(--line); }
+.lc-pos-table .lc-final td { font-size: 15px; }
+.lc-pos-table .lc-muted td { color: var(--muted); font-weight: 500; }
+.lc-ct-table td { vertical-align: top; }
+.lc-sh-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.lc-sh-head .fc-h2 { margin: 0; }
+.lc-sheets { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+.lc-sh-table td, .lc-sh-table th { white-space: nowrap; }
+.lc-sh-table .lc-out td { color: var(--muted); }
+.lc-wait-link { color: var(--orange-700); font-weight: 650; }
+.fc-more { margin-top: 18px; }
+.fc-more > summary { cursor: pointer; font-weight: 650; color: var(--navy-700); padding: 10px 0; }
+.lc-ct-table th, .lc-ct-table td, .lc-sh-table th, .lc-sh-table td, .lc-pos-table td { text-align: left; }
+.lc-ct-table .num, .lc-sh-table .num, .lc-pos-table td.num { text-align: right; }
+.lc-pos-table td.num small { display: inline; }
+
+/* Contrato de mão de obra: quadros no padrão, barras de % e dica do gráfico por período */
+.lc-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 0 16px; }
+.lc-kpis > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lc-kpis span { font-size: 12px; color: var(--muted); }
+.lc-kpis b { font-size: 18px; color: var(--navy); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-kpis small { font-size: 12px; color: var(--ink-2); }
+.lc-kpis .lc-sal b { font-size: 18px; }
+@media (max-width: 899px) { .lc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 380px) { .lc-kpis b { font-size: 16px; } }
+.lc-pbars { display: grid; gap: 10px; }
+.lc-pb { display: grid; gap: 4px; }
+.lc-pb-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13.5px; }
+.lc-pb-top span { font-weight: 650; color: var(--ink); min-width: 130px; }
+.lc-pb-top b { font-variant-numeric: tabular-nums; }
+.lc-pb-top small { color: var(--ink-2); font-size: 12.5px; }
+.lc-pb-bar { position: relative; height: 12px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.lc-pb-bar > span { display: block; height: 100%; border-radius: 999px; }
+.lc-pb-over { position: absolute; right: 8px; top: -1px; font-size: 10px; font-style: normal; font-weight: 700; color: #fff; }
+.lc-pb-cmp { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.lc-gran { margin-left: auto; }
+.lc-tip { min-width: 240px; max-width: 340px; }
+.lc-tip-sub { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.lc-tip-ev { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 2px 0; }
+.lc-tip-ev em { font-style: normal; font-weight: 700; color: var(--navy-700); }
+.lc-tip-ev b { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lc-tip-ev.is-info { color: var(--muted); }
+
+/* Contrato de mão de obra: tabelas responsivas (sem barra horizontal) e gráfico que encolhe */
+.lc-rt { container-type: inline-size; width: 100%; }
+.lc-rt table { width: 100%; }
+.lc-sheets { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.lc-sh-table td, .lc-sh-table th { white-space: nowrap; }
+.lc-key a b { white-space: nowrap; }
+.lc-key-per { display: none; color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+.lc-ct-table td.lc-wide { white-space: normal; }
+.lc-pos-table td:first-child { white-space: normal; }
+.lc-chart.ct-chart-box { overflow: visible; }
+.lc-svg.ct-svg { min-width: 0; }
+@container (max-width: 980px) {
+  .lc-sh-table thead { display: none; }
+  .lc-sh-table, .lc-sh-table tbody, .lc-sh-table tfoot { display: block; width: 100%; }
+  .lc-sh-table tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px 14px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .lc-sh-table td { display: block; padding: 0; border: 0; white-space: normal; text-align: left !important; }
+  .lc-sh-table td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .lc-sh-table td.lc-key { grid-column: 1 / -1; font-size: 15px; }
+  .lc-sh-table .lc-key-per { display: inline; }
+  .lc-sh-table .lc-hide-s { display: none; }
+  .lc-sh-table tfoot tr { background: var(--surface); }
+  .lc-sh-table tfoot td { border: 0 !important; }
+}
+@container (max-width: 640px) {
+  .lc-ct-table thead { display: none; }
+  .lc-ct-table, .lc-ct-table tbody, .lc-ct-table tfoot { display: block; width: 100%; }
+  .lc-ct-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); position: relative; }
+  .lc-ct-table td { display: block; padding: 0; border: 0 !important; text-align: left !important; white-space: normal; }
+  .lc-ct-table td[data-label]:not([data-label=""])::before { content: attr(data-label); display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .lc-ct-table td.lc-wide { grid-column: 1 / -1; order: -1; padding-right: 40px; }
+  .lc-ct-table td.lc-act { position: absolute; top: 6px; right: 8px; }
+  .lc-ct-table .lc-hide-s { display: none; }
+  .lc-pos-table td { padding: 7px 10px; }
+}

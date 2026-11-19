@@ -2986,7 +2986,7 @@ async function main() {
     ok(r1.measured_acc === lcT1 + 500 && Math.abs(lastRow.paid_acc - (lcT1 + lcT2)) < 0.01 && Math.abs(lastRow.diff_acc - L.balance) < 0.01, 'acumulado folha a folha (medido × pago) para o gráfico');
     await fcAna('PUT', `/field/sheets/${fcS2.id}/measurement`, { amount: lcT2 - 800, ref_date: '2026-09-20' });
     L = (await fcAna('GET', '/field/labor?obra=2')).data.contract;
-    ok(L.balance === -300 && L.pending_sheets === 0 && Math.abs(L.to_measure - (100000 - (lcT1 + lcT2 - 300))) < 0.01 && L.projection?.per_day > 0, 'acumulado: medido − pago das folhas; falta medir e prazo pelo ritmo da medição');
+    ok(L.balance === -300 && L.pending_sheets === 0 && Math.abs(L.to_measure - (100000 - (lcT1 + lcT2 - 300))) < 0.01 && L.projection?.base === 'FC-02' && Math.abs(L.projection.per_day - Math.round(lcT2 / 7 * 100) / 100) < 0.01, 'acumulado: medido − pago das folhas; prazo pelo valor pago por dia na última folha');
     await fcAna('PUT', `/field/sheets/${fcS2.id}/measurement`, { amount: lcT2 });
     ok((await fcAna('GET', '/field/labor?obra=2')).data.contract.balance === 500 && (await fcAna('GET', '/field/measurements?obra=2')).data.measurements.filter(m => m.supplier === 'Empreiteira Teste').length === 2, 'corrigir a medição da folha atualiza a mesma medição (aparece em Medição do terceiro)');
     L = (await fcAna('POST', '/field/labor/entries', { project_id: 2, kind: 'aditivo', amount: 20000, ref_date: '2026-09-20', description: 'Aditivo teste' })).data.contract;

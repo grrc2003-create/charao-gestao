@@ -426,7 +426,7 @@ function laborResumo(c) {
         <tr class="lc-tot lc-final"><td>Saldo do fornecedor <small>${saldoTxt(c.balance)}</small></td><td class="num ${saldoCls(c.balance)}">${signed(c.balance)}</td></tr>
         ${c.noted ? html`<tr class="lc-muted"><td>Retrabalhos só registrados (não descontados)</td><td class="num">${money(c.noted)}</td></tr>` : ''}
       </tbody></table></div>
-      ${p && howLong(p) ? html`<p class="lc-say">${icon('calendar')}<span>No ritmo da última medição (${p.base}: ${money(p.per_day)} por dia), o que falta medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</span></p>` : ''}
+      ${p && howLong(p) ? html`<p class="lc-say">${icon('calendar')}<span>No ritmo da última folha (${p.base}: ${money(p.per_day)} pago por dia), o que falta medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</span></p>` : ''}
     </div></section>`;
 }
 function laborContractCard(c) {

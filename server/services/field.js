@@ -1285,9 +1285,10 @@ export function laborContract(ctx, projectId) {
   const balance = r2(c.prior_balance + measured - paidMeasured - pending - deducted);
   const measuredTotal = r2(c.prior_measured + measured);
   const toMeasure = r2(value - measuredTotal);
-  // Prazo: o que falta medir ÷ medição por dia corrido da última folha medida
-  const lastM = [...measuredRows].reverse().find(r => r.days > 0 && r.measured > 0);
-  const perDay = lastM ? r2(lastM.measured / lastM.days) : 0;
+  // Prazo: o que falta medir ÷ valor pago por dia corrido na última folha (a mais recente com valor)
+  const lastS = [...sheets].reverse().find(s => tot.get(s.id) > 0);
+  const lastM = lastS ? { sheets: [{ code: code.get(lastS.id) }], days: calDays(lastS), paid: tot.get(lastS.id) } : null;
+  const perDay = lastM ? r2(lastM.paid / lastM.days) : 0;
   const days = perDay && toMeasure > 0 ? Math.ceil(toMeasure / perDay) : 0;
   const lastEnd = sheets.at(-1)?.end_date || null;
   return {

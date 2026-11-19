@@ -379,38 +379,70 @@ export function laborChart(c, g) {
   </svg>`;
   return { svg, pts, y0 };
 }
-// Barras de %: o contrato é 100%; medido × pago em folha
-function laborBars(c) {
+// Totais comparáveis (incluem o que já vinha de antes do sistema)
+export function laborNums(c) {
+  const r = v => Math.round(v * 100) / 100;
+  const before = c.start?.paid || 0;
+  const paidAll = r(c.paid + before);
+  const pct = v => (c.value > 0 ? r((v / c.value) * 100) : 0);
+  return { before, paidAll, paidPct: pct(paidAll), medPct: c.measured_pct, diff: r(c.measured_total - paidAll),
+    leftPaid: r(c.value - paidAll), leftMed: c.to_measure, sheetsN: c.rows.reduce((a, x) => a + x.sheets.length, 0) };
+}
+// Destaque: pagamento de folha × o que o fornecedor mediu, com a diferença e o saldo do fornecedor
+export function laborHighlight(c) {
+  const n = laborNums(c);
   const w = v => Math.min(100, Math.max(0, v));
-  // Pago comparável ao medido: inclui o que já tinha sido pago antes do sistema (já medido − saldo anterior)
-  const before = c.start?.paid || 0, paidAll = r2c(c.paid + before);
-  const paidPct = c.value > 0 ? r2c((paidAll / c.value) * 100) : 0;
-  const row = (label, pct, val, cls, note) => html`<div class="lc-pb"><div class="lc-pb-top"><span>${label}</span><b>${pctTxt(pct)}</b><small>${money(val)} de ${money(c.value)}${note ? ` · ${note}` : ''}</small></div>
-    <div class="lc-pb-bar" role="img" aria-label="${label}: ${pctTxt(pct)} do contrato"><span class="${cls}" style="width:${w(pct)}%"></span>${pct > 100 ? html`<i class="lc-pb-over">acima do contrato</i>` : ''}</div></div>`;
-  const gap = r2c(c.measured_pct - paidPct);
-  return html`<div class="lc-pbars">
-    ${row('Contrato medido', c.measured_pct, c.measured_total, 'lc-k-med', `falta medir ${money(c.to_measure)}`)}
-    ${row('Pago em folha', paidPct, paidAll, 'lc-k-pago', [before ? `inclui ${money(before)} antes da ${c.start_sheet?.code || 'conta'}` : '', c.pending ? `${money(c.pending)} ainda sem medição` : ''].filter(Boolean).join(' · '))}
-    <p class="lc-pb-cmp ${gap < -0.5 ? 'lc-neg' : gap > 0.5 ? 'lc-pos' : ''}">${Math.abs(gap) < 0.5 ? 'Medido e pago em folha andando juntos.'
-      : gap < 0 ? `A folha está ${pctTxt(-gap)} do contrato à frente da medição.` : `A medição está ${pctTxt(gap)} do contrato à frente da folha.`}</p></div>`;
+  return html`<div class="lc-hl">
+    <div class="lc-hl-col lc-hl-pago"><span class="lc-hl-l">Pago em folha</span><b class="lc-hl-v">${money(n.paidAll)}</b>
+      <small>${pctTxt(n.paidPct)} do contrato · ${n.sheetsN} folha(s)${n.before ? ` · inclui ${money(n.before)} antes da ${c.start_sheet?.code || 'conta'}` : ''}</small>
+      <div class="lc-hl-bar"><span style="width:${w(n.paidPct)}%"></span></div></div>
+    <div class="lc-hl-col lc-hl-med"><span class="lc-hl-l">Medido pelo fornecedor</span><b class="lc-hl-v">${money(c.measured_total)}</b>
+      <small>${pctTxt(n.medPct)} do contrato${c.pending ? ` · ${money(c.pending)} de folha ainda sem medição` : ''}</small>
+      <div class="lc-hl-bar"><span style="width:${w(n.medPct)}%"></span></div></div>
+    <div class="lc-hl-res ${saldoCls(n.diff)}">
+      <div><span class="lc-hl-l">Medido − pago em folha</span><b>${signed(n.diff)}</b>
+        <small>${n.diff < -0.004 ? 'a folha pagou mais do que o fornecedor mediu' : n.diff > 0.004 ? 'o fornecedor mediu mais do que foi pago' : 'pago e medido iguais'}</small></div>
+      ${c.deducted ? html`<div><span class="lc-hl-l">Retrabalhos descontados</span><b class="lc-neg">${signed(-c.deducted)}</b><small>falhas do fornecedor pagas pelo cliente</small></div>` : ''}
+      <div class="lc-hl-sal ${saldoCls(c.balance)}"><span class="lc-hl-l">Saldo do fornecedor</span><b>${signed(c.balance)}</b><small>${saldoTxt(c.balance)}</small></div>
+    </div></div>`;
+}
+// Final: saldo contratual (o contrato e o que ainda falta, pelo medido e pelo pago em folha) e a previsão de prazo
+export function laborSaldoBlock(c) {
+  const n = laborNums(c);
+  const p = c.projection;
+  const adds = c.entries.filter(e => e.kind === 'aditivo').length;
+  return html`<div class="lc-sc">
+    <table class="lc-sc-t"><tbody>
+      <tr><td>Valor original do contrato</td><td class="num">${money(c.total)}</td></tr>
+      <tr><td>+ Aditivos (${adds})</td><td class="num">${c.additions ? signed(c.additions) : money(0)}</td></tr>
+      <tr class="lc-sc-sub"><td>= Valor do contrato</td><td class="num">${money(c.value)}</td></tr>
+      <tr><td>− Medido pelo fornecedor${c.prior_measured ? ` (inclui ${money(c.prior_measured)} antes da ${c.start_sheet?.code || 'conta'})` : ''}</td><td class="num">${money(c.measured_total)}</td></tr>
+      <tr><td>− Pago em folha${n.before ? ` (inclui ${money(n.before)} antes da ${c.start_sheet?.code || 'conta'})` : ''}</td><td class="num">${money(n.paidAll)}</td></tr>
+    </tbody></table>
+    <div class="lc-sc-big">
+      <div><span>Saldo contratual a medir</span><b>${money(n.leftMed)}</b><small>${pctTxt(c.value ? (n.leftMed / c.value) * 100 : 0)} do contrato · valor − medido</small></div>
+      <div class="${n.leftPaid < -0.004 ? 'lc-neg' : ''}"><span>Saldo contratual pelo pago em folha</span><b>${n.leftPaid < -0.004 ? signed(n.leftPaid) : money(n.leftPaid)}</b><small>${n.leftPaid < -0.004 ? 'pago em folha acima do contrato' : `${pctTxt(c.value ? (n.leftPaid / c.value) * 100 : 0)} do contrato · valor − pago`}</small></div>
+    </div>
+    ${p && howLong(p) ? html`<p class="lc-sc-prev">${icon('calendar')}<span>No ritmo da última folha (${p.base}: ${money(p.per_day)} pago por dia), o saldo a medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</span></p>` : ''}
+    ${c.noted ? html`<p class="small muted lc-sc-note">Retrabalhos só registrados (não descontados do fornecedor): ${money(c.noted)}.</p>` : ''}
+  </div>`;
 }
 function laborResumo(c) {
-  const p = c.projection;
   const g = lcGran || autoGran(laborEvents(c));
   const ch = c.rows.length || c.entries.length ? laborChart(c, g) : null;
-  // Quanto falta do contrato pelo que já foi pago em folha (inclui o pago antes do sistema)
-  const paidAll = r2c(c.paid + (c.start?.paid || 0)), left = r2c(c.value - paidAll);
+  const n = laborNums(c);
   return html`<section class="card section lc-card lc-resumo"><div class="card-head">
       <h2>${icon('dashboard')}<span class="lc-title"><span>Resumo do contrato de mão de obra</span><small>Fornecedor: ${c.supplier}${c.supplier_doc ? ` · ${c.supplier_doc}` : ''}</small></span></h2></div>
     <div class="lc-kpis">
       <div><span>Contrato</span><b>${money(c.value)}</b><small>${c.additions ? `${money(c.total)} + aditivos` : 'sem aditivos'}</small></div>
-      <div><span>Medido pelo fornecedor</span><b>${money(c.measured_total)}</b><small>${pctTxt(c.measured_pct)} do contrato</small></div>
-      <div><span>Pago nas folhas</span><b>${money(c.paid)}</b><small>${c.rows.reduce((a, r) => a + r.sheets.length, 0)} folha(s)${c.pending_sheets ? ` · ${c.pending_sheets} sem medição` : ''}</small></div>
-      <div class="${left < -0.004 ? 'lc-sal lc-neg' : ''}"><span>Falta do contrato</span><b>${left < -0.004 ? signed(left) : money(left)}</b><small>${left < -0.004 ? 'pago em folha acima do contrato' : `${pctTxt(c.value ? (left / c.value) * 100 : 0)} do contrato ainda a pagar`}</small></div>
+      <div class="lc-kp-pago"><span>Pago em folha</span><b>${money(n.paidAll)}</b><small>${pctTxt(n.paidPct)} do contrato</small></div>
+      <div class="lc-kp-med"><span>Medido</span><b>${money(c.measured_total)}</b><small>${pctTxt(n.medPct)} do contrato</small></div>
       <div class="lc-sal ${saldoCls(c.balance)}"><span>Saldo do fornecedor</span><b>${signed(c.balance)}</b><small>${saldoTxt(c.balance)}</small></div>
+      <div><span>Saldo contratual</span><b>${money(n.leftMed)}</b><small>a medir · pelo pago ${n.leftPaid < -0.004 ? signed(n.leftPaid) : money(n.leftPaid)}</small></div>
     </div>
     <div class="card-body lc-body">
-      ${laborBars(c)}
+      <h3 class="fm-subh lc-hl-h">Pagamento de folha × medição do fornecedor</h3>
+      ${laborHighlight(c)}
       ${ch ? html`<div class="lc-chart-head"><h3 class="fm-subh">Acumulado: medido × pago nas folhas</h3>
           <div class="chips lc-gran" role="group" aria-label="Período do gráfico">${Object.entries(GRAN).map(([k, l]) => html`<button type="button" class="chip" data-lc-gran="${k}" aria-pressed="${k === g}">${l}</button>`)}</div></div>
         <ul class="ct-legend lc-legend2"><li><i class="ln-key lc-k-med"></i>Medido (− retrabalhos descontados)</li><li><i class="ln-key lc-k-pago"></i>Pago nas folhas</li><li><i class="ln-key lc-k-ct"></i>Valor final do contrato</li>
@@ -418,23 +450,12 @@ function laborResumo(c) {
         <div class="ct-chart-box lc-chart">${raw(ch.svg)}<div class="ct-tip lc-tip" hidden></div></div>
         <p class="hint lc-hint">Passe o mouse (ou toque) num ponto para ver as folhas, BMs e retrabalhos daquele período. A folha entra na data de fim do período dela; o BM, na data da medição.${ch.y0 ? ` O eixo vertical começa em ${BRLs(ch.y0)} (não em zero) para mostrar melhor a diferença.` : ''}</p>`
         : html`<p class="muted">O gráfico aparece com a primeira folha da obra. Lance a medição do fornecedor dentro de cada folha.</p>`}
-      <h3 class="fm-subh">Posição do contrato do fornecedor</h3>
-      <div class="lc-rt"><table class="fc-table lc-pos-table"><tbody>
-        <tr><td>Valor original do contrato</td><td class="num">${money(c.total)}</td></tr>
-        <tr><td>Aditivos (${c.entries.filter(e => e.kind === 'aditivo').length})</td><td class="num">${c.additions ? signed(c.additions) : money(0)}</td></tr>
-        <tr class="lc-tot"><td>Valor atualizado do contrato</td><td class="num">${money(c.value)}</td></tr>
-        <tr><td>Medido pelo fornecedor (acumulado)${c.prior_measured ? html` <small>inclui ${money(c.prior_measured)} antes da ${c.start_sheet?.code || 'conta'}</small>` : ''}</td><td class="num">${money(c.measured_total)} <small>(${pctTxt(c.measured_pct)})</small></td></tr>
-        <tr class="lc-tot"><td>Falta medir</td><td class="num">${money(c.to_measure)}</td></tr>
-        <tr><td>Pago nas folhas (acumulado)${c.pending ? html` <small>${money(c.pending)} ainda sem medição</small>` : ''}</td><td class="num">${money(c.paid)}</td></tr>
-        <tr class="lc-tot"><td>Falta do contrato pelo pago em folha <small>valor atualizado − pago${c.start?.paid ? ` (inclui ${money(c.start.paid)} pago antes da ${c.start_sheet?.code || 'conta'})` : ''}</small></td><td class="num ${left < -0.004 ? 'lc-neg' : ''}">${left < -0.004 ? signed(left) : money(left)}</td></tr>
-        <tr><td>Medido − pago nas folhas</td><td class="num ${saldoCls(c.measured - c.paid)}">${signed(c.measured - c.paid)}</td></tr>
-        ${c.prior_balance ? html`<tr><td>Saldo anterior do fornecedor${c.start_sheet ? ` (antes da ${c.start_sheet.code})` : ''}</td><td class="num ${saldoCls(c.prior_balance)}">${signed(c.prior_balance)}</td></tr>` : ''}
-        ${c.deducted ? html`<tr><td>Retrabalhos descontados do fornecedor</td><td class="num lc-neg">${signed(-c.deducted)}</td></tr>` : ''}
-        <tr class="lc-tot lc-final"><td>Saldo do fornecedor <small>${saldoTxt(c.balance)}</small></td><td class="num ${saldoCls(c.balance)}">${signed(c.balance)}</td></tr>
-        ${c.noted ? html`<tr class="lc-muted"><td>Retrabalhos só registrados (não descontados)</td><td class="num">${money(c.noted)}</td></tr>` : ''}
-      </tbody></table></div>
-      ${p && howLong(p) ? html`<p class="lc-say">${icon('calendar')}<span>No ritmo da última folha (${p.base}: ${money(p.per_day)} pago por dia), o que falta medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</span></p>` : ''}
     </div></section>`;
+}
+// Card final da tela: saldo contratual
+function laborSaldoCard(c) {
+  return html`<section class="card section lc-card lc-final-card"><div class="card-head"><h2>${icon('contract')}Saldo contratual</h2></div>
+    <div class="card-body">${laborSaldoBlock(c)}</div></section>`;
 }
 function laborContractCard(c) {
   const add = c.entries.filter(e => e.kind === 'aditivo');
@@ -682,6 +703,7 @@ export async function list({ query, navigate, state, render }) {
       ${lc ? html`${laborResumo(lc)}${laborContractCard(lc)}${laborReworkCard(lc)}
       <div class="lc-sh-head section"><h2 class="fc-h2">Folhas</h2><span class="muted">pago na folha × medição do fornecedor, com o saldo acumulado</span></div>
       ${d.sheets.length ? laborSheetsTable(lc, d.sheets) : html`<div class="empty-state"><h2>Nenhuma folha nesta obra</h2><p>Crie a folha do período e lance a medição do fornecedor dentro dela.</p></div>`}
+      ${laborSaldoCard(lc)}
       <details class="section fc-more"><summary>Outros controles da obra: resumo, medição do terceiro, dívidas anteriores e folhas em cartões</summary>
       <section class="card section fc-resumo"><div class="card-head"><h2>${icon('dashboard')}Resumo da obra</h2></div>
         <div class="pf-kpis">

@@ -4828,3 +4828,47 @@ body:has(.sticky-actions) .charao { bottom: calc(var(--bottombar-h) + env(safe-a
 .frc-pos td:first-child { width: 75%; }
 .frc .r-kpi-v { font-size: 14px; }
 .frc .r-kpi { min-width: 0; padding-left: 8px; padding-right: 6px; }
+
+/* Contrato de mão de obra: destaque pago em folha × medido e saldo contratual no final (tela e relatório) */
+.lc-hl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.lc-hl-col { border: 1px solid var(--line, #E3DFD6); border-radius: 12px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
+.lc-hl-pago { border-left: 6px solid #eb6834; background: #FFF6F1; }
+.lc-hl-med { border-left: 6px solid #2a78d6; background: #F2F7FD; }
+.lc-hl-l { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #46535F; }
+.lc-hl-v { font-size: 26px; line-height: 1.15; color: #1E2A36; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-hl-col small { font-size: 12px; color: #5B6773; }
+.lc-hl-bar { height: 8px; border-radius: 999px; background: #E9E6DF; overflow: hidden; margin-top: 2px; }
+.lc-hl-bar span { display: block; height: 100%; border-radius: 999px; }
+.lc-hl-pago .lc-hl-bar span { background: #eb6834; }
+.lc-hl-med .lc-hl-bar span { background: #2a78d6; }
+.lc-hl-res { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; padding: 10px 14px; border-radius: 12px; background: #F6F4EF; }
+.lc-hl-res > div { display: grid; gap: 2px; min-width: 0; }
+.lc-hl-res b { font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-hl-res small { font-size: 12px; color: #5B6773; }
+.lc-hl-sal b { font-size: 22px; }
+.lc-hl-sal.lc-pos b { color: #1F6B41; } .lc-hl-sal.lc-neg b { color: #C0392B; }
+.lc-hl-res > div.lc-pos > b { color: #1F6B41; } .lc-hl-res > div.lc-neg > b { color: #C0392B; }
+.lc-hl-res.lc-neg > div:first-child b { color: #C0392B; } .lc-hl-res.lc-pos > div:first-child b { color: #1F6B41; }
+.lc-hl-h { padding: 0; }
+.lc-kpis .lc-kp-pago { border-left: 4px solid #eb6834; }
+.lc-kpis .lc-kp-med { border-left: 4px solid #2a78d6; }
+@media (max-width: 640px) { .lc-hl { grid-template-columns: minmax(0, 1fr); } .lc-hl-v { font-size: 22px; } }
+.lc-sc { display: grid; gap: 10px; }
+.lc-sc-t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.lc-sc-t td { padding: 6px 4px; border-bottom: 1px dashed #E3DFD6; }
+.lc-sc-t td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lc-sc-t .lc-sc-sub td { font-weight: 700; border-bottom: 2px solid #E3DFD6; }
+.lc-sc-big { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.lc-sc-big > div { display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px; background: #2A3D50; color: #fff; min-width: 0; }
+.lc-sc-big > div:last-child { background: #46535F; }
+.lc-sc-big > div.lc-neg { background: #C0392B; }
+.lc-sc-big span { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #D5DEE7; }
+.lc-sc-big b { font-size: 24px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-sc-big small { font-size: 12px; color: #D5DEE7; }
+@media (max-width: 640px) { .lc-sc-big { grid-template-columns: minmax(0, 1fr); } }
+.lc-sc-prev { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-size: 14px; }
+.lc-sc-prev svg { flex: none; margin-top: 3px; }
+.lc-sc-note { margin: 0; }
+.frc .lc-hl-v { font-size: 18px; } .frc .lc-hl-sal b, .frc .lc-sc-big b { font-size: 17px; } .frc .lc-hl-res b { font-size: 14px; }
+.frc .lc-sc-prev { font-size: 11.5px; } .frc .lc-sc-t { font-size: 11.5px; }
+.frc-final { margin-top: 6px; }

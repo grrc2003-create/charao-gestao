@@ -2,7 +2,7 @@
 // na barra (presença por dia de cada pessoa, equipe por dia, por pessoa, por serviço/função, empreitadas, medição do
 // terceiro, atividades e pagamentos). Valores só para quem tem a seção Folha de Campo.
 import { html, raw, api, icon, fmtDate, fmtDateTime } from '../core.js';
-import { laborChart, laborEvents, autoGran, GRAN, signed, saldoCls, saldoTxt, howLong, pctTxt } from './field.js';
+import { laborChart, laborEvents, autoGran, GRAN, signed, saldoTxt, laborNums, laborHighlight, laborSaldoBlock } from './field.js';
 import { toast, isPdfFile } from '../ui.js';
 import { printToolbar, bindPrintToolbar, setPageFooter } from './print-common.js';
 
@@ -359,63 +359,40 @@ export async function view({ query, setQuery, render }) {
 }
 
 // ---------- Contrato de mão de obra no relatório (encontro de contas com o fornecedor, contrato até hoje) ----------
+// Ordem: números principais, pagamento de folha × medição em destaque, gráfico, folhas × medição, contrato e aditivos,
+// retrabalhos e, no final, o saldo contratual com a previsão de prazo.
 function laborReport(c, graf, kpi) {
   const g = graf || autoGran(laborEvents(c));
   const ch = c.rows.length || c.entries.length ? laborChart(c, g) : null;
-  const r2 = v => Math.round(v * 100) / 100;
-  const paidAll = r2(c.paid + (c.start?.paid || 0)), left = r2(c.value - paidAll);
-  const paidPct = c.value > 0 ? r2((paidAll / c.value) * 100) : 0;
-  const gap = r2(c.measured_pct - paidPct);
-  const p = c.projection;
+  const n = laborNums(c);
   const adds = c.entries.filter(e => e.kind === 'aditivo'), rws = c.entries.filter(e => e.kind === 'retrabalho');
-  const bar = (label, pct, val, color, note) => html`<div class="frc-pb"><div class="frc-pb-t"><b>${label}</b> <span>${pctTxt(pct)}</span> <small>${money(val)} de ${money(c.value)}${note ? ` · ${note}` : ''}</small></div>
-    <div class="frc-pb-b"><span style="width:${Math.min(100, Math.max(0, pct))}%;background:${color}"></span></div></div>`;
   return html`<section class="r-section lc-resumo frc"><h3 class="r-h">Contrato de mão de obra · ${c.supplier}</h3>
-    <p class="small muted" style="margin:0 0 8px">Encontro de contas do contrato até hoje: o que o fornecedor mediu × o que foi pago nas folhas (pelo cliente e pela Charão).${c.supplier_doc ? ` CPF/CNPJ ${c.supplier_doc}.` : ''}</p>
+    <p class="small muted" style="margin:0 0 8px">Encontro de contas do contrato até hoje: o que foi pago nas folhas (pelo cliente e pela Charão) × o que o fornecedor mediu.${c.supplier_doc ? ` CPF/CNPJ ${c.supplier_doc}.` : ''}</p>
     <div class="r-kpis frc-kpis avoid">
       ${kpi('Contrato', money(c.value), c.additions ? `${money(c.total)} + aditivos` : 'sem aditivos')}
-      ${kpi('Medido pelo fornecedor', money(c.measured_total), `${pctTxt(c.measured_pct)} do contrato`, '#2a78d6')}
-      ${kpi('Pago nas folhas', money(c.paid), `${c.rows.reduce((a, x) => a + x.sheets.length, 0)} folha(s)`, '#eb6834')}
-      ${kpi('Falta do contrato', left < -0.004 ? signed(left) : money(left), left < -0.004 ? 'pago acima do contrato' : `${pctTxt(c.value ? (left / c.value) * 100 : 0)} ainda a pagar`, '#2A3D50')}
+      ${kpi('Pago em folha', money(n.paidAll), `${Math.round(n.paidPct)}% do contrato`, '#eb6834')}
+      ${kpi('Medido', money(c.measured_total), `${Math.round(n.medPct)}% do contrato`, '#2a78d6')}
       ${kpi('Saldo do fornecedor', signed(c.balance), saldoTxt(c.balance), c.balance < -0.004 ? '#C0392B' : c.balance > 0.004 ? '#1F6B41' : '#2A3D50')}
+      ${kpi('Saldo contratual', money(n.leftMed), 'a medir (valor − medido)', '#2A3D50')}
     </div>
-    <div class="frc-bars avoid">
-      ${bar('Contrato medido', c.measured_pct, c.measured_total, '#2a78d6', `falta medir ${money(c.to_measure)}`)}
-      ${bar('Pago em folha', paidPct, paidAll, '#eb6834', c.start?.paid ? `inclui ${money(c.start.paid)} antes da ${c.start_sheet?.code || 'conta'}` : '')}
-      <p class="small" style="margin:2px 0 0"><b>${Math.abs(gap) < 0.5 ? 'Medido e pago em folha andando juntos.' : gap < 0 ? `A folha está ${pctTxt(-gap)} do contrato à frente da medição.` : `A medição está ${pctTxt(gap)} do contrato à frente da folha.`}</b></p>
-    </div>
+    <div class="avoid"><h4 class="fr-h4">Pagamento de folha × medição do fornecedor</h4>${laborHighlight(c)}</div>
     ${ch ? html`<div class="frc-chart avoid"><h4 class="fr-h4">Acumulado (${GRAN[g].toLowerCase()}): medido × pago nas folhas</h4>
       <p class="small muted frc-leg"><i style="background:#2a78d6"></i>Medido (− retrabalhos descontados) <i style="background:#eb6834"></i>Pago nas folhas <i class="frc-dash"></i>Valor final do contrato <i style="background:rgba(31,107,65,.3)"></i>Medido acima <i style="background:rgba(192,57,43,.3)"></i>Folha acima da medição</p>
       ${raw(ch.svg)}${ch.y0 ? html`<p class="small muted" style="margin:2px 0 0">O eixo vertical começa em ${money(ch.y0)} para mostrar melhor a diferença.</p>` : ''}</div>` : ''}
-    <div class="avoid"><h4 class="fr-h4">Posição do contrato do fornecedor</h4>
-    <table class="r-table frc-pos"><tbody>
-      <tr><td>Valor original do contrato</td><td class="num">${money(c.total)}</td></tr>
-      <tr><td>Aditivos (${adds.length})</td><td class="num">${c.additions ? signed(c.additions) : money(0)}</td></tr>
-      <tr class="fr-sum"><td>Valor atualizado do contrato</td><td class="num">${money(c.value)}</td></tr>
-      <tr><td>Medido pelo fornecedor (acumulado)${c.prior_measured ? ` · inclui ${money(c.prior_measured)} antes da ${c.start_sheet?.code || 'conta'}` : ''}</td><td class="num">${money(c.measured_total)} (${pctTxt(c.measured_pct)})</td></tr>
-      <tr class="fr-sum"><td>Falta medir</td><td class="num">${money(c.to_measure)}</td></tr>
-      <tr><td>Pago nas folhas (acumulado)${c.pending ? ` · ${money(c.pending)} ainda sem medição` : ''}</td><td class="num">${money(c.paid)}</td></tr>
-      <tr class="fr-sum"><td>Falta do contrato pelo pago em folha (valor atualizado − pago)</td><td class="num">${left < -0.004 ? signed(left) : money(left)}</td></tr>
-      <tr><td>Medido − pago nas folhas</td><td class="num">${signed(c.measured - c.paid)}</td></tr>
-      ${c.prior_balance ? html`<tr><td>Saldo anterior do fornecedor${c.start_sheet ? ` (antes da ${c.start_sheet.code})` : ''}</td><td class="num">${signed(c.prior_balance)}</td></tr>` : ''}
-      ${c.deducted ? html`<tr><td>Retrabalhos descontados do fornecedor</td><td class="num">${signed(-c.deducted)}</td></tr>` : ''}
-      <tr class="fr-sum"><td>Saldo do fornecedor · ${saldoTxt(c.balance)}</td><td class="num ${c.balance < -0.004 ? 'late' : ''}">${signed(c.balance)}</td></tr>
-      ${c.noted ? html`<tr><td class="muted">Retrabalhos só registrados (não descontados)</td><td class="num muted">${money(c.noted)}</td></tr>` : ''}
-    </tbody></table>
-    ${p && howLong(p) ? html`<p class="small" style="margin:6px 0 0">No ritmo da última folha (${p.base}: ${money(p.per_day)} pago por dia), o que falta medir dá para mais ou menos <b>${howLong(p)}</b> de obra${p.end_date ? html`, até por volta de <b>${fmtDate(p.end_date)}</b>` : ''}.</p>` : ''}</div>
-    <div class="${adds.length + 2 <= KEEP_ROWS ? 'avoid' : 'fr-flow'}"><h4 class="fr-h4">Contrato e aditivos</h4>
-    <table class="r-table"><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th></tr></thead><tbody>
-      <tr><td class="small nowrap">—</td><td><b>Contrato original</b> · ${c.supplier}</td><td class="num">${money(c.total)}</td></tr>
-      ${adds.map(e => html`<tr><td class="small nowrap">${fmtDate(e.ref_date)}</td><td>Aditivo · ${e.description}</td><td class="num">${signed(e.amount)}</td></tr>`)}
-      <tr class="fr-sum"><td colspan="2">Valor atualizado do contrato</td><td class="num">${money(c.value)}</td></tr></tbody></table></div>
-    ${rws.length ? html`<div class="${keepCls(rws.length + 2)}"><h4 class="fr-h4">Retrabalhos e gastos extras do fornecedor</h4>
-    <table class="r-table"><thead><tr><th>Data</th><th>O que aconteceu</th><th class="num">Valor</th><th>Desconta do fornecedor</th></tr></thead><tbody>
-      ${rws.map(e => html`<tr><td class="small nowrap">${fmtDate(e.ref_date)}</td><td>${e.description}</td><td class="num">${money(e.amount)}</td><td class="small">${e.deduct ? 'Sim' : 'Não (só registrado)'}</td></tr>`)}
-      <tr class="fr-sum"><td colspan="2">Descontado do fornecedor</td><td class="num">${money(c.deducted)}</td><td></td></tr></tbody></table></div>` : ''}
     ${c.rows.length ? html`<div class="${keepCls(c.rows.length + 2)}"><h4 class="fr-h4">Folhas × medição do fornecedor</h4>
     <table class="r-table"><thead><tr><th>Folha</th><th>Período</th><th class="num">Pago na folha</th><th class="num">Medido</th><th class="num">Diferença</th><th class="num">Saldo acumulado</th></tr></thead><tbody>
       ${c.rows.map(x => html`<tr><td class="nowrap"><b>${x.sheets.map(y => y.code).join(', ') || 'Medição avulsa'}</b></td><td class="small nowrap">${dm(x.start_date)}${x.end_date !== x.start_date ? ` a ${dm(x.end_date)}` : ''}</td>
         <td class="num">${money(x.paid)}</td><td class="num">${x.measured === null ? 'aguardando' : money(x.measured)}</td><td class="num">${x.diff === null ? '—' : signed(x.diff)}</td><td class="num ${x.diff_acc < -0.004 ? 'late' : ''}">${signed(x.diff_acc)}</td></tr>`)}
       <tr class="fr-sum"><td colspan="2">Total</td><td class="num">${money(c.paid)}</td><td class="num">${money(c.measured)}</td><td class="num">${signed(c.measured - c.paid)}</td><td></td></tr></tbody></table></div>` : ''}
+    <div class="${adds.length + 2 <= KEEP_ROWS ? 'avoid' : 'fr-flow'}"><h4 class="fr-h4">Contrato e aditivos</h4>
+    <table class="r-table"><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th></tr></thead><tbody>
+      <tr><td class="small nowrap">—</td><td><b>Contrato original</b> · ${c.supplier}</td><td class="num">${money(c.total)}</td></tr>
+      ${adds.map(e => html`<tr><td class="small nowrap">${fmtDate(e.ref_date)}</td><td>Aditivo · ${e.description}</td><td class="num">${signed(e.amount)}</td></tr>`)}
+      <tr class="fr-sum"><td colspan="2">Valor do contrato</td><td class="num">${money(c.value)}</td></tr></tbody></table></div>
+    ${rws.length ? html`<div class="${keepCls(rws.length + 2)}"><h4 class="fr-h4">Retrabalhos e gastos extras do fornecedor</h4>
+    <table class="r-table"><thead><tr><th>Data</th><th>O que aconteceu</th><th class="num">Valor</th><th>Desconta do fornecedor</th></tr></thead><tbody>
+      ${rws.map(e => html`<tr><td class="small nowrap">${fmtDate(e.ref_date)}</td><td>${e.description}</td><td class="num">${money(e.amount)}</td><td class="small">${e.deduct ? 'Sim' : 'Não (só registrado)'}</td></tr>`)}
+      <tr class="fr-sum"><td colspan="2">Descontado do fornecedor</td><td class="num">${money(c.deducted)}</td><td></td></tr></tbody></table></div>` : ''}
+    <div class="avoid frc-final"><h4 class="fr-h4">Saldo contratual</h4>${laborSaldoBlock(c)}</div>
   </section>`;
 }

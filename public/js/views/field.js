@@ -331,10 +331,20 @@ function laborChart(c, g) {
   const pts = laborSeries(c, g);
   const W = 760, H = 270, L = 72, R = 96, T = 16, B = 34;
   const iw = W - L - R, ih = H - T - B;
-  const max = niceTop(Math.max(...pts.flatMap(p => [p.med, p.paid])));
+  // Eixo Y dinâmico: se tudo está bem acima de zero (obra que entrou já em andamento), começa perto do menor valor
+  const vals = pts.flatMap(p => [p.med, p.paid]);
+  const hi = Math.max(...vals), lo = Math.min(...vals);
+  let y0 = 0, max = niceTop(hi), ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  if (lo > 0 && lo > hi * 0.35) {
+    const st = niceTop((hi - lo) / 4 || hi * 0.02);
+    y0 = Math.max(0, Math.floor((lo - st * 0.25) / st) * st);
+    max = y0 + st * 4;
+    while (max < hi) max += st;
+    ticks = [];
+    for (let t = y0; t <= max + st / 2; t += st) ticks.push(t);
+  }
   const x = i => L + (pts.length > 1 ? (i / (pts.length - 1)) * iw : iw / 2);
-  const y = v => T + ih - (Math.max(0, v) / max) * ih;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  const y = v => T + ih - ((Math.min(max, Math.max(y0, v)) - y0) / (max - y0)) * ih;
   // Áreas entre as linhas, cortadas no cruzamento: verde = medido acima (a Charão deve), vermelho = folha acima
   const areas = [];
   const seg = (x1, m1, p1, x2, m2, p2, d) => (Math.abs(d) < 0.005 ? '' : `<path class="${d > 0 ? 'lc-ar-pos' : 'lc-ar-neg'}" d="M${x1},${y(m1)} L${x2},${y(m2)} L${x2},${y(p2)} L${x1},${y(p1)} Z"/>`);
@@ -364,18 +374,20 @@ function laborChart(c, g) {
     <text class="g-peak" x="${x(li) + 8}" y="${ly[1] + 4}">${BRLs(last.paid)}</text>
     ${pts.map((p, i) => `<rect class="g-hit" data-pt="${i}" x="${x(i) - bw / 2}" y="${T}" width="${bw}" height="${ih}" tabindex="0"/>`).join('')}
   </svg>`;
-  return { svg, pts };
+  return { svg, pts, y0 };
 }
 // Barras de %: o contrato é 100%; medido × pago em folha
 function laborBars(c) {
   const w = v => Math.min(100, Math.max(0, v));
-  const paidPct = c.value > 0 ? r2c((c.paid / c.value) * 100) : 0;
+  // Pago comparável ao medido: inclui o que já tinha sido pago antes do sistema (já medido − saldo anterior)
+  const before = c.start?.paid || 0, paidAll = r2c(c.paid + before);
+  const paidPct = c.value > 0 ? r2c((paidAll / c.value) * 100) : 0;
   const row = (label, pct, val, cls, note) => html`<div class="lc-pb"><div class="lc-pb-top"><span>${label}</span><b>${pctTxt(pct)}</b><small>${money(val)} de ${money(c.value)}${note ? ` · ${note}` : ''}</small></div>
     <div class="lc-pb-bar" role="img" aria-label="${label}: ${pctTxt(pct)} do contrato"><span class="${cls}" style="width:${w(pct)}%"></span>${pct > 100 ? html`<i class="lc-pb-over">acima do contrato</i>` : ''}</div></div>`;
   const gap = r2c(c.measured_pct - paidPct);
   return html`<div class="lc-pbars">
     ${row('Contrato medido', c.measured_pct, c.measured_total, 'lc-k-med', `falta medir ${money(c.to_measure)}`)}
-    ${row('Pago em folha', paidPct, c.paid, 'lc-k-pago', c.pending ? `${money(c.pending)} ainda sem medição` : '')}
+    ${row('Pago em folha', paidPct, paidAll, 'lc-k-pago', [before ? `inclui ${money(before)} antes da ${c.start_sheet?.code || 'conta'}` : '', c.pending ? `${money(c.pending)} ainda sem medição` : ''].filter(Boolean).join(' · '))}
     <p class="lc-pb-cmp ${gap < -0.5 ? 'lc-neg' : gap > 0.5 ? 'lc-pos' : ''}">${Math.abs(gap) < 0.5 ? 'Medido e pago em folha andando juntos.'
       : gap < 0 ? `A folha está ${pctTxt(-gap)} do contrato à frente da medição.` : `A medição está ${pctTxt(gap)} do contrato à frente da folha.`}</p></div>`;
 }
@@ -398,7 +410,7 @@ function laborResumo(c) {
         <ul class="ct-legend lc-legend2"><li><i class="ln-key lc-k-med"></i>Medido (− retrabalhos descontados)</li><li><i class="ln-key lc-k-pago"></i>Pago nas folhas</li>
           <li><i class="lc-k-area lc-ar-pos"></i>Medido acima (a Charão deve)</li><li><i class="lc-k-area lc-ar-neg"></i>Folha acima da medição</li></ul>
         <div class="ct-chart-box lc-chart">${raw(ch.svg)}<div class="ct-tip lc-tip" hidden></div></div>
-        <p class="hint lc-hint">Passe o mouse (ou toque) num ponto para ver as folhas, BMs e retrabalhos daquele período. A folha entra na data de fim do período dela; o BM, na data da medição.</p>`
+        <p class="hint lc-hint">Passe o mouse (ou toque) num ponto para ver as folhas, BMs e retrabalhos daquele período. A folha entra na data de fim do período dela; o BM, na data da medição.${ch.y0 ? ` O eixo vertical começa em ${BRLs(ch.y0)} (não em zero) para mostrar melhor a diferença.` : ''}</p>`
         : html`<p class="muted">O gráfico aparece com a primeira folha da obra. Lance a medição do fornecedor dentro de cada folha.</p>`}
       <h3 class="fm-subh">Posição do contrato do fornecedor</h3>
       <div class="lc-rt"><table class="fc-table lc-pos-table"><tbody>
